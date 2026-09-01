@@ -190,8 +190,14 @@ async function main() {
     outputDir,
     signal: controller.signal,
     readCapacityTelemetry: limaTelemetryReader(config),
+    faultEvidence: args.fault_evidence
+      ? { ...JSON.parse(fs.readFileSync(path.resolve(args.fault_evidence), "utf8")), artifact: path.resolve(args.fault_evidence) }
+      : null,
+    headroomEvidence: args.headroom_evidence
+      ? JSON.parse(fs.readFileSync(path.resolve(args.headroom_evidence), "utf8"))
+      : null,
     readGlobalEventInfrastructure: config.provider === "lima"
-      ? async ({ samples, eventStartsAt, startedAt, profile: eventProfile, runId: eventRunId, repeat }) => normalizeGlobalEventInfrastructure({
+      ? async ({ samples, eventStartsAt, startedAt, profile: eventProfile, runId: eventRunId, repeat, measurementSeconds }) => normalizeGlobalEventInfrastructure({
           metrics: await finishMetricsAndRead(metricsPath),
           requestSamples: samples,
           expectedProfile: eventProfile,
@@ -200,6 +206,7 @@ async function main() {
           eventStartsAt: eventProfile === "event_provisioning_10000"
             ? new Date(new Date(startedAt).getTime() + 120_000)
             : eventStartsAt,
+          measurementSeconds: measurementSeconds || 600,
         })
       : null,
   });

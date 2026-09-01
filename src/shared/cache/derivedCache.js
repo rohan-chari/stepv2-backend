@@ -122,7 +122,7 @@ function handleMessage(message) {
     if (!prefix.startsWith(registered) && !registered.startsWith(prefix)) continue;
     for (const handler of handlers) {
       try {
-        handler();
+        handler(message);
       } catch {}
     }
   }
@@ -246,7 +246,7 @@ async function invalidate({ keys = [], prefix, run }) {
 
   if (ok) {
     closeBypass(prefix);
-    await redisCache.publishInvalidate({ prefix });
+    await redisCache.publishInvalidate({ prefix, ...(keys[0] ? { key: keys[0] } : {}) });
     return true;
   }
 

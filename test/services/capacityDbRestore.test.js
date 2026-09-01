@@ -9,6 +9,11 @@ const SCRIPT = path.resolve(__dirname, "../../scripts/capacity-db.js");
 const PASSWORD = "capacity restore password";
 const DATABASE_URL = `postgresql://capacity_restore:${encodeURIComponent(PASSWORD)}@127.0.0.1:5544/capacity_restore_test`;
 
+test("capacity scrub never rewrites the nullable device-token foreign key", () => {
+  const source = fs.readFileSync(SCRIPT, "utf8");
+  assert.match(source, /column\.table_name === "inbox_delivery_device_attempts"\s*&&\s*column\.column_name === "device_token_id"/);
+});
+
 function installFakePostgresCommand(directory, command) {
   const executable = path.join(directory, command);
   fs.writeFileSync(executable, `#!/usr/bin/env node

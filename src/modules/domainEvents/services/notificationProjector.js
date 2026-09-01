@@ -26,7 +26,11 @@ const EXPANSION_BATCH_SIZE = 100;
 const PROJECTION_BATCH_SIZE = 50;
 const PROJECTION_CONCURRENCY = 4;
 const PROJECTOR_TICK_BUDGET_MS = 5_000;
-const SCHEDULED_EVENT_BATCH_SIZE = 100;
+// Keep the delivery pace at 200 durable projections/second, but commit it as
+// one set-based statement. Two 100-row transactions repeated the same index,
+// validation, planning, and commit overhead while competing with app opens.
+const SCHEDULED_EVENT_BATCH_SIZE = 200;
+const MAX_SCHEDULED_EVENT_BATCHES_PER_TICK = 1;
 const MAX_ATTEMPTS = 12;
 const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
@@ -355,7 +359,11 @@ function buildNotificationProjector(dependencies = {}) {
       placementSilentEventsExpanded: 0,
     };
     if (projectScheduledEntitlementEventsBatch) {
-      while (monotonicNow() - started < budgetMs) {
+      let scheduledBacklogFull = false;
+      while (
+        stats.scheduledEventBatches < MAX_SCHEDULED_EVENT_BATCHES_PER_TICK &&
+        monotonicNow() - started < budgetMs
+      ) {
         const result = await projectScheduledEntitlementEventsBatch({
           now: now(),
           batchSize: SCHEDULED_EVENT_BATCH_SIZE,
@@ -365,32 +373,39 @@ function buildNotificationProjector(dependencies = {}) {
         stats.scheduledEventBatches += 1;
         stats.scheduledEventsProjected += processed;
         if (processed < SCHEDULED_EVENT_BATCH_SIZE) break;
+        scheduledBacklogFull =
+          stats.scheduledEventBatches === MAX_SCHEDULED_EVENT_BATCHES_PER_TICK;
       }
+      // A full scheduled-event backlog is the user-visible daily-event lane.
+      // Pace it at 200 durable projections/s (well inside the two-minute SLO)
+      // and leave the rest of this tick's DB budget to launch traffic. Generic
+      // placement/silent work resumes automatically as soon as a page is short.
+      if (scheduledBacklogFull) return stats;
     }
     if (expandPureSilentPlacementEventsBatch) {
       while (monotonicNow() - started < budgetMs) {
         const result = await expandPureSilentPlacementEventsBatch({
           now: now(),
-          batchSize: SCHEDULED_EVENT_BATCH_SIZE,
+          batchSize: EXPANSION_BATCH_SIZE,
         });
         const processed = Number(result?.processed || 0);
         if (processed === 0) break;
         stats.placementSilentEventBatches += 1;
         stats.placementSilentEventsExpanded += processed;
-        if (processed < SCHEDULED_EVENT_BATCH_SIZE) break;
+        if (processed < EXPANSION_BATCH_SIZE) break;
       }
     }
     if (completeNoDevicePlacementProjectionsBatch) {
       while (monotonicNow() - started < budgetMs) {
         const result = await completeNoDevicePlacementProjectionsBatch({
           now: now(),
-          batchSize: SCHEDULED_EVENT_BATCH_SIZE,
+          batchSize: EXPANSION_BATCH_SIZE,
         });
         const processed = Number(result?.processed || 0);
         if (processed === 0) break;
         stats.noDeviceSilentBatches += 1;
         stats.noDeviceSilentProjected += processed;
-        if (processed < SCHEDULED_EVENT_BATCH_SIZE) break;
+        if (processed < EXPANSION_BATCH_SIZE) break;
       }
     }
     while (monotonicNow() - started < budgetMs) {
@@ -423,6 +438,7 @@ module.exports = {
   PROJECTION_CONCURRENCY,
   PROJECTOR_TICK_BUDGET_MS,
   SCHEDULED_EVENT_BATCH_SIZE,
+  MAX_SCHEDULED_EVENT_BATCHES_PER_TICK,
   MAX_ATTEMPTS,
   boundedErrorCode,
   retryAt,

@@ -280,6 +280,73 @@ async function setManyJSON(entries) {
   }
 }
 
+// Replace a related key-set as one Redis-visible commit. This is deliberately
+// separate from the ordinary pipelined writer: readers of a multi-key snapshot
+// must never observe half of the next generation and stampede into Postgres.
+async function setManyJSONAtomic(entries, { generationFence = null } = {}) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { ok: false, disabled: false, count: 0, superseded: false };
+  }
+  try {
+    const client = await readyClient();
+    if (!client) {
+      return { ok: false, disabled: true, count: 0, superseded: false };
+    }
+    const fenceKey = generationFence?.key;
+    const generation = Number(generationFence?.generation);
+    if (!fenceKey || !Number.isSafeInteger(generation) || generation <= 0) {
+      return { ok: false, disabled: false, count: 0, superseded: false };
+    }
+    const keys = [prefixed(fenceKey), ...entries.map(({ key }) => prefixed(key))];
+    const args = [String(generation)];
+    for (const { value, ttlSeconds, ttlMs } of entries) {
+      args.push(JSON.stringify(value));
+      if (ttlMs > 0) args.push("PX", String(Math.ceil(ttlMs)));
+      else if (ttlSeconds > 0) args.push("EX", String(Math.ceil(ttlSeconds)));
+      else args.push("", "0");
+    }
+    const script = `
+local current = redis.call("get", KEYS[1])
+if current then
+  local ok, decoded = pcall(cjson.decode, current)
+  if ok then
+    local currentGeneration = tonumber(decoded.generation)
+    if currentGeneration and currentGeneration > tonumber(ARGV[1]) then
+      return -1
+    end
+  end
+end
+local argument = 2
+for keyIndex = 2, #KEYS do
+  local mode = ARGV[argument + 1]
+  local ttl = tonumber(ARGV[argument + 2])
+  if mode == "PX" then
+    redis.call("set", KEYS[keyIndex], ARGV[argument], "PX", ttl)
+  elseif mode == "EX" then
+    redis.call("set", KEYS[keyIndex], ARGV[argument], "EX", ttl)
+  else
+    redis.call("set", KEYS[keyIndex], ARGV[argument])
+  end
+  argument = argument + 3
+end
+return #KEYS - 1
+`;
+    const result = Number(await client.eval(script, keys.length, ...keys, ...args));
+    if (result === -1) {
+      return { ok: false, disabled: false, count: 0, superseded: true };
+    }
+    return {
+      ok: result === entries.length,
+      disabled: false,
+      count: result === entries.length ? result : 0,
+      superseded: false,
+    };
+  } catch (error) {
+    logOnce("setManyJSONAtomic", error);
+    return { ok: false, disabled: false, count: 0, superseded: false };
+  }
+}
+
 /**
  * @param {string|string[]} keys
  * @returns {Promise<boolean>} true when the DEL command succeeded (even if it
@@ -899,6 +966,7 @@ module.exports = {
   setJSON,
   setJSONWithTtlMs,
   setManyJSON,
+  setManyJSONAtomic,
   del,
   withLock,
   withLockStatus,

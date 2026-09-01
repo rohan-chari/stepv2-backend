@@ -109,4 +109,34 @@ describe("seeded race pre-registration compat", () => {
     assert.equal(dailyCard.upcoming.teamWinnerRewardCoins, null);
     assert.equal(dailyCard.upcoming.myStatus, null); // not opted in -> "Opt in"
   });
+
+  it("preserves every frozen-client featured membership status", async () => {
+    const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
+    const now = Date.now();
+    const active = await createSeededRace(seed.id, {
+      status: "ACTIVE",
+      startedAt: new Date(now - 60 * 60 * 1000),
+      endsAt: new Date(now + 23 * 60 * 60 * 1000),
+    });
+    const user = await createTestUser();
+    const participant = await prisma.raceParticipant.create({ data: {
+      raceId: active.id,
+      userId: user.user.id,
+      status: "ACCEPTED",
+    } });
+
+    for (const status of ["ACCEPTED", "INVITED", "DECLINED"]) {
+      await prisma.raceParticipant.update({
+        where: { id: participant.id },
+        data: { status },
+      });
+      const response = await request(server.baseUrl, "GET", "/races/featured", {
+        token: user.token,
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      const card = (body.races || body).find((row) => row.raceId === active.id);
+      assert.equal(card.myStatus, status);
+    }
+  });
 });

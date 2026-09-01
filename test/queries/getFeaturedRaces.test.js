@@ -217,3 +217,32 @@ test("getFeaturedRaces treats null maxParticipants as unlimited (isFull false)",
   assert.equal(card.isFull, false);
   assert.equal(card.maxParticipants, 100); // legacy int surface for old clients
 });
+
+test("getFeaturedRaces uses compact viewer summaries without hydrating the field", async () => {
+  let receivedUserId = null;
+  const getFeaturedRaces = buildGetFeaturedRaces({
+    Race: {
+      async findLiveSeededSummariesForUser(userId, options) {
+        receivedUserId = userId;
+        assert.deepEqual(options, { legacyOnly: true });
+        return [makeRace({
+          participants: [],
+          _featuredSummary: {
+            acceptedCount: 10_000,
+            viewerStatus: "ACCEPTED",
+            heldPotCoins: 0,
+            fundedProjectionPlayerCount: 10_000,
+            teamPayoutRecipientCount: 0,
+          },
+        })];
+      },
+    },
+    now: () => NOW,
+  });
+
+  const [card] = await getFeaturedRaces({ userId: "viewer" });
+
+  assert.equal(receivedUserId, "viewer");
+  assert.equal(card.participantCount, 10_000);
+  assert.equal(card.myStatus, "ACCEPTED");
+});

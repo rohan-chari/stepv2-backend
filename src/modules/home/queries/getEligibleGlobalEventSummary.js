@@ -1,9 +1,19 @@
 const { Prisma } = require("@prisma/client");
+const { prisma: defaultPrisma } = require("../../../db");
+const {
+  homeLaunchAuxiliaryBatch,
+} = require("../services/homeLaunchAuxiliaryBatch");
 
 // One authoritative Postgres predicate for both Home response builders. An
 // aggregate net of zero is still eligible; only an all-zero per-race vector is
 // suppressed.
 async function getEligibleGlobalEventSummary({ prisma, userId }) {
+  if (!prisma || prisma === defaultPrisma) {
+    return homeLaunchAuxiliaryBatch.loadGlobalEventSummary({
+      prisma: prisma || defaultPrisma,
+      userId,
+    });
+  }
   const rows = await prisma.$queryRaw(Prisma.sql`
     WITH authoritative_time AS (
       SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load

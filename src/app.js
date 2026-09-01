@@ -82,6 +82,29 @@ const {
 } = require("./shared/observability/capacityPhaseMetrics");
 const { appSettings } = require("./shared/config/appSettings");
 const { readCapacityProviderCensus } = require("./localCapacitySafety");
+const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("./shared/observability/eventSurgeTelemetry");
+
+const SMALL_LAUNCH_RESPONSE_BYTES = 8 * 1024;
+
+function launchCompressionFilter(req, res) {
+  const requestUrl = new URL(req.originalUrl || req.url || req.path, "http://local");
+  const compactLaunchPath =
+    requestUrl.pathname === "/auth/session" ||
+    requestUrl.pathname === "/home/race-card" ||
+    requestUrl.pathname === "/inbox/alerts" ||
+    requestUrl.pathname === "/races/discovery-summary" ||
+    (requestUrl.pathname === "/races" &&
+      requestUrl.searchParams.get("view") === "compact-v1") ||
+    (requestUrl.pathname.startsWith("/races/") &&
+      requestUrl.pathname.endsWith("/bootstrap"));
+  const responseBytes = Number(res.getHeader("Content-Length"));
+  if (
+    compactLaunchPath &&
+    Number.isFinite(responseBytes) &&
+    responseBytes < SMALL_LAUNCH_RESPONSE_BYTES
+  ) return false;
+  return compression.filter(req, res);
+}
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -108,7 +131,7 @@ function createApp(dependencies = {}) {
   // `Vary: Accept-Encoding` so caches key on it. Old and new apps decode
   // transparently (Dart HttpClient autoUncompress; undici/URLSession likewise).
   // Placed early so it wraps every downstream JSON response.
-  app.use(compression({ threshold: 1024 }));
+  app.use(compression({ threshold: 1024, filter: launchCompressionFilter }));
   // Giveaway admin/entry payloads are legally sensitive, small structured
   // documents. Parse them with the contract's tighter bound before the
   // application-wide parser; body-parser skips an already-consumed request.
@@ -125,6 +148,7 @@ function createApp(dependencies = {}) {
   // characters to TestFlight viewers. Prod is the default for anything that
   // omits the header, so no shipped binary sees an asset it lacks.
   app.use(extractReleaseChannel);
+  app.use((dependencies.eventSurgeTelemetry || defaultEventSurgeTelemetry).middleware());
   app.use(
     createApiContractTelemetry({ logger: dependencies.logger || console })
   );
@@ -138,7 +162,6 @@ function createApp(dependencies = {}) {
         dependencies.getDbPoolPressure || getDbPoolPressure,
     })
   );
-
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter({
     ...dependencies,
@@ -537,4 +560,4 @@ function createApp(dependencies = {}) {
   return app;
 }
 
-module.exports = { createApp };
+module.exports = { SMALL_LAUNCH_RESPONSE_BYTES, createApp, launchCompressionFilter };

@@ -59,7 +59,9 @@ function buildGetFeaturedRaces(dependencies = {}) {
       });
     }
 
-    const races = await raceModel.findLiveSeeded({ legacyOnly: true });
+    const races = typeof raceModel.findLiveSeededSummariesForUser === "function"
+      ? await raceModel.findLiveSeededSummariesForUser(userId, { legacyOnly: true })
+      : await raceModel.findLiveSeeded({ legacyOnly: true });
     const currentTime = now();
 
     // Partition the live seeded races by status:
@@ -107,9 +109,10 @@ function buildGetFeaturedRaces(dependencies = {}) {
     function summarizeUpcoming(race) {
       if (!race) return null;
       const participants = race.participants || [];
-      const acceptedCount = participants.filter(
-        (p) => p.status === "ACCEPTED"
-      ).length;
+      const compact = race._featuredSummary || null;
+      const acceptedCount = compact
+        ? Number(compact.acceptedCount || 0)
+        : participants.filter((p) => p.status === "ACCEPTED").length;
       const myParticipant = participants.find((p) => p.userId === userId);
       const max = race.maxParticipants ?? null; // null = unlimited
       return {
@@ -122,21 +125,30 @@ function buildGetFeaturedRaces(dependencies = {}) {
         maxParticipants: max,
         isFull: max != null && acceptedCount >= max,
         // null → render "Opt in"; "ACCEPTED" → render "You're in".
-        myStatus: myParticipant ? myParticipant.status : null,
+        myStatus: compact?.viewerStatus || (myParticipant ? myParticipant.status : null),
       };
     }
 
     const featured = [...activeBySeed.values()].map((race) => {
       const participants = race.participants || [];
-      const acceptedCount = participants.filter(
-        (p) => p.status === "ACCEPTED"
-      ).length;
+      const compact = race._featuredSummary || null;
+      const acceptedCount = compact
+        ? Number(compact.acceptedCount || 0)
+        : participants.filter((p) => p.status === "ACCEPTED").length;
       const myParticipant = participants.find((p) => p.userId === userId);
       const max = race.maxParticipants ?? null; // null = unlimited
       // Projected from the current field; the final pool/places are recomputed
       // from actual finishers at settlement (completeRace). A funded seeded race
       // carries the app-minted prizePool instead of the retired finishReward.
-      const money = buildRaceMoneyView({ race, participants, acceptedCount });
+      const money = buildRaceMoneyView({
+        race,
+        participants,
+        acceptedCount,
+        heldPotCoins: compact?.heldPotCoins ?? null,
+        fundedProjectionPlayerCount:
+          compact?.fundedProjectionPlayerCount ?? null,
+        teamPayoutRecipientCount: compact?.teamPayoutRecipientCount ?? null,
+      });
 
       return {
         raceId: race.id,
@@ -158,7 +170,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
         prizePool: money.prizePool,
         // null = not joined → render JOIN; otherwise the participant status
         // (ACCEPTED) → render VIEW.
-        myStatus: myParticipant ? myParticipant.status : null,
+        myStatus: compact?.viewerStatus || (myParticipant ? myParticipant.status : null),
         // Additive: the pre-registerable next race for this seed (null if none).
         // Old app builds ignore the unknown field; new builds render an opt-in
         // affordance with a starts-in countdown.

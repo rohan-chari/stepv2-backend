@@ -121,6 +121,55 @@ describe("global-event reliability v2 contract", () => {
     assert.ok(rows[0].lastRegisteredAt >= before.lastRegisteredAt);
   });
 
+  it("acknowledges an unchanged recent installation without rewriting its row", async () => {
+    await makeGenerationReady(undefined, "idempotent-registration");
+    const { token, user } = await createTestUser();
+    const body = {
+      deviceToken: "ios-token-idempotent",
+      platform: "ios",
+      installationId: "ios.installation:idempotent",
+      providerEnvironment: "sandbox",
+    };
+    assert.equal((await request(server.baseUrl, "POST", "/notifications/device-token", {
+      token, body,
+    })).status, 200);
+    const before = await prisma.deviceToken.findFirstOrThrow({
+      where: { userId: user.id, installationId: body.installationId },
+    });
+
+    assert.equal((await request(server.baseUrl, "POST", "/notifications/device-token", {
+      token, body,
+    })).status, 200);
+    const after = await prisma.deviceToken.findUniqueOrThrow({ where: { id: before.id } });
+
+    assert.equal(after.lastRegisteredAt.toISOString(), before.lastRegisteredAt.toISOString());
+    assert.equal(after.updatedAt.toISOString(), before.updatedAt.toISOString());
+    assert.equal(after.ownershipGeneration, before.ownershipGeneration);
+  });
+
+  it("registers a cold launch wave without changing lifecycle ownership semantics", async () => {
+    await makeGenerationReady(undefined, "cold-registration-wave");
+    const accounts = await Promise.all(Array.from({ length: 40 }, () => createTestUser()));
+    const responses = await Promise.all(accounts.map((account, index) =>
+      request(server.baseUrl, "POST", "/notifications/device-token", {
+        token: account.token,
+        body: {
+          deviceToken: `cold-wave-token-${index}`,
+          platform: "ios",
+          installationId: `cold.wave.installation.${index}`,
+          providerEnvironment: "sandbox",
+        },
+      })));
+
+    assert.ok(responses.every((response) => response.status === 200));
+    const rows = await prisma.deviceToken.findMany({
+      where: { token: { startsWith: "cold-wave-token-" } },
+    });
+    assert.equal(rows.length, 40);
+    assert.ok(rows.every((row) =>
+      row.status === "ACTIVE" && row.ownershipGeneration === 1));
+  });
+
   it("converges cross-account legacy raw-token collisions through the retained user-token key", async () => {
     await makeGenerationReady(undefined, "compat-collision");
     const destination = await createTestUser();
@@ -324,7 +373,7 @@ describe("global-event reliability v2 contract", () => {
     await project();
     const schedule = await prisma.notificationSchedule.findFirstOrThrow({ where: { sourceRef: entitlement.id } });
     assert.equal(schedule.availableAt.toISOString(), startsAt.toISOString());
-    assert.equal(schedule.expiresAt.toISOString(), endsAt.toISOString());
+    assert.equal(schedule.expiresAt.toISOString(), new Date(endsAt.getTime() - 60_000).toISOString());
     assert.equal(schedule.sourceRevision, 0);
     assert.equal(schedule.deliveryKey, `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`);
     assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 0);
@@ -397,7 +446,7 @@ describe("global-event reliability v2 contract", () => {
       logger: { log() {}, error() {} },
     }).run({ budgetMs: 1 });
 
-    assert.equal(result.scheduledEventBatches, 2);
+    assert.equal(result.scheduledEventBatches, 1);
     assert.equal(result.scheduledEventsProjected, 120);
     assert.equal(await prisma.notificationSchedule.count(), 120);
     assert.equal(await prisma.domainEventNotificationProjection.count({
@@ -461,12 +510,14 @@ describe("global-event reliability v2 contract", () => {
     assert.equal(await prisma.notificationSchedule.count({}), 3);
     assert.equal(await prisma.inboxAlert.count({}), 0, "late projection cannot bypass eligibility");
 
-    const released = await notificationIntentService.releaseDue({ now: current, batchSize: 500 });
-    assert.equal(released.released, 1);
+    const released = await notificationIntentService.releaseEventNotificationPage({
+      now: current, maximumRows: 500,
+    });
+    assert.equal(released.materialized, 1);
     assert.equal(await prisma.inboxAlert.count({ where: { userId: eligible.user.id } }), 1);
     assert.equal((await prisma.notificationSchedule.findFirstOrThrow({
       where: { recipientUserId: pending.user.id },
-    })).status, "PENDING");
+    })).status, "ADMISSION_PENDING");
     assert.equal((await prisma.notificationSchedule.findFirstOrThrow({
       where: { recipientUserId: dormant.user.id },
     })).status, "CANCELLED_NO_ACTIVE_RACE");
@@ -1156,7 +1207,18 @@ describe("global-event reliability v2 contract", () => {
       where: { startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: { not: null } },
     }), 561);
     assert.equal(await prisma.globalEventRaceImpact.count({ where: { eventId: event.id } }), 561);
-    assert.equal(await prisma.raceResolutionJobV2.count({ where: { raceId: race.id } }), 1);
+    const resolutionJob = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    const participantIds = await prisma.raceParticipant.findMany({
+      where: { raceId: race.id },
+      select: { id: true },
+    });
+    assert.deepEqual(
+      new Set(resolutionJob.dirtyParticipantIds),
+      new Set(participantIds.map((row) => row.id)),
+      "the boundary handoff retains exact participant scope instead of forcing repeated full-race work",
+    );
   });
 
   it("keeps domain activation live when an owner restarts at the exact boundary", async () => {
@@ -1454,6 +1516,12 @@ describe("global-event reliability v2 contract", () => {
       logger: { log() {}, error() {} },
       random: () => 0,
     });
+    // The first scan stamps/snapshots the legacy fixture but cannot spend one
+    // token on two devices. The second token is available one 10ms interval
+    // later, at which point the whole immutable target set is admitted.
+    await deliver();
+    assert.equal(sent.length, 0);
+    current = new Date(current.getTime() + 10);
     await deliver();
     const outbox = await prisma.inboxDeliveryOutbox.findFirstOrThrow({});
     let targets = await prisma.inboxDeliveryDeviceAttempt.findMany({
@@ -1589,7 +1657,7 @@ describe("global-event reliability v2 contract", () => {
     });
     await deliver();
     const first = await prisma.inboxDeliveryOutbox.findFirstOrThrow({});
-    assert.equal(first.status, "RETRY");
+    assert.equal(first.status, "ADMISSION_RETRY");
     assert.equal(first.attemptCount, 1);
     assert.equal(first.availableAt.toISOString(), "2098-08-26T10:01:00.000Z");
     const target = await prisma.inboxDeliveryDeviceAttempt.findFirstOrThrow({});

@@ -12,7 +12,17 @@ function buildNotificationScheduleRelease(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const batchSize = Math.min(500, Math.max(1, Number(dependencies.batchSize) || 500));
   return async function releaseNotificationSchedules() {
-    const totals = { released: 0, expired: 0, canceled: 0, batches: 0 };
+    await dependencies.startupBarrier?.();
+    const totals = { released: 0, materialized: 0, expired: 0, canceled: 0, batches: 0 };
+    for (;;) {
+      const admitted = await service.releaseEventNotificationPage({ now: now(), maximumRows: batchSize });
+      totals.batches += 1;
+      totals.materialized += admitted.materialized || 0;
+      totals.released += admitted.materialized || 0;
+      totals.expired += admitted.expired || 0;
+      if ((admitted.examined || 0) < batchSize) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     for (;;) {
       const page = await service.releaseDue({ now: now(), batchSize });
       totals.batches += 1;

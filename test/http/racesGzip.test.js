@@ -82,3 +82,11 @@ test("no Brotli is emitted even if the client offers it (gzip-only contract)", a
     assert.equal(res.headers["content-encoding"], "gzip");
   });
 });
+
+test("compact launch payloads skip gzip work even when they exceed one KiB", async () => {
+  await withServer(async (port) => {
+    const res = await rawGet(port, "/races?view=compact-v1", "gzip");
+    assert.equal(res.headers["content-encoding"], undefined);
+    assert.deepEqual(JSON.parse(res.body.toString("utf8")), BIG_RESULT);
+  });
+});

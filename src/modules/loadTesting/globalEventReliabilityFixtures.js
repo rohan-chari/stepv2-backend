@@ -13,6 +13,30 @@ const { localEventWindowForZone } = require("../steps/globalStepEvent");
 
 const FIXTURE_USERS = 10_000;
 const CHUNK_SIZE = 1_000;
+const CAPACITY_IOS_PROVIDER_ENVIRONMENT = "production";
+// Match the already-installed current client cohort used by the k6 graph.
+// These are existing users opening a daily event together, not 10,000 brand-new
+// accounts whose first request must backfill every capability and telemetry
+// marker. `lastSeenAt` deliberately stays on the prior UTC day below so the
+// run still pays the real once-daily write for every user.
+const CURRENT_CLIENT_FEATURES = Object.freeze([
+  "characters", "jammer", "spinpowerups", "team_races", "tournaments",
+  "race_leave", "powerups2", "powerups3", "powerups4", "powerups5",
+  "stealth_runner_duration", "hitchhike_effective_steps", "remote_assets",
+  "remote_asset_preferred", "next_race_cta", "discoverable_identity",
+  "home_suggested_races", "seeded_race_buckets", "home_invite_modal",
+  "race_participants_paging", "race_preview", "privacy_safe_display_ranks",
+  "powerup_stacking_guide_v1", "impact_notices", "active_impact_notices_v1",
+  "resolved_impact_events_v2", "impact_summaries", "impact_summary_expiry_v1",
+  "review_prompt", "inbox_v1", "privateJoinApproval", "api_payload_compact_v1",
+  "referral_contest_v1", "referral_contest_global_v1", "admin_metrics_v2",
+]);
+
+function fixtureIosProviderEnvironment(env = process.env) {
+  return env.NODE_ENV === "production" || env.APNS_PRODUCTION === "true"
+    ? "production"
+    : "sandbox";
+}
 
 function chunks(values, size = CHUNK_SIZE) {
   const result = [];
@@ -117,6 +141,28 @@ function capacityRaceParticipantRows({
 
 async function resetGlobalEventDerivedState(prisma) {
   await prisma.$transaction(async (tx) => {
+    // The capacity clone keeps the real cron topology running. Freeze every
+    // global-event derived table for this short reset transaction; otherwise a
+    // worker can insert a new RESTRICT child after its table was cleared but
+    // before the parent delete, making fixture setup nondeterministic.
+    await tx.$executeRawUnsafe(
+      `LOCK TABLE
+         notification_schedules,
+         inbox_alerts,
+         domain_event_outbox,
+         race_resolution_full_triggers,
+         race_resolution_jobs_v2,
+         global_event_capture_artifacts,
+         global_event_summary_work,
+         global_event_user_summaries,
+         global_event_race_impacts,
+         global_step_event_boundary_cursors,
+         global_step_event_entitlements,
+         global_step_events,
+         global_step_event_operational_snapshots,
+         global_step_event_operational_counters
+       IN ACCESS EXCLUSIVE MODE`
+    );
     await tx.$executeRawUnsafe(
       "DELETE FROM notification_schedules WHERE type='GLOBAL_EVENT_STARTED'"
     );
@@ -130,6 +176,16 @@ async function resetGlobalEventDerivedState(prisma) {
           'GLOBAL_STEP_EVENT_ACTIVATED_V1'
         )`
     );
+    // A production-clone snapshot can contain old live/recovery work whose
+    // queue lag predates this synthetic run by hours. Letting the dedicated
+    // worker drain that unrelated backlog during the measured event makes the
+    // result depend on snapshot timing rather than this fixture. The capacity
+    // database is disposable; fixture races enqueue their own durable work
+    // after this reset.
+    await tx.$executeRawUnsafe("DELETE FROM race_resolution_full_triggers");
+    await tx.$executeRawUnsafe("DELETE FROM race_resolution_jobs_v2");
+    await tx.$executeRawUnsafe("DELETE FROM global_event_capture_artifacts");
+    await tx.$executeRawUnsafe("DELETE FROM global_event_summary_work");
     await tx.$executeRawUnsafe("DELETE FROM global_event_user_summaries");
     await tx.$executeRawUnsafe("DELETE FROM global_event_race_impacts");
     await tx.$executeRawUnsafe("DELETE FROM global_step_event_boundary_cursors");
@@ -286,12 +342,25 @@ async function createGlobalEventReliabilityFixtures({
   };
   try {
     const marker = `capacity-event:${runId}`;
+    const activeMetricsEpoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+      where: { endedAt: null },
+      orderBy: { startedAt: "desc" },
+      select: { id: true },
+    });
+    const priorUtcDay = new Date(now.getTime() - 24 * 60 * 60_000);
     await createManyInChunks(prisma.user, Array.from({ length: users }, (_, index) => ({
       appleId: `${marker}:apple:${index}`,
       email: `${marker}:${String(index).padStart(5, "0")}@synthetic.invalid`,
       displayName: `${marker}:${index}`,
       timezone: "America/New_York",
       globalEventTimezone: "America/New_York",
+      clientFeatures: [...CURRENT_CLIENT_FEATURES],
+      lastAppVersion: "2.3.8",
+      lastSeenAt: priorUtcDay,
+      ...(activeMetricsEpoch ? {
+        metricsV2EligibleEpochId: activeMetricsEpoch.id,
+        metricsV2EligibleAt: priorUtcDay,
+      } : {}),
     })));
     const userRows = await prisma.user.findMany({
       where: { email: { startsWith: `${marker}:` } },
@@ -356,12 +425,25 @@ async function createGlobalEventReliabilityFixtures({
       for (let installation = 0; installation < installationCountForUser(userIndex, users); installation += 1) {
         tokens.push({
           userId: user.id,
-          token: `${marker}:token:${userIndex}:${installation}`,
+          // Installation zero is the exact already-current registration the
+          // app-open session acknowledges. Its environment must match the
+          // isolated iOS backend; otherwise the fixture manufactures a token
+          // ownership migration on every launch that real steady-state opens
+          // do not perform.
+          token: installation === 0
+            ? `capacity-${runId}-${userIndex}`
+            : `${marker}:token:${userIndex}:${installation}`,
           platform: installation % 2 === 0 ? "ios" : "android",
-          installationId: `${marker}:installation:${userIndex}:${installation}`,
+          installationId: installation === 0
+            ? `capacity.${runId}.${userIndex}`.slice(0, 128)
+            : `${marker}:installation:${userIndex}:${installation}`,
           lastRegisteredAt: now,
           status: "ACTIVE",
-          providerEnvironment: "capacity",
+          providerEnvironment: installation === 0
+            // Fixtures are assembled by the host process, whose NODE_ENV is
+            // not the production-shaped backend container's NODE_ENV.
+            ? CAPACITY_IOS_PROVIDER_ENVIRONMENT
+            : "capacity",
         });
       }
     });
@@ -490,9 +572,11 @@ async function createGlobalEventReliabilityFixtures({
 }
 
 module.exports = {
+  CAPACITY_IOS_PROVIDER_ENVIRONMENT,
   capacityRaceParticipantRows,
   cleanupSyntheticRun,
   createGlobalEventReliabilityFixtures,
+  fixtureIosProviderEnvironment,
   resetGlobalEventDerivedState,
   selectProvisioningParent,
 };

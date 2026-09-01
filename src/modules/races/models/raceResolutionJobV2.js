@@ -23,7 +23,13 @@ const QUEUE_PRIORITIES = Object.freeze([
   "MAINTENANCE",
 ]);
 const DEFAULT_DEBOUNCE_MS = 5000;
+// At the measured 140 uploads/s surge, one five-second window stays below the
+// planner's bounded 1,000-row envelope. Coalescing the whole window prevents
+// several overlapping partial resolutions from competing with launch reads.
+// Viewer totals remain immediate because Home overlays the persisted row.
+const LARGE_SCOPED_DEBOUNCE_MS = DEFAULT_DEBOUNCE_MS;
 const DEFAULT_RECOVERY_STALE_MS = 60 * 60 * 1000;
+const FULL_TRIGGER_PROMOTION_BATCH_SIZE = 500;
 const {
   normalizeDirtyEnvelope,
   DIRTY_REASONS,
@@ -111,6 +117,7 @@ const jobColumns = (q = "") => `
   ${q}dirty_participant_ids              AS "dirtyParticipantIds",
   ${q}dirty_powerup_types                 AS "dirtyPowerupTypes",
   ${q}dirty_priority                      AS "dirtyPriority",
+  ${q}full_trigger_seed_only              AS "fullTriggerSeedOnly",
   ${q}queue_priority                      AS "queuePriority",
   ${q}processing_dirty_reasons            AS "processingDirtyReasons",
   ${q}processing_dirty_participant_ids    AS "processingDirtyParticipantIds",
@@ -218,6 +225,308 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       return row || null;
     },
 
+    // Large races use an append-only intake handoff. Every source transaction
+    // owns a different UUID row, so 10,000 simultaneous uploads do not queue
+    // behind one mutable race job. The first uploader seeds the normal job;
+    // the dedicated resolution process folds all committed trigger rows into
+    // that job in bounded pages before claiming work.
+    async enqueueFullScopeTrigger(
+      {
+        raceId,
+        resolutionTimeZone = null,
+        now = new Date(),
+        burstCoalescing = false,
+        queuePriority = "MAINTENANCE",
+        scope = null,
+      },
+      tx = prisma,
+    ) {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO race_resolution_full_triggers (
+           id,race_id,user_id,participant_id,resolution_time_zone,requested_at,created_at
+         ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$5)`,
+        raceId,
+        scope?.userId || null,
+        scope?.participantId || null,
+        resolutionTimeZone,
+        now,
+      );
+      const notBeforeAt = burstCoalescing
+        ? new Date(now.getTime() + (
+            scope?.userId && scope?.participantId
+              ? LARGE_SCOPED_DEBOUNCE_MS
+              : DEFAULT_DEBOUNCE_MS
+          ))
+        : null;
+      // The append above is the durable handoff. On a hot large race the
+      // ordinary queue row nearly always already exists, and attempting even
+      // `ON CONFLICT DO NOTHING` against it waits behind the resolution
+      // worker's row lock. A plain MVCC read does not, so return the active
+      // generation immediately and let trigger promotion fold in this upload.
+      const active = await tx.$queryRawUnsafe(
+        `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id=$1`,
+        raceId,
+      );
+      if (active[0] && ["queued", "running"].includes(active[0].state)) {
+        return normalizeRow(active[0]);
+      }
+      const inserted = await tx.$queryRawUnsafe(
+        `INSERT INTO race_resolution_jobs_v2 (
+           id,race_id,generation,resolution_time_zone,state,attempts,
+           requested_at,not_before_at,triggered_by_user_ids,
+           processing_triggered_by_user_ids,dirty_reasons,
+           dirty_participant_ids,dirty_powerup_types,dirty_priority,
+           queue_priority,full_trigger_seed_only,created_at,updated_at
+         ) VALUES (
+           gen_random_uuid()::text,$1,1,$2,'queued',0,
+           $3,$4,'[]'::jsonb,'[]'::jsonb,'["FULL"]'::jsonb,
+           '[]'::jsonb,'[]'::jsonb,'COALESCE',$5,$6,$3,$3
+         )
+         ON CONFLICT (race_id) DO NOTHING
+         RETURNING ${jobColumns()}`,
+        raceId,
+        resolutionTimeZone,
+        now,
+        notBeforeAt,
+        normalizeQueuePriority(queuePriority),
+        Boolean(scope?.userId && scope?.participantId),
+      );
+      if (inserted.length === 1) return normalizeRow(inserted[0]);
+
+      // A completed/failed generation needs to become visibly queued before
+      // the HTTP response. Exactly one concurrent uploader wins this guarded
+      // transition; after that all others take the non-locking read below.
+      const restarted = await tx.$queryRawUnsafe(
+        `UPDATE race_resolution_jobs_v2
+            SET generation=generation+1,
+                resolution_time_zone=COALESCE($2,resolution_time_zone),
+                state='queued',attempts=0,requested_at=$3,
+                not_before_at=$4,retry_at=NULL,last_error_code=NULL,
+                dirty_reasons='["FULL"]'::jsonb,
+                dirty_participant_ids='[]'::jsonb,
+                dirty_powerup_types='[]'::jsonb,
+                dirty_priority='COALESCE',queue_priority=$5,
+                full_trigger_seed_only=$6,
+                triggered_by_user_ids='[]'::jsonb,updated_at=$3
+          WHERE race_id=$1
+            AND state IN ('succeeded','failed')
+          RETURNING ${jobColumns()}`,
+        raceId,
+        resolutionTimeZone,
+        now,
+        notBeforeAt,
+        normalizeQueuePriority(queuePriority),
+        Boolean(scope?.userId && scope?.participantId),
+      );
+      if (restarted.length === 1) return normalizeRow(restarted[0]);
+      const existing = await tx.$queryRawUnsafe(
+        `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id=$1`,
+        raceId,
+      );
+      return normalizeRow(existing[0]);
+    },
+
+    async promoteFullScopeTriggers({
+      now = new Date(),
+      batchSize = FULL_TRIGGER_PROMOTION_BATCH_SIZE,
+    } = {}) {
+      const limit = Math.min(
+        FULL_TRIGGER_PROMOTION_BATCH_SIZE,
+        Math.max(1, Number(batchSize) || FULL_TRIGGER_PROMOTION_BATCH_SIZE),
+      );
+      const claimFloor = new Date(now.getTime() + debounceMs());
+      const scopedClaimFloor = new Date(
+        now.getTime() + LARGE_SCOPED_DEBOUNCE_MS,
+      );
+      return prisma.$transaction(async (tx) => {
+        // Defensive mixed-version recovery: a trigger may outlive an old job
+        // row deleted by repair tooling. Seed its ordinary queue destination
+        // before the atomic promotion/deletion statement.
+        await tx.$executeRawUnsafe(
+          `WITH candidate_races AS (
+             SELECT trigger.race_id,
+                    MIN(trigger.requested_at) AS requested_at,
+                    MAX(trigger.resolution_time_zone) AS resolution_time_zone
+               FROM (
+                 SELECT race_id,requested_at,resolution_time_zone
+                   FROM race_resolution_full_triggers
+                  ORDER BY requested_at,id
+                  LIMIT $1
+               ) trigger
+              GROUP BY trigger.race_id
+           )
+           INSERT INTO race_resolution_jobs_v2 (
+             id,race_id,generation,resolution_time_zone,state,attempts,
+             requested_at,not_before_at,triggered_by_user_ids,
+             processing_triggered_by_user_ids,dirty_reasons,
+             dirty_participant_ids,dirty_powerup_types,dirty_priority,
+             queue_priority,created_at,updated_at
+           )
+           SELECT gen_random_uuid()::text,race_id,1,resolution_time_zone,
+                  'queued',0,requested_at,$3,'[]'::jsonb,'[]'::jsonb,
+                  '["FULL"]'::jsonb,'[]'::jsonb,'[]'::jsonb,
+                  'COALESCE','MAINTENANCE',requested_at,$2
+             FROM candidate_races
+           ON CONFLICT (race_id) DO NOTHING`,
+          limit,
+          now,
+          claimFloor,
+        );
+        const rows = await tx.$queryRawUnsafe(
+          `WITH candidates AS MATERIALIZED (
+             SELECT trigger.id,trigger.race_id,trigger.user_id,trigger.participant_id,
+                    trigger.resolution_time_zone,trigger.requested_at
+               FROM race_resolution_full_triggers trigger
+               JOIN race_resolution_jobs_v2 job ON job.race_id=trigger.race_id
+              WHERE job.full_trigger_seed_only
+                 OR NOT (job.dirty_reasons ? 'STEP_INPUT_CHANGED')
+                 OR jsonb_array_length(job.dirty_participant_ids) < 500
+               ORDER BY trigger.requested_at,trigger.id
+              LIMIT $1
+              FOR UPDATE SKIP LOCKED
+           ), grouped AS MATERIALIZED (
+             SELECT race_id,MIN(requested_at) AS requested_at,
+                    MAX(resolution_time_zone) AS resolution_time_zone,
+                    COUNT(*)::int AS trigger_count,
+                    BOOL_AND(user_id IS NOT NULL AND participant_id IS NOT NULL)
+                      AS all_scoped,
+                    COUNT(DISTINCT user_id)::int AS scoped_user_count,
+                    COUNT(DISTINCT participant_id)::int AS scoped_participant_count,
+                    COALESCE(jsonb_agg(DISTINCT to_jsonb(user_id))
+                      FILTER (WHERE user_id IS NOT NULL),'[]'::jsonb) AS user_ids,
+                    COALESCE(jsonb_agg(DISTINCT to_jsonb(participant_id))
+                      FILTER (WHERE participant_id IS NOT NULL),'[]'::jsonb)
+                      AS participant_ids
+               FROM candidates GROUP BY race_id
+           ), scoped AS MATERIALIZED (
+             SELECT grouped.*,
+                    grouped.all_scoped
+                    AND grouped.scoped_user_count <= 1000
+                    AND grouped.scoped_participant_count <= 1000
+                    AND (
+                      job.full_trigger_seed_only
+                      OR NOT (job.dirty_reasons ? 'FULL')
+                    )
+                    AND (
+                      SELECT COUNT(DISTINCT value) <= 1000
+                        FROM jsonb_array_elements(
+                          (CASE WHEN job.full_trigger_seed_only
+                            THEN '[]'::jsonb
+                            ELSE job.triggered_by_user_ids END) || grouped.user_ids
+                        ) merged(value)
+                    )
+                    AND (
+                      SELECT COUNT(DISTINCT value) <= 1000
+                        FROM jsonb_array_elements(
+                          (CASE WHEN job.full_trigger_seed_only
+                            THEN '[]'::jsonb
+                            ELSE job.dirty_participant_ids END) || grouped.participant_ids
+                        ) merged(value)
+                    ) AS can_scope
+               FROM grouped
+               JOIN race_resolution_jobs_v2 job ON job.race_id=grouped.race_id
+           ), promoted AS (
+             UPDATE race_resolution_jobs_v2 job
+                SET generation=CASE
+                      WHEN job.state='running' THEN job.generation+1
+                      WHEN job.state='queued' THEN job.generation
+                      ELSE job.generation+1 END,
+                    resolution_time_zone=COALESCE(scoped.resolution_time_zone,
+                                                  job.resolution_time_zone),
+                    state=CASE WHEN job.state='running' THEN job.state
+                               ELSE 'queued'::"RaceResolutionJobState" END,
+                    attempts=CASE WHEN job.state='running' THEN job.attempts ELSE 0 END,
+                    requested_at=CASE
+                      WHEN job.state IN ('queued','running') THEN job.requested_at
+                      ELSE scoped.requested_at END,
+                    not_before_at=GREATEST(
+                      '-infinity'::timestamp,
+                      CASE WHEN job.state='queued'
+                                  AND (job.queue_priority='LIVE'
+                                    OR job.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY')
+                        THEN COALESCE(job.not_before_at,'-infinity'::timestamp)
+                      WHEN scoped.can_scope THEN
+                        CASE WHEN job.state='running' THEN $4::timestamp
+                             ELSE GREATEST(
+                               COALESCE(job.not_before_at,$4::timestamp),
+                               $4::timestamp
+                             ) END
+                      ELSE GREATEST(
+                        COALESCE(job.not_before_at,'-infinity'::timestamp),
+                        $3::timestamp
+                      ) END
+                    ),
+                    retry_at=NULL,last_error_code=NULL,
+                    triggered_by_user_ids=CASE WHEN scoped.can_scope THEN (
+                      SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb)
+                        FROM (
+                          SELECT value,MIN(ordinality) AS first_ordinal
+                            FROM jsonb_array_elements(
+                              (CASE WHEN job.full_trigger_seed_only
+                                THEN '[]'::jsonb
+                                ELSE job.triggered_by_user_ids END) || scoped.user_ids
+                            ) WITH ORDINALITY AS merged(value,ordinality)
+                           GROUP BY value
+                        ) stable
+                    ) ELSE '[]'::jsonb END,
+                    dirty_reasons=CASE WHEN scoped.can_scope THEN (
+                      SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb)
+                        FROM (
+                          SELECT value,MIN(ordinality) AS first_ordinal
+                            FROM jsonb_array_elements(
+                              (CASE WHEN job.full_trigger_seed_only
+                                THEN '[]'::jsonb
+                                ELSE job.dirty_reasons END) ||
+                              '["STEP_INPUT_CHANGED"]'::jsonb
+                            ) WITH ORDINALITY AS merged(value,ordinality)
+                           WHERE value <> '"STEP_SYNC"'::jsonb
+                           GROUP BY value
+                        ) stable
+                    ) ELSE '["FULL"]'::jsonb END,
+                    dirty_participant_ids=CASE WHEN scoped.can_scope THEN (
+                      SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb)
+                        FROM (
+                          SELECT value,MIN(ordinality) AS first_ordinal
+                            FROM jsonb_array_elements(
+                              (CASE WHEN job.full_trigger_seed_only
+                                THEN '[]'::jsonb
+                                ELSE job.dirty_participant_ids END) ||
+                              scoped.participant_ids
+                            ) WITH ORDINALITY AS merged(value,ordinality)
+                           GROUP BY value
+                        ) stable
+                    ) ELSE '[]'::jsonb END,
+                    dirty_powerup_types=CASE WHEN scoped.can_scope
+                      THEN job.dirty_powerup_types ELSE '[]'::jsonb END,
+                    dirty_priority='COALESCE',
+                    queue_priority=CASE
+                      WHEN job.state='queued' AND job.queue_priority='LIVE'
+                        THEN 'LIVE'
+                      ELSE 'MAINTENANCE' END,
+                    full_trigger_seed_only=false,updated_at=$2
+               FROM scoped WHERE job.race_id=scoped.race_id
+             RETURNING job.race_id
+           ), deleted AS (
+             DELETE FROM race_resolution_full_triggers trigger
+              USING candidates,promoted
+              WHERE trigger.id=candidates.id
+                AND candidates.race_id=promoted.race_id
+             RETURNING trigger.id
+           )
+           SELECT (SELECT COUNT(*)::int FROM deleted) AS promoted,
+                  (SELECT COUNT(*)::int FROM grouped) AS races`,
+          limit,
+          now,
+          claimFloor,
+          scopedClaimFloor,
+        );
+        return {
+          promoted: Number(rows[0]?.promoted || 0),
+          races: Number(rows[0]?.races || 0),
+        };
+      }, { timeout: 15_000, maxWait: 10_000 });
+    },
+
     // Convenience for the multi-race enqueue sites (sync-v2 Transaction B).
     // Enqueues in stable ascending raceId order so two
     // concurrent uploaders never take the row locks in opposite orders.
@@ -268,6 +577,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         resolutionTimeZone = null,
         now = new Date(),
         dirtyEnvelopeByRaceId = null,
+        largeRaceScopeByRaceId = null,
         triggeredUserIdsByRaceId = null,
         displayArtifactByRaceId = null,
         burstCoalescing = false,
@@ -296,10 +606,17 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             ? candidate
             : null;
         const priority = dirty?.priority || "IMMEDIATE";
+        const fullScope = dirty?.reasons?.includes("FULL") === true;
         return {
           raceId,
           resolutionTimeZone,
-          triggered: triggeredUserIdsByRaceId?.get?.(raceId)
+          // FULL already means recompute every participant. Retaining a
+          // per-uploader list beside it has no consumer-visible meaning and
+          // turns a large shared race into an ever-growing JSON aggregation on
+          // the hottest row in the system.
+          triggered: fullScope
+            ? []
+            : triggeredUserIdsByRaceId?.get?.(raceId)
             ? [...new Set(triggeredUserIdsByRaceId.get(raceId).filter((id) => typeof id === "string" && id))].slice(0, 1000)
             : triggered,
           dirtyReasons: dirty?.reasons || [],
@@ -311,11 +628,84 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           artifactDigest: artifact?.digest || null,
           artifactSchema: artifact?.schema || null,
           notBeforeAt:
-            burstCoalescing && priority === "COALESCE"
+            burstCoalescing && (
+              priority === "COALESCE" || dirty?.reasons?.includes("GLOBAL_EVENT_BOUNDARY")
+            )
               ? new Date(now.getTime() + DEFAULT_DEBOUNCE_MS).toISOString()
               : null,
         };
       });
+
+      if (queuedGenerationMerge === true && rowsIn.some((row) =>
+        row.dirtyReasons.includes("FULL"))) {
+        const byRaceId = new Map();
+        const fullRows = rowsIn.filter((row) => row.dirtyReasons.includes("FULL"));
+        for (const row of fullRows) {
+          byRaceId.set(row.raceId, await this.enqueueFullScopeTrigger({
+            raceId: row.raceId,
+            resolutionTimeZone: row.resolutionTimeZone,
+            now,
+            burstCoalescing,
+            queuePriority: row.queuePriority,
+            scope: largeRaceScopeByRaceId?.get?.(row.raceId) || null,
+          }, tx));
+        }
+        const ordinaryRaceIds = rowsIn
+          .filter((row) => !row.dirtyReasons.includes("FULL"))
+          .map((row) => row.raceId);
+        if (ordinaryRaceIds.length > 0) {
+          const ordinary = await this.enqueueMany({
+            raceIds: ordinaryRaceIds,
+            userId,
+            resolutionTimeZone,
+            now,
+            dirtyEnvelopeByRaceId,
+            largeRaceScopeByRaceId,
+            triggeredUserIdsByRaceId,
+            displayArtifactByRaceId,
+            burstCoalescing,
+            queuedGenerationMerge,
+            bypassDebounce,
+            queuePriority,
+          }, tx);
+          ordinary.forEach((row, index) => byRaceId.set(ordinaryRaceIds[index], row));
+        }
+        return ordered.map((raceId) => byRaceId.get(raceId) || null);
+      }
+
+      // Once a queued generation already carries FULL, another uploader cannot
+      // add scoring scope: FULL means every participant. Share-locking that one
+      // row makes the source transaction commit before a worker can claim or
+      // refresh it, while allowing all sibling upload transactions to proceed
+      // concurrently without rewriting/serializing on the same JSONB row.
+      //
+      // Keep this optimization to the single-race case. Multi-race requests
+      // need the established one-statement ascending lock order; selectively
+      // share-locking a subset before updating another subset could invert lock
+      // order between two uploaders.
+      if (
+        queuedGenerationMerge === true &&
+        rowsIn.length === 1 &&
+        rowsIn[0].dirtyReasons.includes("FULL")
+      ) {
+        const coveredRows = await tx.$queryRawUnsafe(
+          `SELECT ${jobColumns()}
+             FROM race_resolution_jobs_v2
+            WHERE race_id=$1
+              AND dirty_reasons ? 'FULL'
+              AND (
+                state='queued'::"RaceResolutionJobState"
+                OR (
+                  state='running'::"RaceResolutionJobState"
+                  AND processing_generation IS NOT NULL
+                  AND generation > processing_generation
+                )
+              )
+            FOR SHARE`,
+          rowsIn[0].raceId,
+        );
+        if (coveredRows.length === 1) return [normalizeRow(coveredRows[0])];
+      }
 
       const rows = await tx.$queryRawUnsafe(
         `
@@ -510,6 +900,17 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             ELSE 'MAINTENANCE' END,
           not_before_at = CASE
             WHEN $4::boolean THEN NULL
+            WHEN EXCLUDED.not_before_at IS NOT NULL
+              AND EXCLUDED.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY'
+              THEN GREATEST(
+                COALESCE(race_resolution_jobs_v2.not_before_at,'-infinity'::timestamp),
+                EXCLUDED.not_before_at
+              )
+            WHEN EXCLUDED.not_before_at IS NOT NULL
+              THEN LEAST(
+                COALESCE(race_resolution_jobs_v2.not_before_at,EXCLUDED.not_before_at),
+                EXCLUDED.not_before_at
+              )
             ELSE race_resolution_jobs_v2.not_before_at
           END,
           display_artifact_id = CASE
@@ -1195,6 +1596,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
 const RaceResolutionJobV2 = buildRaceResolutionJobV2Model();
 
 module.exports = {
+  FULL_TRIGGER_PROMOTION_BATCH_SIZE,
   buildRaceResolutionJobV2Model,
   RaceResolutionJobV2,
   newLeaseToken,

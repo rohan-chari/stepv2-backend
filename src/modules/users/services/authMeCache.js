@@ -111,8 +111,14 @@ async function read({
  */
 async function invalidate(userId) {
   if (!userId) return true;
+  // Pub/sub delivers invalidations to sibling processes, not back to the
+  // publisher. Evict this worker synchronously so a mutation followed by the
+  // next app-open request cannot reuse its pre-mutation session row.
+  require("./authSessionUserCache").invalidate(userId);
   return derivedCache.invalidate({
-    keys: cacheKeys.userAuthMeVariants(userId),
+    keys: [
+      ...cacheKeys.userAuthMeVariants(userId),
+    ],
     prefix: cacheKeys.PREFIX.USER_AUTHME,
   });
 }

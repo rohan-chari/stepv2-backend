@@ -70,6 +70,9 @@ const {
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const authMeCache = require("./services/authMeCache");
 const { prisma } = require("../../db");
+const {
+  authShellAggregateBatch: defaultAuthShellAggregateBatch,
+} = require("./services/authShellAggregateBatch");
 const { asyncHandler } = require("../../shared/http/asyncHandler");
 const { ValidationError } = require("../../shared/errors/AppError");
 const { buildSetLeaderboardVisibility } = require("./commands/setLeaderboardVisibility");
@@ -183,6 +186,10 @@ function createAuthRouter(dependencies = {}) {
     dependencies.deleteUserAccount || defaultDeleteUserAccount;
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
   const UserModel = dependencies.User || DefaultUser;
+  const authShellAggregateBatch = dependencies.authShellAggregateBatch ||
+    (!dependencies.User && !dependencies.getIncomingFriendRequestCount
+      ? defaultAuthShellAggregateBatch
+      : null);
   const setLeaderboardVisibility = dependencies.setLeaderboardVisibility ||
     (dependencies.User
       ? async ({ userId, hidden }) => UserModel.update(userId, { hiddenFromLeaderboard: hidden })
@@ -619,10 +626,15 @@ function createAuthRouter(dependencies = {}) {
       appleId: req.user.appleId,
     });
 
-    const [heldCoins, incomingFriendRequests] = await Promise.all([
-      getHeldCoinsSafe(req.user.id),
-      compact ? getIncomingRequestCount(req.user.id) : Promise.resolve(undefined),
-    ]);
+    const shellAggregates = compact && authShellAggregateBatch
+      ? await authShellAggregateBatch.load({ prisma, userId: req.user.id })
+      : null;
+    const [heldCoins, incomingFriendRequests] = shellAggregates
+      ? [shellAggregates.heldCoins, shellAggregates.incomingFriendRequests]
+      : await Promise.all([
+          getHeldCoinsSafe(req.user.id),
+          compact ? getIncomingRequestCount(req.user.id) : Promise.resolve(undefined),
+        ]);
     const user = await withRuntimeFlags(
       withAdminFlag(
         {

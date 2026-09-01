@@ -97,8 +97,9 @@ describe("ad coin reward (Get Coins hub)", () => {
       { token: user.token, headers: { "X-Client-Features": "characters,ads" } }
     );
     assert.equal(res.status, 200);
-    assert.equal(res.body.adCoinReward.dailyCap, 3);
-    assert.equal("coinRewardMin" in res.body.adCoinReward, false);
+    const body = await res.json();
+    assert.equal(body.adCoinReward.dailyCap, 3);
+    assert.equal("coinRewardMin" in body.adCoinReward, false);
   });
 
   it("claims up to the daily cap, then 409s; coins and ledger add up", async () => {

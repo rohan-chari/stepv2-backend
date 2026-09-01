@@ -36,11 +36,31 @@ function buildApiContractMetric({ body, statusCode, durationMs = 0, request = {}
   };
 }
 
-function createApiContractTelemetry({ logger = console, now = () => Date.now() } = {}) {
+function createApiContractLogSampler({ successEvery = 100 } = {}) {
+  const counts = new Map();
+  const interval = Math.max(1, Number(successEvery) || 100);
+  return ({ contract, statusCode }) => {
+    if (typeof contract !== "string") return false;
+    if (Number(statusCode) >= 400) return true;
+    const count = counts.get(contract) || 0;
+    counts.set(contract, count + 1);
+    return count % interval === 0;
+  };
+}
+
+function createApiContractTelemetry({
+  logger = console,
+  now = () => Date.now(),
+  successEvery = 100,
+} = {}) {
+  const shouldLog = createApiContractLogSampler({ successEvery });
   return function apiContractTelemetry(req, res, next) {
     const startedAt = now();
     const sendJson = res.json.bind(res);
     res.json = function instrumentedJson(body) {
+      if (!shouldLog({ contract: body?.contract, statusCode: res.statusCode })) {
+        return sendJson(body);
+      }
       const metric = buildApiContractMetric({
         body,
         statusCode: res.statusCode,
@@ -55,4 +75,8 @@ function createApiContractTelemetry({ logger = console, now = () => Date.now() }
   };
 }
 
-module.exports = { buildApiContractMetric, createApiContractTelemetry };
+module.exports = {
+  buildApiContractMetric,
+  createApiContractLogSampler,
+  createApiContractTelemetry,
+};

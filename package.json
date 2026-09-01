@@ -47,6 +47,7 @@
     "capacity": "node scripts/capacity.js",
     "capacity:db": "node scripts/capacity-db.js",
     "load-test": "node scripts/load-test.js",
+    "load-test:k6:event-open": "node scripts/k6-event-open.js",
     "cohort:repair": "node scripts/repair-signup-seeded-cohort.js",
     "team-payouts:repair": "node scripts/repair-open-fixed-team-payouts.js"
   },

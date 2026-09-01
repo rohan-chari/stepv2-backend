@@ -30,6 +30,12 @@ const User = {
     return prisma.user.findUnique({ where: { id } });
   },
 
+  async findByIds(ids) {
+    const userIds = [...new Set(ids || [])].filter(Boolean);
+    if (userIds.length === 0) return [];
+    return prisma.user.findMany({ where: { id: { in: userIds } } });
+  },
+
   async findStepSyncCandidates(ids) {
     const userIds = [...new Set(ids || [])].filter(Boolean);
     if (userIds.length === 0) return [];
@@ -141,15 +147,15 @@ const User = {
   // appeared, so this is never a hot write path). Stamps clientFeaturesAt for
   // observability/debugging.
   async updateClientFeatures(id, features) {
-    const updated = await prisma.user.update({
-      where: { id },
-      data: { clientFeatures: features, clientFeaturesAt: new Date() },
+    await require("../services/clientFeaturesWriteBatch").clientFeaturesWriteBatch.write({
+      prisma,
+      id,
+      features,
     });
     await invalidateAuthMe(id);
     try {
       await require("../../social/services/userPresentationCache").invalidate(id);
     } catch {}
-    return updated;
   },
 
   // Sticky-write the user's IANA timezone (§7). Called from requireAuth ONLY
@@ -194,7 +200,11 @@ const User = {
   // not throw a P2025 into the auth middleware.
   async touchLastSeen(id, fields) {
     if (!id || !fields || Object.keys(fields).length === 0) return;
-    await prisma.user.updateMany({ where: { id }, data: fields });
+    await require("../services/lastSeenWriteBatch").lastSeenWriteBatch.write({
+      prisma,
+      id,
+      fields,
+    });
   },
 
   // §9.1: read the user's notification preferences. The column is NOT NULL with a

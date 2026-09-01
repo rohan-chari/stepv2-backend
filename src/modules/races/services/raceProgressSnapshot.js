@@ -13,10 +13,13 @@
 // one). `assertAllowlisted` + the two-viewer isolation test are the guard.
 //
 // ── Lifecycle (§3 key table) ───────────────────────────────────────────────
-// SOFT 15s / PHYSICAL 60s. The key lives 60s; a reader treats `asOf` older than
+// SOFT 15s / PHYSICAL 5m. A reader treats `asOf` older than
 // 15s as STALE — serve it AND trigger a rebuild. A physical 15s TTL would
 // delete the value the moment it went stale, and "losers serve the stale
-// snapshot" would have nothing to serve.
+// snapshot" would have nothing to serve. Five minutes also keeps the complete
+// baseline alive through a synchronized app-open wave while the dedicated
+// worker coalesces newer generations; each successful publish still replaces
+// it immediately.
 //
 // ── Who writes it ──────────────────────────────────────────────────────────
 //   * the `/progress` request that WINS `v1:lock:progress:{raceId}` (SET), and
@@ -46,7 +49,7 @@ const SCHEMA_VERSION = 2;
 // instead of accepting a presentation-free roster it cannot hydrate.
 const LEAN_SCHEMA_VERSION = 3;
 const SOFT_TTL_MS = 15_000;
-const PHYSICAL_TTL_SECONDS = 60;
+const PHYSICAL_TTL_SECONDS = 300;
 const LOCK_TTL_MS = 10_000;
 // Deliberately shorter than the measured recompute p99 (1.76s): some losers are
 // SUPPOSED to fall through to the persisted read rather than hold a request
@@ -54,6 +57,19 @@ const LOCK_TTL_MS = 10_000;
 // get the snapshot").
 const LOSER_WAIT_MS = 1_000;
 const LOSER_POLL_MS = 40;
+const LOCAL_READ_TTL_MS = 2_000;
+const LOCAL_READ_MAX_ENTRIES = 8;
+const localReads = new Map();
+
+function localReadKey(raceId, schemaVersion) {
+  return `${raceId}:${schemaVersion}`;
+}
+
+function clearLocalRace(raceId) {
+  for (const key of localReads.keys()) {
+    if (key.startsWith(`${raceId}:`)) localReads.delete(key);
+  }
+}
 
 // ── THE PINNED ALLOWLIST ────────────────────────────────────────────────────
 // Top-level envelope.
@@ -259,17 +275,34 @@ function matchesTimeZone(snapshot, scoringTimeZone) {
 }
 
 async function readSnapshot(raceId, schemaVersion = SCHEMA_VERSION) {
-  const value = await redisCache.getJSON(cacheKeys.raceProgress(raceId));
-  return value && value.v === schemaVersion ? value : null;
+  const key = localReadKey(raceId, schemaVersion);
+  const nowMs = Date.now();
+  const cached = localReads.get(key);
+  if (cached && cached.expiresAt > nowMs) return cached.promise;
+  const promise = redisCache.getJSON(cacheKeys.raceProgress(raceId, schemaVersion))
+    .then((value) => value && value.v === schemaVersion ? value : null);
+  const entry = { expiresAt: nowMs + LOCAL_READ_TTL_MS, promise };
+  localReads.delete(key);
+  localReads.set(key, entry);
+  while (localReads.size > LOCAL_READ_MAX_ENTRIES) {
+    localReads.delete(localReads.keys().next().value);
+  }
+  promise.then((value) => {
+    if (value == null && localReads.get(key) === entry) localReads.delete(key);
+  }).catch(() => {
+    if (localReads.get(key) === entry) localReads.delete(key);
+  });
+  return promise;
 }
 
 // Both supported viewer-neutral schemas share one physical key. Consumers
 // that accept either can fetch once instead of probing the same key twice.
 async function readSupportedSnapshot(raceId) {
-  const value = await redisCache.getJSON(cacheKeys.raceProgress(raceId));
-  return value && [SCHEMA_VERSION, LEAN_SCHEMA_VERSION].includes(value.v)
-    ? value
-    : null;
+  const [lean, legacy] = await Promise.all([
+    readSnapshot(raceId, LEAN_SCHEMA_VERSION),
+    readSnapshot(raceId, SCHEMA_VERSION),
+  ]);
+  return lean || legacy || null;
 }
 
 /**
@@ -279,10 +312,16 @@ async function readSupportedSnapshot(raceId) {
  */
 async function writeSnapshot(raceId, snapshot) {
   const ok = await redisCache.setJSON(
-    cacheKeys.raceProgress(raceId),
+    cacheKeys.raceProgress(raceId, snapshot?.v),
     snapshot,
     PHYSICAL_TTL_SECONDS
   );
+  if (ok) {
+    localReads.set(localReadKey(raceId, snapshot.v), {
+      expiresAt: Date.now() + LOCAL_READ_TTL_MS,
+      promise: Promise.resolve(snapshot),
+    });
+  }
   bump(ok ? "publishes" : "publishFailures");
   return ok;
 }
@@ -296,6 +335,7 @@ async function writeSnapshot(raceId, snapshot) {
  */
 async function invalidateRaceProgress(raceId) {
   if (!raceId) return true;
+  clearLocalRace(raceId);
   try {
     // The page projection shares this prefix but has generation-specific chunk
     // keys. Invalidate its known generation before deleting the legacy C3
@@ -303,7 +343,7 @@ async function invalidateRaceProgress(raceId) {
     const pageProjection = require("./raceProgressPageProjection");
     await pageProjection.invalidateRaceProgressPageProjection(raceId);
     return await derivedCache.invalidate({
-      keys: [cacheKeys.raceProgress(raceId)],
+      keys: cacheKeys.raceProgressVariants(raceId),
       prefix: cacheKeys.PREFIX.RACE_PROGRESS,
     });
   } catch (error) {
@@ -337,8 +377,16 @@ async function waitForSnapshot(
 }
 
 /** Run `fn` as the single rebuild owner, or resolve null immediately. */
-async function withRebuildLock(raceId, fn) {
-  return redisCache.withLock(cacheKeys.raceProgressLock(raceId), LOCK_TTL_MS, fn);
+async function withRebuildLock(raceId, schemaVersion, fn) {
+  if (typeof schemaVersion === "function") {
+    fn = schemaVersion;
+    schemaVersion = SCHEMA_VERSION;
+  }
+  return redisCache.withLock(
+    cacheKeys.raceProgressLock(raceId, schemaVersion),
+    LOCK_TTL_MS,
+    fn
+  );
 }
 
 module.exports = {
@@ -348,6 +396,7 @@ module.exports = {
   PHYSICAL_TTL_SECONDS,
   LOCK_TTL_MS,
   LOSER_WAIT_MS,
+  LOCAL_READ_TTL_MS,
   SNAPSHOT_FIELDS,
   SNAPSHOT_RACE_FIELDS,
   SNAPSHOT_PARTICIPANT_FIELDS,
@@ -366,5 +415,6 @@ module.exports = {
   withRebuildLock,
   __counters: counters,
   __resetCounters: resetCounters,
+  __resetLocalReadCache() { localReads.clear(); },
   __bump: bump,
 };

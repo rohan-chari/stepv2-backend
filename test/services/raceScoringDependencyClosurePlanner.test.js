@@ -26,6 +26,10 @@ const NOW = new Date("2026-08-14T12:00:00.000Z");
 const CLAIM_STARTED_AT = new Date("2026-08-14T12:00:05.000Z");
 const RACE_ENDS_AT = new Date("2026-08-14T23:00:00.000Z");
 
+test("the closure ceiling admits one complete scoped launch-wave envelope", () => {
+  assert.equal(MAX_DEPENDENCY_CLOSURE_PARTICIPANTS, 1000);
+});
+
 function participant(id, overrides = {}) {
   return {
     id,
@@ -94,7 +98,7 @@ function effect(id, type, targetParticipantId, overrides = {}) {
 // its inputs, so "same inputs => same digest" and "changed row => changed
 // digest" are meaningful assertions here. The real builder is exercised against
 // Postgres in the integration file.
-function fakeFingerprint({ participants, effects, events, nextSampleBoundary }) {
+function fakeFingerprint({ participants, effects, events, nextSampleBoundary, race }) {
   return async () => ({
     digest: crypto
       .createHash("sha256")
@@ -108,6 +112,7 @@ function fakeFingerprint({ participants, effects, events, nextSampleBoundary }) 
       )
       .digest("hex"),
     participantCount: participants.length,
+    race,
     nextSampleBoundary: nextSampleBoundary || null,
     activeEffects: effects.filter((row) => row.status !== "EXPIRED"),
     expiredScoringEffects: effects.filter((row) => row.status === "EXPIRED"),
@@ -129,6 +134,14 @@ function world({
   claimStartedAt = CLAIM_STARTED_AT,
 } = {}) {
   const dirtyRows = participants.filter((row) => dirty.includes(row.id));
+  const raceRow = {
+    id: "r1",
+    status: "ACTIVE",
+    isTeamRace: false,
+    endsAt: RACE_ENDS_AT,
+    timezone: "UTC",
+    ...race,
+  };
   return {
     raceId: "r1",
     dirtyParticipantIds: dirty,
@@ -144,13 +157,8 @@ function world({
     Race: {
       async findById() {
         return {
-          id: "r1",
-          status: "ACTIVE",
-          isTeamRace: false,
-          endsAt: RACE_ENDS_AT,
-          timezone: "UTC",
           participants,
-          ...race,
+          ...raceRow,
         };
       },
     },
@@ -172,6 +180,7 @@ function world({
       effects,
       events,
       nextSampleBoundary,
+      race: raceRow,
     }),
   };
 }
@@ -254,6 +263,40 @@ test("an unrelated SELF effect leaves the closure at the uploader alone", async 
   });
   assert.deepEqual(plan.participantIds, ["p1"]);
   assert.deepEqual(plan.sourceParticipantIds, ["p1"]);
+});
+
+test("the authoritative fingerprint graph avoids a duplicate full-race model read", async () => {
+  const participants = [participant("p1"), participant("p2")];
+  const effects = [leech("l1", "p1", "u-p2")];
+  const input = world({ participants, effects });
+  const originalFingerprint = input.buildInputFingerprint;
+  input.buildInputFingerprint = async (...args) => ({
+    ...(await originalFingerprint(...args)),
+    race: {
+      id: "r1",
+      status: "ACTIVE",
+      isTeamRace: false,
+      endsAt: RACE_ENDS_AT,
+      timezone: "UTC",
+    },
+  });
+  input.Race = {
+    async findById() {
+      throw new Error("duplicate full-race read");
+    },
+  };
+  input.RaceActiveEffect = {
+    async findActiveForRace() {
+      throw new Error("duplicate active-effect read");
+    },
+    async findRaceEffectsByType() {
+      throw new Error("duplicate effect-history read");
+    },
+  };
+
+  const plan = await buildRaceScoringDependencyClosure(input);
+  assert.equal(plan.plan, "DEPENDENCY_CLOSURE");
+  assert.deepEqual(plan.participantIds, ["p1", "p2"]);
 });
 
 test("a scoring-inert effect neither edges nor vetoes", async () => {
@@ -419,8 +462,8 @@ test("a team race forces FULL as an explicit condition", async () => {
   });
 });
 
-test("a global event overlapping the as-of instant forces FULL", async () => {
-  await assertFullBecause(CLOSURE_FALLBACK_REASONS.GLOBAL_EVENT_ACTIVE, {
+test("an active global event remains closure-safe and is fenced", async () => {
+  const { plan } = await planFor({
     participants: [participant("p1")],
     events: [
       {
@@ -431,6 +474,8 @@ test("a global event overlapping the as-of instant forces FULL", async () => {
       },
     ],
   });
+  assert.equal(plan.plan, "DEPENDENCY_CLOSURE");
+  assert.equal(plan.validUntil.toISOString(), "2026-08-14T12:10:00.000Z");
 });
 
 test("a global event that has not started only shortens the deadline", async () => {
@@ -449,7 +494,7 @@ test("a global event that has not started only shortens the deadline", async () 
   assert.equal(plan.validUntil.toISOString(), "2026-08-14T12:04:00.000Z");
 });
 
-test("a linked component above the 64 cap forces FULL", async () => {
+test("a linked component above the bounded closure cap forces FULL", async () => {
   const size = MAX_DEPENDENCY_CLOSURE_PARTICIPANTS + 1;
   const participants = Array.from({ length: size }, (_, index) =>
     participant(`p${String(index).padStart(3, "0")}`)
@@ -570,6 +615,12 @@ test("a non-ACTIVE race, an ended race, and a failed read all fail closed", asyn
     race: { endsAt: new Date("2026-08-14T11:00:00.000Z") },
   });
   const input = world({});
+  const originalFingerprint = input.buildInputFingerprint;
+  input.buildInputFingerprint = async (...args) => {
+    const fingerprint = await originalFingerprint(...args);
+    delete fingerprint.race;
+    return fingerprint;
+  };
   input.RaceActiveEffect = {
     async findActiveForRace() {
       throw new Error("boom");

@@ -13,7 +13,11 @@ const {
   aggregateGlobalEventCapacityEvidence,
   assertGlobalEventCapacityGates,
   assertSustainedBackgroundLoad,
+  installationCountForUser,
 } = require("./globalEventReliabilityProfiles");
+const {
+  GLOBAL_EVENT_DELIVERY_WINDOW_MS,
+} = require("../notifications/services/notificationAdmission");
 
 async function runPacedBackgroundProducer({
   rate,
@@ -38,10 +42,17 @@ async function runPacedBackgroundProducer({
       const scheduledAtMs = startedAtMs + second * 1000 + slot * (1000 / rate);
       const delay = scheduledAtMs - clock();
       if (delay > 0) await wait(delay, signal);
-      while (active.size >= maxInFlight && clock() < bucketEndMs) await Promise.race(active);
-      if (clock() >= bucketEndMs) break;
       const offeredSequence = sequence++;
       bucket.offered += 1;
+      if (maxInFlight <= 0) {
+        bucket.failed += 1;
+        continue;
+      }
+      while (active.size >= maxInFlight && clock() < bucketEndMs) await Promise.race(active);
+      if (clock() >= bucketEndMs) {
+        bucket.failed += 1;
+        continue;
+      }
       let task;
       task = Promise.resolve()
         .then(() => runOne({ sequence: offeredSequence, second }))
@@ -64,14 +75,16 @@ async function runPacedBackgroundProducer({
 
 function selectSyntheticFixtureLifecycle({
   eventReliability,
+  eventOpenFixture,
   fixtureFactory,
   cleanup,
 } = {}) {
+  const globalEventFixture = Boolean(eventReliability || eventOpenFixture);
   return {
-    fixtureFactory: eventReliability && fixtureFactory === createSyntheticFixtures
+    fixtureFactory: globalEventFixture && fixtureFactory === createSyntheticFixtures
       ? createGlobalEventReliabilityFixtures
       : fixtureFactory,
-    cleanup: eventReliability && cleanup === cleanupSyntheticRun
+    cleanup: globalEventFixture && cleanup === cleanupSyntheticRun
       ? cleanupGlobalEventReliabilityRun
       : cleanup,
   };
@@ -134,6 +147,41 @@ function assertGlobalEventArtifactSet({ outputDir, runId, profile } = {}) {
 }
 function replaceTemplate(value, context) { return value.replace(/:raceId/g, context.raceId || "missing-race").replace(/:jobId/g, context.jobId || "missing-job").replace(/:userId/g, context.userId || "missing-user").replace(/\{\{today\}\}/g, context.today).replace(/\{\{generation\}\}/g, String(context.generation || 1)); }
 function weightedChoice(entries, random) { const eligible = entries.filter((item) => item.weight > 0); const total = eligible.reduce((sum, item) => sum + item.weight, 0); let needle = random() * total; for (const item of eligible) { needle -= item.weight; if (needle <= 0) return item; } return eligible[eligible.length - 1]; }
+
+function eventOpenSessionEntries(profile = PROFILES["event-open-surge"], random = Math.random) {
+  const stepEntries = profile.entries.filter((entry) => /^\/steps(?:\/|$)/.test(entry.path));
+  const chosenStep = weightedChoice(stepEntries, random);
+  return profile.entries.filter((entry) => !stepEntries.includes(entry) || entry === chosenStep);
+}
+
+async function runEventOpenSession({
+  profile = PROFILES["event-open-surge"],
+  random = Math.random,
+  requestOne = oneRequest,
+  fetchImpl,
+  baseUrl,
+  context,
+  sequence,
+  timeoutMs,
+} = {}) {
+  const entries = eventOpenSessionEntries(profile, random);
+  const auth = entries.find((entry) => entry.method === "GET" && entry.path === "/auth/me");
+  const remaining = entries.filter((entry) => entry !== auth);
+  const authSample = await requestOne({ fetchImpl, baseUrl, entry: auth, context, sequence, timeoutMs });
+  const samples = [authSample];
+  if (authSample.status >= 200 && authSample.status < 300 && !authSample.timeout && !authSample.unexpectedStatus) {
+    samples.push(...await Promise.all(remaining.map((entry) => requestOne({
+      fetchImpl, baseUrl, entry, context, sequence, timeoutMs,
+      sourceChangedExpected: !entry.readOnly,
+    }))));
+  }
+  return {
+    samples,
+    successful: samples.length === entries.length && samples.every((sample) =>
+      sample.status >= 200 && sample.status < 300 && sample.timeout !== true && sample.unexpectedStatus !== true
+    ),
+  };
+}
 function textReport(result) {
   const endpoints = Object.entries(result.endpoints || {});
   const worstLatency = endpoints.sort(([, left], [, right]) => right.latencyMs.p95 - left.latencyMs.p95)[0];
@@ -156,6 +204,19 @@ function payloadFor(entry, context, sequence) {
   if (entry.path === "/steps/samples") return { samples: [{ periodStart: start, periodEnd: end, steps: sampleSteps, recordingMethod: "automatic", sourceName: "synthetic-health", sourceId: `load:${context.runId}:${context.userIndex}` }] };
   if (entry.path === "/steps") return { steps: 1000 + sequence, date, skipRaceResolution: true };
   if (entry.path === "/steps/sync-v2") return { date, steps: 1000 + sequence, samples: [{ periodStart: start, periodEnd: end, steps: sampleSteps, recordingMethod: "automatic", sourceName: "synthetic-health", sourceId: `load:${context.runId}:${context.userIndex}` }] };
+  if (entry.path === "/notifications/device-token") return {
+    deviceToken: `capacity-${context.runId}-${context.userIndex}`,
+    platform: "ios",
+    installationId: `capacity.${context.runId}.${context.userIndex}`.slice(0, 128),
+  };
+  if (entry.path === "/analytics/activation-events") return { events: [{
+    id: uuidFor(context.runId, context.userIndex, sequence),
+    name: "home_reached",
+    timestamp: new Date().toISOString(),
+    appVersion: "2.3.8",
+    platform: "ios",
+    context: {},
+  }] };
   return undefined;
 }
 function requestUrl(baseUrl, entry, context) { const pathName = replaceTemplate(entry.path, context); return `${baseUrl}${pathName}${entry.query ? `?${replaceTemplate(entry.query, context)}` : ""}`; }
@@ -164,6 +225,157 @@ function percentile(values, p) {
   if (!values.length) return 0;
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p / 100) - 1)];
+}
+
+function assertEventOpenSurgeGates(result) {
+  const expectedSessions = Number(result?.parameters?.arrivalRatePerSecond) *
+    Number(result?.parameters?.durationSeconds);
+  if (!Number.isInteger(expectedSessions) || expectedSessions < 1 ||
+      Number(result?.sessions?.offered) !== expectedSessions) {
+    throw new Error("event-open capacity gate failed: offered session census");
+  }
+  if (Number(result.sessions.completedSuccessful) !== expectedSessions ||
+      Number(result.sessions.failed) !== 0) {
+    throw new Error("event-open capacity gate failed: dropped or failed session");
+  }
+  if (Number(result.summary?.errorRate) >= 0.001) {
+    throw new Error("event-open capacity gate failed: 5xx/timeout/unexpected rate");
+  }
+  const assertEndpoint = (name, p95Limit, p99Limit) => {
+    const value = result.endpoints?.[name];
+    if (!value?.requests || Number(value.latencyMs?.p95) >= p95Limit ||
+        Number(value.latencyMs?.p99) >= p99Limit) {
+      throw new Error(`event-open capacity gate failed: ${name} latency`);
+    }
+  };
+  for (const name of [
+    "GET /auth/me", "GET /home/race-card", "GET /races/discovery-summary",
+    "GET /races", "GET /inbox/alerts", "GET /races/:raceId/progress",
+    "GET /races/:raceId/bootstrap",
+  ]) assertEndpoint(name, 500, 1_000);
+  assertEndpoint("POST /steps/sync-v2", 750, 1_500);
+  assertEndpoint("POST /steps", 2_000, 5_000);
+  assertEndpoint("POST /steps/samples", 2_000, 5_000);
+  if (result.queue?.drainCompleted !== true || Number(result.queue?.lagMs?.p95) >= 30_000 ||
+      Number(result.queue?.drainSeconds) > 300) {
+    throw new Error("event-open capacity gate failed: resolution queue lag/drain");
+  }
+  const infrastructure = result.infrastructure?.eventSurge;
+  if (!infrastructure || infrastructure.processCeilingsOk !== true ||
+      Number(infrastructure.dbPoolWaitP99Ms) >= 50 ||
+      Number(infrastructure.poolExhaustions) !== 0) {
+    throw new Error("event-open capacity gate failed: process/pool reserve");
+  }
+  const poolBudget = infrastructure.poolBudget;
+  if (!poolBudget || poolBudget.http0 !== 10 || poolBudget.http1 !== 10 ||
+      poolBudget.resolution !== 8 || poolBudget.cron !== 4 || poolBudget.total !== 32) {
+    throw new Error("event-open capacity gate failed: exact 10/10/8/4 pool budget");
+  }
+  const evidence = result.eventEvidence;
+  if (evidence?.c0Queue?.directlyInspected !== true || evidence.c0Queue.drained !== true ||
+      Number(evidence.c0Queue.failedRows) !== 0 || Number(evidence.c0Queue.oldestAgeMs) !== 0 ||
+      Number(evidence.c0Queue.p95LagMs) >= 30_000 || Number(evidence.c0Queue.drainSeconds) > 300) {
+    throw new Error("event-open capacity gate failed: direct C0 queue inspection");
+  }
+  const notification = evidence.notification;
+  if (!notification || Number(notification.expectedProviderAttempts) !== 12_000 ||
+      Number(notification.firstAttempts) !== 12_000 ||
+      Number(notification.accepted) !== 11_988 || Number(notification.invalid) !== 12 ||
+      Number(notification.accepted) + Number(notification.invalid) !== 12_000 ||
+      Number(notification.lateFirstAttempts) !== 0 ||
+      Number(notification.finalFirstAttemptLagMs) > GLOBAL_EVENT_DELIVERY_WINDOW_MS ||
+      Number(notification.pacingRatePerSecond) > 100) {
+    throw new Error("event-open capacity gate failed: notification pacing/deadline");
+  }
+  if (evidence.sourcePersistence?.ok !== true ||
+      Number(evidence.sourcePersistence.persistedWrites) !== Number(evidence.sourcePersistence.acceptedWrites)) {
+    throw new Error("event-open capacity gate failed: accepted source persistence");
+  }
+  if (evidence.duplicateScoring?.ok !== true ||
+      Number(evidence.duplicateScoring.expectedGenerationDelta) < 1 ||
+      Number(evidence.duplicateScoring.observedGenerationDelta) !==
+        Number(evidence.duplicateScoring.expectedGenerationDelta) ||
+      Number(evidence.duplicateScoring.generationAmplificationRatio) !== 1 ||
+      evidence.parity?.ok !== true || Number(evidence.parity.checkedParticipants) !== 14_000) {
+    throw new Error("event-open capacity gate failed: duplicate scoring/parity");
+  }
+  const headroom = evidence.headroom;
+  if (!headroom || Number(headroom.required) !== 0.4 ||
+      Number(headroom.provedPerSecond) < Number(headroom.sustainedTargetPerSecond) * 1.4) {
+    throw new Error("event-open capacity gate failed: 40% headroom");
+  }
+  if (evidence.fault?.executed !== true || evidence.fault?.recovered !== true ||
+      typeof evidence.fault?.artifact !== "string" || !evidence.fault.artifact) {
+    throw new Error("event-open capacity gate failed: fault automation artifact");
+  }
+  if (evidence.fault.scenario === "redis-outage" &&
+      new Date(evidence.fault.recoveredAt).getTime() - new Date(evidence.fault.appliedAt).getTime() < 60_000) {
+    throw new Error("event-open capacity gate failed: Redis outage duration evidence");
+  }
+  if (evidence.fault.scenario === "worker-restart" &&
+      (evidence.fault.before?.identities?.["http:0"] === evidence.fault.after?.identities?.["http:0"] ||
+       evidence.fault.before?.identities?.["http:1"] !== evidence.fault.after?.identities?.["http:1"])) {
+    throw new Error("event-open capacity gate failed: worker replacement boot identity");
+  }
+  return true;
+}
+
+async function assertAcceptedStepSourcePersistence({ prisma, samples } = {}) {
+  const accepted = (samples || []).filter((sample) =>
+    sample?.sourceExpectation && sample.status >= 200 && sample.status < 300 &&
+    /^POST \/steps/.test(sample.endpoint));
+  const latestDaily = new Map();
+  const latestSample = new Map();
+  const syncKeys = new Set();
+  for (const sample of accepted.sort((left, right) => left.completedAtMs - right.completedAtMs)) {
+    const expected = sample.sourceExpectation;
+    if (expected.payload?.date != null && expected.payload?.steps != null) {
+      latestDaily.set(`${expected.userId}:${expected.payload.date}`, {
+        userId: expected.userId, date: expected.payload.date, steps: Number(expected.payload.steps),
+      });
+    }
+    for (const row of expected.payload?.samples || []) {
+      latestSample.set(`${expected.userId}:${row.periodStart}`, {
+        userId: expected.userId, periodStart: row.periodStart, periodEnd: row.periodEnd,
+        steps: Number(row.steps), sourceId: row.sourceId || null,
+      });
+    }
+    if (expected.idempotencyKey) syncKeys.add(`${expected.userId}:${expected.idempotencyKey}`);
+  }
+  const userIds = [...new Set(accepted.map((sample) => sample.sourceExpectation.userId))];
+  const [dailyRows, sampleRows, syncRows] = userIds.length ? await Promise.all([
+    prisma.step.findMany({ where: { userId: { in: userIds } }, select: { userId: true, date: true, steps: true } }),
+    prisma.stepSample.findMany({ where: { userId: { in: userIds } }, select: {
+      userId: true, periodStart: true, periodEnd: true, steps: true, sourceId: true,
+    } }),
+    prisma.stepSyncRequest.findMany({ where: { userId: { in: userIds }, state: "COMPLETE" }, select: {
+      userId: true, idempotencyKey: true,
+    } }),
+  ]) : [[], [], []];
+  const dailyByKey = new Map(dailyRows.map((row) => [
+    `${row.userId}:${row.date.toISOString().slice(0, 10)}`, row,
+  ]));
+  const sampleByKey = new Map(sampleRows.map((row) => [
+    `${row.userId}:${row.periodStart.toISOString()}`, row,
+  ]));
+  const storedSyncKeys = new Set(syncRows.map((row) => `${row.userId}:${row.idempotencyKey}`));
+  const dailyOk = [...latestDaily].every(([key, expected]) =>
+    Number(dailyByKey.get(key)?.steps) === expected.steps);
+  const samplesOk = [...latestSample].every(([key, expected]) => {
+    const stored = sampleByKey.get(key);
+    return Number(stored?.steps) === expected.steps &&
+      stored?.periodEnd?.toISOString() === expected.periodEnd && stored?.sourceId === expected.sourceId;
+  });
+  const syncOk = [...syncKeys].every((key) => storedSyncKeys.has(key));
+  const ok = dailyOk && samplesOk && syncOk;
+  return {
+    acceptedWrites: accepted.length,
+    persistedWrites: ok ? accepted.length : 0,
+    finalDailyKeys: latestDaily.size,
+    finalSampleKeys: latestSample.size,
+    syncReceipts: syncKeys.size,
+    ok,
+  };
 }
 
 // Capacity fixtures deliberately start mid-day and submit one closed sample
@@ -459,13 +671,20 @@ async function oneRequest({ fetchImpl, baseUrl, entry, context, sequence, reques
     const latencyMs = Number(process.hrtime.bigint() - started) / 1e6;
     let body = null;
     try { body = await response.json(); } catch {}
-    return { endpoint: `${entry.method} ${entry.path}`, status: response.status, latencyMs, completedAtMs: Date.now(), sourceChangedExpected, persona: entry.persona, userIndex: context.userIndex, requestIdentitySequence, queueJobId: body?.raceResolution?.jobId || body?.jobId || null, queueGeneration: body?.raceResolution?.generation || body?.generation || 1, queueState: body?.state || body?.raceResolution?.state || null, errorDiagnostic: response.status >= 400 ? String(body?.code || body?.error || "").slice(0, 120) : null, allowedStatuses: entry.allowedStatuses, unexpectedStatus: !entry.allowedStatuses.includes(response.status), timeout: false };
+    const sourceExpectation = /^\/steps(?:\/|$)/.test(entry.path) && requestBody
+      ? {
+          userId: context.userId,
+          payload: JSON.parse(requestBody),
+          idempotencyKey: headers["Idempotency-Key"] || null,
+        }
+      : null;
+    return { endpoint: `${entry.method} ${entry.path}`, status: response.status, latencyMs, completedAtMs: Date.now(), sourceChangedExpected, persona: entry.persona, userIndex: context.userIndex, requestIdentitySequence, sourceExpectation, queueJobId: body?.raceResolution?.jobId || body?.jobId || null, queueGeneration: body?.raceResolution?.generation || body?.generation || 1, queueState: body?.state || body?.raceResolution?.state || null, errorDiagnostic: response.status >= 400 ? String(body?.code || body?.error || "").slice(0, 120) : null, allowedStatuses: entry.allowedStatuses, unexpectedStatus: !entry.allowedStatuses.includes(response.status), timeout: false };
   } catch (error) {
     return { endpoint: `${entry.method} ${entry.path}`, status: 0, latencyMs: Number(process.hrtime.bigint() - started) / 1e6, completedAtMs: Date.now(), sourceChangedExpected, persona: entry.persona, userIndex: context.userIndex, errorDiagnostic: String(error?.code || error?.message || "request error").slice(0, 120), allowedStatuses: entry.allowedStatuses, unexpectedStatus: true, timeout: error.name === "AbortError" || error.message.includes("timeout") };
   } finally { clearTimeout(timer); }
 }
 
-async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, users, arrivalRate, duration, timeoutMs, concurrency, runId, capacityRepeat = "1", capacityStateDirectory, confirmCapacityVm = false, dryRun = false, fetchImpl = globalThis.fetch, prisma, fixtureFactory = createSyntheticFixtures, cleanup = cleanupSyntheticRun, outputDir = path.resolve("results"), now = () => new Date(), signal, max5xxRate = 0.05, maxTimeoutRate = 0.05, random = Math.random, environment = process.env, readCapacityTelemetry = null, readGlobalEventInfrastructure = null, enqueueResolutionJobs = null }) {
+async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, users, arrivalRate, duration, timeoutMs, concurrency, runId, capacityRepeat = "1", capacityStateDirectory, confirmCapacityVm = false, dryRun = false, fetchImpl = globalThis.fetch, prisma, fixtureFactory = createSyntheticFixtures, cleanup = cleanupSyntheticRun, outputDir = path.resolve("results"), now = () => new Date(), signal, max5xxRate = 0.05, maxTimeoutRate = 0.05, random = Math.random, environment = process.env, readCapacityTelemetry = null, readGlobalEventInfrastructure = null, enqueueResolutionJobs = null, faultEvidence: suppliedFaultEvidence = null, headroomEvidence: suppliedHeadroomEvidence = null }) {
   const targetInfo = classifyTarget({ target, baseUrl, databaseUrl });
   if (!confirmCapacityVm && dryRun) throw new Error("dry-run capacity plans require --confirm-capacity-vm");
   if (!dryRun && (!runId || !capacityStateDirectory)) throw new Error("load runs require --run-id and --capacity-state-dir after a verified capacity start");
@@ -509,11 +728,16 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
   let settlementMonitor = null;
   let phaseEvidence = null;
   let eventBackground = null;
+  let eventOpenSessions = null;
+  let eventOpenInfrastructure = null;
+  let eventOpenEvidence = null;
+  let eventOpenScoringGenerationBaseline = new Map();
     let stopReason = "completed";
   let sequence = 0;
   const coverageEntries = profileConfig.entries.filter((entry) => !entry.path.includes(":jobId"));
   const fixtureLifecycle = selectSyntheticFixtureLifecycle({
     eventReliability: profileConfig.eventReliability,
+    eventOpenFixture: profileConfig.eventOpenFixture,
     fixtureFactory,
     cleanup,
   });
@@ -522,14 +746,22 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
       prisma,
       runId,
       profile: params.profile,
-      users: params.users,
+      users: profileConfig.eventOpenFixture?.fixtureUsers || params.users,
       races: profileConfig.fixtureRaces,
       env: environment,
     });
     const latestRaceStartMs = Math.max(...fixture.races.map((race) => new Date(race.startedAt).getTime()));
     const sampleStart = new Date(latestRaceStartMs + 10 * 60 * 1000).toISOString();
     const sampleEnd = new Date(latestRaceStartMs + 20 * 60 * 1000).toISOString();
-    const contexts = fixture.users.map((user, userIndex) => ({ runId, repeat: String(capacityRepeat), userCount: fixture.users.length, userIndex, userId: user.id, token: user.token, raceId: fixture.manifest.ids.races[userIndex % profileConfig.fixtureRaces], today: new Date().toISOString().slice(0, 10), sampleStart, sampleEnd, requestBodies: new Map() }));
+    const trafficUsers = params.profile === "event-open-surge"
+      ? fixture.users.map((user, userIndex) => ({ user, userIndex }))
+        .filter(({ userIndex }) => installationCountForUser(userIndex, fixture.users.length) > 0)
+      : fixture.users.map((user, userIndex) => ({ user, userIndex }));
+    const contexts = trafficUsers.map(({ user, userIndex }) => ({ runId, repeat: String(capacityRepeat), userCount: trafficUsers.length, userIndex, userId: user.id, token: user.token, raceId: fixture.manifest.ids.races[userIndex % profileConfig.fixtureRaces], today: new Date().toISOString().slice(0, 10), sampleStart, sampleEnd, requestBodies: new Map() }));
+    if (profileConfig.eventOpenFixture?.activatesBoundary && fixture.eventStartsAt) {
+      const untilBoundaryMs = new Date(fixture.eventStartsAt).getTime() - Date.now();
+      if (untilBoundaryMs > 0) await sleep(untilBoundaryMs, signal);
+    }
     const burstProfile = ["frozen-step-sync-burst", "current-step-sync-burst"].includes(params.profile);
     const observeSettlements = (rows, observedAtMs = Date.now()) => {
       for (const row of rows || []) {
@@ -546,7 +778,7 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
         });
       }
     };
-    if (burstProfile) {
+    if (burstProfile || params.profile === "event-open-surge") {
       const raceIds = fixture.manifest.ids.races || [];
       settlementMonitor = (async () => {
         while (!stopSettlementMonitor) {
@@ -588,6 +820,12 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
       coverageRequests += 1;
       if (sample.queueJobId) jobs.push({ id: sample.queueJobId, generation: sample.queueGeneration || 1, userIndex: sample.userIndex, enqueuedAt: Date.now() });
     }
+    if (params.profile === "event-open-surge") {
+      eventOpenScoringGenerationBaseline = new Map((await prisma.userScoringInputVersion.findMany({
+        where: { userId: { in: contexts.map((context) => context.userId) } },
+        select: { userId: true, generation: true },
+      })).map((row) => [row.userId, BigInt(row.generation)]));
+    }
     // Start the offered-rate window after fixture setup and coverage traffic so
     // setup time does not dilute the sustained throughput measurement.
     startedAt = now().toISOString();
@@ -596,7 +834,34 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
     const launchIntervalMs = 1000 / params.arrivalRatePerSecond;
     let nextLaunchAt = sustainedStartedMs;
     let active = new Set();
-    if (profileConfig.eventReliability) {
+    if (params.profile === "event-open-surge") {
+      eventOpenSessions = await runPacedBackgroundProducer({
+        rate: params.arrivalRatePerSecond,
+        durationSeconds: params.durationSeconds,
+        startedAtMs: sustainedStartedMs,
+        signal,
+        maxInFlight: params.concurrency,
+        runOne: async ({ sequence: offered }) => {
+          const context = contexts[offered % contexts.length];
+          const session = await runEventOpenSession({
+            profile: profileConfig, random, fetchImpl, baseUrl: targetInfo.baseUrl,
+            context, sequence: offered, timeoutMs: params.timeoutMs,
+          });
+          samples.push(...session.samples);
+          for (const sample of session.samples) {
+            if (sample.queueJobId) jobs.push({
+              id: sample.queueJobId, generation: sample.queueGeneration || 1,
+              userIndex: sample.userIndex, enqueuedAt: Date.now(),
+            });
+          }
+          return session.successful;
+        },
+      });
+      if (eventOpenSessions.failed > 0 ||
+          eventOpenSessions.completedSuccessful !== eventOpenSessions.offered) {
+        stopReason = "session-failure";
+      }
+    } else if (profileConfig.eventReliability) {
       const authEntry = profileConfig.entries.find((entry) => entry.method === "GET" && entry.path === "/auth/me");
       const enqueue = enqueueResolutionJobs || (async ({ raceId, userId, at, dirtyEnvelope }) =>
         require("../races/models/raceResolutionJobV2").RaceResolutionJobV2.enqueueMany({
@@ -688,7 +953,8 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
     const queueEntry = profileConfig.entries.find((entry) => entry.path.includes(":jobId"));
     if (queueEntry && jobs.length) {
       const pending = new Map(jobs.map((job) => [`${job.userIndex}:${job.id}`, job]));
-      while (pending.size && Date.now() - queueStartedAt < 30000) {
+      const queueDrainDeadlineMs = params.profile === "event-open-surge" ? 300_000 : 30_000;
+      while (pending.size && Date.now() - queueStartedAt < queueDrainDeadlineMs) {
         const checks = await Promise.all([...pending.values()].map(async (job) => {
           const context = contexts[job.userIndex];
           context.jobId = job.id;
@@ -708,10 +974,11 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
       }
       queueDrainCompleted = pending.size === 0;
     }
-    if (["frozen-step-sync-burst", "current-step-sync-burst"].includes(params.profile)) {
+    if (["frozen-step-sync-burst", "current-step-sync-burst", "event-open-surge"].includes(params.profile)) {
       const raceIds = fixture.manifest.ids.races || [];
       queueDrainCompleted = false;
-      while (Date.now() - queueStartedAt < 60_000) {
+      const directQueueDeadlineMs = params.profile === "event-open-surge" ? 300_000 : 60_000;
+      while (Date.now() - queueStartedAt < directQueueDeadlineMs) {
         fixtureQueueRows = await prisma.raceResolutionJobV2.findMany({
           where: { raceId: { in: raceIds } },
           select: {
@@ -764,10 +1031,17 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
           };
         })
       );
-      settlement = assertChangedUploadSettlement({
-        changedUploads,
-        settledGenerations: settlementObservations,
-      });
+      if (params.profile !== "event-open-surge") {
+        settlement = assertChangedUploadSettlement({
+          changedUploads,
+          settledGenerations: settlementObservations,
+        });
+      } else {
+        const lags = changedUploads
+          .filter((row) => row.settledAtMs != null)
+          .map((row) => Math.max(0, row.settledAtMs - row.completedAtMs));
+        queueLatencies.push(...lags);
+      }
       const participantRows = await prisma.raceParticipant.findMany({
         where: { raceId: { in: raceIds }, status: "ACCEPTED" },
         select: {
@@ -872,8 +1146,127 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
         : [];
       phaseEvidence = phaseEvidenceFromTelemetry(telemetry, { runId });
     }
+    if (params.profile === "event-open-surge") {
+      const sourcePersistence = await assertAcceptedStepSourcePersistence({ prisma, samples });
+      const trafficUserIds = contexts.map((context) => context.userId);
+      const [finalScoringVersions, trafficMemberships] = await Promise.all([
+        prisma.userScoringInputVersion.findMany({
+          where: { userId: { in: trafficUserIds } },
+          select: { userId: true, generation: true },
+        }),
+        prisma.raceParticipant.findMany({
+          where: { raceId: { in: fixture.manifest.ids.races }, userId: { in: trafficUserIds }, status: "ACCEPTED" },
+          select: { userId: true },
+        }),
+      ]);
+      const membershipCountByUser = new Map();
+      for (const participant of trafficMemberships) {
+        membershipCountByUser.set(participant.userId,
+          (membershipCountByUser.get(participant.userId) || 0) + 1);
+      }
+      const expectedSessionsByUser = new Map();
+      for (let offered = 0; offered < Number(eventOpenSessions?.offered || 0); offered += 1) {
+        const userId = contexts[offered % contexts.length].userId;
+        expectedSessionsByUser.set(userId, (expectedSessionsByUser.get(userId) || 0) + 1);
+      }
+      const finalGenerationByUser = new Map(finalScoringVersions.map((row) => [row.userId, BigInt(row.generation)]));
+      let expectedGenerationDelta = 0;
+      let observedGenerationDelta = 0;
+      let exactUserGenerations = true;
+      for (const context of contexts) {
+        const baseline = eventOpenScoringGenerationBaseline.get(context.userId) || 0n;
+        const expectedUserDelta = BigInt(expectedSessionsByUser.get(context.userId) || 0);
+        const observedUserDelta = (finalGenerationByUser.get(context.userId) || baseline) - baseline;
+        const memberships = membershipCountByUser.get(context.userId) || 0;
+        expectedGenerationDelta += Number(expectedUserDelta) * memberships;
+        observedGenerationDelta += Number(observedUserDelta) * memberships;
+        if (observedUserDelta !== expectedUserDelta) exactUserGenerations = false;
+      }
+      const eventId = fixture.event?.id;
+      const providerAttempts = await prisma.inboxDeliveryDeviceAttempt.findMany({
+        where: {
+          outbox: { alert: { sourceKey: { endsWith: `:${eventId}` } } },
+        },
+        select: { disposition: true, firstAttemptedAt: true },
+      });
+      const eventStartedMs = new Date(fixture.eventStartsAt).getTime();
+      const attempted = providerAttempts.filter((row) => row.firstAttemptedAt != null);
+      const lagValues = attempted.map((row) =>
+        Math.max(0, new Date(row.firstAttemptedAt).getTime() - eventStartedMs));
+      const attemptsBySecond = new Map();
+      for (const lagMs of lagValues) {
+        const second = Math.floor(lagMs / 1000);
+        attemptsBySecond.set(second, (attemptsBySecond.get(second) || 0) + 1);
+      }
+      const successfulWrites = samples.filter((sample) =>
+        sample.status >= 200 && sample.status < 300 && /^POST \/steps/.test(sample.endpoint)).length;
+      const generations = fixtureQueueRows.reduce(
+        (sum, row) => sum + Math.max(0, Number(row.generation) || 0), 0);
+      const fault = suppliedFaultEvidence;
+      let headroom = null;
+      if (params.arrivalRatePerSecond >= 140 && eventOpenSessions?.failed === 0) {
+        headroom = {
+          required: 0.4, sustainedTargetPerSecond: 100,
+          provedPerSecond: params.arrivalRatePerSecond,
+        };
+      } else if (suppliedHeadroomEvidence) {
+        headroom = suppliedHeadroomEvidence.headroom ||
+          suppliedHeadroomEvidence.result?.eventEvidence?.headroom || null;
+      }
+      const queueP95Direct = percentile(queueLatencies, 95);
+      eventOpenEvidence = {
+        c0Queue: {
+          directlyInspected: true,
+          drained: queueDrainCompleted && fixtureQueueRows.length === fixture.manifest.ids.races.length,
+          failedRows: fixtureQueueRows.filter((row) => String(row.state).toUpperCase() === "FAILED").length,
+          oldestAgeMs: fixtureQueueRows.some((row) =>
+            String(row.state).toUpperCase() !== "SUCCEEDED" ||
+            Number(row.generation) !== Number(row.processingGeneration))
+            ? Math.max(...fixtureQueueRows.map((row) => Math.max(0, Date.now() - new Date(row.updatedAt).getTime())))
+            : 0,
+          p95LagMs: queueP95Direct,
+          drainSeconds: (Date.now() - queueStartedAt) / 1000,
+        },
+        notification: {
+          expectedProviderAttempts: 12_000,
+          firstAttempts: attempted.length,
+          accepted: providerAttempts.filter((row) => row.disposition === "ACCEPTED").length,
+          invalid: providerAttempts.filter((row) => row.disposition === "INVALID").length,
+          lateFirstAttempts: lagValues.filter((lagMs) => lagMs > GLOBAL_EVENT_DELIVERY_WINDOW_MS).length,
+          finalFirstAttemptLagMs: lagValues.length ? Math.max(...lagValues) : Infinity,
+          pacingRatePerSecond: attemptsBySecond.size ? Math.max(...attemptsBySecond.values()) : Infinity,
+        },
+        sourcePersistence,
+        duplicateScoring: {
+          ok: successfulWrites > 0 && exactUserGenerations &&
+            observedGenerationDelta === expectedGenerationDelta,
+          expectedGenerationDelta,
+          observedGenerationDelta,
+          generationAmplificationRatio: expectedGenerationDelta > 0
+            ? observedGenerationDelta / expectedGenerationDelta : Infinity,
+        },
+        parity,
+        headroom,
+        fault,
+      };
+    }
     const endedAt = now().toISOString();
     let eventReliabilityEvidence = null;
+    if (params.profile === "event-open-surge" && typeof readGlobalEventInfrastructure === "function") {
+      eventOpenInfrastructure = await readGlobalEventInfrastructure({
+        runId,
+        repeat: String(capacityRepeat),
+        profile: params.profile,
+        startedAt,
+        endedAt,
+        eventStartsAt: fixture.eventStartsAt,
+        measurementSeconds: params.durationSeconds,
+        samples,
+      });
+      eventOpenInfrastructure.poolBudget = {
+        http0: 10, http1: 10, resolution: 8, cron: 4, total: 32,
+      };
+    }
     if (profileConfig.eventReliability) {
       let infrastructure = null;
       if (typeof readGlobalEventInfrastructure === "function") {
@@ -913,8 +1306,13 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
     }
     const queueP95 = queueLatencies.length ? queueLatencies.sort((a, b) => a - b)[Math.min(queueLatencies.length - 1, Math.ceil(queueLatencies.length * 0.95) - 1)] : 0;
     const redisConfigured = Boolean(environment.REDIS_URL || environment.CAPACITY_REDIS_ENABLED === "true");
-    const result = buildResult({ runId, target: targetInfo.kind, baseUrl: targetInfo.baseUrl, commit: environment.CAPACITY_EXPECTED_COMMIT_SHA || capacityState?.approvedManifest?.backend?.commit || null, profile: params.profile, profileVersion: profileConfig.version, startedAt, endedAt, parameters: { ...params, coverageRequests }, samples, queue: { enqueued: jobs.length, completed: queueCompleted, drainCompleted: queueDrainCompleted, lagMs: { p95: queueP95 }, drainSeconds: (Date.now() - queueStartedAt) / 1000 }, infrastructure: { redis: { mode: redisConfigured ? "configured" : "unset", fallbackMode: redisConfigured ? "cache" : "postgres" }, queue: { mode: redisConfigured ? "postgres-backed-dedicated-resolution-process" : "in-process-local-capacity" } }, safety: { targetConfirmed: true, databaseCheck: "scrub-attested", snapshotHash: capacityState?.snapshotHash || environment.CAPACITY_SNAPSHOT_HASH, scrubAttestationHash: capacityState?.scrubAttestationHash || environment.CAPACITY_SCRUB_ATTESTATION_HASH } });
+    const result = buildResult({ runId, target: targetInfo.kind, baseUrl: targetInfo.baseUrl, commit: environment.CAPACITY_EXPECTED_COMMIT_SHA || capacityState?.approvedManifest?.backend?.commit || null, profile: params.profile, profileVersion: profileConfig.version, startedAt, endedAt, parameters: { ...params, coverageRequests }, samples, queue: { enqueued: jobs.length, completed: queueCompleted, drainCompleted: queueDrainCompleted, lagMs: { p95: queueP95 }, drainSeconds: (Date.now() - queueStartedAt) / 1000 }, infrastructure: { redis: { mode: redisConfigured ? "configured" : "unset", fallbackMode: redisConfigured ? "cache" : "postgres" }, queue: { mode: redisConfigured ? "postgres-backed-dedicated-resolution-process" : "in-process-local-capacity" }, ...(eventOpenInfrastructure ? { eventSurge: eventOpenInfrastructure } : {}) }, safety: { targetConfirmed: true, databaseCheck: "scrub-attested", snapshotHash: capacityState?.snapshotHash || environment.CAPACITY_SNAPSHOT_HASH, scrubAttestationHash: capacityState?.scrubAttestationHash || environment.CAPACITY_SCRUB_ATTESTATION_HASH } });
     result.summary.stopReason = stopReason;
+    if (eventOpenSessions) {
+      result.sessions = eventOpenSessions;
+      result.eventEvidence = eventOpenEvidence;
+      assertEventOpenSurgeGates(result);
+    }
     if (eventReliabilityEvidence) {
       result.eventReliability = { repeat: Number(capacityRepeat), evidence: eventReliabilityEvidence };
       result.eventReliability.background = eventBackground;
@@ -996,4 +1394,4 @@ function capacityResolutionJobInput({ fixture, sequence, at = new Date() } = {})
   };
 }
 
-module.exports = { assertBurstCapacityGates, assertChangedUploadSettlement, assertFixtureParity, assertGlobalEventArtifactSet, capacityResolutionJobInput, oneRequest, payloadFor, phaseEvidenceFromTelemetry, requestUrl, runLoad, runPacedBackgroundProducer, selectSyntheticFixtureLifecycle, uuidFor, weightedChoice, writeImmutableArtifact };
+module.exports = { assertAcceptedStepSourcePersistence, assertBurstCapacityGates, assertChangedUploadSettlement, assertEventOpenSurgeGates, assertFixtureParity, assertGlobalEventArtifactSet, capacityResolutionJobInput, eventOpenSessionEntries, oneRequest, payloadFor, phaseEvidenceFromTelemetry, requestUrl, runEventOpenSession, runLoad, runPacedBackgroundProducer, selectSyntheticFixtureLifecycle, uuidFor, weightedChoice, writeImmutableArtifact };

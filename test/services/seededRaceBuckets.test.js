@@ -6,7 +6,30 @@ const {
   cohortMinimumForSeed,
   planBuckets,
   splitFundedExposureCandidates,
+  readWindowMode,
 } = require("../../src/modules/races/services/seededRaceBuckets");
+
+test("concurrent reads of an immutable seeded window mode share one database lookup", async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const prisma = {
+    seededRaceWindowModeRecord: {
+      async findUnique() {
+        calls += 1;
+        await gate;
+        return { mode: "BUCKET" };
+      },
+    },
+  };
+  const args = { prisma, seedId: "daily", windowStart: new Date("2026-09-01T04:00:00Z") };
+  const reads = [readWindowMode(args), readWindowMode(args), readWindowMode(args)];
+  release();
+  assert.deepEqual(await Promise.all(reads), ["BUCKET", "BUCKET", "BUCKET"]);
+  assert.equal(calls, 1);
+  assert.equal(await readWindowMode(args), "BUCKET");
+  assert.equal(calls, 1);
+});
 
 function candidates(count) {
   return Array.from({ length: count }, (_, index) => ({

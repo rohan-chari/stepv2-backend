@@ -1,8 +1,12 @@
 const { Router } = require("express");
 const { prisma: defaultPrisma } = require("../../db");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
+const { activeAdminMetricsEpochCache } = require("./services/activeAdminMetricsEpochCache");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const { isSafeAppVersion } = require("../../shared/validation/appVersion");
+const {
+  activationEventInsertBatch: defaultActivationEventInsertBatch,
+} = require("./services/activationEventInsertBatch");
 
 const MAX_BATCH_SIZE = 50;
 const MAX_EVENT_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -401,13 +405,12 @@ function createAnalyticsRouter(dependencies = {}) {
   const requireAuth = dependencies.requireAuth || buildRequireAuth(dependencies);
   const now = dependencies.now || (() => new Date());
   const settings = dependencies.appSettings || defaultAppSettings;
+  const activationEventInsertBatch = dependencies.activationEventInsertBatch ||
+    (prisma === defaultPrisma ? defaultActivationEventInsertBatch : null);
 
   async function currentEpoch() {
     if (!(await settings.getFlag("adminMetricsV2TelemetryEnabled"))) return null;
-    return prisma.adminMetricsCollectionEpoch.findFirst({
-      where: { endedAt: null },
-      orderBy: { startedAt: "desc" },
-    });
+    return activeAdminMetricsEpochCache.get(prisma);
   }
 
   function validAppVersion(value) {
@@ -578,11 +581,13 @@ function createAnalyticsRouter(dependencies = {}) {
       if (data.length === 0) {
         return res.status(202).json({ accepted: 0, inserted: 0 });
       }
-      const result = await prisma.activationEvent.createMany({
-        data,
-        skipDuplicates: true,
-      });
-      return res.status(202).json({ accepted: data.length, inserted: result.count });
+      const inserted = activationEventInsertBatch
+        ? await activationEventInsertBatch.insert({ prisma, data })
+        : (await prisma.activationEvent.createMany({
+            data,
+            skipDuplicates: true,
+          })).count;
+      return res.status(202).json({ accepted: data.length, inserted });
     } catch (error) {
       if (error.statusCode === 400) {
         return res.status(400).json({ error: error.message });

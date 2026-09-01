@@ -1,5 +1,41 @@
 # Backend economy ledger
 
+## Bounty and cleanser interaction
+
+**Verified 2026-09-01 against production rows, production PM2 environment,
+deployed/current code, and seed data.** Bounty is a race-end placement wager,
+not a debuff: it may target only a rival currently ahead in an individual
+time-based race, pays the caster only if the caster finishes ahead of that
+target, and must survive both Cleanse and Quick Rinse. `usePowerup.js` excludes
+`BOUNTY` from the shared cleansable-debuff predicate used by both cleaners;
+`raceExpiry.js` settles the immutable payout stamped into the effect metadata.
+
+| Item | Live value | Source of truth |
+| --- | ---: | --- |
+| Bounty payout on success | **150 coins** | production PM2 workers have no `BOUNTY_PAYOUT_COINS` override, so `usePowerup.js` stamps its 150 fallback; production ledger has one historical 150-coin `bounty_payout` |
+| Nominal Bounty purchase price | **75 coins** | production `powerup_shop_items` row |
+| Current Bounty availability | **Unavailable** | production row is `active=false`, with zero held global-inventory copies and zero active effects; there are two historical uses |
+| Cleanse availability | in-race RARE drop; shop inactive at 150 | active production balance-config v4 + production shop row |
+| Quick Rinse availability | active at 75 coins | production shop row; it remains excluded from in-race drops by the effective store-only rules |
+
+If Bounty is reactivated at the present price, purchased-copy net EV is
+`150q - 75`, where `q` is the probability that a trailing caster ultimately
+out-places the selected target: **-75 / 0 / +75 coins** at `q = 0 / 0.5 / 1`,
+with break-even at 50%. A free awarded copy would mint `150q` coins. Current
+marginal daily issuance is zero because production has no available or held
+Bounties. The production row disagrees with `prisma/seed.js`, which declares
+Bounty `active=true,testOnly=true`; production state is authoritative until a
+separately authorized catalog change.
+
+Allowing either cleaner to erase Bounty would create a zero-skill denial
+strategy: the target could destroy up to 150 coins of the caster's conditional
+payout without changing placement. It would reduce coin issuance rather than
+create a farming loop, but would make a cleanser an unintended universal
+counter to a wager that explicitly inflicts no debuff. Tests should preserve
+the non-cleansable assertions and establish the ahead/behind fixture directly
+or run the queued race projection before casting; an HTTP step upload no longer
+guarantees that materialized participant totals change before its response.
+
 ## Fixed funded-team winner rewards (V1)
 
 **Approved 2026-08-26; implementation pending the two-stage production

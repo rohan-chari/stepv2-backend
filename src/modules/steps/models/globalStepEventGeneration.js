@@ -1,5 +1,8 @@
 const crypto = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
+const {
+  scheduleBoundedBatchDrain,
+} = require("../../../shared/batching/boundedBatchDrain");
 
 const REQUIRED_GENERATION = 2;
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -129,7 +132,7 @@ async function isGenerationUsable({ client = defaultPrisma, now = new Date() } =
     : evaluateReadiness(client, current);
 }
 
-async function isTokenLifecycleRequired({ client = defaultPrisma, now = new Date() } = {}) {
+async function readTokenLifecycleRequired({ client = defaultPrisma, now = new Date() } = {}) {
   if (!client?.globalStepEventGenerationState?.findUnique) return false;
   const state = await client.globalStepEventGenerationState.findUnique({
     where: { id: 1 },
@@ -137,6 +140,34 @@ async function isTokenLifecycleRequired({ client = defaultPrisma, now = new Date
   });
   if (state?.quarantineStartedAt) return true;
   return isGenerationUsable({ client, now });
+}
+
+function createTokenLifecycleRequirementBatch(loadDecision = readTokenLifecycleRequired) {
+  const states = new WeakMap();
+  function load({ client = defaultPrisma, now = new Date() } = {}) {
+    let state = states.get(client);
+    if (!state) {
+      state = { pending: [], draining: false };
+      states.set(client, state);
+    }
+    const promise = new Promise((resolve, reject) => {
+      state.pending.push({ now, resolve, reject });
+    });
+    scheduleBoundedBatchDrain(state, async (requests) => {
+      const latestNow = new Date(Math.max(...requests.map(({ now: at }) =>
+        new Date(at).getTime())));
+      const required = await loadDecision({ client, now: latestNow });
+      for (const request of requests) request.resolve(required);
+    });
+    return promise;
+  }
+  return { load };
+}
+
+const tokenLifecycleRequirementBatch = createTokenLifecycleRequirementBatch();
+
+async function isTokenLifecycleRequired({ client = defaultPrisma, now = new Date() } = {}) {
+  return tokenLifecycleRequirementBatch.load({ client, now });
 }
 
 function logicalOwnerIdForProcess(env = process.env) {
@@ -188,6 +219,7 @@ module.exports = {
   heartbeatGeneration,
   isGenerationUsable,
   isTokenLifecycleRequired,
+  createTokenLifecycleRequirementBatch,
   logicalOwnerIdForProcess,
   scheduleGenerationHeartbeat,
 };

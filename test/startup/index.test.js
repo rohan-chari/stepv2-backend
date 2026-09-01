@@ -4,8 +4,18 @@ const { EventEmitter } = require("node:events");
 
 const {
   startServer,
+  configureHttpServer,
   installProductionShutdownHandlers,
 } = require("../../src/index");
+
+test("HTTP server keeps pooled clients alive without stale-socket resets", () => {
+  const server = {};
+  configureHttpServer(server);
+  assert.equal(server.keepAliveTimeout, 65_000);
+  assert.equal(server.headersTimeout, 66_000);
+  assert.equal(server.requestTimeout, 30_000);
+  assert.equal(server.maxRequestsPerSocket, 100);
+});
 
 test("startServer listens on 0.0.0.0 by default", () => {
   let listenArgs;

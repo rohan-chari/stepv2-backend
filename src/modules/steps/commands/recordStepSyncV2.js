@@ -14,7 +14,11 @@ const {
   recordStepTelemetryPhase,
   measureStepTelemetryPhase,
   markStepTelemetryTransactionError,
+  releaseStepAdmission,
 } = require("../../../shared/observability/stepTelemetryContext");
+const {
+  lastStepSyncWriteBatch,
+} = require("../services/lastStepSyncWriteBatch");
 
 const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
@@ -92,6 +96,12 @@ function buildRecordStepSyncV2(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const maxWaitMs = dependencies.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const pollMs = dependencies.pollMs ?? DEFAULT_POLL_MS;
+  const stampLastStepSyncAt = dependencies.prisma
+    ? (userId, at) => prisma.user.update({
+      where: { id: userId },
+      data: { lastStepSyncAt: at },
+    })
+    : (userId, at) => lastStepSyncWriteBatch.stamp({ prisma, userId, at });
 
   async function runIntakeTransaction(work) {
     for (let attempt = 0; attempt < CAPTURE_CLOSURE_RETRIES; attempt += 1) {
@@ -119,21 +129,22 @@ function buildRecordStepSyncV2(dependencies = {}) {
   }
 
   async function queueOptions() {
-    const [burstCoalescing, queuedGenerationMerge] = await Promise.all([
-      isStrictFlagEnabled(appSettings, "raceResolutionBurstCoalescingV1Enabled"),
-      isStrictFlagEnabled(appSettings, "raceResolutionQueuedGenerationMergeV1Enabled"),
-    ]);
+    const burstCoalescing = await isStrictFlagEnabled(
+      appSettings, "raceResolutionBurstCoalescingV1Enabled",
+    );
+    const queuedGenerationMerge = await isStrictFlagEnabled(
+      appSettings, "raceResolutionQueuedGenerationMergeV1Enabled",
+    );
     return { burstCoalescing, queuedGenerationMerge };
   }
 
-  async function stampAfterCommit({ userId, date }) {
-    try {
-      await prisma.user.update({
-        where: { id: userId },
-        data: { lastStepSyncAt: now() },
-      });
-    } catch (error) {
-      console.error("sync-v2 lastStepSyncAt update failed:", error);
+  async function stampAfterCommit({ userId, date, alreadyStamped = false }) {
+    if (!alreadyStamped) {
+      try {
+        await stampLastStepSyncAt(userId, now());
+      } catch (error) {
+        console.error("sync-v2 lastStepSyncAt update failed:", error);
+      }
     }
     try {
       await require("../services/dailyStepsCache").invalidateSafe(userId, date);
@@ -222,13 +233,18 @@ function buildRecordStepSyncV2(dependencies = {}) {
       response,
       reservationId: reservation.id,
       dailyExisted: intake.dailyExisted,
+      lastStepSyncStamped: intake.lastStepSyncStamped === true,
     };
   }
 
   async function afterCommit(result, { userId, canonical }) {
     await measureStepTelemetryPhase("post_commit", async () => {
-      await stampAfterCommit({ userId, date: canonical.date });
-      await emitEventOnce(result.reservationId, {
+      await stampAfterCommit({
+        userId,
+        date: canonical.date,
+        alreadyStamped: result.lastStepSyncStamped,
+      });
+      void emitEventOnce(result.reservationId, {
         userId,
         date: canonical.date,
         steps: canonical.steps,
@@ -260,6 +276,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
       });
     });
     if (!result) return null;
+    releaseStepAdmission();
     await afterCommit(result, { userId, canonical });
     return result.response;
   }
@@ -330,15 +347,6 @@ function buildRecordStepSyncV2(dependencies = {}) {
     const { canonical, hash } = canonicalizeStepSyncRequest(body);
     const cleaned = removeOverlaps(normalizeSamples(canonical.samples));
 
-    const existing = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-    if (existing) {
-      const replay = await replayExisting({
-        reservation: existing, userId, idempotencyKey, timeZone,
-        canonical, cleaned, hash,
-      });
-      if (replay) return replay;
-    }
-
     const options = await queueOptions();
     let result;
     try {
@@ -380,17 +388,25 @@ function buildRecordStepSyncV2(dependencies = {}) {
         });
       });
     } catch (error) {
-      if (error?.code !== "P2002") throw error;
-      const winner = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-      if (!winner) throw error;
-      const replay = await replayExisting({
-        reservation: winner, userId, idempotencyKey, timeZone,
-        canonical, cleaned, hash,
-      });
-      if (!replay) throw error;
-      return replay;
+      if (error?.code !== "P2002") {
+        releaseStepAdmission();
+        throw error;
+      }
+      try {
+        const winner = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+        if (!winner) throw error;
+        const replay = await replayExisting({
+          reservation: winner, userId, idempotencyKey, timeZone,
+          canonical, cleaned, hash,
+        });
+        if (!replay) throw error;
+        return replay;
+      } finally {
+        releaseStepAdmission();
+      }
     }
 
+    releaseStepAdmission();
     await afterCommit(result, { userId, canonical });
     return result.response;
   };

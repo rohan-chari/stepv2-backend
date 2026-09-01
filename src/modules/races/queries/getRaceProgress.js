@@ -98,6 +98,10 @@ const {
 } = require("../services/raceResolutionInputFingerprint");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const userPresentationCache = require("../../social/services/userPresentationCache");
+const {
+  buildRacePresentationBulkRead,
+  racePresentationBulkRead,
+} = require("../services/racePresentationBulkRead");
 const defaultPageProjection = require("../services/raceProgressPageProjection");
 const {
   uniqueTypesIfTrailMixUsed,
@@ -264,6 +268,13 @@ function buildDropOdds({
   };
 }
 
+function workerOwnsProductionRefresh({
+  hasInjectedDependencies,
+  legacyReplayForTests,
+}) {
+  return !hasInjectedDependencies && !legacyReplayForTests;
+}
+
 function buildGetRaceProgress(deps = {}) {
   // Injected dependencies are used by the pure scoring fixtures. They do not
   // represent the production request path and intentionally retain the replay
@@ -326,6 +337,34 @@ function buildGetRaceProgress(deps = {}) {
     deps.buildRaceResolutionInputFingerprint || defaultBuildInputFingerprint;
   const presentationCache =
     deps.userPresentationCache || userPresentationCache;
+  const presentationBulkRead = deps.racePresentationBulkRead ||
+    (deps.userPresentationCache
+      ? buildRacePresentationBulkRead({ presentationCache })
+      : racePresentationBulkRead);
+  const workerOwnedRefresh = workerOwnsProductionRefresh({
+    hasInjectedDependencies,
+    legacyReplayForTests,
+  });
+  const refreshRequests = new Map();
+
+  function requestWorkerRefresh({ raceId, userId, scoringTimeZone }) {
+    const currentTime = Date.now();
+    const current = refreshRequests.get(raceId);
+    if (current && current.expiresAt > currentTime) return current.promise;
+    const promise = Promise.resolve().then(() => enqueueRaceResolutionFn({
+      raceId,
+      userId,
+      timeZone: scoringTimeZone,
+      reason: "DISPLAY_REFRESH",
+      priority: "IMMEDIATE",
+    }));
+    const entry = { expiresAt: currentTime + 5_000, promise };
+    refreshRequests.set(raceId, entry);
+    promise.catch(() => {
+      if (refreshRequests.get(raceId) === entry) refreshRequests.delete(raceId);
+    });
+    return promise;
+  }
 
   function buildProgressMoney(race) {
     const participants = race?.participants || [];
@@ -912,13 +951,23 @@ function buildGetRaceProgress(deps = {}) {
     snapshotStore.__bump("persistedFallbacks");
     const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
     const leanSnapshot = race._leanProgressProjection === true;
-    let presentations = new Map();
+    let presentations = new Map(
+      accepted
+        .filter((participant) => participant.user)
+        .map((participant) => [participant.userId, participant.user])
+    );
     if (!leanSnapshot) {
+      const missingPresentationIds = accepted
+        .filter((participant) => !presentations.has(participant.userId))
+        .map((participant) => participant.userId);
       try {
-        presentations = await presentationCache.getMany(
-          accepted.map((participant) => participant.userId),
-          true,
-        );
+        if (missingPresentationIds.length > 0) {
+          const loaded = await presentationCache.getMany(
+            missingPresentationIds,
+            true,
+          );
+          presentations = new Map([...presentations, ...loaded]);
+        }
       } catch (error) {
         // Persisted totals remain useful if the optional presentation cache is
         // unavailable. Legacy full reads still carry `participant.user`, while
@@ -1760,7 +1809,11 @@ function buildGetRaceProgress(deps = {}) {
             participant.stealthed !== true && participant.displayName !== "???"
         )
         .map((participant) => participant.userId);
-      const presentations = await presentationCache.getMany(visibleIds, true);
+      const presentations = await presentationBulkRead.getMany(
+        raceId,
+        visibleIds,
+        true,
+      );
       result.participants = result.participants.map((participant) => {
         if (
           participant.stealthed === true ||
@@ -1868,7 +1921,11 @@ function buildGetRaceProgress(deps = {}) {
             "raceProgressLeanProjectionV1Enabled"
           ))));
     let pageScopedContext = false;
-    let race = requestedPage
+    const boundedLegacyContext =
+      !requestedPage &&
+      leanProjectionEnabled &&
+      typeof raceModel.findProgressPageContext === "function";
+    let race = requestedPage || boundedLegacyContext
       ? await raceModel.findProgressPageContext(raceId, userId)
       : (leanProjectionEnabled
         ? await raceModel.findProgressScoringContext(raceId)
@@ -1895,11 +1952,40 @@ function buildGetRaceProgress(deps = {}) {
         ? await raceModel.findProgressScoringContext(raceId)
         : await raceModel.findById(raceId);
     }
+    let fullScoringContextLoaded = !boundedLegacyContext;
+    async function ensureFullScoringContext() {
+      if (fullScoringContextLoaded) return race;
+      // A frozen client needs the complete presentation-bearing roster. Its
+      // full race query already joined those users, so sending all participant
+      // ids through the per-user Redis cache is pure amplification. Compact
+      // and typed internal consumers keep the lean scoring projection.
+      const canUseLeanContext =
+        typeof raceModel.findProgressScoringContext === "function";
+      const useLeanContext =
+        (leanScoringContext || boundedLegacyContext) && canUseLeanContext;
+      race = leanScoringContext && canUseLeanContext
+        ? await raceModel.findProgressScoringContext(raceId)
+        : boundedLegacyContext && canUseLeanContext
+          ? await raceModel.findProgressScoringContext(raceId)
+          : await raceModel.findById(raceId);
+      fullScoringContextLoaded = true;
+      if (race && useLeanContext) {
+        Object.defineProperty(race, "_leanProgressProjection", {
+          value: true,
+          enumerable: false,
+        });
+      }
+      if (resolvedContext && typeof resolvedContext === "object") {
+        resolvedContext.race = race;
+      }
+      return race;
+    }
     let usingLeanProjection =
       (leanProjectionEnabled && !requestedPage || pageScopedContext) &&
       race.status === "ACTIVE";
     if (leanProjectionEnabled && !usingLeanProjection) {
       race = await raceModel.findById(raceId);
+      fullScoringContextLoaded = true;
     }
     if (usingLeanProjection) {
       Object.defineProperty(race, "_leanProgressProjection", {
@@ -1944,6 +2030,7 @@ function buildGetRaceProgress(deps = {}) {
     }
 
     if (race.status !== "ACTIVE") {
+      if (boundedLegacyContext) await ensureFullScoringContext();
       const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
       const progressMoney = buildProgressMoney(race);
       const nonActiveResult = {
@@ -2178,13 +2265,15 @@ function buildGetRaceProgress(deps = {}) {
         }
       }
       snapshot =
-        usable || (await loadPersistedState({ race, raceId, scoringTimeZone }));
+        usable || (await loadPersistedState({
+          race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+        }));
     } else if (!cacheOn) {
       if (hasInjectedDependencies || legacyReplayForTests) {
         // Pure scoring fixtures intentionally exercise the live replay path;
         // the production singleton takes the persisted fallback below.
         snapshot = await computeSharedState({
-          race,
+          race: await ensureFullScoringContext(),
           raceId,
           scoringTimeZone,
           persist: true,
@@ -2196,12 +2285,16 @@ function buildGetRaceProgress(deps = {}) {
         // persisted view. Keep the per-viewer powerup sync seam below for
         // frozen clients, but do not run the race-wide replay, write-back,
         // expiry, or queue enqueue here.
-        snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+        snapshot = await loadPersistedState({
+          race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+        });
       }
     } else if (snapshotStore.isBypassed()) {
       // A DEL failed somewhere in this process, so a KNOWN-STALE snapshot may
       // still be sitting in Redis. Serve Postgres until the retry lands (§3).
-      snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+      snapshot = await loadPersistedState({
+        race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+      });
     } else {
       const cached = await snapshotStore.readSnapshot(
         raceId,
@@ -2215,12 +2308,49 @@ function buildGetRaceProgress(deps = {}) {
       if (usable && snapshotStore.isFresh(usable, now().getTime())) {
         snapshotStore.__bump("snapshotHits");
         snapshot = usable;
+      } else if (workerOwnedRefresh) {
+        // A production HTTP worker never replays a whole race. The dedicated
+        // resolution process owns refreshes, so a valid stale snapshot is
+        // served immediately and a true cold read waits briefly for its
+        // durable refresh before using persisted columns.
+        if (usable) {
+          snapshotStore.__bump("staleServes");
+          snapshot = usable;
+          void requestWorkerRefresh({ raceId, userId, scoringTimeZone })
+            .catch((error) => logger.warn?.(
+              "Race progress worker refresh enqueue failed",
+              { raceId, error: error?.message || "unknown" },
+            ));
+        } else {
+          await requestWorkerRefresh({ raceId, userId, scoringTimeZone });
+          let waited = null;
+          if ((await redisCache.healthStatus()) === "ok") {
+            waited = await snapshotStore.waitForSnapshot(
+              raceId,
+              scoringTimeZone,
+              undefined,
+              snapshotSchemaVersion,
+            );
+          }
+          if (waited) {
+            snapshotStore.__bump("staleServes");
+            snapshot = waited;
+          } else {
+            snapshot = await loadPersistedState({
+              race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+            });
+          }
+        }
       } else {
         let displayArtifactRef = null;
         // Miss or soft-expiry. Exactly ONE request rebuilds; the lock
         // self-expires (PX) so a crashed winner cannot wedge it.
-        const startRebuild = () => snapshotStore.withRebuildLock(raceId, async () => {
+        const startRebuild = () => snapshotStore.withRebuildLock(
+          raceId,
+          snapshotSchemaVersion,
+          async () => {
           snapshotStore.__bump("requestReplays");
+          const replayRace = await ensureFullScoringContext();
           let fresh = null;
           let artifactEnabled = false;
           try {
@@ -2251,7 +2381,7 @@ function buildGetRaceProgress(deps = {}) {
                 const result = computed?.result || null;
                 fresh = buildSnapshotFromResolution({
                   result,
-                  race,
+                  race: replayRace,
                   scoringTimeZone,
                 });
                 const reuseDeadline = fingerprintB && result
@@ -2290,15 +2420,16 @@ function buildGetRaceProgress(deps = {}) {
           }
           if (!fresh) {
             fresh = await computeSharedState({
-              race,
+              race: replayRace,
               raceId,
               scoringTimeZone,
               persist: false,
             });
           }
           await snapshotStore.writeSnapshot(raceId, fresh);
-          return fresh;
-        });
+            return fresh;
+          }
+        );
 
         if (usable) {
           // Serve stale-while-revalidate: the valid snapshot is immediately
@@ -2328,7 +2459,9 @@ function buildGetRaceProgress(deps = {}) {
           // persisted projection is safe for an immediate page response;
           // the canonical replay remains owned by the background refresh and
           // will publish the exact live-effect ranking for subsequent reads.
-          snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+          snapshot = await loadPersistedState({
+            race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+          });
           // Queue the canonical refresh; do not start the replay in this
           // request. The resolution worker owns the expensive race-wide
           // calculation and coalesces concurrent DISPLAY_REFRESH requests.
@@ -2374,7 +2507,9 @@ function buildGetRaceProgress(deps = {}) {
               snapshot = waited;
             } else {
               // Losers NEVER fall through to the replay.
-              snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+              snapshot = await loadPersistedState({
+                race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+              });
             }
           }
         }
@@ -2384,7 +2519,25 @@ function buildGetRaceProgress(deps = {}) {
     if (participantsView === "participants-v1" && !projectionMetadata) {
       projectionMetadata = { projectionSource: "legacy" };
     }
-    let moneyRace = race;
+    if (boundedLegacyContext && snapshot?.participants) {
+      Object.defineProperty(race, "_projectionParticipants", {
+        value: snapshot.participants.map((participant) => ({
+          id: participant.participantId,
+          userId: participant.userId,
+          status: "ACCEPTED",
+          totalSteps: participant.totalSteps,
+          rawSteps: participant.baseAdjusted,
+          finishedAt: participant.finishedAt,
+          forfeitedAt: participant.forfeitedAt,
+          placement: participant.placement,
+          team: participant.team,
+        })),
+        enumerable: false,
+      });
+    }
+    let moneyRace = boundedLegacyContext && snapshot?.participants
+      ? { ...race, participants: race._projectionParticipants }
+      : race;
     if (
       pageScopedContext &&
       typeof raceModel.findProgressMoneyContext === "function"
@@ -2486,4 +2639,9 @@ function buildGetRaceProgress(deps = {}) {
 
 const getRaceProgress = buildGetRaceProgress();
 
-module.exports = { getRaceProgress, buildGetRaceProgress, computeEffectModifiers };
+module.exports = {
+  getRaceProgress,
+  buildGetRaceProgress,
+  computeEffectModifiers,
+  workerOwnsProductionRefresh,
+};

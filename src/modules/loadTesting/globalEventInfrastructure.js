@@ -27,6 +27,7 @@ function normalizeGlobalEventInfrastructure({
   expectedProfile,
   expectedRunId,
   expectedRepeat,
+  measurementSeconds = 600,
 } = {}) {
   if (metrics?.schema !== "capacity-metrics-v2" || !Array.isArray(metrics.samples)) {
     throw new Error("global-event infrastructure requires capacity-metrics-v2 evidence");
@@ -38,7 +39,7 @@ function normalizeGlobalEventInfrastructure({
   const boundaryMs = new Date(eventStartsAt).getTime();
   if (!Number.isFinite(boundaryMs)) throw new Error("global-event infrastructure requires eventStartsAt");
   const warmupStartMs = boundaryMs - 120_000;
-  const measuredEndMs = boundaryMs + 600_000;
+  const measuredEndMs = boundaryMs + Number(measurementSeconds) * 1000;
   const windowSamples = metrics.samples
     .filter((sample) => {
       const at = new Date(sample.at).getTime();
@@ -47,7 +48,7 @@ function normalizeGlobalEventInfrastructure({
     .sort((left, right) => new Date(left.at) - new Date(right.at));
   const warmupSamples = windowSamples.filter((sample) => new Date(sample.at).getTime() < boundaryMs);
   const measuredSamples = windowSamples.filter((sample) => new Date(sample.at).getTime() >= boundaryMs);
-  if (warmupSamples.length < 118 || measuredSamples.length < 598) {
+  if (warmupSamples.length < 118 || measuredSamples.length < Math.max(1, Number(measurementSeconds) - 2)) {
     throw new Error("global-event infrastructure health telemetry does not cover the full warmup/measured windows");
   }
   for (let index = 1; index < windowSamples.length; index += 1) {

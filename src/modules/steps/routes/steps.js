@@ -38,7 +38,10 @@ const {
   runWithStepTelemetryContext,
   recordStepTelemetryPhase,
   isStepTelemetryTransactionError,
+  setStepAdmissionRelease,
 } = require("../../../shared/observability/stepTelemetryContext");
+const { createBoundedAdmission } = require("../../../shared/admission/boundedAdmission");
+const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("../../../shared/observability/eventSurgeTelemetry");
 
 function classifyCaughtStepServerError(error) {
   if (isPendingCheckoutTimeout(error)) return "pool_checkout_timeout";
@@ -49,6 +52,14 @@ function classifyCaughtStepServerError(error) {
 // 64 KiB cap on the encoded sync-v2 body (§6.4). The app-wide express.json outer
 // limit is unchanged; this is the tighter v2-specific bound.
 const SYNC_V2_MAX_BYTES = 64 * 1024;
+// Match the approved ten-connection HTTP pool. Real launch traffic is not
+// evenly split across two long-lived worker connection sets; an eight-per-
+// process ceiling rejected traffic on the busier worker while its peer still
+// had unused write capacity. The database pool remains the hard concurrency
+// ceiling and the bounded queue remains the overload guard.
+const STEP_ADMISSION_CONCURRENCY = 6;
+const STEP_ADMISSION_MAXIMUM_QUEUED = 128;
+const STEP_ADMISSION_WAIT_MS = 2_000;
 
 function createStepsRouter(dependencies = {}) {
   const router = Router();
@@ -71,6 +82,12 @@ function createStepsRouter(dependencies = {}) {
     dependencies.getProfileStats || defaultGetProfileStats;
   const settings = dependencies.appSettings || defaultAppSettings;
   const stepTelemetry = dependencies.stepTelemetry || null;
+  const admissionTelemetry = dependencies.eventSurgeTelemetry || defaultEventSurgeTelemetry;
+  const stepAdmission = dependencies.stepAdmission || createBoundedAdmission({
+    concurrency: STEP_ADMISSION_CONCURRENCY,
+    maximumQueued: STEP_ADMISSION_MAXIMUM_QUEUED,
+    waitMs: STEP_ADMISSION_WAIT_MS,
+  });
 
   const telemetryEndpoint = (req) => {
     if (req.method !== "POST") return null;
@@ -82,9 +99,12 @@ function createStepsRouter(dependencies = {}) {
 
   router.use((req, res, next) => {
     const endpoint = telemetryEndpoint(req);
-    if (!endpoint || typeof stepTelemetry?.recordStepRequest !== "function") return next();
+    if (!endpoint) return next();
     const startedAt = process.hrtime.bigint();
     const telemetryContext = { phases: {}, phaseObservations: {} };
+    if (typeof stepTelemetry?.recordStepRequest !== "function") {
+      return runWithStepTelemetryContext(telemetryContext, next);
+    }
     res.locals.stepTelemetryStartedAt = startedAt;
     res.once("finish", () => {
       const status = res.statusCode;
@@ -122,10 +142,62 @@ function createStepsRouter(dependencies = {}) {
     runWithStepTelemetryContext(telemetryContext, next);
   });
 
+  // Permanent write-work bulkhead for the three canonical step POST contracts.
+  // Reject excess write work before authentication or any database access.
+  router.use(async (req, res, next) => {
+    const endpoint = telemetryEndpoint(req);
+    if (!endpoint) return next();
+    const started = process.hrtime.bigint();
+    try {
+      const release = await stepAdmission.acquire();
+      const waitMs = Number(process.hrtime.bigint() - started) / 1e6;
+      const admittedState = stepAdmission.snapshot?.() || {};
+      admissionTelemetry?.recordStepAdmission?.({
+        outcome: "admitted", waitMs,
+        active: admittedState.active, queued: admittedState.queued,
+      });
+      let released = false;
+      let finished = false;
+      const releasePermit = () => {
+        if (released) return;
+        released = true;
+        release();
+      };
+      setStepAdmissionRelease(releasePermit);
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        const state = stepAdmission.snapshot?.() || admittedState;
+        admissionTelemetry?.recordStepAdmission?.({
+          outcome: res.statusCode >= 500 ? "failed" : "succeeded",
+          waitMs, active: state.active, queued: state.queued,
+        });
+        releasePermit();
+      };
+      res.once("finish", finish);
+      res.once("close", finish);
+      return next();
+    } catch {
+      const waitMs = Number(process.hrtime.bigint() - started) / 1e6;
+      const state = stepAdmission.snapshot?.() || {};
+      admissionTelemetry?.recordStepAdmission?.({
+        outcome: "rejected", waitMs, active: state.active, queued: state.queued,
+      });
+      res.locals.stepTelemetryOutcome = "server_5xx";
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.use((req, res, next) => {
+    res.locals.stepTelemetryAuthStartedAt = process.hrtime.bigint();
+    next();
+  });
   router.use(requireAuth);
   router.use((req, res, next) => {
     if (res.locals.stepTelemetryStartedAt != null) {
-      const durationMs = Number(process.hrtime.bigint() - res.locals.stepTelemetryStartedAt) / 1e6;
+      const authStartedAt = res.locals.stepTelemetryAuthStartedAt ||
+        res.locals.stepTelemetryStartedAt;
+      const durationMs = Number(process.hrtime.bigint() - authStartedAt) / 1e6;
       res.locals.stepTelemetryAuthDurationMs = durationMs;
       recordStepTelemetryPhase("authentication", durationMs);
     }
@@ -492,4 +564,9 @@ function createStepsRouter(dependencies = {}) {
   return router;
 }
 
-module.exports = { createStepsRouter };
+module.exports = {
+  createStepsRouter,
+  STEP_ADMISSION_CONCURRENCY,
+  STEP_ADMISSION_MAXIMUM_QUEUED,
+  STEP_ADMISSION_WAIT_MS,
+};

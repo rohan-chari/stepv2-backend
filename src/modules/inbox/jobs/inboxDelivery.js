@@ -6,8 +6,16 @@ const { fcmService: defaultFcm } = require("../../../shared/push/fcm");
 const { appSettings: defaultSettings } = require("../../../shared/config/appSettings");
 const { canonicalPushDeliveryKey } = require("../../notifications/pushDeliveryAttribution");
 const { notificationIntentService: defaultNotificationIntentService } = require("../../notifications/services/notificationDelivery");
+const { invalidateInboxUnreadMany: defaultInvalidateInboxUnreadMany } = require("../services/inbox");
 const redisCache = require("../../../shared/cache/redisCache");
 const { userFanoutDisabled: defaultUserFanoutDisabled } = require("../../../shared/config/operationalControls");
+const {
+  ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+  ADMISSION_LEASED,
+  ADMISSION_RETRY,
+  claimProviderAttemptPage: defaultClaimProviderAttemptPage,
+} = require("../../notifications/services/notificationAdmission");
+const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("../../../shared/observability/eventSurgeTelemetry");
 
 const LEASE_MS = 30_000;
 const TICK_INTERVAL_MS = 15_000;
@@ -37,6 +45,24 @@ function retryAt(now, attempts, random = Math.random, retryAfterMs = 0) {
   const cap = Math.min(60 * 60_000, 1_000 * 2 ** Math.min(attempts, 10));
   const jitter = Math.floor(Math.max(0, Math.min(1, Number(random()) || 0)) * cap);
   return new Date(now.getTime() + Math.max(0, Number(retryAfterMs) || 0, jitter));
+}
+
+// The lane grants one token every 10ms, but opening a database transaction for
+// every token creates 100 serialized row locks per second. Let at most 100ms
+// accumulate so each durable claim normally carries ten attempts. This keeps
+// the exact 100/s provider rate and adds no more than a tenth of a second to
+// the two-minute delivery window.
+const ADMISSION_MIN_WAKE_MS = 100;
+
+function admissionWakeAt(page, nowMs = Date.now()) {
+  if (!page?.hasPending) return null;
+  const boundaries = [page.nextTokenAt, page.nextAvailableAt]
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite);
+  return boundaries.length
+    ? new Date(Math.max(...boundaries, Number(nowMs) + ADMISSION_MIN_WAKE_MS))
+    : null;
 }
 
 function pushPayload(alert, storedPayload = null) {
@@ -179,6 +205,209 @@ async function mapWithConcurrency(values, limit, worker) {
   return results;
 }
 
+async function persistAdmittedAttemptResultsInTransaction(tx, outcomes) {
+  const mutations = outcomes.flatMap((outcome) =>
+    outcome?.attemptMutation ? [outcome.attemptMutation] : []);
+  const tokenMutations = outcomes.flatMap((outcome) =>
+    outcome?.tokenMutation ? [outcome.tokenMutation] : []);
+  if (!mutations.length && !tokenMutations.length) return {
+    attemptedAttempts: 0, updatedAttempts: 0,
+    attemptedTokens: 0, updatedTokens: 0, leaseLost: false,
+  };
+  const updatedAttempts = mutations.length ? await tx.$executeRawUnsafe(
+      `UPDATE inbox_delivery_device_attempts attempt
+        SET disposition=input.disposition,
+            attempt_count=attempt.attempt_count+input.attempt_increment,
+            last_error_code=CASE WHEN input.replace_error THEN input.last_error_code ELSE attempt.last_error_code END,
+            accepted_at=COALESCE(input.accepted_at,attempt.accepted_at),
+            next_attempt_at=input.next_attempt_at,
+            provider_message_id=input.provider_message_id,
+            provider_environment=COALESCE(input.provider_environment,attempt.provider_environment),
+            provider_responded_at=input.provider_responded_at,
+            first_attempted_at=COALESCE(attempt.first_attempted_at,input.first_attempted_at),
+            updated_at=input.provider_responded_at
+       FROM jsonb_to_recordset($1::jsonb) AS input(
+         id text,outbox_id text,lease_token text,disposition text,attempt_increment integer,replace_error boolean,
+         last_error_code text,accepted_at timestamp,next_attempt_at timestamp,
+         provider_message_id text,provider_environment text,
+         provider_responded_at timestamp,first_attempted_at timestamp
+       ), inbox_delivery_outbox outbox
+      WHERE attempt.id=input.id
+        AND attempt.outbox_id=input.outbox_id
+        AND outbox.id=input.outbox_id
+        AND outbox.status='ADMISSION_LEASED'
+        AND outbox.lease_token=input.lease_token
+        AND attempt.disposition IN ('PENDING','RETRY','TRANSIENT_FAIL','TIMEOUT')`,
+      JSON.stringify(mutations),
+    ) : 0;
+  let updatedTokens = 0;
+  if (tokenMutations.length) {
+    updatedTokens = await tx.$executeRawUnsafe(
+        `UPDATE device_tokens token
+            SET last_provider_accepted_at=CASE WHEN input.invalidate THEN token.last_provider_accepted_at ELSE input.accepted_at END,
+                provider_environment=CASE
+                  WHEN NOT input.invalidate AND token.provider_environment IS NULL
+                    THEN COALESCE(input.provider_environment,token.provider_environment)
+                  ELSE token.provider_environment
+                END,
+                status=CASE WHEN input.invalidate THEN 'INVALIDATED' ELSE token.status END,
+                status_reason=CASE WHEN input.invalidate THEN 'PROVIDER_INVALID_TOKEN' ELSE token.status_reason END,
+                status_changed_at=CASE WHEN input.invalidate THEN input.mutated_at ELSE token.status_changed_at END,
+                updated_at=input.mutated_at
+           FROM jsonb_to_recordset($1::jsonb) AS input(
+             id text,outbox_id text,attempt_id text,lease_token text,
+             ownership_generation integer,accepted_at timestamp,
+             provider_environment text,invalidate boolean,mutated_at timestamp
+           ), inbox_delivery_device_attempts attempt,
+              inbox_delivery_outbox outbox
+          WHERE token.id=input.id
+            AND token.ownership_generation=input.ownership_generation
+            AND attempt.id=input.attempt_id
+            AND attempt.outbox_id=input.outbox_id
+            AND attempt.device_token_id=token.id
+            AND outbox.id=input.outbox_id
+            AND outbox.status='ADMISSION_LEASED'
+            AND outbox.lease_token=input.lease_token`,
+        JSON.stringify(tokenMutations),
+      );
+  }
+  return {
+    attemptedAttempts: mutations.length,
+    updatedAttempts: Number(updatedAttempts),
+    attemptedTokens: tokenMutations.length,
+    updatedTokens: Number(updatedTokens),
+    leaseLost: Number(updatedAttempts) !== mutations.length ||
+      Number(updatedTokens) !== tokenMutations.length,
+  };
+}
+
+async function persistAdmittedAttemptResults(prisma, outcomes) {
+  return prisma.$transaction((tx) =>
+    persistAdmittedAttemptResultsInTransaction(tx, outcomes));
+}
+
+async function persistAdmittedPageResults(prisma, pageResults, current = new Date()) {
+  if (!pageResults.length) return { delivered: 0, retried: 0, leaseLost: 0 };
+  return prisma.$transaction(async (tx) => {
+    const outcomes = pageResults.flatMap((result) => result.outcomes || []);
+    const attempts = await persistAdmittedAttemptResultsInTransaction(tx, outcomes);
+    const page = pageResults.map((result) => ({
+      outbox_id: result.row.id,
+      lease_token: result.row.leaseToken,
+      provider_accepted_at: result.providerAccepted
+        ? (result.row.providerAcceptedAt || current).toISOString()
+        : null,
+      accepted_tokens: result.acceptedTokens || [],
+      attempted: (result.outcomes || []).length > 0,
+      transient_error: (result.outcomes || []).find((outcome) => outcome?.error)?.error?.code || null,
+      attribution_delivery_id: result.attributionDeliveryId || null,
+      attribution_accepted: result.attributionAccepted === true,
+      completed_at: current.toISOString(),
+    }));
+    const attributable = page.filter((row) => row.attribution_delivery_id && row.attribution_accepted);
+    if (attributable.length) {
+      await tx.$executeRawUnsafe(
+        `UPDATE push_deliveries delivery
+            SET open_capable=true,provider_accepted_at=input.completed_at
+           FROM jsonb_to_recordset($1::jsonb) AS input(
+             outbox_id text,lease_token text,attribution_delivery_id text,
+             attribution_accepted boolean,completed_at timestamp
+           ), inbox_delivery_outbox outbox
+          WHERE delivery.id=input.attribution_delivery_id
+            AND delivery.provider_accepted_at IS NULL
+            AND input.attribution_accepted=true
+            AND outbox.id=input.outbox_id
+            AND outbox.status='ADMISSION_LEASED'
+            AND outbox.lease_token=input.lease_token`,
+        JSON.stringify(attributable),
+      );
+    }
+    const finalized = await tx.$queryRawUnsafe(
+      `WITH input AS (
+         SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(
+           outbox_id text,lease_token text,provider_accepted_at timestamp,
+           accepted_tokens jsonb,attempted boolean,transient_error text,
+           attribution_delivery_id text,attribution_accepted boolean,completed_at timestamp
+         )
+       ), remaining AS (
+         SELECT input.outbox_id,input.lease_token,input.provider_accepted_at,
+                input.accepted_tokens,input.attempted,input.transient_error,input.completed_at,
+                MIN(attempt.next_attempt_at) FILTER (
+                  WHERE attempt.disposition IN ('PENDING','RETRY','TRANSIENT_FAIL','TIMEOUT')
+                ) AS next_attempt_at,
+                COUNT(attempt.id) FILTER (
+                  WHERE attempt.disposition IN ('PENDING','RETRY','TRANSIENT_FAIL','TIMEOUT')
+                )::int AS remaining_count
+           FROM input
+           LEFT JOIN inbox_delivery_device_attempts attempt
+             ON attempt.outbox_id=input.outbox_id
+          GROUP BY input.outbox_id,input.lease_token,input.provider_accepted_at,
+                   input.accepted_tokens,input.attempted,input.transient_error,input.completed_at
+       )
+       UPDATE inbox_delivery_outbox outbox
+          SET status=CASE WHEN remaining.remaining_count > 0 THEN 'ADMISSION_RETRY' ELSE 'DELIVERED' END,
+              delivered_at=CASE WHEN remaining.remaining_count = 0 THEN remaining.completed_at ELSE outbox.delivered_at END,
+              provider_accepted_at=COALESCE(outbox.provider_accepted_at,remaining.provider_accepted_at),
+              accepted_tokens=CASE WHEN remaining.provider_accepted_at IS NULL THEN outbox.accepted_tokens
+                ELSE remaining.accepted_tokens END,
+              attempt_count=outbox.attempt_count+CASE WHEN remaining.attempted THEN 1 ELSE 0 END,
+              available_at=CASE WHEN remaining.remaining_count > 0
+                THEN COALESCE(remaining.next_attempt_at,remaining.completed_at + interval '250 milliseconds')
+                ELSE outbox.available_at END,
+              retry_at=CASE WHEN remaining.remaining_count > 0
+                THEN COALESCE(remaining.next_attempt_at,remaining.completed_at + interval '250 milliseconds')
+                ELSE NULL END,
+              last_error_code=CASE WHEN remaining.remaining_count > 0
+                THEN COALESCE(remaining.transient_error,'PROVIDER_RETRYABLE_TARGET') ELSE outbox.last_error_code END,
+              lease_until=NULL,lease_token=NULL,updated_at=remaining.completed_at
+         FROM remaining
+        WHERE outbox.id=remaining.outbox_id
+          AND outbox.status='ADMISSION_LEASED'
+          AND outbox.lease_token=remaining.lease_token
+       RETURNING outbox.id,outbox.status`,
+      JSON.stringify(page),
+    );
+    const rows = Array.isArray(finalized) ? finalized : [];
+    return {
+      delivered: rows.filter((row) => row.status === "DELIVERED").length,
+      retried: rows.filter((row) => row.status === ADMISSION_RETRY).length,
+      leaseLost: page.length - rows.length + (attempts.leaseLost ? 1 : 0),
+    };
+  });
+}
+
+async function upsertAdmittedPushDelivery(prisma, {
+  outboxId,
+  leaseToken,
+  deliveryKey,
+  userId,
+  notificationType,
+  createdAt,
+}) {
+  const [delivery] = await prisma.$queryRawUnsafe(
+    `WITH owned AS (
+       SELECT id FROM inbox_delivery_outbox
+        WHERE id=$1 AND status='ADMISSION_LEASED' AND lease_token=$2
+        FOR UPDATE
+     ), saved AS (
+       INSERT INTO push_deliveries (
+         id,public_id,delivery_key,user_id,notification_type,open_capable,created_at
+       )
+       SELECT $4,$5,$3,$6,$7,false,$8 FROM owned
+       ON CONFLICT (delivery_key) DO UPDATE
+         SET delivery_key=EXCLUDED.delivery_key
+       RETURNING id,public_id AS "publicId",delivery_key AS "deliveryKey",
+                 user_id AS "userId",notification_type AS "notificationType",
+                 open_capable AS "openCapable",created_at AS "createdAt",
+                 provider_accepted_at AS "providerAcceptedAt",opened_at AS "openedAt"
+     )
+     SELECT * FROM saved`,
+    outboxId, leaseToken, deliveryKey, crypto.randomUUID(), crypto.randomUUID(),
+    userId, notificationType, createdAt,
+  );
+  return delivery || null;
+}
+
 function buildInboxDelivery(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const deviceTokens = dependencies.DeviceToken || defaultDeviceToken;
@@ -195,31 +424,60 @@ function buildInboxDelivery(dependencies = {}) {
   const apnsSemaphore = dependencies.apnsSemaphore || createSemaphore(DEFAULT_PROVIDER_CONCURRENCY);
   const fcmSemaphore = dependencies.fcmSemaphore || createSemaphore(DEFAULT_PROVIDER_CONCURRENCY);
   const dbWriteSemaphore = dependencies.dbWriteSemaphore || createSemaphore(DEFAULT_DB_WRITE_CONCURRENCY);
+  const claimProviderAttemptPage = dependencies.claimProviderAttemptPage || defaultClaimProviderAttemptPage;
+  const eventSurgeTelemetry = dependencies.eventSurgeTelemetry || defaultEventSurgeTelemetry;
+  const invalidateInboxUnreadMany = dependencies.invalidateInboxUnreadMany || defaultInvalidateInboxUnreadMany;
+  const beforePushAttribution = dependencies.beforePushAttribution || null;
+  let activeMetricsEpochPromise = null;
 
-  async function renewLease(rowId, leaseToken, leaseUntil) {
+  function activeMetricsEpochForTick() {
+    if (!activeMetricsEpochPromise) {
+      activeMetricsEpochPromise = Promise.resolve()
+        .then(() => settings.getFlag("adminMetricsV2TelemetryEnabled"))
+        .then((enabled) => enabled === true
+          ? prisma.adminMetricsCollectionEpoch.findFirst({
+              where: { endedAt: null },
+              orderBy: { startedAt: "desc" },
+            })
+          : null);
+    }
+    return activeMetricsEpochPromise;
+  }
+
+  async function renewLease(rowId, leaseToken, leaseUntil, leaseStatus = "LEASED") {
     const renewed = await prisma.inboxDeliveryOutbox.updateMany({
-      where: { id: rowId, status: "LEASED", leaseToken },
+      where: { id: rowId, status: leaseStatus, leaseToken },
       data: { leaseUntil },
     });
     return renewed.count === 1;
   }
 
-  async function deliverRow(row, leaseToken, current) {
+  async function deliverRow(row, leaseToken, current, { deferAdmittedPersistence = false } = {}) {
+    const admitted = row.admissionClass === ADMISSION_CLASS_GLOBAL_EVENT_STARTED;
+    const leaseStatus = admitted ? ADMISSION_LEASED : "LEASED";
+    const retryStatus = admitted ? ADMISSION_RETRY : "RETRY";
     let leaseLost = false;
-    const renewal = setInterval(async () => {
+    // Admitted rows are already bounded by the provider deadline and claimed
+    // in a page with a 30-second lease. A timer per recipient turns database
+    // pressure into a positive feedback loop: delayed finalizers all wake at
+    // once, update the same outboxes being finalized, and can deadlock. Legacy
+    // rows retain renewal because their provider path is not admission-bounded.
+    const renewal = admitted ? null : setInterval(async () => {
       try {
-        const renewed = await renewLease(row.id, leaseToken, new Date(now().getTime() + LEASE_MS));
+        const renewed = await renewLease(row.id, leaseToken, new Date(now().getTime() + LEASE_MS), leaseStatus);
         if (!renewed) leaseLost = true;
       } catch (error) {
         logger.error("inbox delivery lease renewal failed", { outboxId: row.id, error: error?.message || String(error) });
       }
     }, Math.max(1_000, Math.floor(LEASE_MS / 3)));
-    renewal.unref?.();
+    renewal?.unref?.();
 
     try {
       const targetAware = typeof prisma.inboxDeliveryDeviceAttempt?.findMany === "function";
       const targets = targetAware
-        ? await prisma.inboxDeliveryDeviceAttempt.findMany({
+        ? Array.isArray(row.deviceAttempts)
+          ? row.deviceAttempts
+          : await prisma.inboxDeliveryDeviceAttempt.findMany({
             where: {
               outboxId: row.id,
               disposition: { in: ["PENDING", "RETRY", "TRANSIENT_FAIL", "TIMEOUT"] },
@@ -231,17 +489,23 @@ function buildInboxDelivery(dependencies = {}) {
       const tokens = targetAware
         ? []
         : await deviceTokens.findByUserId(row.alert.userId);
-      const attributionTokens = targetAware && targets.length
-        ? await prisma.deviceToken.findMany({
+      const hydratedTargetTokens = targets
+        .map((target) => target.deviceToken)
+        .filter(Boolean);
+      const targetTokenRows = targetAware && targets.length
+        ? hydratedTargetTokens.length === targets.filter((target) => target.deviceTokenId).length
+          ? hydratedTargetTokens
+          : await prisma.deviceToken.findMany({
             where: { id: { in: targets.map((target) => target.deviceTokenId).filter(Boolean) } },
-          }).then((rows) => {
-            const byId = new Map(rows.map((token) => [token.id, token]));
-            return targets.flatMap((target) => {
-              const token = byId.get(target.deviceTokenId);
-              return targetMatchesCurrentRegistration(target, token, row.alert.userId)
-                ? [token]
-                : [];
-            });
+          })
+        : [];
+      const targetTokenById = new Map(targetTokenRows.map((token) => [token.id, token]));
+      const attributionTokens = targetAware
+        ? targets.flatMap((target) => {
+            const token = targetTokenById.get(target.deviceTokenId);
+            return targetMatchesCurrentRegistration(target, token, row.alert.userId)
+              ? [token]
+              : [];
           })
         : tokens;
       const accepted = new Set(Array.isArray(row.acceptedTokens) ? row.acceptedTokens : []);
@@ -261,31 +525,44 @@ function buildInboxDelivery(dependencies = {}) {
 
       let attribution = null;
       let deliveryEpochId = null;
-      if ((await settings.getFlag("adminMetricsV2TelemetryEnabled")) === true) {
-        const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({ where: { endedAt: null }, orderBy: { startedAt: "desc" } });
-        const user = await prisma.user.findUnique({ where: { id: row.alert.userId } });
+      {
+        const epoch = await activeMetricsEpochForTick();
+        const user = row.alert.user ||
+          (epoch ? await prisma.user.findUnique({ where: { id: row.alert.userId } }) : null);
         if (epoch && user && user.isReviewAccount !== true && (attributionTokens || []).some((token) =>
           token.platform === "ios" && token.adminMetricsOpenCapable === true && token.adminMetricsOpenEpochId === epoch.id)) {
           const deliveryKey = row.alert.sourceKey?.startsWith("visible:")
             ? row.alert.sourceKey
             : canonicalPushDeliveryKey(row.alert.type, row.alert.userId, row.alert.sourceKey || row.id);
-          const delivery = await prisma.pushDelivery.upsert({
-            where: { deliveryKey }, update: {},
-            create: { publicId: crypto.randomUUID(), deliveryKey, userId: row.alert.userId, notificationType: row.alert.type, openCapable: false },
-          });
+          await beforePushAttribution?.({ outboxId: row.id, leaseToken, admitted });
+          const delivery = admitted
+            ? await upsertAdmittedPushDelivery(prisma, {
+                outboxId: row.id,
+                leaseToken,
+                deliveryKey,
+                userId: row.alert.userId,
+                notificationType: row.alert.type,
+                createdAt: now(),
+              })
+            : await prisma.pushDelivery.upsert({
+                where: { deliveryKey }, update: {},
+                create: { publicId: crypto.randomUUID(), deliveryKey, userId: row.alert.userId, notificationType: row.alert.type, openCapable: false },
+              });
+          if (!delivery) leaseLost = true;
           deliveryEpochId = epoch.id;
-          attribution = { delivery, payload: { ...payload, notificationId: delivery.publicId }, epochId: epoch.id };
+          if (delivery) {
+            attribution = { delivery, payload: { ...payload, notificationId: delivery.publicId }, epochId: epoch.id };
+          }
         }
       }
+      if (leaseLost) return { state: "LOST_LEASE" };
       const sendPayload = attribution?.payload || payload;
 
       const deliveryItems = targetAware ? targets : (tokens || []);
       const outcomes = await mapWithConcurrency(deliveryItems, Math.min(concurrency, MAX_TARGETS_PER_RECIPIENT), async (item) => {
         let token = item;
         if (targetAware) {
-          token = item.deviceTokenId
-            ? await prisma.deviceToken.findUnique({ where: { id: item.deviceTokenId } })
-            : null;
+          token = item.deviceTokenId ? targetTokenById.get(item.deviceTokenId) : null;
           let terminal = null;
           if (!token) terminal = "SUPERSEDED";
           else if (token.userId !== item.recipientUserId || token.userId !== row.alert.userId) terminal = "OWNERSHIP_CHANGED";
@@ -299,6 +576,28 @@ function buildInboxDelivery(dependencies = {}) {
               token.providerEnvironment !== item.providerEnvironment ||
               tokenFingerprint(token.token) !== item.tokenHash) terminal = "SUPERSEDED";
           if (terminal) {
+            if (admitted) {
+              const respondedAt = now();
+              return {
+                terminal: true,
+                disposition: terminal,
+                attemptMutation: {
+                  id: item.id,
+                  outbox_id: row.id,
+                  lease_token: leaseToken,
+                  disposition: terminal,
+                  attempt_increment: 0,
+                  replace_error: false,
+                  last_error_code: null,
+                  accepted_at: null,
+                  next_attempt_at: null,
+                  provider_message_id: null,
+                  provider_environment: item.providerEnvironment,
+                  provider_responded_at: respondedAt.toISOString(),
+                  first_attempted_at: null,
+                },
+              };
+            }
             await prisma.inboxDeliveryDeviceAttempt.updateMany({
               where: { id: item.id, disposition: { in: ["PENDING", "RETRY", "TRANSIENT_FAIL", "TIMEOUT"] } },
               data: { disposition: terminal, nextAttemptAt: null, providerRespondedAt: now() },
@@ -308,7 +607,7 @@ function buildInboxDelivery(dependencies = {}) {
         }
         const fingerprint = targetAware ? item.tokenHash : tokenFingerprint(token.token);
         if (accepted.has(fingerprint)) return { accepted: true, skipped: true };
-        const record = async (disposition, lastErrorCode = null, providerResult = null) => {
+        const record = async (disposition, lastErrorCode = null, providerResult = null, attemptedAt = null) => {
           if (!prisma.inboxDeliveryDeviceAttempt) return null;
           if (targetAware) {
             const retryable = ["TRANSIENT_FAIL", "TIMEOUT"].includes(disposition);
@@ -316,7 +615,35 @@ function buildInboxDelivery(dependencies = {}) {
               ? retryAt(now(), item.attemptCount + 1, random, providerResult?.retryAfterMs)
               : null;
             const expired = proposedRetry && row.expiresAt && proposedRetry >= new Date(row.expiresAt);
-            const effectiveDisposition = expired ? "EXHAUSTED" : disposition;
+            const attemptsExhausted = retryable && item.attemptCount + 1 >= 8;
+            const effectiveDisposition = expired || attemptsExhausted ? "EXHAUSTED" : disposition;
+            if (admitted) {
+              const respondedAt = now();
+              return {
+                id: item.id,
+                disposition: effectiveDisposition,
+                attemptCount: item.attemptCount + 1,
+                attemptMutation: {
+                  id: item.id,
+                  outbox_id: row.id,
+                  lease_token: leaseToken,
+                  disposition: effectiveDisposition,
+                  attempt_increment: 1,
+                  replace_error: true,
+                  last_error_code: lastErrorCode,
+                  accepted_at: effectiveDisposition === "ACCEPTED" ? respondedAt.toISOString() : null,
+                  next_attempt_at: retryable && !expired && !attemptsExhausted
+                    ? proposedRetry.toISOString()
+                    : null,
+                  provider_message_id: providerResult?.providerMessageId || null,
+                  provider_environment: providerResult?.environment ?? item.providerEnvironment,
+                  provider_responded_at: respondedAt.toISOString(),
+                  first_attempted_at: item.firstAttemptedAt == null
+                    ? (attemptedAt || respondedAt).toISOString()
+                    : null,
+                },
+              };
+            }
             return dbWriteSemaphore.run(() => prisma.inboxDeliveryDeviceAttempt.update({
               where: { id: item.id },
               data: {
@@ -348,10 +675,10 @@ function buildInboxDelivery(dependencies = {}) {
             },
           });
         };
+        const firstAttemptedAt = now();
         try {
           const provider = token.platform === "android" ? fcm : apns;
           const providerSemaphore = token.platform === "android" ? fcmSemaphore : apnsSemaphore;
-          const firstAttemptedAt = now();
           const providerOperation = runProviderWithDeadline({
             semaphore: providerSemaphore,
             timeoutMs: providerTimeoutMs,
@@ -368,7 +695,7 @@ function buildInboxDelivery(dependencies = {}) {
               ...(sendPayload.threadId ? { threadId: sendPayload.threadId } : {}),
             }),
           });
-          const result = targetAware && item.firstAttemptedAt == null
+          const result = targetAware && !admitted && item.firstAttemptedAt == null
             ? await Promise.all([
                 providerOperation,
                 dbWriteSemaphore.run(() =>
@@ -381,8 +708,8 @@ function buildInboxDelivery(dependencies = {}) {
           if (result?.success) {
             accepted.add(fingerprint);
             providerAccepted = true;
-            await record("ACCEPTED", null, result);
-            if (targetAware) {
+            const attempt = await record("ACCEPTED", null, result, firstAttemptedAt);
+            if (targetAware && !admitted) {
               await prisma.deviceToken.updateMany({
                 where: { id: token.id, ownershipGeneration: item.ownershipGeneration },
                 data: {
@@ -393,27 +720,57 @@ function buildInboxDelivery(dependencies = {}) {
                 },
               });
             }
-            if (attribution?.delivery && token.platform === "ios" && token.adminMetricsOpenCapable === true && token.adminMetricsOpenEpochId === deliveryEpochId) {
-              await prisma.pushDelivery.updateMany({ where: { id: attribution.delivery.id, providerAcceptedAt: null }, data: { openCapable: true, providerAcceptedAt: now() } });
-            }
-            return { accepted: true };
+            return {
+              accepted: true,
+              attributionAccepted: Boolean(attribution?.delivery && token.platform === "ios" &&
+                token.adminMetricsOpenCapable === true && token.adminMetricsOpenEpochId === deliveryEpochId),
+              attemptMutation: attempt?.attemptMutation,
+              tokenMutation: admitted ? {
+                id: token.id,
+                outbox_id: row.id,
+                attempt_id: item.id,
+                lease_token: leaseToken,
+                ownership_generation: item.ownershipGeneration,
+                accepted_at: now().toISOString(),
+                provider_environment: result.environment || null,
+                invalidate: false,
+                mutated_at: now().toISOString(),
+              } : null,
+            };
           }
           if (result?.unregistered || result?.invalidToken) {
             if (targetAware) {
-              await prisma.deviceToken.updateMany({
-                where: { id: token.id, ownershipGeneration: item.ownershipGeneration },
-                data: {
-                  status: "INVALIDATED",
-                  statusReason: "PROVIDER_INVALID_TOKEN",
-                  statusChangedAt: now(),
-                },
-              });
+              if (!admitted) {
+                await prisma.deviceToken.updateMany({
+                  where: { id: token.id, ownershipGeneration: item.ownershipGeneration },
+                  data: {
+                    status: "INVALIDATED",
+                    statusReason: "PROVIDER_INVALID_TOKEN",
+                    statusChangedAt: now(),
+                  },
+                });
+              }
             } else await deviceTokens.deleteToken({ userId: row.alert.userId, token: token.token });
-            await record(targetAware ? "INVALID" : "UNREGISTERED", result?.reason || null, result);
-            return { unregistered: true, terminal: true };
+            const attempt = await record(targetAware ? "INVALID" : "UNREGISTERED", result?.reason || null, result, firstAttemptedAt);
+            return {
+              unregistered: true,
+              terminal: true,
+              attemptMutation: attempt?.attemptMutation,
+              tokenMutation: admitted ? {
+                id: token.id,
+                outbox_id: row.id,
+                attempt_id: item.id,
+                lease_token: leaseToken,
+                ownership_generation: item.ownershipGeneration,
+                accepted_at: null,
+                provider_environment: null,
+                invalidate: true,
+                mutated_at: now().toISOString(),
+              } : null,
+            };
           }
           const permanent = result?.permanent === true;
-          const attempt = await record(permanent ? "PERMANENT_FAIL" : "TRANSIENT_FAIL", result?.reason || null, result);
+          const attempt = await record(permanent ? "PERMANENT_FAIL" : "TRANSIENT_FAIL", result?.reason || null, result, firstAttemptedAt);
           const exhausted = !permanent && attempt &&
             (attempt.disposition === "EXHAUSTED" || attempt.attemptCount >= 8);
           if (exhausted && attempt.disposition !== "EXHAUSTED") {
@@ -422,9 +779,13 @@ function buildInboxDelivery(dependencies = {}) {
               data: { disposition: "EXHAUSTED", nextAttemptAt: null, lastErrorCode: result?.reason || "RETRY_EXHAUSTED" },
             });
           }
-          return { failed: !permanent && !exhausted, terminal: permanent || exhausted };
+          return {
+            failed: !permanent && !exhausted,
+            terminal: permanent || exhausted,
+            attemptMutation: attempt?.attemptMutation,
+          };
         } catch (error) {
-          const attempt = await record(error?.code === "PROVIDER_TIMEOUT" ? "TIMEOUT" : "TRANSIENT_FAIL", error?.code || null, null);
+          const attempt = await record(error?.code === "PROVIDER_TIMEOUT" ? "TIMEOUT" : "TRANSIENT_FAIL", error?.code || null, null, firstAttemptedAt);
           const exhausted = attempt &&
             (attempt.disposition === "EXHAUSTED" || attempt.attemptCount >= 8);
           if (exhausted && attempt.disposition !== "EXHAUSTED") {
@@ -433,17 +794,55 @@ function buildInboxDelivery(dependencies = {}) {
               data: { disposition: "EXHAUSTED", nextAttemptAt: null, lastErrorCode: error?.code || "RETRY_EXHAUSTED" },
             });
           }
-          return { failed: !exhausted, error };
+          return { failed: !exhausted, error, attemptMutation: attempt?.attemptMutation };
         }
       });
+      if (admitted && targetAware && !deferAdmittedPersistence) {
+        const persisted = await persistAdmittedAttemptResults(prisma, outcomes);
+        if (persisted.leaseLost) leaseLost = true;
+      }
       transientFailure = outcomes.some((outcome) => outcome?.failed);
+
+      if (admitted && targetAware && deferAdmittedPersistence) {
+        return {
+          state: "PENDING_BATCH",
+          row,
+          outcomes,
+          acceptedTokens: [...accepted],
+          providerAccepted,
+          attributionDeliveryId: attribution?.delivery?.id || null,
+          attributionAccepted: Boolean(
+            attribution?.delivery && outcomes.some((outcome) => outcome?.attributionAccepted),
+          ),
+        };
+      }
 
       if (providerAccepted) {
         const acceptedUpdate = await prisma.inboxDeliveryOutbox.updateMany({
-          where: { id: row.id, status: "LEASED", leaseToken },
+          where: { id: row.id, status: leaseStatus, leaseToken },
           data: { providerAcceptedAt: row.providerAcceptedAt || now(), acceptedTokens: [...accepted] },
         });
         if (acceptedUpdate.count !== 1) leaseLost = true;
+      }
+      if (!leaseLost && attribution?.delivery && outcomes.some((outcome) => outcome?.attributionAccepted)) {
+        if (admitted) {
+          await prisma.$executeRawUnsafe(
+            `UPDATE push_deliveries delivery
+                SET open_capable=true,provider_accepted_at=$4
+              WHERE delivery.id=$1 AND delivery.provider_accepted_at IS NULL
+                AND EXISTS (
+                  SELECT 1 FROM inbox_delivery_outbox outbox
+                   WHERE outbox.id=$2 AND outbox.status='ADMISSION_LEASED'
+                     AND outbox.lease_token=$3
+                )`,
+            attribution.delivery.id, row.id, leaseToken, now(),
+          );
+        } else {
+          await prisma.pushDelivery.updateMany({
+            where: { id: attribution.delivery.id, providerAcceptedAt: null },
+            data: { openCapable: true, providerAcceptedAt: now() },
+          });
+        }
       }
       if (leaseLost) return { state: "LOST_LEASE" };
       const remainingTarget = targetAware
@@ -456,9 +855,9 @@ function buildInboxDelivery(dependencies = {}) {
       if (remainingTarget) {
         const nextAttemptAt = remainingTarget.nextAttemptAt || new Date(current.getTime() + 250);
         const deferred = await prisma.inboxDeliveryOutbox.updateMany({
-          where: { id: row.id, status: "LEASED", leaseToken },
+          where: { id: row.id, status: leaseStatus, leaseToken },
           data: {
-            status: "RETRY",
+            status: retryStatus,
             ...(deliveryItems.length ? { attemptCount: { increment: 1 } } : {}),
             availableAt: nextAttemptAt,
             retryAt: nextAttemptAt,
@@ -472,18 +871,29 @@ function buildInboxDelivery(dependencies = {}) {
         return deferred.count === 1 ? { state: "RETRY", nextAttemptAt } : { state: "LOST_LEASE" };
       }
       const completed = await prisma.inboxDeliveryOutbox.updateMany({
-        where: { id: row.id, status: "LEASED", leaseToken },
+        where: { id: row.id, status: leaseStatus, leaseToken },
         data: { status: "DELIVERED", deliveredAt: now(), leaseUntil: null, leaseToken: null },
       });
       return completed.count === 1 ? { state: "DELIVERED" } : { state: "LOST_LEASE" };
     } finally {
-      clearInterval(renewal);
+      if (renewal) clearInterval(renewal);
     }
   }
 
   return async function deliverInbox() {
     if (userFanoutDisabled("INBOX_DELIVERY_DISABLED")) return null;
+    activeMetricsEpochPromise = null;
     const current = now();
+    const admittedPage = typeof prisma.$transaction === "function"
+      ? await claimProviderAttemptPage({
+          prisma,
+          admissionClass: ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+          now: current,
+          maximumRows: batchSize,
+          telemetry: eventSurgeTelemetry,
+          invalidateUnreadBatch: invalidateInboxUnreadMany,
+        })
+      : { claimed: [], nextTokenAt: null };
     const expiredIds = typeof prisma.$queryRawUnsafe === "function"
       ? await prisma.$queryRawUnsafe(
           `SELECT id FROM inbox_delivery_outbox
@@ -631,7 +1041,48 @@ function buildInboxDelivery(dependencies = {}) {
         logger.error("[CRON] inbox delivery failed", { outboxId: row.id, error: error?.message || String(error) });
       }
     });
-    return { claimed, delivered, expired: expiredIds.length };
+    const admittedResults = await mapWithConcurrency(admittedPage.claimed, concurrency, async (row) => {
+      claimed += 1;
+      try {
+        const result = await deliverRow(
+          row, row.leaseToken, current, { deferAdmittedPersistence: true },
+        );
+        if (result.state === "DELIVERED") delivered += 1;
+        return result;
+      } catch (error) {
+        const attempts = row.attemptCount + 1;
+        let nextRetry = retryAt(current, attempts, random);
+        const expiry = row.admissionExpiresAt || row.expiresAt;
+        const expired = expiry && nextRetry >= new Date(expiry);
+        if (expired) nextRetry = new Date(expiry);
+        await prisma.inboxDeliveryOutbox.updateMany({
+          where: { id: row.id, status: ADMISSION_LEASED, leaseToken: row.leaseToken },
+          data: {
+            status: expired ? "EXPIRED" : attempts >= 8 ? "EXHAUSTED" : ADMISSION_RETRY,
+            attemptCount: attempts, leaseUntil: null, leaseToken: null,
+            availableAt: nextRetry, retryAt: expired ? null : nextRetry,
+            lastErrorCode: expired ? "NOTIFICATION_EXPIRED" : error?.code || "PROVIDER_REJECTED",
+          },
+        });
+        logger.error("[CRON] admitted inbox delivery failed", { outboxId: row.id, error: error?.message || String(error) });
+        return null;
+      }
+    });
+    const admittedBatch = admittedResults.filter((result) => result?.state === "PENDING_BATCH");
+    if (admittedBatch.length) {
+      const persisted = await persistAdmittedPageResults(prisma, admittedBatch, now());
+      delivered += persisted.delivered;
+      if (persisted.leaseLost) {
+        logger.warn?.("[CRON] admitted inbox delivery page lost leases", {
+          claimed: admittedBatch.length,
+          leaseLost: persisted.leaseLost,
+        });
+      }
+    }
+    const summary = { claimed, delivered, expired: expiredIds.length };
+    const nextAdmissionAt = admissionWakeAt(admittedPage);
+    if (nextAdmissionAt) summary.nextAdmissionAt = nextAdmissionAt;
+    return summary;
   };
 }
 
@@ -653,6 +1104,7 @@ function scheduleInboxDelivery(dependencies = {}) {
   const tick = () => {
     if (stopped || running) return running;
     running = Promise.resolve()
+      .then(() => dependencies.startupBarrier?.())
       .then(() => releaseDue?.({ now: dependencies.now?.() }))
       .then(() => run())
       .then(async (result) => {
@@ -660,7 +1112,11 @@ function scheduleInboxDelivery(dependencies = {}) {
           setImmediate(tick);
         }
         if (typeof nextDueAt !== "function") return;
-        const dueAt = await nextDueAt();
+        const scheduleDueAt = await nextDueAt();
+        const dueAt = [scheduleDueAt, result?.nextAdmissionAt]
+          .filter(Boolean)
+          .map((value) => new Date(value))
+          .sort((left, right) => left - right)[0];
         if (!dueAt) return;
         const delay = Math.max(0, Math.min(60_000, new Date(dueAt).getTime() - Date.now()));
         if (dueTimer) clearTimeout(dueTimer);
@@ -706,5 +1162,8 @@ module.exports = {
   DEFAULT_PROVIDER_CONCURRENCY,
   DEFAULT_DB_WRITE_CONCURRENCY,
   eventCollapseId,
+  admissionWakeAt,
+  persistAdmittedAttemptResults,
+  persistAdmittedPageResults,
   LEASE_MS,
 };

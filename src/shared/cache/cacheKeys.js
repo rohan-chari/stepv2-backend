@@ -52,6 +52,7 @@ const PREFIX = {
   DATABASE_POOL_TELEMETRY: "v1:ops:db-pool",
   STEP_INGESTION_HOUR: "v1:ops:step-ingestion-hour",
   STEP_INGESTION_HISTORY_START: "v1:ops:step-ingestion-history-start",
+  EVENT_SURGE: "v1:ops:event-surge",
 };
 
 // The only two values `resolveReleaseChannel` can ever produce
@@ -233,6 +234,12 @@ function stepIngestionHistoryStart() {
   return PREFIX.STEP_INGESTION_HISTORY_START;
 }
 
+function eventSurge(role, instance) {
+  const identity = `${role}:${instance}`;
+  if (!DATABASE_POOL_IDENTITIES.has(identity)) throw new TypeError("invalid event surge telemetry identity");
+  return `${PREFIX.EVENT_SURGE}:${identity}`;
+}
+
 // `/races` is split into a user-scoped membership snapshot and two bounded
 // status fragments. The generation is deliberately separate from the variant
 // key: invalidation advances one small marker instead of enumerating every
@@ -277,8 +284,11 @@ function raceMessagesAllKeys(raceId) {
 }
 
 // ── C3: shared live-standings snapshot + its stampede lock ──────────────────
-// ONE key per race (spec §3 `v1:race:{id}:progress`), deliberately NOT keyed by
-// viewer, client capability, or timezone:
+// One key per race and supported internal snapshot SCHEMA, deliberately NOT
+// keyed by viewer, client capability, or timezone. The deployed v2/legacy key
+// stays byte-for-byte stable; the presentation-free v3 projection has its own
+// additive key so mixed old/current traffic cannot overwrite it and trigger a
+// rebuild loop.
 //   * viewer/capability variance is handled by the per-request OVERLAY, never by
 //     the cached value (that is the whole point of the pinned allowlist);
 //   * the SCORING TIMEZONE is embedded in the payload instead of the key. A
@@ -290,12 +300,24 @@ function raceMessagesAllKeys(raceId) {
 //     treated as a MISS: the request rebuilds (under the lock) or takes the
 //     cheap persisted fallback. One key => one DEL => the §3 hook list stays
 //     literally correct.
-function raceProgress(raceId) {
-  return `${PREFIX.RACE_PROGRESS}:${raceId}`;
+function raceProgress(raceId, schemaVersion = 2) {
+  return Number(schemaVersion) === 3
+    ? `${PREFIX.RACE_PROGRESS}:${raceId}:lean-v3`
+    : `${PREFIX.RACE_PROGRESS}:${raceId}`;
 }
 
-function raceProgressLock(raceId) {
-  return `v1:lock:progress:${raceId}`;
+function raceProgressVariants(raceId) {
+  return [raceProgress(raceId, 2), raceProgress(raceId, 3)];
+}
+
+function raceProgressLock(raceId, schemaVersion = 2) {
+  return Number(schemaVersion) === 3
+    ? `v1:lock:progress:${raceId}:lean-v3`
+    : `v1:lock:progress:${raceId}`;
+}
+
+function raceProgressPagePublishLock(raceId) {
+  return `v1:lock:progress-page-publish:${raceId}`;
 }
 
 function raceProgressIndex(raceId) {
@@ -306,8 +328,28 @@ function raceProgressPage(raceId, generation, chunk) {
   return `${PREFIX.RACE_PROGRESS_PAGE}:${raceId}:${generation}:${chunk}`;
 }
 
+function raceProgressPageSlot(raceId, chunk) {
+  return `${PREFIX.RACE_PROGRESS_PAGE}:${raceId}:slot:${chunk}`;
+}
+
+function raceProgressPageBankSlot(raceId, bank, chunk) {
+  return `${PREFIX.RACE_PROGRESS_PAGE}:${raceId}:bank:${bank}:${chunk}`;
+}
+
 function raceProgressParticipant(raceId, generation, userId) {
   return `${PREFIX.RACE_PROGRESS_PARTICIPANT}:${raceId}:${generation}:${userId}`;
+}
+
+function raceProgressParticipantBucket(raceId, generation, bucket) {
+  return `${PREFIX.RACE_PROGRESS_PARTICIPANT}:${raceId}:${generation}:bucket:${bucket}`;
+}
+
+function raceProgressParticipantBucketSlot(raceId, bucket) {
+  return `${PREFIX.RACE_PROGRESS_PARTICIPANT}:${raceId}:slot:bucket:${bucket}`;
+}
+
+function raceProgressParticipantBucketBankSlot(raceId, bank, bucket) {
+  return `${PREFIX.RACE_PROGRESS_PARTICIPANT}:${raceId}:bank:${bank}:bucket:${bucket}`;
 }
 
 // ── C4: a user's daily step total, per DATE ─────────────────────────────────
@@ -423,10 +465,17 @@ module.exports = {
   userAuthMe,
   userAuthMeVariants,
   raceProgress,
+  raceProgressVariants,
   raceProgressLock,
+  raceProgressPagePublishLock,
   raceProgressIndex,
   raceProgressPage,
+  raceProgressPageSlot,
+  raceProgressPageBankSlot,
   raceProgressParticipant,
+  raceProgressParticipantBucket,
+  raceProgressParticipantBucketSlot,
+  raceProgressParticipantBucketBankSlot,
   shopCatalog,
   shopCatalogVariants,
   powerupCatalog,
@@ -452,6 +501,7 @@ module.exports = {
   databasePoolTelemetry,
   stepIngestionHour,
   stepIngestionHistoryStart,
+  eventSurge,
   raceListGeneration,
   raceListMembership,
   raceListFragment,

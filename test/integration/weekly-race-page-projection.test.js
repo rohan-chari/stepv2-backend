@@ -20,7 +20,9 @@ const cacheKeys = require("../../src/shared/cache/cacheKeys");
 const { appSettings } = require("../../src/shared/config/appSettings");
 const {
   buildRaceProgressPageProjection,
+  invalidateRaceProgressPageProjection,
   publishRaceProgressPageProjection,
+  projectionSlotKeys,
   readRaceProgressPageProjection,
 } = require("../../src/modules/races/services/raceProgressPageProjection");
 
@@ -147,6 +149,22 @@ async function publishFixture(raceId, users, generation = 1, currentGeneration =
   });
 }
 
+async function publishSupersededFixture(
+  raceId,
+  users,
+  generation = 1,
+  currentGeneration = generation,
+) {
+  const { snapshot } = await projectionFixture(raceId, users, generation);
+  return publishRaceProgressPageProjection({
+    raceId,
+    generation,
+    snapshot,
+    currentGeneration: async () => currentGeneration,
+    allowSupersededComplete: true,
+  });
+}
+
 async function readProgress(user, raceId, query = "offset=0&limit=15") {
   return request(server.baseUrl, "GET", `/races/${raceId}/progress?view=participants-v1&${query}`, {
     token: user.token,
@@ -197,6 +215,21 @@ describe("weekly race page projection", () => {
     assert.ok(keys.some((key) => key.includes(":index:")));
     assert.ok(keys.some((key) => key.includes(":page:") && key.endsWith(":0")));
     assert.ok(keys.some((key) => key.includes(":page:") && key.endsWith(":9")));
+    const requesterBuckets = keys.filter((key) =>
+      key.includes(":participant:") && key.includes(":bucket:"));
+    assert.ok(requesterBuckets.length > 0);
+    assert.ok(requesterBuckets.length <= 256);
+    assert.equal(
+      keys.some((key) => /:participant:[^:]+:[^:]+:[^:]+$/.test(key) && !key.includes(":bucket:")),
+      false,
+    );
+    const indexKey = keys.find((key) => key.includes(":index:"));
+    const pageKey = keys.find((key) => key.includes(":page:") && key.endsWith(":0"));
+    // A projection generation is refreshed or explicitly invalidated when its
+    // source changes. Its TTL is only abandoned-data cleanup, so it must
+    // outlive the five-minute surge gate and its drain window.
+    assert.ok(await probe.ttl(indexKey) >= 14 * 60);
+    assert.ok(await probe.ttl(pageKey) >= 14 * 60);
     assert.equal(PAGE_SIZE, 50);
   });
 
@@ -218,8 +251,9 @@ describe("weekly race page projection", () => {
     const { race, users } = await createActiveRace(60);
     assert.equal(await publishFixture(race.id, users, 2), true);
     const old = await projectionFixture(race.id, users, 1);
+    const index = await redisCache.getJSON(cacheKeys.raceProgressIndex(race.id));
     await redisCache.setJSON(
-      cacheKeys.raceProgressPage(race.id, 2, 0),
+      cacheKeys.raceProgressPageBankSlot(race.id, index.slotBank, 0),
       { ...old.snapshot.chunks[0], generation: 1 },
       60,
     );
@@ -239,6 +273,79 @@ describe("weekly race page projection", () => {
     assert.equal(await publishFixture(race.id, users, 1, 2), false);
     const index = await redisCache.getJSON(cacheKeys.raceProgressIndex(race.id));
     assert.equal(index.generation, 2);
+  });
+
+  it("serializes overlapping page publishers so one complete bank wins", async (t) => {
+    if (!liveRedis) return t.skip("no local Redis available");
+    const { race, users } = await createActiveRace(60);
+    const outcomes = await Promise.all([
+      publishFixture(race.id, users, 1),
+      publishFixture(race.id, users, 2),
+    ]);
+    assert.equal(outcomes.filter(Boolean).length, 1);
+    const page = await readRaceProgressPageProjection({
+      raceId: race.id,
+      offset: 0,
+      limit: 15,
+      requesterUserId: users[0].user.id,
+    });
+    assert.ok(page);
+    assert.equal(page.rows.length, 15);
+    assert.ok(page.rows.every((row) => row.totalSteps != null));
+  });
+
+  it("can retain a complete bounded baseline when step churn supersedes its generation", async (t) => {
+    if (!liveRedis) return t.skip("no local Redis available");
+    const { race, users } = await createActiveRace(60);
+
+    assert.equal(await publishSupersededFixture(race.id, users, 1, 2), true);
+    const index = await redisCache.getJSON(cacheKeys.raceProgressIndex(race.id));
+    assert.equal(index.generation, 1);
+
+    const page = await readRaceProgressPageProjection({
+      raceId: race.id,
+      offset: 0,
+      limit: 15,
+      requesterUserId: users[59].user.id,
+    });
+    assert.equal(page.rows.length, 15);
+    assert.equal(page.requesterRow.userId, users[59].user.id);
+
+    // The Redis-side generation fence still prevents a genuinely older writer
+    // from replacing a newer complete baseline.
+    assert.equal(await publishSupersededFixture(race.id, users, 2, 3), true);
+    assert.equal(await publishSupersededFixture(race.id, users, 1, 3), false);
+    assert.equal(
+      (await redisCache.getJSON(cacheKeys.raceProgressIndex(race.id))).generation,
+      2,
+    );
+  });
+
+  it("reuses bounded page and requester-bucket slots across generations", async (t) => {
+    if (!liveRedis) return t.skip("no local Redis available");
+    const { race, users } = await createActiveRace(60);
+    assert.equal(await publishFixture(race.id, users, 1), true);
+    const firstKeys = await probe.keys(`t:v1:race:progress:*:${race.id}:bank:*`);
+    assert.ok(firstKeys.length > 0);
+
+    assert.equal(await publishFixture(race.id, users, 2), true);
+    const secondKeys = await probe.keys(`t:v1:race:progress:*:${race.id}:bank:*`);
+    assert.equal(secondKeys.length <= firstKeys.length * 2, true);
+    assert.deepEqual(await probe.keys(`t:v1:race:progress:*:${race.id}:1:*`), []);
+    assert.deepEqual(await probe.keys(`t:v1:race:progress:*:${race.id}:2:*`), []);
+  });
+
+  it("invalidation removes requester buckets as well as pages", async (t) => {
+    if (!liveRedis) return t.skip("no local Redis available");
+    const { race, users } = await createActiveRace(60);
+    assert.equal(await publishFixture(race.id, users, 1), true);
+    const index = await redisCache.getJSON(cacheKeys.raceProgressIndex(race.id));
+    const activeKeys = projectionSlotKeys(race.id, index).map((key) => `t:${key}`);
+    assert.ok(activeKeys.some((key) => key.includes(":participant:")));
+    assert.ok((await probe.mget(...activeKeys)).some((value) => value !== null));
+
+    assert.equal(await invalidateRaceProgressPageProjection(race.id), true);
+    assert.ok((await probe.mget(...activeKeys)).every((value) => value === null));
   });
 
   it("uses the legacy path for null-timezone races", async () => {

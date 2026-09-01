@@ -9,10 +9,22 @@ const redisCache = require("../../../shared/cache/redisCache");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
 const { compareParticipantsForPlacement } = require("../placementOrder");
+const crypto = require("node:crypto");
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const CHUNK_SIZE = 50;
-const TTL_SECONDS = 60;
+const REQUESTER_BUCKET_COUNT = 256;
+// Keep each Redis request small. Sending a complete 10k-person projection as
+// one pipeline makes Redis account the whole client input/output buffer at
+// once; on the 100 MB tier that non-evictable memory can exceed maxmemory even
+// though the final bounded key-set comfortably fits.
+const PUBLISH_BATCH_SIZE = 16;
+// Generations are refreshed on resolution and invalidated when their source is
+// dirtied. This TTL is therefore abandoned-data cleanup, not a freshness
+// deadline. Keep it comfortably beyond the five-minute event surge plus queue
+// drain; a one-minute expiry caused every request to stampede into the 10k-row
+// SQL fallback while an otherwise healthy generation was still authoritative.
+const TTL_SECONDS = 15 * 60;
 const counters = { chunkReads: 0, requesterReads: 0 };
 
 const INSTALL_IF_NOT_OLDER = `
@@ -57,6 +69,42 @@ function normalizeRow(row, sourceParticipant = null) {
   };
 }
 
+function requesterBucket(userId) {
+  return crypto.createHash("sha256").update(String(userId)).digest()[0];
+}
+
+function projectionGenerationKeys(raceId, index) {
+  const generation = finiteGeneration(index?.generation);
+  if (!raceId || !generation) return [];
+  const keys = [];
+  for (let chunk = 0; chunk < Number(index.chunkCount || 0); chunk += 1) {
+    keys.push(cacheKeys.raceProgressPage(raceId, generation, chunk));
+  }
+  // Buckets are sparse, but deleting all 256 deterministic names is bounded
+  // and avoids needing a Redis SCAN on the request or publication path.
+  for (let bucket = 0; bucket < REQUESTER_BUCKET_COUNT; bucket += 1) {
+    keys.push(cacheKeys.raceProgressParticipantBucket(raceId, generation, bucket));
+  }
+  return keys;
+}
+
+function projectionSlotKeys(raceId, index) {
+  if (!raceId) return [];
+  const bank = Number.isSafeInteger(index?.slotBank) ? index.slotBank : null;
+  const keys = [];
+  for (let chunk = 0; chunk < Number(index?.chunkCount || 0); chunk += 1) {
+    keys.push(bank == null
+      ? cacheKeys.raceProgressPageSlot(raceId, chunk)
+      : cacheKeys.raceProgressPageBankSlot(raceId, bank, chunk));
+  }
+  for (let bucket = 0; bucket < REQUESTER_BUCKET_COUNT; bucket += 1) {
+    keys.push(bank == null
+      ? cacheKeys.raceProgressParticipantBucketSlot(raceId, bucket)
+      : cacheKeys.raceProgressParticipantBucketBankSlot(raceId, bank, bucket));
+  }
+  return keys;
+}
+
 function buildRaceProgressPageProjection({
   raceId,
   generation,
@@ -88,6 +136,13 @@ function buildRaceProgressPageProjection({
       rows: rows.slice(offset, offset + CHUNK_SIZE),
     });
   }
+  const participantBuckets = new Map();
+  for (const row of rows) {
+    const bucket = requesterBucket(row.userId);
+    const entries = participantBuckets.get(bucket) || {};
+    entries[row.userId] = row;
+    participantBuckets.set(bucket, entries);
+  }
   const index = {
     v: SCHEMA_VERSION,
     generation: safeGeneration,
@@ -98,11 +153,13 @@ function buildRaceProgressPageProjection({
     totalCount: rows.length,
     chunkSize: CHUNK_SIZE,
     chunkCount: chunks.length,
+    requesterBucketCount: REQUESTER_BUCKET_COUNT,
+    slotBank: safeGeneration % 2,
     // Chunk descriptors are the ordered ranking index. The request path reads
     // only the descriptors needed for its page, never a presentation roster.
     chunks: chunks.map((_, chunk) => chunk),
   };
-  return { index, chunks, participantRows: rows };
+  return { index, chunks, participantBuckets };
 }
 
 async function currentGenerationIsValid(currentGeneration, generation) {
@@ -114,55 +171,94 @@ async function currentGenerationIsValid(currentGeneration, generation) {
   }
 }
 
-async function publishRaceProgressPageProjection({
+async function publishRaceProgressPageProjectionUnlocked({
   raceId,
   generation,
   snapshot,
   currentGeneration,
   ttlSeconds = TTL_SECONDS,
+  allowSupersededComplete = false,
 }) {
   const safeGeneration = finiteGeneration(generation);
   if (!safeGeneration || !snapshot || snapshot.index?.raceId !== raceId) return false;
   if (!redisCache.isEnabled()) return false;
-  if (!(await currentGenerationIsValid(currentGeneration, safeGeneration))) return false;
+  if (
+    !allowSupersededComplete &&
+    !(await currentGenerationIsValid(currentGeneration, safeGeneration))
+  ) return false;
 
   const existing = await redisCache.getJSON(cacheKeys.raceProgressIndex(raceId));
   if (existing && finiteGeneration(existing.generation) > safeGeneration) return false;
-
   const entries = [];
+  const existingBank = Number.isSafeInteger(existing?.slotBank)
+    ? existing.slotBank
+    : null;
+  // Always fill the inactive bank. Generation parity is only a cold-start
+  // default: coalescing can skip generations, so parity can otherwise select
+  // the bank readers are actively using and expose a mixed generation while
+  // the bounded batches are still being written.
+  const bank = existingBank == null
+    ? snapshot.index.slotBank
+    : existingBank === 0 ? 1 : 0;
+  const installedIndex = { ...snapshot.index, slotBank: bank };
   for (const [chunk, value] of (snapshot.chunks || []).entries()) {
     entries.push({
-      key: cacheKeys.raceProgressPage(raceId, safeGeneration, chunk),
+      key: cacheKeys.raceProgressPageBankSlot(raceId, bank, chunk),
       value,
       ttlSeconds,
     });
   }
-  for (const row of snapshot.participantRows || []) {
+  for (const [bucket, rowsByUserId] of snapshot.participantBuckets || []) {
     entries.push({
-      key: cacheKeys.raceProgressParticipant(raceId, safeGeneration, row.userId),
+      key: cacheKeys.raceProgressParticipantBucketBankSlot(raceId, bank, bucket),
       value: {
         v: SCHEMA_VERSION,
         generation: safeGeneration,
         asOf: snapshot.index.asOf,
-        row,
+        rowsByUserId,
       },
       ttlSeconds,
     });
   }
-  const written = await redisCache.setManyJSON(entries);
-  if (!written.ok || written.count !== entries.length) return false;
-
-  // Chunks are durable before this marker becomes visible. The marker is a
-  // Redis-side generation fence, so an older worker cannot repoint a reader at
-  // its generation after a newer worker has published.
-  if (!(await currentGenerationIsValid(currentGeneration, safeGeneration))) return false;
+  if (
+    !allowSupersededComplete &&
+    !(await currentGenerationIsValid(currentGeneration, safeGeneration))
+  ) return false;
+  for (let offset = 0; offset < entries.length; offset += PUBLISH_BATCH_SIZE) {
+    const batch = entries.slice(offset, offset + PUBLISH_BATCH_SIZE);
+    const written = await redisCache.setManyJSON(batch);
+    if (!written.ok || written.count !== batch.length) return false;
+  }
   const installed = await redisCache.evalLua(
     INSTALL_IF_NOT_OLDER,
     [cacheKeys.raceProgressIndex(raceId)],
-    [safeGeneration, JSON.stringify(snapshot.index), ttlSeconds]
+    [safeGeneration, JSON.stringify(installedIndex), ttlSeconds],
   );
   if (!installed.ok || Number(installed.result) !== 1) return false;
-  return currentGenerationIsValid(currentGeneration, safeGeneration);
+  if (existing) {
+    // Coalescing can skip generations. Because the bounded banks are selected
+    // by generation parity, a skipped generation may legitimately reuse the
+    // same bank as the prior index. Those keys now contain the new generation
+    // and must not be deleted after the index flip.
+    await redisCache.del([
+      ...(existingBank !== bank ? projectionSlotKeys(raceId, existing) : []),
+      ...projectionGenerationKeys(raceId, existing),
+    ]);
+  }
+  return allowSupersededComplete
+    ? true
+    : currentGenerationIsValid(currentGeneration, safeGeneration);
+}
+
+async function publishRaceProgressPageProjection(options) {
+  const raceId = options?.raceId;
+  if (!raceId || !redisCache.isEnabled()) return false;
+  const published = await redisCache.withLock(
+    cacheKeys.raceProgressPagePublishLock(raceId),
+    30_000,
+    () => publishRaceProgressPageProjectionUnlocked(options),
+  );
+  return published === true;
 }
 
 function validChunk(value, generation, asOf) {
@@ -193,6 +289,7 @@ async function readRaceProgressPageProjection({
     typeof index.asOf !== "string" ||
     !Number.isSafeInteger(index.totalCount) ||
     index.chunkSize !== CHUNK_SIZE ||
+    index.requesterBucketCount !== REQUESTER_BUCKET_COUNT ||
     (scoringTimeZone && index.scoringTimeZone !== scoringTimeZone)
   ) return null;
 
@@ -205,9 +302,10 @@ async function readRaceProgressPageProjection({
   const chunkNumbers = end > start
     ? Array.from({ length: lastChunk - firstChunk + 1 }, (_, i) => firstChunk + i)
     : [];
-  const chunkKeys = chunkNumbers.map((chunk) =>
-    cacheKeys.raceProgressPage(raceId, generation, chunk)
-  );
+  const bank = Number.isSafeInteger(index.slotBank) ? index.slotBank : null;
+  const chunkKeys = chunkNumbers.map((chunk) => bank == null
+    ? cacheKeys.raceProgressPageSlot(raceId, chunk)
+    : cacheKeys.raceProgressPageBankSlot(raceId, bank, chunk));
   const chunkResult = await redisCache.getManyJSON(chunkKeys);
   counters.chunkReads = chunkKeys.length;
   if (!chunkResult.ok) return null;
@@ -221,14 +319,19 @@ async function readRaceProgressPageProjection({
 
   let requesterRow = null;
   if (requesterUserId && !rows.some((row) => row.userId === requesterUserId)) {
-    const requester = await redisCache.getJSON(
-      cacheKeys.raceProgressParticipant(raceId, generation, requesterUserId)
+    const bucket = await redisCache.getJSON(
+      bank == null
+        ? cacheKeys.raceProgressParticipantBucketSlot(
+            raceId, requesterBucket(requesterUserId))
+        : cacheKeys.raceProgressParticipantBucketBankSlot(
+            raceId, bank, requesterBucket(requesterUserId))
     );
     counters.requesterReads += 1;
-    if (!requester || requester.v !== SCHEMA_VERSION ||
-        finiteGeneration(requester.generation) !== generation ||
-        requester.asOf !== index.asOf || !normalizeRow(requester.row)) return null;
-    requesterRow = requester.row;
+    const row = bucket?.rowsByUserId?.[requesterUserId];
+    if (!bucket || bucket.v !== SCHEMA_VERSION ||
+        finiteGeneration(bucket.generation) !== generation ||
+        bucket.asOf !== index.asOf || !normalizeRow(row)) return null;
+    requesterRow = row;
   }
   return {
     index,
@@ -245,13 +348,11 @@ async function readRaceProgressPageProjection({
 async function invalidateRaceProgressPageProjection(raceId) {
   if (!raceId || !redisCache.isEnabled()) return true;
   const index = await redisCache.getJSON(cacheKeys.raceProgressIndex(raceId));
-  const keys = [cacheKeys.raceProgressIndex(raceId)];
-  const generation = finiteGeneration(index?.generation);
-  if (generation) {
-    for (let chunk = 0; chunk < Number(index.chunkCount || 0); chunk += 1) {
-      keys.push(cacheKeys.raceProgressPage(raceId, generation, chunk));
-    }
-  }
+  const keys = [
+    cacheKeys.raceProgressIndex(raceId),
+    ...projectionSlotKeys(raceId, index),
+    ...projectionGenerationKeys(raceId, index),
+  ];
   return derivedCache.invalidate({
     keys,
     prefix: cacheKeys.PREFIX.RACE_PROGRESS,
@@ -261,12 +362,15 @@ async function invalidateRaceProgressPageProjection(raceId) {
 module.exports = {
   SCHEMA_VERSION,
   CHUNK_SIZE,
+  REQUESTER_BUCKET_COUNT,
+  PUBLISH_BATCH_SIZE,
   TTL_SECONDS,
+  projectionGenerationKeys,
+  projectionSlotKeys,
   buildRaceProgressPageProjection,
   publishRaceProgressPageProjection,
   readRaceProgressPageProjection,
   invalidateRaceProgressPageProjection,
-  __private: { INSTALL_IF_NOT_OLDER },
   __counters: counters,
   __resetCounters() {
     counters.chunkReads = 0;

@@ -1,4 +1,8 @@
 const { prisma: defaultPrisma } = require("../../../db");
+const {
+  ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+  lockNotificationAdmissionLane,
+} = require("../services/notificationAdmission");
 
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -7,6 +11,7 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const pageSize = Math.min(500, Math.max(1, Number(dependencies.pageSize) || 500));
   return async function reconcileNotificationCompleteness() {
+    await dependencies.startupBarrier?.();
     const current = now();
     const unknownReset = await prisma.$executeRawUnsafe(
       `WITH candidates AS (
@@ -63,32 +68,40 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
          FROM candidates WHERE schedule.id=candidates.id`,
       current, pageSize,
     );
-    const materializationGapsRearmed = await prisma.$executeRawUnsafe(
-      `WITH candidates AS (
-         SELECT schedule.id
-           FROM notification_schedules schedule
-          WHERE schedule.type='GLOBAL_EVENT_STARTED'
-            AND schedule.status='MATERIALIZED'
-            AND (
-              NOT EXISTS (
-                SELECT 1 FROM inbox_alerts alert
-                 WHERE alert.user_id=schedule.recipient_user_id
-                   AND alert.source_key=schedule.delivery_key
-              ) OR NOT EXISTS (
-                SELECT 1 FROM inbox_alerts alert
-                JOIN inbox_delivery_outbox outbox ON outbox.alert_id=alert.id AND outbox.kind='PUSH'
-                 WHERE alert.user_id=schedule.recipient_user_id
-                   AND alert.source_key=schedule.delivery_key
+    const materializationGapsRearmed = await prisma.$transaction(async (tx) => {
+      await lockNotificationAdmissionLane(tx, {
+        admissionClass: ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+        now: current,
+      });
+      await dependencies.afterAdmissionLaneLock?.();
+      return tx.$executeRawUnsafe(
+        `WITH candidates AS (
+           SELECT schedule.id
+             FROM notification_schedules schedule
+            WHERE schedule.type='GLOBAL_EVENT_STARTED'
+              AND schedule.status='MATERIALIZED'
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM inbox_alerts alert
+                   WHERE alert.user_id=schedule.recipient_user_id
+                     AND alert.source_key=schedule.delivery_key
+                ) OR NOT EXISTS (
+                  SELECT 1 FROM inbox_alerts alert
+                  JOIN inbox_delivery_outbox outbox ON outbox.alert_id=alert.id AND outbox.kind='PUSH'
+                   WHERE alert.user_id=schedule.recipient_user_id
+                     AND alert.source_key=schedule.delivery_key
+                )
               )
-            )
-          ORDER BY schedule.updated_at,schedule.id LIMIT $2
-       )
-       UPDATE notification_schedules schedule
-          SET status='PENDING',claimed_at=NULL,released_at=NULL,
-              canceled_at=NULL,cancellation_reason=NULL,available_at=$1,updated_at=$1
-         FROM candidates WHERE schedule.id=candidates.id`,
-      current, pageSize,
-    );
+            ORDER BY schedule.updated_at,schedule.id LIMIT $2
+         )
+         UPDATE notification_schedules schedule
+            SET status=CASE WHEN schedule.admission_class IS NULL THEN 'PENDING' ELSE 'ADMISSION_PENDING' END,
+                claimed_at=NULL,released_at=NULL,
+                canceled_at=NULL,cancellation_reason=NULL,available_at=$1,updated_at=$1
+           FROM candidates WHERE schedule.id=candidates.id`,
+        current, pageSize,
+      );
+    });
     const overdueOutboxesRearmed = await prisma.$executeRawUnsafe(
       `WITH candidates AS (
          SELECT outbox.id
@@ -103,7 +116,8 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
           ORDER BY outbox.available_at,outbox.id LIMIT $2
        )
        UPDATE inbox_delivery_outbox outbox
-          SET status='RETRY',available_at=$1,retry_at=$1,
+          SET status=CASE WHEN outbox.admission_class IS NULL THEN 'RETRY' ELSE 'ADMISSION_RETRY' END,
+              available_at=$1,retry_at=$1,
               lease_until=NULL,lease_token=NULL,updated_at=$1
          FROM candidates WHERE outbox.id=candidates.id`,
       current, pageSize,
@@ -157,7 +171,7 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
     const expired = await prisma.$executeRawUnsafe(
       `WITH candidates AS (
          SELECT id FROM notification_schedules
-          WHERE status IN ('PENDING','CANCELLED_NO_ACTIVE_RACE')
+          WHERE status IN ('PENDING','ADMISSION_PENDING','CANCELLED_NO_ACTIVE_RACE')
             AND expires_at <= $1
           ORDER BY expires_at,id LIMIT $2
        )

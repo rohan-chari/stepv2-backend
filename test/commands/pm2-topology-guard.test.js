@@ -355,6 +355,12 @@ test("the production reload wrapper serializes and reapplies ecosystem config", 
   assert.match(wrapper, /pm2 startOrReload "\$CONFIG" --only steps-tracker/);
   assert.match(wrapper, /--only steps-tracker-resolution/);
   assert.match(wrapper, /--only steps-tracker-cron/);
+  assert.match(wrapper, /OLD_CRON_PID=.*pm2 pid steps-tracker-cron/);
+  assert.match(wrapper, /pm2 stop steps-tracker-cron/);
+  assert.match(wrapper, /kill -0 "\$OLD_CRON_PID"/);
+  assert.match(wrapper, /sleep 30/);
+  assert.match(wrapper, /pm2 start "\$CONFIG" --only steps-tracker-cron/);
+  assert.doesNotMatch(wrapper, /startOrReload "\$CONFIG" --only steps-tracker-cron/);
   assert.doesNotMatch(wrapper, /pm2 reload steps-tracker/);
   const lines = wrapper.split("\n").map((line) => line.trim());
   const httpReload = lines.findIndex((line) => line.endsWith("--only steps-tracker"));

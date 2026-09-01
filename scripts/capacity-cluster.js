@@ -43,14 +43,19 @@ function roleChildEnvironment(baseEnv, role, port, limits) {
 function main() {
 const limits = capacityPoolLimits(capacityPoolProfile(process.env));
 if (cluster.isPrimary) {
-  for (let instance = 0; instance < workerCount; instance += 1) {
-    cluster.fork({
+  const httpWorkers = new Map();
+  let plannedHttpRestart = null;
+  const forkHttpWorker = (instance) => {
+    const worker = cluster.fork({
       NODE_APP_INSTANCE: String(instance),
       STEPS_PROCESS_ROLE: "http",
       PORT: "3000",
       DB_POOL_MAX: limits.http,
     });
-  }
+    httpWorkers.set(String(instance), worker);
+    return worker;
+  };
+  for (let instance = 0; instance < workerCount; instance += 1) forkHttpWorker(instance);
 
   const roleChildren = [
     ["resolution", "3010"],
@@ -78,8 +83,24 @@ if (cluster.isPrimary) {
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
+  // Capacity-only worker-restart fault injection. `docker kill --signal=USR2`
+  // replaces HTTP worker 0 under the same logical identity while worker 1
+  // continues serving. Production topology/config is untouched.
+  process.on("SIGUSR2", () => {
+    if (shuttingDown || plannedHttpRestart) return;
+    const worker = httpWorkers.get("0");
+    if (!worker) return;
+    plannedHttpRestart = { id: worker.id, instance: "0" };
+    worker.kill("SIGTERM");
+  });
   cluster.on("exit", (worker) => {
     if (shuttingDown) return;
+    if (plannedHttpRestart?.id === worker.id) {
+      const { instance } = plannedHttpRestart;
+      plannedHttpRestart = null;
+      forkHttpWorker(instance);
+      return;
+    }
     process.stderr.write(`capacity HTTP worker ${worker.id} exited unexpectedly\n`);
     process.exitCode = 1;
     process.kill(process.pid, "SIGTERM");

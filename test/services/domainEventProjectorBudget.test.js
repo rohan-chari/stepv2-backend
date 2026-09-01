@@ -63,7 +63,6 @@ test("a projector tick never claims more rows than it finishes after its budget 
 
 test("a projector tick drains bounded scheduled-entitlement pages before generic per-recipient work", async () => {
   const pages = [
-    { processed: 100 },
     { processed: 37 },
     { processed: 0 },
   ];
@@ -72,7 +71,7 @@ test("a projector tick drains bounded scheduled-entitlement pages before generic
     prisma: {},
     repository: {},
     projectScheduledEntitlementEventsBatch: async ({ batchSize }) => {
-      assert.equal(batchSize, 100);
+      assert.equal(batchSize, 200);
       return pages.shift();
     },
     claimDomainEvents: async () => [],
@@ -85,9 +84,34 @@ test("a projector tick drains bounded scheduled-entitlement pages before generic
   });
 
   const result = await projector.run({ budgetMs: 1 });
-  assert.equal(result.scheduledEventsProjected, 137);
-  assert.equal(result.scheduledEventBatches, 2);
+  assert.equal(result.scheduledEventsProjected, 37);
+  assert.equal(result.scheduledEventBatches, 1);
   assert.equal(genericClaims, 1, "unrelated projection work remains reachable in the same tick");
+});
+
+test("a projector tick reserves the database for launch traffic while scheduled-event backlog is full", async () => {
+  let scheduledCalls = 0;
+  let genericClaims = 0;
+  const projector = buildNotificationProjector({
+    prisma: {},
+    repository: {},
+    projectScheduledEntitlementEventsBatch: async () => {
+      scheduledCalls += 1;
+      return { processed: 200 };
+    },
+    claimDomainEvents: async () => {
+      genericClaims += 1;
+      return [];
+    },
+    claimNotificationProjections: async () => [],
+    monotonicNow: () => 0,
+    logger: { log() {}, error() {} },
+  });
+
+  const result = await projector.run({ budgetMs: 5_000 });
+  assert.equal(scheduledCalls, 1);
+  assert.equal(result.scheduledEventsProjected, 200);
+  assert.equal(genericClaims, 0);
 });
 
 test("typed V1 handlers propagate infrastructure failures instead of suppressing them", async () => {

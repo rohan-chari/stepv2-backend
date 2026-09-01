@@ -21,6 +21,7 @@ const {
   applyHitchhikeCopies,
 } = require("../powerups/hitchhikeCopies");
 const defaultRaceProgressSnapshot = require("../races/services/raceProgressSnapshot");
+const defaultRaceProgressPageProjection = require("../races/services/raceProgressPageProjection");
 const {
   RaceResolutionJobV2: defaultRaceResolutionJobV2,
 } = require("../races/models/raceResolutionJobV2");
@@ -34,6 +35,9 @@ const {
 const {
   buildViewerDisplayPlacementMap,
 } = require("../races/services/viewerDisplayPlacements");
+const {
+  homeLaunchReadBatch: defaultHomeLaunchReadBatch,
+} = require("./services/homeLaunchReadBatch");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -74,13 +78,26 @@ function buildHomePlacementProjection({ ranked, effects, userId }) {
         })),
         maskedUserIds
       );
-  const presentationOrder = [...(ranked || [])].sort((left, right) => {
-    const leftMasked = maskedUserIds.has(left.userId);
-    const rightMasked = maskedUserIds.has(right.userId);
-    if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
-    if (leftMasked) return String(left.userId).localeCompare(String(right.userId));
-    return (ranked || []).indexOf(left) - (ranked || []).indexOf(right);
-  });
+  // The common case has no privacy masking, so the canonical ranking is
+  // already the exact presentation order. Avoid sorting it again: the old
+  // comparator called indexOf for every comparison, making each app open
+  // quadratic in the race size (especially damaging for 10k-person events).
+  const presentationOrder = maskedUserIds.size === 0
+    ? (ranked || [])
+    : (ranked || [])
+        .map((participant, index) => ({ participant, index }))
+        .sort((left, right) => {
+          const leftMasked = maskedUserIds.has(left.participant.userId);
+          const rightMasked = maskedUserIds.has(right.participant.userId);
+          if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
+          if (leftMasked) {
+            return String(left.participant.userId).localeCompare(
+              String(right.participant.userId)
+            );
+          }
+          return left.index - right.index;
+        })
+        .map(({ participant }) => participant);
   return {
     displayPlacementByUserId,
     maskedUserIds,
@@ -108,10 +125,16 @@ function raceDurationHours(race) {
 
 function homeMoneyView(race, participants) {
   const rows = participants || [];
+  const boundedAcceptedCount = Number(
+    race?._acceptedCount ?? rows[0]?.totalCount,
+  );
   const money = buildRaceMoneyView({
     race,
     participants: rows,
-    acceptedCount: rows.filter((row) => row.status === "ACCEPTED").length,
+    acceptedCount: Number.isSafeInteger(boundedAcceptedCount) &&
+      boundedAcceptedCount >= 0
+      ? boundedAcceptedCount
+      : rows.filter((row) => row.status === "ACCEPTED").length,
   });
   const { payouts, payoutTiers } = serializePayouts(money.payouts);
   return {
@@ -124,6 +147,54 @@ function homeMoneyView(race, participants) {
     payouts,
     payoutTiers,
     finishReward: money.finishReward,
+  };
+}
+
+function pageProjectionEligibleForHome(race) {
+  return Boolean(
+    race &&
+      race.isTeamRace !== true &&
+      race.powerupsEnabled !== true &&
+      Number(race.buyInAmount || 0) === 0 &&
+      Number(race.potCoins || 0) === 0
+  );
+}
+
+async function readBoundedHomeProjection({
+  race,
+  userId,
+  timeZone,
+  pageProjection,
+}) {
+  if (!pageProjectionEligibleForHome(race)) return null;
+  const page = await pageProjection.readRaceProgressPageProjection({
+    raceId: race.id,
+    offset: 0,
+    limit: 15,
+    requesterUserId: userId,
+    scoringTimeZone: raceTimeZone(race, timeZone),
+  });
+  if (!page || !page.index?.race) return null;
+  const participants = [...page.rows];
+  if (page.requesterRow && !participants.some((row) => row.userId === userId)) {
+    participants.push(page.requesterRow);
+  }
+  return {
+    v: 3,
+    asOf: page.asOf,
+    scoringTimeZone: page.index.scoringTimeZone,
+    source: "page-projection",
+    race: page.index.race,
+    participants,
+    activeEffects: [],
+    teams: null,
+    totalCount: page.total,
+    requesterWasInPage: page.rows.some((row) => row.userId === userId),
+    pageRowCount: page.rows.length,
+    requesterSnapshotPlacement:
+      page.requesterRow?.placement ??
+      page.rows.find((row) => row.userId === userId)?.placement ??
+      null,
   };
 }
 
@@ -141,6 +212,68 @@ const USER_SELECT = {
     },
   },
 };
+
+// The frozen home card ranks the whole field but renders at most four people.
+// Keep the shared 10k-row read to only the scalars used by placement, money,
+// and team math; presentation/cosmetic data is loaded for visible users below.
+const LEGACY_HOME_PARTICIPANT_SELECT = {
+  id: true,
+  userId: true,
+  status: true,
+  totalSteps: true,
+  rawSteps: true,
+  placement: true,
+  finishedAt: true,
+  forfeitedAt: true,
+  team: true,
+  payoutCoins: true,
+  buyInAmount: true,
+  buyInStatus: true,
+};
+
+const PERSISTED_HOME_ACTIVE_SELECT = {
+  id: true,
+  userId: true,
+  team: true,
+  totalSteps: true,
+  finishedAt: true,
+  finishTotalSteps: true,
+  race: {
+    select: {
+      id: true,
+      name: true,
+      startedAt: true,
+      endsAt: true,
+      timezone: true,
+      powerupsEnabled: true,
+      isTeamRace: true,
+      teamSize: true,
+      fundedPrize: true,
+      payoutRoundingVersion: true,
+      payoutPreset: true,
+      payoutCurve: true,
+      potCoins: true,
+      buyInAmount: true,
+      maxDurationDays: true,
+      prizeCoinUnit: true,
+      prizePoolMaxCoins: true,
+      teamPoolMultBps: true,
+      teamPayoutVersion: true,
+      teamWinnerRewardCoins: true,
+      creationSource: true,
+      startPolicy: true,
+      exitActionsEnabled: true,
+      status: true,
+    },
+  },
+};
+
+function boundedPersistedHomeRace(race) {
+  return Boolean(race && race.isTeamRace !== true &&
+    race.powerupsEnabled !== true &&
+    (race.fundedPrize !== true || race.exitActionsEnabled !== true) &&
+    Number(race.buyInAmount || 0) === 0 && Number(race.potCoins || 0) === 0);
+}
 
 const FRIEND_FINISHED_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -186,7 +319,8 @@ async function checkPendingInvite(
   now,
   supportsCharacters = false,
   releaseChannel = "prod",
-  supportsRemoteAssets = false
+  supportsRemoteAssets = false,
+  launchReadBatch = null
 ) {
   const where = {
     userId,
@@ -197,9 +331,7 @@ async function checkPendingInvite(
       { inviteExpiresAt: { gt: now } },
     ],
   };
-  const invites = await prisma.raceParticipant.findMany({
-    where,
-    select: {
+  const select = {
       inviteExpiresAt: true,
       joinedAt: true,
       race: {
@@ -213,10 +345,15 @@ async function checkPendingInvite(
           _count: { select: { participants: true } },
         },
       },
-    },
-    // Nulls last so explicitly-expiring invites surface before legacy ones.
-    orderBy: [{ inviteExpiresAt: "asc" }, { joinedAt: "asc" }],
-  });
+    };
+  const invites = launchReadBatch
+    ? await launchReadBatch.loadPendingInvites({ prisma, userId, now, select })
+    : await prisma.raceParticipant.findMany({
+        where,
+        select,
+        // Nulls last so explicitly-expiring invites surface before legacy ones.
+        orderBy: [{ inviteExpiresAt: "asc" }, { joinedAt: "asc" }],
+      });
 
   if (invites.length === 0) return null;
 
@@ -251,9 +388,16 @@ async function checkActiveRace(
   releaseChannel = "prod",
   supportsRemoteAssets = false,
   raceActiveEffectModel = RaceActiveEffect,
-  privacySafeDisplayRanks = false
+  privacySafeDisplayRanks = false,
+  launchReadBatch = null,
 ) {
-  const myActive = await prisma.raceParticipant.findFirst({
+  const myActive = launchReadBatch
+    ? await launchReadBatch.loadLegacyActiveRow({
+        prisma,
+        userId,
+        supportsTeamRaces,
+      })
+    : await prisma.raceParticipant.findFirst({
     where: {
       userId,
       status: "ACCEPTED",
@@ -281,7 +425,7 @@ async function checkActiveRace(
       },
     },
     orderBy: { race: { startedAt: "desc" } },
-  });
+      });
 
   if (!myActive) return null;
 
@@ -289,6 +433,28 @@ async function checkActiveRace(
   // TR-702 belt-and-braces: the query above already filters team races out for
   // tokenless clients; never serialize one even if that filter is bypassed.
   if (race.isTeamRace && !supportsTeamRaces) return null;
+  if (launchReadBatch) {
+    const boundedSimpleRace = race.isTeamRace !== true &&
+      race.powerupsEnabled !== true &&
+      (race.fundedPrize !== true || race.exitActionsEnabled !== true) &&
+      Number(race.buyInAmount || 0) === 0 && Number(race.potCoins || 0) === 0;
+    race.participants = boundedSimpleRace
+      ? await launchReadBatch.loadBoundedLegacyRoster({
+          prisma,
+          raceId: race.id,
+          userId,
+        })
+      : await launchReadBatch.loadAcceptedRoster({
+          prisma,
+          raceId: race.id,
+          participantSelect: LEGACY_HOME_PARTICIPANT_SELECT,
+        });
+    if (boundedSimpleRace) {
+      race._acceptedCount = Number(
+        race.participants[0]?.totalCount || race.participants.length,
+      );
+    }
+  }
 
   const sorted = race.participants;
   const effects = race.powerupsEnabled === true
@@ -305,6 +471,19 @@ async function checkActiveRace(
     .filter((p) => p.userId !== userId && p.userId !== leader?.userId)
     .slice(0, 2);
 
+  if (launchReadBatch) {
+    const visible = [me, leader, ...others].filter(Boolean);
+    const users = await launchReadBatch.loadUsers({
+      prisma,
+      userIds: visible.map((participant) => participant.userId),
+      select: USER_SELECT,
+    });
+    const userById = new Map(users.map((user) => [user.id, user]));
+    for (const participant of visible) {
+      participant.user = userById.get(participant.userId) || null;
+    }
+  }
+
   let gapText = null;
   if (me && leader && leader.userId !== userId) {
     const gap = leader.totalSteps - me.totalSteps;
@@ -318,7 +497,7 @@ async function checkActiveRace(
   }
 
   function buildEntry(p) {
-    const canonicalPlacement = sorted.indexOf(p) + 1;
+    const canonicalPlacement = Number(p.computedPlacement) || sorted.indexOf(p) + 1;
     const masked = projection.maskedUserIds.has(p.userId);
     return {
       rank:
@@ -662,23 +841,35 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
     supportsRemoteAssets = false,
     supportsTeamRaces = false,
     privacySafeDisplayRanks = false,
+    usePersistedTotals = false,
     snapshotStore = defaultRaceProgressSnapshot,
+    pageProjection = defaultRaceProgressPageProjection,
     raceResolutionJobModel = defaultRaceResolutionJobV2,
     fallback,
+    includeLegacyProjection = false,
+    launchReadBatch = null,
   } = options;
 
   // A failed invalidation opens this process-local breaker because Redis may
   // still contain pre-mutation standings. Honor it before reading any key.
   if (snapshotStore.isBypassed?.() === true) return fallback();
 
-  const myActive = await prisma.raceParticipant.findMany({
-    where: {
+  const activeWhere = {
       userId,
       status: "ACCEPTED",
-      race: { status: "ACTIVE", tournamentId: null },
-    },
-    select: {
+      race: {
+        status: "ACTIVE",
+        tournamentId: null,
+        ...(supportsTeamRaces ? {} : { isTeamRace: false }),
+      },
+    };
+  const activeSelect = {
+      id: true,
+      userId: true,
       team: true,
+      totalSteps: true,
+      finishedAt: true,
+      finishTotalSteps: true,
       race: {
         select: {
           id: true,
@@ -707,42 +898,105 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
           status: true,
         },
       },
-    },
-    orderBy: { race: { startedAt: "desc" } },
-    take: MAX_ACTIVE_RACES,
-  });
+    };
+  const myActive = launchReadBatch
+    ? await launchReadBatch.loadActiveRows({
+        prisma,
+        userId,
+        supportsTeamRaces,
+        select: activeSelect,
+        maxRows: MAX_ACTIVE_RACES,
+      })
+    : await prisma.raceParticipant.findMany({
+        where: activeWhere,
+        select: activeSelect,
+        orderBy: { race: { startedAt: "desc" } },
+        take: MAX_ACTIVE_RACES,
+      });
   if (!myActive || myActive.length === 0) return null;
 
   const raceIds = myActive.map((row) => row.race?.id).filter(Boolean);
   let jobs;
   try {
-    const snapshots = await Promise.all(
-      raceIds.map((raceId) => readHomeSnapshot(snapshotStore, raceId))
-    );
+    const boundedSnapshots = usePersistedTotals && pageProjection
+      ? await Promise.all(myActive.map(({ race }) =>
+          readBoundedHomeProjection({ race, userId, timeZone, pageProjection })
+            .catch(() => null)))
+      : [];
+    const snapshots = boundedSnapshots.length === myActive.length &&
+      boundedSnapshots.every(Boolean)
+      ? boundedSnapshots
+      : await Promise.all(raceIds.map((raceId) =>
+          readHomeSnapshot(snapshotStore, raceId)));
     // A missing/stale Redis value is the common miss case. Avoid adding a job
     // table read before taking the exact live fallback on those requests.
-    if (snapshots.some((snapshot) => !snapshotStore.isFresh(snapshot, now.getTime()))) {
+    if (
+      !usePersistedTotals &&
+      snapshots.some((snapshot) => !snapshotStore.isFresh(snapshot, now.getTime()))
+    ) {
       return fallback();
     }
-    const loadedJobs = await raceResolutionJobModel.findByRaceIds(raceIds);
-    jobs = new Map(loadedJobs.map((job) => [job.raceId, job]));
+    if (!usePersistedTotals) {
+      const loadedJobs = await raceResolutionJobModel.findByRaceIds(raceIds);
+      jobs = new Map(loadedJobs.map((job) => [job.raceId, job]));
+    }
     for (let index = 0; index < myActive.length; index += 1) {
       const race = myActive[index].race;
-      const snapshot = snapshots[index];
+      let snapshot = snapshots[index];
       if (
         !race ||
-        !snapshotMatchesCompletedGeneration({
-          snapshot,
-          job: jobs.get(race.id),
-          race,
-          now,
-          timeZone,
-          store: snapshotStore,
-        }) ||
+        !(usePersistedTotals
+          ? snapshotStore.matchesTimeZone(snapshot, raceTimeZone(race, timeZone)) &&
+            snapshotTimeBoundaryIsCurrent(snapshot, now) &&
+            snapshot.race?.raceId === race.id &&
+            snapshot.race?.status === "ACTIVE"
+          : snapshotMatchesCompletedGeneration({
+              snapshot,
+              job: jobs.get(race.id),
+              race,
+              now,
+              timeZone,
+              store: snapshotStore,
+            })) ||
         !snapshot.participants.some((participant) => participant.userId === userId) ||
         (race.isTeamRace && supportsTeamRaces && !snapshot.teams)
       ) {
         return fallback();
+      }
+      if (usePersistedTotals) {
+        // sync-v2 has already made the viewer's persisted row current. Keep the
+        // shared race snapshot for every rival, overlay only that one bounded
+        // row, then recompute deterministic placement in memory. This avoids a
+        // 10,000-row hydration per app open while keeping the number the user
+        // just synced immediately truthful; rivals converge with the worker's
+        // next snapshot (soft TTL <= 15 seconds).
+        const adjusted = snapshot.participants.map((participant) =>
+          participant.userId === userId
+            ? {
+                ...participant,
+                participantId: myActive[index].id,
+                totalSteps: myActive[index].finishedAt
+                  ? myActive[index].finishTotalSteps ?? myActive[index].totalSteps ?? 0
+                  : myActive[index].totalSteps ?? 0,
+                finishedAt: myActive[index].finishedAt,
+              }
+            : { ...participant });
+        adjusted.sort(compareParticipantsForPlacement);
+        const adjustedViewerIndex = adjusted.findIndex(
+          (participant) => participant.userId === userId
+        );
+        const viewerPlacementOverride =
+          snapshot.requesterWasInPage || adjustedViewerIndex < snapshot.pageRowCount
+            ? adjustedViewerIndex + 1
+            : snapshot.requesterSnapshotPlacement;
+        snapshot = {
+          ...snapshot,
+          viewerPlacementOverride,
+          participants: adjusted.map((participant, placement) => ({
+            ...participant,
+            placement: placement + 1,
+          })),
+        };
       }
       myActive[index].snapshot = snapshot;
     }
@@ -767,26 +1021,33 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
   );
   const visibleUserIds = [
     ...new Set(
-      myActive.flatMap((row) =>
-        projectionsByRaceId
-          .get(row.race.id)
-          .presentationOrder
-          .slice(0, 3)
-          .filter(
-            (participant) =>
-              !projectionsByRaceId
-                .get(row.race.id)
-                .maskedUserIds.has(participant.userId)
-          )
-          .map((participant) => participant.userId)
-      )
+      [
+        userId,
+        ...myActive.flatMap((row) =>
+          projectionsByRaceId
+            .get(row.race.id)
+            .presentationOrder
+            .slice(0, 3)
+            .filter(
+              (participant) =>
+                !projectionsByRaceId
+                  .get(row.race.id)
+                  .maskedUserIds.has(participant.userId)
+            )
+            .map((participant) => participant.userId)
+        ),
+      ]
     ),
   ];
   const users = visibleUserIds.length > 0
-    ? await prisma.user.findMany({
-        where: { id: { in: visibleUserIds } },
-        select: USER_SELECT,
-      })
+    ? launchReadBatch
+      ? await launchReadBatch.loadUsers({
+          prisma, userIds: visibleUserIds, select: USER_SELECT,
+        })
+      : await prisma.user.findMany({
+          where: { id: { in: visibleUserIds } },
+          select: USER_SELECT,
+        })
     : [];
   const userById = new Map(users.map((user) => [user.id, user]));
 
@@ -832,7 +1093,7 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
       };
     });
     const myIndex = ranked.findIndex((participant) => participant.userId === userId);
-    return {
+    const result = {
       raceId: race.id,
       name: race.name,
       endsAt: race.endsAt,
@@ -842,7 +1103,7 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
         (!privacySafeDisplayRanks && projection.placementPrivacyActive) ||
         myIndex < 0
           ? null
-          : myIndex + 1,
+          : snapshot.viewerPlacementOverride ?? myIndex + 1,
       userPlacementHidden: projection.viewerIsDetoured,
       ...(privacySafeDisplayRanks
         ? {
@@ -852,7 +1113,7 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
             placementPrivacyActive: projection.placementPrivacyActive,
           }
         : {}),
-      participantCount: ranked.length,
+      participantCount: snapshot.totalCount ?? ranked.length,
       ...homeMoneyView(
         race,
         ranked.map((participant) => ({
@@ -869,8 +1130,94 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
           }
         : {}),
     };
+    if (!includeLegacyProjection) return result;
+    const entriesByUserId = new Map(ranked.map((participant) => {
+      const masked = projection.maskedUserIds.has(participant.userId);
+      const user = userById.get(participant.userId) || null;
+      return [participant.userId, {
+        rank:
+          masked || (!privacySafeDisplayRanks && projection.placementPrivacyActive)
+            ? null
+            : ranked.indexOf(participant) + 1,
+        ...(privacySafeDisplayRanks
+          ? { displayPlacement: masked
+              ? null
+              : projection.displayPlacementByUserId.get(participant.userId) ?? null }
+          : {}),
+        totalSteps: masked ? null : Math.max(0, Number(participant.totalSteps) || 0),
+        ...(masked
+          ? { userId: participant.userId, displayName: "???", profilePhotoUrl: null,
+              animal: null, accessories: [] }
+          : serializeUser(user, supportsCharacters, releaseChannel, supportsRemoteAssets)),
+        isStealthed: masked,
+      }];
+    }));
+    Object.defineProperty(result, "_legacySnapshotProjection", {
+      enumerable: false,
+      value: {
+        entriesByUserId,
+        presentationUserIds: projection.presentationOrder.map((row) => row.userId),
+        viewerUserId: userId,
+        placementPrivacyActive: projection.placementPrivacyActive,
+      },
+    });
+    return result;
   });
   return { state: "ACTIVE_RACES", data: { races } };
+}
+
+async function checkActiveRaceFromSnapshot(prisma, userId, options = {}) {
+  const active = await checkActiveRacesFromSnapshots(prisma, userId, {
+    ...options,
+    usePersistedTotals: true,
+    includeLegacyProjection: true,
+  });
+  if (!active || active.state !== "ACTIVE_RACES" || !active.data?.races?.length) {
+    return active;
+  }
+  const race = active.data.races[0];
+  const projection = race._legacySnapshotProjection;
+  if (!projection) return options.fallback();
+  const me = projection.entriesByUserId.get(userId) || null;
+  const leaderId = projection.presentationUserIds[0] || null;
+  const leader = leaderId ? projection.entriesByUserId.get(leaderId) || null : null;
+  const others = projection.presentationUserIds
+    .filter((id) => id !== userId && id !== leaderId)
+    .slice(0, 2)
+    .map((id) => projection.entriesByUserId.get(id))
+    .filter(Boolean);
+  const moneyKeys = [
+    "buyInAmount", "potCoins", "heldPotCoins", "projectedPotCoins",
+    "prizePool", "payouts", "payoutTiers", "finishReward",
+    "teamPayoutVersion", "teamWinnerRewardCoins",
+  ];
+  const money = Object.fromEntries(
+    moneyKeys.filter((key) => Object.prototype.hasOwnProperty.call(race, key))
+      .map((key) => [key, race[key]])
+  );
+  return {
+    state: "ACTIVE_RACE",
+    data: {
+      raceId: race.raceId,
+      name: race.name,
+      endsAt: race.endsAt,
+      me,
+      leader,
+      others,
+      ...(options.privacySafeDisplayRanks
+        ? { placementPrivacyActive: projection.placementPrivacyActive }
+        : {}),
+      ...money,
+      ...(race.isTeamRace
+        ? {
+            isTeamRace: true,
+            teamSize: race.teamSize ?? null,
+            myTeam: race.myTeam ?? null,
+            teams: race.teams,
+          }
+        : {}),
+    },
+  };
 }
 
 async function checkActiveRaces(prisma, userId, options = {}) {
@@ -895,9 +1242,35 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // ordering, top-three, placement, and team blocks are unchanged.
     usePersistedTotals = false,
     leanLiveEnabled = false,
+    launchReadBatch = null,
   } = options;
 
-  const myActive = await prisma.raceParticipant.findMany({
+  let myActive = null;
+  if (usePersistedTotals && leanLiveEnabled && launchReadBatch) {
+    const boundedRows = await launchReadBatch.loadActiveRows({
+      prisma,
+      userId,
+      supportsTeamRaces,
+      select: PERSISTED_HOME_ACTIVE_SELECT,
+      maxRows: MAX_ACTIVE_RACES,
+    });
+    if (boundedRows.length > 0 && boundedRows.every((row) =>
+      boundedPersistedHomeRace(row.race))) {
+      await Promise.all(boundedRows.map(async (row) => {
+        row.race.participants = await launchReadBatch.loadBoundedLegacyRoster({
+          prisma,
+          raceId: row.race.id,
+          userId,
+        });
+        row.race._acceptedCount = Number(
+          row.race.participants[0]?.totalCount || row.race.participants.length,
+        );
+      }));
+      myActive = boundedRows;
+    }
+  }
+
+  myActive ||= await prisma.raceParticipant.findMany({
     where: {
       userId,
       status: "ACCEPTED",
@@ -1108,7 +1481,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
       }
     }
     const top3 = projection.presentationOrder.slice(0, 3).map((p) => {
-      const canonicalPlacement = ranked.indexOf(p) + 1;
+      const canonicalPlacement = Number(p.computedPlacement) || ranked.indexOf(p) + 1;
       const isStealthed = projection.maskedUserIds.has(p.userId);
       return {
         rank:
@@ -1142,12 +1515,15 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     });
 
     const myIndex = ranked.findIndex((p) => p.userId === userId);
+    const persistedViewerPlacement = myIndex < 0
+      ? null
+      : Number(ranked[myIndex].computedPlacement) || myIndex + 1;
     const userPlacement =
       viewerIsDetoured ||
       (!privacySafeDisplayRanks && projection.placementPrivacyActive) ||
       myIndex < 0
         ? null
-        : myIndex + 1;
+        : persistedViewerPlacement;
 
     return {
       raceId: race.id,
@@ -1166,7 +1542,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
             placementPrivacyActive: projection.placementPrivacyActive,
           }
         : {}),
-      participantCount: ranked.length,
+      participantCount: race._acceptedCount ?? ranked.length,
       ...homeMoneyView(race, liveParticipants),
       // B-12d: the canonical team block, from the LIVE totals this entry
       // already computed (so it matches the ticket's own numbers), built by the
@@ -1386,6 +1762,8 @@ function buildGetHomeRaceCard(dependencies = {}) {
     dependencies.raceProgressSnapshot || defaultRaceProgressSnapshot;
   const raceResolutionJobModel =
     dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2;
+  const launchReadBatch = dependencies.homeLaunchReadBatch ||
+    (prisma === defaultPrisma ? defaultHomeLaunchReadBatch : null);
 
   return async function getHomeRaceCard({
     userId,
@@ -1414,7 +1792,8 @@ function buildGetHomeRaceCard(dependencies = {}) {
       now,
       supportsCharacters,
       releaseChannel,
-      supportsRemoteAssets
+      supportsRemoteAssets,
+      launchReadBatch
     );
     if (pending) return pending;
 
@@ -1438,27 +1817,50 @@ function buildGetHomeRaceCard(dependencies = {}) {
         privacySafeDisplayRanks,
         usePersistedTotals: homePersistedTotals,
         leanLiveEnabled,
+        launchReadBatch,
       };
-      const activeRaces = snapshotReuseEnabled && !homePersistedTotals
+      const activeRaces = snapshotReuseEnabled
         ? await checkActiveRacesFromSnapshots(prisma, userId, {
             ...activeRaceOptions,
             snapshotStore,
             raceResolutionJobModel,
+            launchReadBatch,
             fallback: () => checkActiveRaces(prisma, userId, activeRaceOptions),
           })
         : await checkActiveRaces(prisma, userId, activeRaceOptions);
       if (activeRaces) return activeRaces;
     } else {
-      const active = await checkActiveRace(
-        prisma,
-        userId,
-        supportsCharacters,
-        supportsTeamRaces,
-        releaseChannel,
-        supportsRemoteAssets,
-        raceActiveEffectModel,
-        privacySafeDisplayRanks
-      );
+      const fallback = () => checkActiveRace(
+          prisma,
+          userId,
+          supportsCharacters,
+          supportsTeamRaces,
+          releaseChannel,
+          supportsRemoteAssets,
+          raceActiveEffectModel,
+          privacySafeDisplayRanks,
+          launchReadBatch,
+        );
+      const active = snapshotReuseEnabled
+        ? await checkActiveRaceFromSnapshot(prisma, userId, {
+            timeZone,
+            now,
+            supportsCharacters,
+            releaseChannel,
+            supportsRemoteAssets,
+            supportsTeamRaces,
+            privacySafeDisplayRanks,
+            // Frozen clients need the same four-person response, not a parsed
+            // 10k presentation roster. The page projection carries the
+            // authoritative generation plus top page and requester overlay;
+            // this changes only the internal read plan, never their payload.
+            usePersistedTotals: true,
+            snapshotStore,
+            raceResolutionJobModel,
+            launchReadBatch,
+            fallback,
+          })
+        : await fallback();
       if (active) return active;
     }
 
@@ -1494,4 +1896,9 @@ function buildGetHomeRaceCard(dependencies = {}) {
 
 const getHomeRaceCard = buildGetHomeRaceCard();
 
-module.exports = { buildGetHomeRaceCard, getHomeRaceCard };
+module.exports = {
+  buildGetHomeRaceCard,
+  checkActiveRaceFromSnapshot,
+  checkActiveRacesFromSnapshots,
+  getHomeRaceCard,
+};

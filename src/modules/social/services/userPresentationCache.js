@@ -6,9 +6,13 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const {
+  scheduleBoundedBatchDrain,
+} = require("../../../shared/batching/boundedBatchDrain");
 
 const TTL_SECONDS = 3600;
 const GENERATION_TTL_SECONDS = 7200;
+const DATABASE_BATCH_SIZE = 256;
 const ADVANCE_AND_DELETE_LUA = `
 local generation = redis.call('incr', KEYS[1])
 redis.call('expire', KEYS[1], ARGV[1])
@@ -88,14 +92,75 @@ function buildUserPresentationCache(dependencies = {}) {
   const cacheKeys = dependencies.cacheKeys || cacheKeysDefault;
   const settings = dependencies.appSettings || defaultAppSettings;
   const logger = dependencies.logger || console;
+  const databaseBatch = { pending: [], draining: false };
 
   async function loadMany(ids) {
-    const rows = await prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: USER_SELECT,
-    });
+    const rows = typeof prisma.$queryRawUnsafe === "function"
+      ? await prisma.$queryRawUnsafe(
+        `SELECT users.id,
+                users.display_name AS "displayName",
+                users.profile_photo_url AS "profilePhotoUrl",
+                users.client_features AS "clientFeatures",
+                users.is_review_account AS "isReviewAccount",
+                users.hidden_from_leaderboard AS "hiddenFromLeaderboard",
+                COALESCE(
+                  jsonb_agg(
+                    jsonb_build_object(
+                      'shopItem', jsonb_build_object(
+                        'id', item.id,
+                        'sku', item.sku,
+                        'name', item.name,
+                        'slot', item.slot,
+                        'assetKey', item.asset_key,
+                        'renderMetadata', item.render_metadata,
+                        'bobble', item.bobble,
+                        'testOnly', item.test_only,
+                        'remoteOnly', item.remote_only,
+                        'assetVersion', item.asset_version
+                      )
+                    ) ORDER BY equipped.slot
+                  ) FILTER (WHERE equipped.id IS NOT NULL),
+                  '[]'::jsonb
+                ) AS "equippedAccessories"
+           FROM users
+           LEFT JOIN user_equipped_accessories equipped ON equipped.user_id=users.id
+           LEFT JOIN shop_items item ON item.id=equipped.shop_item_id
+          WHERE users.id = ANY($1::text[])
+          GROUP BY users.id`,
+        ids,
+      )
+      : await prisma.user.findMany({
+        where: { id: { in: ids } },
+        select: USER_SELECT,
+      });
     const byId = new Map(rows.map((row) => [row.id, project(row)]));
     return new Map(ids.map((id) => [id, byId.get(id) ?? null]));
+  }
+
+  // During an app-open wave, independently assembled race cards often ask for
+  // overlapping presentation sets in the same event-loop turn. Prisma expands
+  // the nested cosmetics relation into several queries, so issuing one call per
+  // viewer creates thousands of otherwise tiny pool checkouts. Merge those
+  // cold reads into bounded set queries and project the exact map each caller
+  // requested; no response shape or cache semantics change.
+  function loadManyBatched(ids) {
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (unique.length === 0) return Promise.resolve(new Map());
+    const promise = new Promise((resolve, reject) => {
+      databaseBatch.pending.push({ ids: unique, resolve, reject });
+    });
+    scheduleBoundedBatchDrain(databaseBatch, async (requests) => {
+      const allIds = [...new Set(requests.flatMap((request) => request.ids))];
+      const loaded = new Map();
+      for (let offset = 0; offset < allIds.length; offset += DATABASE_BATCH_SIZE) {
+        const page = await loadMany(allIds.slice(offset, offset + DATABASE_BATCH_SIZE));
+        for (const [id, value] of page) loaded.set(id, value);
+      }
+      for (const request of requests) {
+        request.resolve(new Map(request.ids.map((id) => [id, loaded.get(id) ?? null])));
+      }
+    });
+    return promise;
   }
 
   async function guardEnabled() {
@@ -125,7 +190,7 @@ function buildUserPresentationCache(dependencies = {}) {
     async function loadMeasured(ids) {
       databaseLoadOperations += 1;
       try {
-        const loaded = await capacity.measurePhase("databaseLoad", () => loadMany(ids));
+        const loaded = await capacity.measurePhase("databaseLoad", () => loadManyBatched(ids));
         databaseLoadedIdentities += [...loaded.values()].filter(
           (value) => value !== null,
         ).length;

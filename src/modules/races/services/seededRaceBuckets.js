@@ -199,6 +199,11 @@ function windowLockKey(seedId, windowStart) {
   return `seeded-bucket:${seedId}:${new Date(windowStart).toISOString()}`;
 }
 
+// A window-mode row is immutable (`stampWindowMode` deliberately uses an empty
+// update), so positive reads can live for the worker lifetime. Missing rows are
+// not cached because another worker may stamp one immediately afterwards.
+const windowModeReadsByPrisma = new WeakMap();
+
 async function acquireSeededWindowLock(tx, seedId, windowStart) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${windowLockKey(seedId, windowStart)}))`;
 }
@@ -216,10 +221,28 @@ async function withSeededWindowLock({ prisma, seedId, windowStart, fn }) {
 
 async function readWindowMode({ prisma, seedId, windowStart }) {
   if (!prisma.seededRaceWindowModeRecord) return "LEGACY";
-  const row = await prisma.seededRaceWindowModeRecord.findUnique({
-    where: { seedId_windowStart: { seedId, windowStart: new Date(windowStart) } },
-    select: { mode: true },
-  });
+  let reads = windowModeReadsByPrisma.get(prisma);
+  if (!reads) {
+    reads = new Map();
+    windowModeReadsByPrisma.set(prisma, reads);
+  }
+  const normalizedWindowStart = new Date(windowStart);
+  const key = `${seedId}:${normalizedWindowStart.toISOString()}`;
+  let read = reads.get(key);
+  if (!read) {
+    read = prisma.seededRaceWindowModeRecord.findUnique({
+      where: { seedId_windowStart: { seedId, windowStart: normalizedWindowStart } },
+      select: { mode: true },
+    }).then((row) => {
+      if (!row?.mode) reads.delete(key);
+      return row;
+    }).catch((error) => {
+      reads.delete(key);
+      throw error;
+    });
+    reads.set(key, read);
+  }
+  const row = await read;
   // Mixed deploy safe default: code may arrive before the migration backfill
   // has touched a row, and that row must remain on the legacy path.
   return row?.mode || "LEGACY";

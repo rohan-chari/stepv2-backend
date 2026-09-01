@@ -2,6 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../db");
 const { User: defaultUser } = require("../users");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const { activeAdminMetricsEpochCache } = require("../analytics/services/activeAdminMetricsEpochCache");
 
 function canonicalPushDeliveryKey(notificationType, recipientUserId, intentId) {
   if (!notificationType || !recipientUserId || !intentId) return null;
@@ -29,11 +30,7 @@ function buildPushDeliveryAttribution(dependencies = {}) {
       }
       const [user, epoch] = await Promise.all([
         User.findById(recipientUserId),
-        prisma.adminMetricsCollectionEpoch.findFirst({
-          where: { endedAt: null },
-          orderBy: { startedAt: "desc" },
-          select: { id: true },
-        }),
+        activeAdminMetricsEpochCache.get(prisma),
       ]);
       const capable =
         user && user.isReviewAccount !== true && epoch &&

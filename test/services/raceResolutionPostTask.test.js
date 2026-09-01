@@ -52,6 +52,17 @@ test("snapshot publication command is a closed allowlist", () => {
     }).snapshotCommand,
     { raceId: "r1", timeZone: "UTC" }
   );
+  assert.deepEqual(
+    validatePostTaskPayload({
+      snapshotCommand: {
+        raceId: "r1",
+        timeZone: "UTC",
+        allowSupersededComplete: true,
+      },
+      intents: [],
+    }).snapshotCommand,
+    { raceId: "r1", timeZone: "UTC", allowSupersededComplete: true }
+  );
 });
 
 test("post-task validation refuses truncation, device tokens and unknown intent kinds", () => {

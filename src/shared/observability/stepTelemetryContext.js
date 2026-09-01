@@ -25,6 +25,28 @@ function currentStepTelemetryContext() {
   return storage.getStore() || null;
 }
 
+function setStepAdmissionRelease(release) {
+  const context = storage.getStore();
+  if (!context || typeof release !== "function") return false;
+  context.stepAdmissionRelease = release;
+  context.stepAdmissionActive = true;
+  return true;
+}
+
+function releaseStepAdmission() {
+  const context = storage.getStore();
+  const release = context?.stepAdmissionRelease;
+  if (typeof release !== "function") return false;
+  context.stepAdmissionRelease = null;
+  context.stepAdmissionActive = false;
+  release();
+  return true;
+}
+
+function isStepAdmissionActive() {
+  return storage.getStore()?.stepAdmissionActive === true;
+}
+
 async function measureStepTelemetryPhase(phase, operation) {
   const startedAt = process.hrtime.bigint();
   try {
@@ -50,6 +72,9 @@ module.exports = {
   runWithStepTelemetryContext,
   recordStepTelemetryPhase,
   currentStepTelemetryContext,
+  setStepAdmissionRelease,
+  releaseStepAdmission,
+  isStepAdmissionActive,
   measureStepTelemetryPhase,
   markStepTelemetryTransactionError,
   isStepTelemetryTransactionError,

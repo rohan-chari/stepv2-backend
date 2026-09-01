@@ -30,13 +30,41 @@ test("a superseded worker keeps the newer snapshot invalidation intact", async (
     raceId: "race-1",
     superseded: true,
     result: {
-      race: { id: "race-1", powerupsEnabled: false, participants: [] },
+      race: { id: "race-1", powerupsEnabled: true, participants: [] },
       baseAdjustedByParticipantId: {},
     },
   });
 
   assert.equal(expiryRuns, 1, "non-snapshot post-commit work still runs");
   assert.equal(snapshotBuilds, 0);
+});
+
+test("a free individual no-powerup race carries the safe superseded baseline policy", async () => {
+  const onCommitted = buildRaceProgressPostCommit({
+    redisStandingsEnabled: true,
+    async expireEffects() {},
+  });
+  const outcome = await onCommitted({
+    raceId: "race-1",
+    job: { processingTimeZone: "UTC" },
+    deferSnapshot: true,
+    result: {
+      race: {
+        id: "race-1",
+        powerupsEnabled: false,
+        isTeamRace: false,
+        buyInAmount: 0,
+        potCoins: 0,
+        participants: [],
+      },
+      baseAdjustedByParticipantId: {},
+    },
+  });
+  assert.deepEqual(outcome.snapshotCommand, {
+    raceId: "race-1",
+    timeZone: "UTC",
+    allowSupersededComplete: true,
+  });
 });
 
 test("deferred mode finishes stateful decisions and returns only an allowlisted snapshot command", async () => {

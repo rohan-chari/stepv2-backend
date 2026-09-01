@@ -6,6 +6,7 @@
 // mitigations are needed — router still last by convention.
 Object.assign(module.exports, require("./notification"));
 Object.assign(module.exports, require("./services/notificationDelivery"));
+Object.assign(module.exports, require("./services/notificationAdmission"));
 Object.assign(module.exports, require("./notificationHandlers"));
 Object.assign(module.exports, require("./eventHandlers"));
 Object.assign(module.exports, require("./notificationCleanup"));

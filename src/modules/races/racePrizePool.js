@@ -122,6 +122,8 @@ function buildRaceMoneyView({
   acceptedCount,
   teamPayoutRecipientCount = null,
   completedTeamPayouts = null,
+  heldPotCoins: suppliedHeldPotCoins = null,
+  fundedProjectionPlayerCount = null,
 }) {
   const rows = participants || race?.participants || [];
   const funded = race?.fundedPrize === true;
@@ -159,10 +161,12 @@ function buildRaceMoneyView({
         : null;
 
   if (!funded) {
-    const heldPotCoins = rows.reduce(
-      (sum, p) => (p.buyInStatus === "HELD" ? sum + (p.buyInAmount || 0) : sum),
-      0
-    );
+    const heldPotCoins = suppliedHeldPotCoins == null
+      ? rows.reduce(
+          (sum, p) => (p.buyInStatus === "HELD" ? sum + (p.buyInAmount || 0) : sum),
+          0
+        )
+      : Math.max(0, Number(suppliedHeldPotCoins) || 0);
     const projectedPotCoins = (race?.potCoins || 0) + heldPotCoins;
     const rawPayouts = computeRacePayouts({
       preset: race?.payoutPreset,
@@ -218,7 +222,9 @@ function buildRaceMoneyView({
     : race?.status === "ACTIVE" &&
         race?.exitActionsEnabled === true &&
         race?.isTeamRace !== true
-      ? activeFundedProjectionPlayerCount(rows, acceptedCount)
+      ? fundedProjectionPlayerCount == null
+        ? activeFundedProjectionPlayerCount(rows, acceptedCount)
+        : Math.max(0, Number(fundedProjectionPlayerCount) || 0)
       : acceptedCount;
   // A positive-step forfeiter keeps the pool size but is never eligible for a
   // tier. Project the tier table over eligible finishers so the UI matches the

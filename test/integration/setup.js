@@ -16,6 +16,7 @@ const TABLES_IN_ORDER = [
   "interstitial_ad_permits",
   "interstitial_ad_caps",
   "notification_schedules",
+  "notification_release_lanes",
   "inbox_delivery_device_attempts",
   "inbox_delivery_outbox",
   "analytics_cleanup_runs",
@@ -50,6 +51,7 @@ const TABLES_IN_ORDER = [
   "race_resolution_delivery_intents",
   "race_resolution_post_tasks",
   "race_placement_transition_jobs",
+  "race_resolution_full_triggers",
   "race_resolution_jobs_v2",
   "race_resolution_jobs",
   "race_admin_commands",
@@ -145,6 +147,12 @@ function assertDisposableDatabase() {
 
 async function cleanDatabase() {
   assertDisposableDatabase();
+  // The shared integration server intentionally survives across cases; clear
+  // process-local read caches when the database fixture is reset so a row from
+  // the preceding case cannot masquerade as current state.
+  require("../../src/modules/users/services/authSessionUserCache").clear();
+  require("../../src/modules/analytics/services/activeAdminMetricsEpochCache")
+    .activeAdminMetricsEpochCache.clear(prisma);
   // TRUNCATE rewrites every relation and index. On the local disposable
   // Postgres volume that is ~25 seconds even when the tables are empty, because
   // this suite has a broad FK graph. Test fixtures create only small row sets,

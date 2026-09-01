@@ -1,6 +1,7 @@
 const HEALTHY_PROFILE = "event_boundary_10000";
 const OUTAGE_PROFILE = "event_provider_outage_10000";
 const PROVISIONING_PROFILE = "event_provisioning_10000";
+const EVENT_OPEN_PROFILE = "event-open-surge";
 
 function boundedIndex(index, count) {
   const total = Number(count);
@@ -61,7 +62,7 @@ function latencyForAttempt(index, count) {
 }
 
 function providerResultForAttempt({ profile, attemptIndex, attemptCount, elapsedMs = 0 }) {
-  if (![HEALTHY_PROFILE, OUTAGE_PROFILE].includes(profile)) {
+  if (![HEALTHY_PROFILE, OUTAGE_PROFILE, EVENT_OPEN_PROFILE].includes(profile)) {
     throw new Error(`provider stub is unavailable for ${profile}`);
   }
   const latencyMs = latencyForAttempt(attemptIndex, attemptCount);
@@ -320,6 +321,7 @@ function aggregateGlobalEventCapacityEvidence(repetitions = []) {
 }
 
 module.exports = {
+  EVENT_OPEN_PROFILE,
   HEALTHY_PROFILE,
   OUTAGE_PROFILE,
   PROVISIONING_PROFILE,

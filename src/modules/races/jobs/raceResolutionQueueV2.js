@@ -56,6 +56,7 @@ const {
 } = require("../services/raceResolutionStepSyncScope");
 const {
   buildRaceScoringDependencyClosure: defaultBuildDependencyClosure,
+  buildClosureFingerprintDigest,
   wouldTrailMineEscalate: defaultWouldTrailMineEscalate,
   TRAIL_MINE_ESCALATION_UNKNOWN,
   CLOSURE_FALLBACK_REASON_VALUES,
@@ -320,6 +321,7 @@ async function resolveDueUmbrellaInterceptionsV2({
 // data. These are aggregate timings only: no ids, payloads, or query text.
 const RACE_RESOLUTION_PHASES = Object.freeze([
   "claimReadiness",
+  "fullTriggerPromotion",
   "claim",
   "planSettings",
   "dependencyClosurePlanner",
@@ -921,6 +923,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         });
     if (!ready) return null;
 
+    // Fold append-only large-race intake into one ordinary FULL generation
+    // before claiming. The promotion is bounded and SKIP LOCKED, so parallel
+    // worker lanes cooperate without making HTTP uploaders contend on the
+    // race-keyed job row.
+    if (!raceId && typeof jobModel.promoteFullScopeTriggers === "function") {
+      await phaseTimer.measure(
+        "fullTriggerPromotion",
+        () => jobModel.promoteFullScopeTriggers({ now: currentTime }),
+      );
+    }
+
     const job = await phaseTimer.measure("claim", () => jobModel.claimNext({
         now: currentTime,
         leaseMs,
@@ -1083,6 +1096,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // Aggregate count only — how many times a closure was turned away at the
       // fence for this claim. Never an id, a total, or a reason string.
       let closureCommittedRejections = 0;
+      let closureFenceRejectionReason = null;
       let sourceInputFenceRejections = 0;
       let activeImpactPersistMs = 0;
       // Source discovery is boundary work, never ordinary score-generation
@@ -1530,27 +1544,34 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           const deadline = closurePlan.validUntil
             ? new Date(closurePlan.validUntil).getTime()
             : null;
-          if (
-            Number(fenced.generation) !== Number(fenced.processingGeneration) ||
-            !fingerprint ||
-            fingerprint.digest !== closurePlan.graphFingerprint ||
-            fingerprint.globalBoundaryScheduleCurrent !== true ||
-            deadline == null ||
-            !Number.isFinite(deadline) ||
-            !Number.isFinite(fenceNow.getTime()) ||
-            fenceNow.getTime() >= deadline ||
+          const currentClosureFingerprint = fingerprint
+            ? buildClosureFingerprintDigest(fingerprint, {
+              participantIds: closurePlan.participantIds,
+              minesActive: closurePlan.minesActive,
+              balanceConfigVersion: currentConfig.version,
+            })
+            : null;
+          const legacyBoundaryRequiresCursor =
+            (fingerprint?.globalEvents || []).some(
+              (event) => event?.scheduleMode === "LEGACY_GLOBAL",
+            );
+          const rejectionReason =
+            !fingerprint ? "fingerprint_unavailable" :
+            currentClosureFingerprint !== closurePlan.closureFingerprint
+              ? "scoped_fingerprint_changed" :
+            legacyBoundaryRequiresCursor &&
+              fingerprint.globalBoundaryScheduleCurrent !== true
+              ? "global_boundary_cursor_stale" :
+            deadline == null || !Number.isFinite(deadline) ||
+              !Number.isFinite(fenceNow.getTime()) || fenceNow.getTime() >= deadline
+              ? "validity_deadline_crossed" :
             dueExpiryOutsideClosureAtFence(
               fingerprint.activeEffects,
               closurePlan.participantIds,
               fenceNow,
-            ) ||
-            (fingerprint.globalEvents || []).some((event) => {
-              const start = new Date(event.startsAt).getTime();
-              const end = new Date(event.endsAt).getTime();
-              return !Number.isFinite(start) || !Number.isFinite(end) ||
-                (start <= fenceNow.getTime() && fenceNow.getTime() < end);
-            })
-          ) {
+            ) ? "due_effect_outside_closure" : null;
+          if (rejectionReason) {
+            closureFenceRejectionReason = rejectionReason;
             closureRejectedAtFence = true;
             return;
           }
@@ -2087,6 +2108,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // write; `false` when a closure ran with the mine question answered no.
         closureEscalatedOnMine,
         closureFenceRejections: closureCommittedRejections,
+        closureFenceRejectionReason,
         placementHandoffGeneration,
         placementHandoffOutcome,
         sourceInputFenceRejections,

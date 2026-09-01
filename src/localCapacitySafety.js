@@ -225,7 +225,7 @@ function assertOutboundDisabled(env = process.env) {
 
 function installLocalNotificationSink(env = process.env) {
   const profile = String(env.CAPACITY_GLOBAL_EVENT_PROFILE || "");
-  if (["event_boundary_10000", "event_provider_outage_10000"].includes(profile)) {
+  if (["event-open-surge", "event_boundary_10000", "event_provider_outage_10000"].includes(profile)) {
     const { buildCapacityProviderSender } = require("./modules/loadTesting/globalEventReliabilityProfiles");
     let firstAttemptAt = null;
     const attemptCount = Number(env.CAPACITY_PROVIDER_ATTEMPT_COUNT) || 12_000;

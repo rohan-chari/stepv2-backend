@@ -1,5 +1,9 @@
 const crypto = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
+const {
+  ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+  lockNotificationAdmissionLane,
+} = require("../../notifications/services/notificationAdmission");
 
 const EVENT_TERMINAL = ["COMPLETED", "SUPPRESSED", "FAILED_TERMINAL"];
 const PROJECTION_TERMINAL = ["COMPLETED", "SUPPRESSED", "FAILED_TERMINAL"];
@@ -329,9 +333,54 @@ async function projectScheduledEntitlementEventsBatch({
   now = new Date(),
   batchSize = 100,
 } = {}) {
-  const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
-  const rows = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
-    `WITH candidate_ids AS MATERIALIZED (
+  const limit = Math.min(500, Math.max(1, Number(batchSize) || 100));
+  const scanLimit = Math.max(500, limit * 5);
+  const projectionLane = "internal:GLOBAL_EVENT_SCHEDULED_PROJECTION";
+  // This producer only creates ADMISSION_PENDING schedules. The statement is
+  // atomic, and admission_sequence is a deterministic hash, so it shares no
+  // mutable lane state with the provider token bucket. Holding that lane row
+  // while validating and projecting 100 JSON envelopes serialized the entire
+  // provider drain behind this comparatively long transaction at event open.
+  // The release/claim consumers remain lane-locked; rows committed after a
+  // claim simply join the deterministic first-attempt queue on its next tick.
+  const rows = await prisma.$transaction(async (tx) => {
+    const [gate] = await tx.$queryRawUnsafe(
+      `SELECT pg_try_advisory_xact_lock(
+         hashtextextended('global-event-scheduled-entitlement-projector-v1',0)
+       ) AS acquired`,
+    );
+    // Keep the expensive JSON validation/projection statement out of the
+    // loser's query plan entirely. A gate CTE still let Postgres plan and scan
+    // the candidate relation before learning that the advisory lock was lost.
+    if (!gate?.acquired) return [{ processed: 0 }];
+    await tx.$executeRawUnsafe(
+      `INSERT INTO notification_release_lanes (
+         admission_class,next_token_at,created_at,updated_at
+       ) VALUES ($1,$2,$2,$2)
+       ON CONFLICT (admission_class) DO NOTHING`,
+      projectionLane,
+      now,
+    );
+    const [lane] = await tx.$queryRawUnsafe(
+      `SELECT next_token_at AS "nextTokenAt"
+         FROM notification_release_lanes
+        WHERE admission_class=$1
+        FOR UPDATE`,
+      projectionLane,
+    );
+    if (lane?.nextTokenAt && new Date(lane.nextTokenAt).getTime() > now.getTime()) {
+      return [{ processed: 0 }];
+    }
+    await tx.$executeRawUnsafe(
+      `UPDATE notification_release_lanes
+          SET next_token_at=$2::timestamptz+interval '1 second',
+              updated_at=$2::timestamptz
+        WHERE admission_class=$1`,
+      projectionLane,
+      now,
+    );
+    return tx.$queryRawUnsafe(
+    `WITH due_ids AS MATERIALIZED (
        SELECT event.id
          FROM domain_event_outbox event
         WHERE event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
@@ -339,7 +388,14 @@ async function projectScheduledEntitlementEventsBatch({
           AND event.status IN ('PENDING','RETRY','EXPANDING')
           AND event.available_at <= $1
           AND (event.lease_until IS NULL OR event.lease_until <= $1)
-          AND event.payload ?& ARRAY[
+        ORDER BY event.available_at ASC,event.occurred_at ASC,event.id ASC
+        LIMIT $3
+        FOR UPDATE SKIP LOCKED
+     ), candidate_ids AS MATERIALIZED (
+       SELECT event.id
+         FROM domain_event_outbox event
+         JOIN due_ids due ON due.id=event.id
+        WHERE event.payload ?& ARRAY[
             'eventId','entitlementId','userId','startsAt','endsAt','scheduleRevision'
           ]
           AND jsonb_typeof(event.payload->'eventId')='string'
@@ -408,7 +464,8 @@ async function projectScheduledEntitlementEventsBatch({
      ), upserted_schedules AS (
        INSERT INTO notification_schedules (
          id,recipient_user_id,type,title,body,payload,delivery_key,
-         available_at,expires_at,status,source_ref,source_revision,created_at,updated_at
+         available_at,expires_at,status,source_ref,source_revision,
+         admission_class,admission_sequence,created_at,updated_at
        )
        SELECT gen_random_uuid()::text,record.recipient_id,'GLOBAL_EVENT_STARTED',
               record.multiplier::text || 'x STEPS EVENT',
@@ -421,9 +478,13 @@ async function projectScheduledEntitlementEventsBatch({
               ),
               'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
                 (record.payload->>'eventId'),
-              (record.payload->>'startsAt')::timestamp,
-              (record.payload->>'endsAt')::timestamp,
-              'PENDING',record.payload->>'entitlementId',record.source_revision,$1,$1
+              (record.payload->>'startsAt')::timestamptz,
+              (record.payload->>'endsAt')::timestamptz-interval '60 seconds',
+              'ADMISSION_PENDING',record.payload->>'entitlementId',record.source_revision,$4,
+              (('x'||substr(encode(digest(
+                'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
+                  (record.payload->>'eventId'),'sha256'),'hex'),1,16))::bit(64)::bigint & 9223372036854775807),
+              $1,$1
          FROM records record
        ON CONFLICT (recipient_user_id,delivery_key) DO UPDATE
          SET available_at=EXCLUDED.available_at,
@@ -434,9 +495,13 @@ async function projectScheduledEntitlementEventsBatch({
              type=EXCLUDED.type,
              source_ref=EXCLUDED.source_ref,
              source_revision=EXCLUDED.source_revision,
+             admission_class=EXCLUDED.admission_class,
+             admission_sequence=EXCLUDED.admission_sequence,
+             status=CASE WHEN notification_schedules.status='PENDING'
+                         THEN 'ADMISSION_PENDING' ELSE notification_schedules.status END,
              updated_at=EXCLUDED.updated_at
-       WHERE notification_schedules.status='PENDING'
-         AND notification_schedules.source_revision < EXCLUDED.source_revision
+       WHERE notification_schedules.status IN ('PENDING','ADMISSION_PENDING')
+         AND notification_schedules.source_revision <= EXCLUDED.source_revision
        RETURNING id
      ), completed_events AS (
        UPDATE domain_event_outbox event
@@ -448,8 +513,9 @@ async function projectScheduledEntitlementEventsBatch({
        RETURNING event.id
      )
      SELECT count(*)::int AS processed FROM completed_events`,
-    now, limit,
-  ));
+      now, limit, scanLimit, ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+    );
+  });
   return { processed: Number(rows[0]?.processed || 0) };
 }
 

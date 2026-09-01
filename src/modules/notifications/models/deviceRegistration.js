@@ -1,9 +1,26 @@
 const { prisma: defaultPrisma } = require("../../../db");
+const {
+  deviceRegistrationReadBatch: defaultDeviceRegistrationReadBatch,
+} = require("../services/deviceRegistrationReadBatch");
+const {
+  deviceRegistrationCreateBatch: defaultDeviceRegistrationCreateBatch,
+} = require("../services/deviceRegistrationCreateBatch");
 
 const ACTIVE = "ACTIVE";
 const MAX_ACTIVE_INSTALLATIONS = 10;
+// Registration is an idempotent acknowledgement, while lastRegisteredAt is a
+// coarse liveness signal used by cleanup. Refreshing an identical row more
+// than once per window adds no correctness and turns every app launch into a
+// lock-heavy write transaction.
+const UNCHANGED_REGISTRATION_REFRESH_MS = 6 * 60 * 60_000;
 
 function buildDeviceRegistrationModel(prisma = defaultPrisma) {
+  const registrationReadBatch = prisma === defaultPrisma
+    ? defaultDeviceRegistrationReadBatch
+    : null;
+  const registrationCreateBatch = prisma === defaultPrisma
+    ? defaultDeviceRegistrationCreateBatch
+    : null;
   async function lockIdentities(tx, identities) {
     for (const identity of [...new Set(identities)].sort()) {
       await tx.$executeRawUnsafe(
@@ -56,6 +73,51 @@ function buildDeviceRegistrationModel(prisma = defaultPrisma) {
     lifecycleEnabled = false,
   }) {
     const current = new Date(now);
+    const unchangedWhere = {
+        userId,
+        token,
+        platform,
+        installationId,
+        providerEnvironment,
+        lastRegisteredAt: {
+          gte: new Date(current.getTime() - UNCHANGED_REGISTRATION_REFRESH_MS),
+        },
+        ...(lifecycleEnabled
+          ? { status: ACTIVE }
+          : { OR: [{ status: ACTIVE }, { status: null }] }),
+        ...(adminMetricsOpenCapable
+          ? {
+              adminMetricsOpenCapable: true,
+              adminMetricsOpenEpochId,
+            }
+          : {}),
+      };
+    if (lifecycleEnabled && registrationCreateBatch) {
+      const resolved = await registrationCreateBatch.tryCreate({
+        prisma,
+        registration: {
+          userId,
+          token,
+          platform,
+          installationId,
+          providerEnvironment,
+          now: current,
+          unchangedAfter: new Date(
+            current.getTime() - UNCHANGED_REGISTRATION_REFRESH_MS,
+          ),
+          adminMetricsOpenCapable,
+          adminMetricsOpenEpochId: adminMetricsOpenCapable
+            ? adminMetricsOpenEpochId
+            : null,
+        },
+      });
+      if (resolved) return resolved;
+    } else {
+      const unchanged = registrationReadBatch
+        ? await registrationReadBatch.find({ prisma, where: unchangedWhere })
+        : await prisma.deviceToken.findFirst({ where: unchangedWhere });
+      if (unchanged) return unchanged;
+    }
     if (!lifecycleEnabled) {
       return prisma.deviceToken.upsert({
         where: { userId_token: { userId, token } },
@@ -101,18 +163,12 @@ function buildDeviceRegistrationModel(prisma = defaultPrisma) {
         : [];
       await lockUsers(tx, [userId, ...tokenRows.map((row) => row.userId), ...installationRows.map((row) => row.userId)]);
 
-      // Re-read after all identity and user locks. The raw-token row is the
-      // compatibility canonical row while (userId,token) remains unique.
-      const tokens = await tx.deviceToken.findMany({
-        where: { platform, token },
-        orderBy: [{ lastRegisteredAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
-      });
-      const installs = installationId
-        ? await tx.deviceToken.findMany({
-            where: { platform, installationId },
-            orderBy: [{ lastRegisteredAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
-          })
-        : [];
+      // Every ownership mutation takes the same token/installation advisory
+      // locks, so these rows cannot change while we wait for the user locks.
+      // Re-reading both fields here doubled the hottest launch query count
+      // without strengthening the ownership fence.
+      const tokens = tokenRows;
+      const installs = installationRows;
       // Preserve the retained global (userId,token) compatibility key: if the
       // destination already owns a legacy row for this raw token, that row must
       // remain canonical even when another user's duplicate is newer. Moving a
@@ -203,6 +259,7 @@ const DeviceRegistration = buildDeviceRegistrationModel();
 module.exports = {
   ACTIVE,
   MAX_ACTIVE_INSTALLATIONS,
+  UNCHANGED_REGISTRATION_REFRESH_MS,
   buildDeviceRegistrationModel,
   DeviceRegistration,
 };

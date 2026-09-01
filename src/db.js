@@ -67,8 +67,19 @@ const connectionString = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
 pg.types.setTypeParser(1114, (str) => new Date(str + 'Z'));
 pg.defaults.parseInputDatesAsUTC = true;
 
+const databaseApplicationName = [
+  "steps",
+  process.env.STEPS_PROCESS_ROLE || "all",
+  process.env.NODE_APP_INSTANCE == null ? "0" : String(process.env.NODE_APP_INSTANCE),
+].join("-").replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 63);
+
 const pool = new pg.Pool({
   connectionString,
+  // Keep database-session timestamp casts deterministic. The adapter already
+  // parses legacy timestamp-without-time-zone columns as UTC; an explicit UTC
+  // session is also required for the new durable timestamptz admission lane so
+  // Prisma never applies the host's local offset twice.
+  options: `-c timezone=UTC -c application_name=${databaseApplicationName}`,
   max: databasePoolMax,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
@@ -82,7 +93,29 @@ let poolWaitCount = 0;
 let poolWaitMsMax = 0;
 let poolConnectFailures = 0;
 const poolWaitSamples = [];
-const originalPoolConnect = pool.connect.bind(pool);
+const rawPoolConnect = pool.connect.bind(pool);
+const processRole = process.env.STEPS_PROCESS_ROLE || "all";
+let connectionBulkhead = null;
+let basePoolConnect = rawPoolConnect;
+if (processRole === "http" && databasePoolMax >= 3) {
+  const {
+    createDatabaseConnectionBulkhead,
+  } = require("./shared/database/databaseConnectionBulkhead");
+  const {
+    isStepAdmissionActive,
+  } = require("./shared/observability/stepTelemetryContext");
+  connectionBulkhead = createDatabaseConnectionBulkhead({
+    connect: () => rawPoolConnect(),
+    maximum: databasePoolMax,
+    // Preserve four connections for launch reads under step-ingestion pressure.
+    // When no step transaction is waiting, the bulkhead lends all ten to the
+    // rest of the application.
+    maximumStep: databasePoolMax - 4,
+    isStep: isStepAdmissionActive,
+  });
+  basePoolConnect = connectionBulkhead.connect;
+  pool.bulkheadSnapshot = connectionBulkhead.snapshot;
+}
 pool.connect = (callback) => {
   const started = process.hrtime.bigint();
   const record = () => {
@@ -98,13 +131,13 @@ pool.connect = (callback) => {
     }
   };
   if (typeof callback === "function") {
-    return originalPoolConnect((error, client, release) => {
+    return basePoolConnect((error, client, release) => {
       record();
       if (error) poolConnectFailures += 1;
       callback(error, client, release);
     });
   }
-  return originalPoolConnect().then((client) => {
+  return basePoolConnect().then((client) => {
     record();
     return client;
   }, (error) => {
@@ -122,7 +155,10 @@ function getDbPoolPressure() {
   return {
     total: pool.totalCount,
     idle: pool.idleCount,
-    waiting: pool.waitingCount,
+    waiting: Math.max(
+      pool.waitingCount,
+      connectionBulkhead?.snapshot().queued || 0,
+    ),
     max: databasePoolMax,
     waitMsTotal: poolWaitMsTotal,
     waitCount: poolWaitCount,

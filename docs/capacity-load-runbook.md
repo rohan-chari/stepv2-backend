@@ -24,8 +24,8 @@ destroys the environment.
   categorically rejected.
 - Exact start confirmation bound to both the run id and snapshot SHA-256.
 - Two Node HTTP workers sharing port 3000, plus dedicated resolution and cron
-  processes on loopback ports 3010 and 3011. Each process has a 20-connection
-  application pool, matching the production PM2 topology.
+  processes on loopback ports 3010 and 3011. The required `role-budget`
+  profile is exact: HTTP 10 + HTTP 10 + resolution 8 + cron 4 = 32 total.
 - Redis 7.0.15 inside Lima, bound to loopback with password authentication,
   100 MB max memory, `allkeys-lru`, and persistence disabled.
 - Synthetic fixture creation, signed run-only auth tokens, disposable writes,
@@ -89,9 +89,9 @@ destroys the environment.
   report's current aggregate `achieved` value: that value currently includes
   coverage traffic and post-run race-resolution polling. Use the sustained
   request count separately when comparing capacity runs.
-- Pool metrics are currently observed through the worker that answers the
-  health sample. The configured pool is 20 per worker and 40 total; the report
-  does not yet emit a combined two-worker pool series.
+- Health sampling rotates fresh connections across the two HTTP workers and
+  also samples the resolution and cron roles, preserving the exact 10/10/8/4
+  process census in the metrics artifact.
 - The local target uses the same Redis and dedicated resolution/cron process
   topology as production. The queue remains database-backed, and all local
   containers are destroyed after the run.
@@ -155,6 +155,116 @@ capacity database, scrubbed before the backend starts, never used as a test
 target directly, and removed with the capacity environment after evidence is
 retained.
 
+## Event-start surge deployment gate
+
+Use the `event-open-surge` profile with `database_pool_profile` fixed to
+`role-budget`. It creates 10,000 synthetic East Coast users, three active
+races, the real entitlement/domain-event/schedule boundary, deterministic
+provider delivery, and a complete app-open session graph. One offered session
+performs auth, token registration, activation analytics, exactly one observed
+step-upload path in the 18/18/64 legacy-samples/current mix, and all Home,
+discovery, race-list, Inbox, progress, and bootstrap reads. Offered and
+completed sessions are recorded separately; a dropped session fails the run.
+
+Run each scenario from a newly restored/scrubbed environment and a unique run
+id. Never reuse or overwrite an artifact:
+
+```sh
+# Sustained: 100 complete sessions/s for five minutes.
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <sustained-run-id>
+npm run load-test -- run --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <sustained-run-id> \
+  --users 10000 --arrival-rate 100 --duration 5m --concurrency 1000
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <sustained-run-id>
+
+# Shock: 200 complete sessions/s for one minute.
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <shock-run-id>
+npm run load-test -- run --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <shock-run-id> \
+  --users 10000 --arrival-rate 200 --duration 1m --concurrency 1000
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <shock-run-id>
+```
+
+The deployment gate uses genuine k6 constant-arrival-rate traffic. The
+orchestrator creates the real 10,000-user entitlement fixture in the already
+started disposable environment, waits for the boundary, runs the complete app
+session graph, injects the selected fault 30 seconds into the wave, writes an
+immutable `.fault.json`, and cleans up only its synthetic manifest. It refuses
+anything except `CAPACITY_MODE=true`, outbound-disabled
+`steps_tracker_capacity`, profile `event-open-surge`, and the `role-budget`
+10/10/8/4 pool profile.
+
+Run every command below from the same run-bound shell used to start that
+disposable environment. It must still contain `CAPACITY_DB_PASSWORD`, the
+started run's random `CAPACITY_DB_MARKER`, `CAPACITY_AUTH_SECRET`, and the
+snapshot/scrub secrets; the orchestrator fails closed before loading the
+database client if any run-bound guard is absent or mismatched.
+
+```sh
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <headroom-run-id>
+CAPACITY_MODE=true CAPACITY_OUTBOUND_DISABLED=true \
+  npm run load-test:k6:event-open -- --config docs/capacity-load.config.json \
+  --run-id <headroom-run-id> --scenario headroom --fault baseline
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <headroom-run-id>
+
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <redis-run-id>
+CAPACITY_MODE=true CAPACITY_OUTBOUND_DISABLED=true \
+  npm run load-test:k6:event-open -- --config docs/capacity-load.config.json \
+  --run-id <redis-run-id> --scenario sustained --fault redis-outage \
+  --headroom-evidence results/<headroom-run-id>.headroom.verification.json
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <redis-run-id>
+
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <restart-run-id>
+CAPACITY_MODE=true CAPACITY_OUTBOUND_DISABLED=true \
+  npm run load-test:k6:event-open -- --config docs/capacity-load.config.json \
+  --run-id <restart-run-id> --scenario sustained --fault worker-restart \
+  --headroom-evidence results/<headroom-run-id>.headroom.verification.json
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <restart-run-id>
+
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <shock-run-id>
+CAPACITY_MODE=true CAPACITY_OUTBOUND_DISABLED=true \
+  npm run load-test:k6:event-open -- --config docs/capacity-load.config.json \
+  --run-id <shock-run-id> --scenario shock --fault baseline \
+  --headroom-evidence results/<headroom-run-id>.headroom.verification.json
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile event-open-surge --run-id <shock-run-id>
+```
+
+The headroom scenario is 140 complete sessions/second for five minutes, which
+is the required measured 40% reserve above the 100/session sustained target.
+The Redis scenario stops the exact disposable Redis container for 60 seconds
+and proves Redis plus backend health recovered; the restart scenario signals
+only the disposable backend and proves health returned. Retain each k6 summary,
+fixture manifest, database verification report, and fault artifact.
+
+Deployment remains blocked unless all four runs pass their built-in gates:
+every offered session completes; interactive p95/p99 are below 500 ms/1 s;
+sync-v2 is below 750 ms/1.5 s; legacy steps are below 2 s/5 s; aggregate
+5xx/timeout/unexpected rate is below 0.1%; pool wait p99 is below 50 ms with
+zero checkout failures; resolution p95 lag is below 30 seconds and drains
+within five minutes; and the four process memory/census checks pass. Retain the
+`.json`, `.txt`, and `.metrics.json` artifacts plus the event-surge structured
+logs. The permanent provider-admission candidate is 6,000 attempts/minute
+(100/second, exact 10,000-microsecond spacing); 12,000 production-shaped
+device attempts therefore fit the approved two-minute window. Changing that
+rate or any 10/10/8/4 pool ceiling is a reviewed code/config change, never a
+runtime tuning action.
+
+This workflow does not authorize a production dump, deploy, restart, pool
+change, cron stop, or database mutation. Each production operation still
+requires fresh explicit authorization.
+
 ## Current findings from today
 
 - A single worker at 40 offered RPS only achieved about 13.25 RPS, with the
@@ -172,18 +282,9 @@ retained.
   active-race bootstrap hydration. See the endpoint code before changing pool
   size.
 
-## Not yet automated
+## Still operator-controlled
 
-The workflow is reusable but not literally natural-language instant. A person
-still has to edit the run config, confirm the printed manifest, and start the
-load command. The following are the next useful automation items:
-
-1. Add a small command that accepts `run-id`, users, RPS, duration, and config
-   path, writes a local run config, starts, runs, captures reports, and destroys
-   in one guarded flow.
-2. Split sustained traffic, coverage traffic, and queue-drain traffic in the
-   result schema so achieved RPS is directly comparable to offered RPS.
-3. Aggregate health/pool telemetry from both workers and label samples by
-   `NODE_APP_INSTANCE`.
-4. Add Postgres slow-query capture and `EXPLAIN (ANALYZE, BUFFERS)` collection
-   for the database-heavy endpoint set.
+Starting and destroying the disposable capacity environment remains an
+explicit operator action so snapshot scope and the printed scrub manifest are
+confirmed before traffic. Fault timing, recovery checks, and evidence capture
+inside a started run are automated by the k6 workflow above.

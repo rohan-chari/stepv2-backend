@@ -16,6 +16,7 @@ const {
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 const { buildViewerDisplayPlacementMap } = require("../services/viewerDisplayPlacements");
 const defaultRaceListCache = require("../services/raceListCache");
+const defaultRaceProgressPageProjection = require("../services/raceProgressPageProjection");
 const {
   serializeTeamPayoutStamp,
 } = require("../services/teamWinnerReward");
@@ -150,19 +151,103 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       options.raceListCache.isEnabled());
   if (useRaceListCache) {
     const cache = options.raceListCache || defaultRaceListCache;
-    const stable = await cache.getStableMembership({
-      userId,
-      variant: options.raceListVariant || "legacy",
-      load: () => Race.findRaceListStableForUser(
+    const boundedLaunch = options.compactRaceList === true &&
+      typeof Race.findBoundedRaceListForUser === "function";
+    const stable = boundedLaunch
+      ? { races: await Race.findBoundedRaceListForUser(
+          userId, options.extraCompletedRaceIds || []), source: "bounded" }
+      : await cache.getStableMembership({
+          userId,
+          variant: options.raceListVariant || "legacy",
+          load: () => Race.findRaceListStableForUser(
+            userId,
+            options.extraCompletedRaceIds || [],
+          ),
+        });
+    let sqlResult = null;
+    const pageProjection = options.raceProgressPageProjection ||
+      defaultRaceProgressPageProjection;
+    // This is an internal read-plan optimization, not a compact-response
+    // feature: frozen clients need the same legacy JSON but must not force a
+    // 10k-row rank on every launch. The projection supplies exactly the same
+    // viewer + leader summary the SQL path constructs for these safe races.
+    const boundedCandidates = stable.races.filter((race) =>
+        race?.status === "ACTIVE" && race.isTeamRace !== true &&
+        race.powerupsEnabled !== true && Number(race.buyInAmount || 0) === 0 &&
+        Number(race.potCoins || 0) === 0);
+    if (boundedCandidates.length > 0 &&
+        typeof RaceParticipant.findViewerRowsForRaces === "function") {
+      const embeddedViewerRows = boundedCandidates
+        .map((race) => race._viewerParticipant).filter(Boolean);
+      const viewerRows = embeddedViewerRows.length === boundedCandidates.length
+        ? embeddedViewerRows
+        : await RaceParticipant.findViewerRowsForRaces(
+            userId, boundedCandidates.map((race) => race.id));
+      const viewerByRaceId = new Map(viewerRows.map((row) => [row.raceId, row]));
+      const pages = await Promise.all(boundedCandidates.map((race) =>
+        pageProjection.readRaceProgressPageProjection({
+          raceId: race.id, offset: 0, limit: 1, requesterUserId: userId,
+          scoringTimeZone: race.timezone || "UTC",
+        }).catch(() => null)));
+      const projectedByRaceId = new Map();
+      boundedCandidates.forEach((race, index) => {
+        const page = pages[index];
+        if (!page) return;
+        const viewer = viewerByRaceId.get(race.id) || null;
+        const leader = page.rows[0] || null;
+        projectedByRaceId.set(race.id, {
+          ...race,
+          participants: [viewer, leader && {
+            ...leader,
+            status: "ACCEPTED",
+            id: leader.participantId,
+          }].filter((row, position, list) => row &&
+            list.findIndex((candidate) => candidate?.id === row.id) === position),
+          _listSummary: {
+            acceptedCount: page.total,
+            rankRoster: [],
+            viewerPosition: page.requesterRow?.placement ??
+              page.rows.find((row) => row.userId === userId)?.placement ?? null,
+            leaderUserId: leader?.userId || null,
+            leaderParticipantId: leader?.participantId || null,
+            teamA: { memberCount: 0, totalSteps: 0 },
+            teamB: { memberCount: 0, totalSteps: 0 },
+            teamPayoutRecipientCount: 0,
+            completedPayouts: [],
+            totalsAsOf: page.asOf,
+          },
+        });
+      });
+      if (projectedByRaceId.size > 0) {
+        const residualRaces = stable.races.filter((race) =>
+          !projectedByRaceId.has(race.id));
+        const residual = residualRaces.length
+          ? await Race.findSqlSummariesForUser(
+              userId,
+              options.extraCompletedRaceIds || [],
+              { stableRaces: residualRaces, stableSource: stable.source },
+            )
+          : { ambiguousFinisherOrder: false, races: [] };
+        if (residual.ambiguousFinisherOrder !== true) {
+          const residualByRaceId = new Map(
+            residual.races.map((race) => [race.id, race]),
+          );
+          sqlResult = {
+            ambiguousFinisherOrder: false,
+            races: stable.races.map((race) =>
+              projectedByRaceId.get(race.id) || residualByRaceId.get(race.id))
+              .filter(Boolean),
+          };
+        }
+      }
+    }
+    if (!sqlResult) {
+      sqlResult = await Race.findSqlSummariesForUser(
         userId,
         options.extraCompletedRaceIds || [],
-      ),
-    });
-    const sqlResult = await Race.findSqlSummariesForUser(
-      userId,
-      options.extraCompletedRaceIds || [],
-      { stableRaces: stable.races, stableSource: stable.source },
-    );
+        { stableRaces: stable.races, stableSource: stable.source },
+      );
+    }
     // The legacy comparator has one anomalous duplicate-finisher case that no
     // total SQL order can reproduce. This is the sole deliberate dual-read
     // fallback; SQL errors are allowed to fail the request and never retry.

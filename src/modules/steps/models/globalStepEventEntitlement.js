@@ -90,6 +90,10 @@ async function findEligibleByRace({
 }
 
 async function findViewerActive({ userId, raceId = null, now = new Date(), client = prisma }) {
+  if (client === prisma) {
+    return require("../services/viewerActiveEventReadBatch")
+      .viewerActiveEventReadBatch.load({ prisma: client, userId, raceId, now });
+  }
   const at = new Date(now);
   const entitlement = await client.globalStepEventEntitlement.findFirst({
     where: {

@@ -25,9 +25,9 @@ async function buildRaceResolutionInputFingerprint({
     client.$queryRawUnsafe(
       `SELECT jsonb_build_object(
           'id', race.id,
-          'status', race.status,
-          'startedAt', race.started_at,
-          'endsAt', race.ends_at,
+          'status', UPPER(race.status::text),
+          'startedAt', EXTRACT(EPOCH FROM race.started_at) * 1000,
+          'endsAt', EXTRACT(EPOCH FROM race.ends_at) * 1000,
           'timezone', race.timezone,
           'targetSteps', race.target_steps,
           'timeBased', race.time_based,
@@ -39,18 +39,19 @@ async function buildRaceResolutionInputFingerprint({
         COALESCE(jsonb_agg(jsonb_build_object(
           'id', participant.id,
           'userId', participant.user_id,
-          'status', participant.status,
+          'status', UPPER(participant.status::text),
           'totalSteps', participant.total_steps,
           'rawSteps', participant.raw_steps,
           'bonusSteps', participant.bonus_steps,
           'maxBonusSteps', participant.max_bonus_steps,
           'nextBoxAtSteps', participant.next_box_at_steps,
           'powerupSlots', participant.powerup_slots,
-          'finishedAt', participant.finished_at,
+          'finishedAt', EXTRACT(EPOCH FROM participant.finished_at) * 1000,
           'finishTotalSteps', participant.finish_total_steps,
-          'forfeitedAt', participant.forfeited_at,
-          'joinedAt', participant.joined_at,
-          'team', participant.team
+          'forfeitedAt', EXTRACT(EPOCH FROM participant.forfeited_at) * 1000,
+          'joinedAt', EXTRACT(EPOCH FROM participant.joined_at) * 1000,
+          'team', participant.team,
+          'totalsUpdatedAt', EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000
         ) ORDER BY participant.id) FILTER (WHERE participant.id IS NOT NULL), '[]'::jsonb)
           AS participants
        FROM races race
@@ -228,6 +229,11 @@ async function buildRaceResolutionInputFingerprint({
     // digested; returning them only widens what callers can READ off the
     // existing result.
     participants: raceRow.participants,
+    // Internal closure-fence input. The full display-artifact digest above is
+    // intentionally race-wide; the dependency worker needs the normalized
+    // per-user generations separately so unrelated uploaders can be excluded
+    // from a bounded closure fence without inventing a second database read.
+    inputs: normalizedInputs,
   };
 }
 

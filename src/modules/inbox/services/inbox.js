@@ -118,9 +118,14 @@ async function createInboxAlert({
 }
 
 async function invalidateInboxUnread(userId) {
-  if (!userId) return;
+  return invalidateInboxUnreadMany(userId ? [userId] : []);
+}
+
+async function invalidateInboxUnreadMany(userIds) {
+  const unique = [...new Set((userIds || []).filter(Boolean))];
+  if (!unique.length) return;
   await derivedCache.invalidate({
-    keys: [cacheKeys.homeInboxUnread(userId)],
+    keys: unique.map((userId) => cacheKeys.homeInboxUnread(userId)),
     prefix: cacheKeys.PREFIX.HOME_INBOX_UNREAD,
   });
 }
@@ -170,5 +175,5 @@ function beforeCursor(cursor) {
 
 module.exports = {
   RETENTION_MS, expiryFrom, createInboxAlert, decodeCursor, encodeCursor,
-  parseLimit, beforeCursor, invalidateInboxUnread,
+  parseLimit, beforeCursor, invalidateInboxUnread, invalidateInboxUnreadMany,
 };

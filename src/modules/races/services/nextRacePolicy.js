@@ -1,5 +1,8 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { withAdvisoryLock } = require("../../../shared/db/withAdvisoryLock");
+const {
+  liveUserCreatedRaceReadBatch,
+} = require("./liveUserCreatedRaceReadBatch");
 
 const FEATURE = "next_race_cta";
 const QUICK_SOURCE = "QUICK_CREATE";
@@ -40,6 +43,9 @@ function isSupportedQuickConfig(input) {
 
 async function hasLiveUserCreatedRace(userId, { prisma = defaultPrisma } = {}) {
   if (!userId) return false;
+  if (prisma === defaultPrisma) {
+    return liveUserCreatedRaceReadBatch.hasLive({ prisma, userId });
+  }
   const row = await prisma.raceParticipant.findFirst({
     where: {
       userId,

@@ -786,6 +786,10 @@ function buildAppSettings(dependencies = {}) {
       });
     }
     cache = null; // bust so this process serves the new value immediately
+    if (key === "adminMetricsV2TelemetryEnabled") {
+      require("../../modules/analytics/services/activeAdminMetricsEpochCache")
+        .activeAdminMetricsEpochCache.clear(prisma);
+    }
     // C1 invalidation site (spec §5 Phase B): delete the shared copy and tell
     // every peer worker to bust its own in-process copy. Invalidate-only — we
     // never write the new value into Redis from a mutation path (§3).
@@ -823,6 +827,10 @@ function buildAppSettings(dependencies = {}) {
       create: { key: ACTIVE_COMPETITION_LIMIT_KEY, value },
     });
     cache = null;
+    if (Object.prototype.hasOwnProperty.call(values, "adminMetricsV2TelemetryEnabled")) {
+      require("../../modules/analytics/services/activeAdminMetricsEpochCache")
+        .activeAdminMetricsEpochCache.clear(prisma);
+    }
     try {
       const invalidated = await derivedCache.invalidate({
         keys: [cacheKeys.appSettingsKey],
@@ -937,6 +945,8 @@ function buildAppSettings(dependencies = {}) {
     if (unsubscribe) return unsubscribe;
     unsubscribe = derivedCache.onInvalidate(cacheKeys.PREFIX.APP_SETTINGS, () => {
       cache = null;
+      require("../../modules/analytics/services/activeAdminMetricsEpochCache")
+        .activeAdminMetricsEpochCache.clear(prisma);
     });
     return unsubscribe;
   }

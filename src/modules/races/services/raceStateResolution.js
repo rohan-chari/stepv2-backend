@@ -1409,13 +1409,17 @@ function buildResolveRaceState(dependencies = {}) {
           "globalEvents",
           () => globalStepEventModel.findEligibleByRace({
             raceId: race.id,
-            userIds: acceptedParticipants.map((participant) => participant.userId),
+            // A dependency-closure run scores only its bounded participant
+            // set. Event entitlement is user-local, so loading eligibility for
+            // the other 9,999 members adds no scoring input and turns an O(C)
+            // resolution back into O(field size) during the daily event.
+            userIds: scoredParticipants.map((participant) => participant.userId),
             rangeStart: race.startedAt,
             rangeEnd: currentTime,
           })
         );
         const seen = new Map();
-        for (const participant of acceptedParticipants) {
+        for (const participant of scoredParticipants) {
           for (const event of eventsForUser(eventsByUserId, participant.userId)) {
             seen.set(`${event.entitlementId || event.id}:${participant.userId}`, event);
           }

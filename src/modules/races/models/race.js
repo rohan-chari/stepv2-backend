@@ -1,5 +1,27 @@
 const { Prisma } = require("@prisma/client");
+const {
+  raceSqlSummaryReadBatch,
+} = require("../services/raceSqlSummaryReadBatch");
 const { prisma } = require("../../../db");
+const { raceListReadBatch } = require("../services/raceListReadBatch");
+const userPresentationCache = require("../../social/services/userPresentationCache");
+
+async function hydrateRaceListPeople(races, presentationCache = userPresentationCache) {
+  const rows = Array.isArray(races) ? races : [];
+  const ids = [...new Set(rows.flatMap((race) => [
+    race?.creatorId,
+    race?.winnerUserId,
+  ]).filter(Boolean))];
+  if (ids.length === 0) {
+    return rows.map((race) => ({ ...race, creator: null, winner: null }));
+  }
+  const people = await presentationCache.getMany(ids, true);
+  return rows.map((race) => ({
+    ...race,
+    creator: people.get(race.creatorId) ?? null,
+    winner: people.get(race.winnerUserId) ?? null,
+  }));
+}
 
 // The cosmetic hydration subtree: participant -> user -> equipped cosmetics ->
 // shop item render metadata. Four Prisma queries and the dominant cost of any
@@ -100,8 +122,6 @@ const raceListStableSelect = {
   seededBucketId: true,
   createdAt: true,
   updatedAt: true,
-  creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-  winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
 };
 
 // ── Paged race-detail read plan ───────────────────────────────────────────────
@@ -834,9 +854,47 @@ const Race = {
     const completedById = new Map(
       [...completed, ...injectedCompleted].map((race) => [race.id, race]),
     );
-    return [...current, ...completedById.values()].sort(
+    return hydrateRaceListPeople([...current, ...completedById.values()].sort(
       (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt),
-    );
+    ));
+  },
+
+  // Compact launch path: one participant-indexed query returns both race
+  // membership and the viewer fields needed by the list overlay. The shared
+  // page projection supplies race-wide counts/rank/leader, so a cold app open
+  // never runs the 10k-roster SQL summary or duplicate membership queries.
+  async findBoundedRaceListForUser(userId, extraCompletedRaceIds = []) {
+    const select = {
+        id: true, raceId: true, userId: true, status: true, placement: true,
+        favoritedAt: true, buyInStatus: true, payoutCoins: true,
+        resultsSeenAt: true, inviteExpiresAt: true, team: true,
+        forfeitedAt: true,
+        race: { select: raceListStableSelect },
+      };
+    const rows = await raceListReadBatch.loadRows({
+      prisma, userId, select,
+    });
+    const current = [];
+    const completed = [];
+    for (const row of rows) {
+      if (!row.race) continue;
+      const race = { ...row.race, _viewerParticipant: {
+        id: row.id, raceId: row.raceId, userId: row.userId,
+        status: row.status, placement: row.placement,
+        favoritedAt: row.favoritedAt, buyInStatus: row.buyInStatus,
+        payoutCoins: row.payoutCoins, resultsSeenAt: row.resultsSeenAt,
+        inviteExpiresAt: row.inviteExpiresAt, team: row.team,
+        forfeitedAt: row.forfeitedAt,
+      } };
+      if (race.status === "COMPLETED") completed.push(race);
+      else current.push(race);
+    }
+    completed.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+    const injected = new Set(extraCompletedRaceIds || []);
+    const selectedCompleted = completed.filter((race, index) =>
+      index < 10 || injected.has(race.id));
+    return hydrateRaceListPeople([...current, ...selectedCompleted].sort(
+      (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
   },
 
   // Lean variant of findForUser for the GET /races list summaries (Phase B1).
@@ -986,7 +1044,16 @@ const Race = {
     }
     const ids = races.map((race) => race.id);
 
-    const rows = await prisma.$queryRaw`
+    const raceSetKey = [...ids].sort().join("\u0000");
+    const rows = await raceSqlSummaryReadBatch.load({
+      prisma,
+      raceSetKey,
+      userId,
+      execute: async (viewerUserIds) => {
+        // Rank the shared roster once for this race set. Viewer-specific
+        // participant rows are fetched separately below so Postgres does not
+        // send the (potentially 10k-entry) rankRoster once per viewer.
+        const sharedRows = await prisma.$queryRaw`
       WITH accepted AS (
         SELECT
           rp.*,
@@ -1003,8 +1070,10 @@ const Race = {
           ) AS persisted_position,
           COUNT(*) OVER (
             PARTITION BY rp.race_id, rp.placement, rp.finished_at
-          ) AS finish_key_count
+          ) AS finish_key_count,
+          race_scope.powerups_enabled
         FROM race_participants rp
+        JOIN races race_scope ON race_scope.id = rp.race_id
         WHERE rp.race_id IN (${Prisma.join(ids)})
           AND rp.status = 'accepted'::"RaceParticipantStatus"
       ), aggregates AS (
@@ -1038,12 +1107,17 @@ const Race = {
                 'placement', persisted_position
               )
               ORDER BY persisted_position
-            ),
+            ) FILTER (WHERE powerups_enabled = TRUE),
             '[]'::jsonb
           ) AS rank_roster,
+          COALESCE(
+            JSONB_OBJECT_AGG(user_id, persisted_position)
+              FILTER (WHERE user_id IN (${Prisma.join(viewerUserIds)})),
+            '{}'::jsonb
+          ) AS viewer_positions,
           BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order
         FROM accepted
-        GROUP BY race_id
+        GROUP BY race_id, powerups_enabled
       )
       SELECT
         r.id AS "raceId",
@@ -1057,18 +1131,8 @@ const Race = {
         COALESCE(a.team_b_steps, 0)::text AS "teamBSteps",
         a.totals_as_of AS "totalsAsOf",
         COALESCE(a.rank_roster, '[]'::jsonb) AS "rankRoster",
+        COALESCE(a.viewer_positions, '{}'::jsonb) AS "viewerPositions",
         COALESCE(a.ambiguous_finisher_order, FALSE) AS "ambiguousFinisherOrder",
-        mine.id AS "viewerParticipantId",
-        mine.status::text AS "viewerStatus",
-        mine.placement AS "viewerPlacement",
-        mine.favorited_at AS "viewerFavoritedAt",
-        mine.buy_in_status::text AS "viewerBuyInStatus",
-        mine.payout_coins AS "viewerPayoutCoins",
-        mine.results_seen_at AS "viewerResultsSeenAt",
-        mine.invite_expires_at AS "viewerInviteExpiresAt",
-        mine.team::text AS "viewerTeam",
-        mine.forfeited_at AS "viewerForfeitedAt",
-        ranked.persisted_position::int AS "viewerPosition",
         leader.id AS "leaderParticipantId",
         leader.user_id AS "leaderUserId",
         leader.total_steps AS "leaderTotalSteps",
@@ -1077,13 +1141,58 @@ const Race = {
         leader.joined_at AS "leaderJoinedAt"
       FROM races r
       LEFT JOIN aggregates a ON a.race_id = r.id
-      LEFT JOIN race_participants mine
-        ON mine.race_id = r.id AND mine.user_id = ${userId}
-      LEFT JOIN accepted ranked ON ranked.id = mine.id
       LEFT JOIN accepted leader
         ON leader.race_id = r.id AND leader.persisted_position = 1
       WHERE r.id IN (${Prisma.join(ids)})
     `;
+        const viewerRows = await prisma.raceParticipant.findMany({
+          where: {
+            raceId: { in: ids },
+            userId: { in: viewerUserIds },
+            status: { not: "DECLINED" },
+          },
+          select: {
+            id: true,
+            raceId: true,
+            userId: true,
+            status: true,
+            placement: true,
+            favoritedAt: true,
+            buyInStatus: true,
+            payoutCoins: true,
+            resultsSeenAt: true,
+            inviteExpiresAt: true,
+            team: true,
+            forfeitedAt: true,
+          },
+        });
+        const viewersByRaceAndUser = new Map(viewerRows.map((viewer) => [
+          `${viewer.raceId}\u0000${viewer.userId}`,
+          viewer,
+        ]));
+        return viewerUserIds.flatMap((viewerUserId) => sharedRows.map((shared) => {
+          const viewer = viewersByRaceAndUser.get(
+            `${shared.raceId}\u0000${viewerUserId}`,
+          );
+          const viewerPosition = shared.viewerPositions?.[viewerUserId] ?? null;
+          return {
+            ...shared,
+            viewerUserId,
+            viewerParticipantId: viewer?.id || null,
+            viewerStatus: viewer?.status || null,
+            viewerPlacement: viewer?.placement ?? null,
+            viewerFavoritedAt: viewer?.favoritedAt || null,
+            viewerBuyInStatus: viewer?.buyInStatus || null,
+            viewerPayoutCoins: viewer?.payoutCoins ?? null,
+            viewerResultsSeenAt: viewer?.resultsSeenAt || null,
+            viewerInviteExpiresAt: viewer?.inviteExpiresAt || null,
+            viewerTeam: viewer?.team || null,
+            viewerForfeitedAt: viewer?.forfeitedAt || null,
+            viewerPosition,
+          };
+        }));
+      },
+    });
     if (rows.some((row) => row.ambiguousFinisherOrder === true)) {
       return { ambiguousFinisherOrder: true, races: [] };
     }
@@ -1662,6 +1771,104 @@ const Race = {
     });
   },
 
+  // The featured card needs field counts, money aggregates, and only the
+  // requesting user's membership. Hydrating every participant plus their
+  // profile/accessories made each app-open deserialize hundreds or thousands
+  // of rows whose values never enter the response.
+  async findLiveSeededSummariesForUser(userId, { legacyOnly = false } = {}) {
+    const rows = await prisma.$queryRaw`
+      SELECT
+        r.id,
+        r.seed_id AS "seedId",
+        r.name,
+        UPPER(r.status::text) AS status,
+        r.max_participants AS "maxParticipants",
+        r.powerups_enabled AS "powerupsEnabled",
+        r.started_at AS "startedAt",
+        r.ends_at AS "endsAt",
+        r.scheduled_start_at AS "scheduledStartAt",
+        r.scheduled_end_at AS "scheduledEndAt",
+        r.max_duration_days AS "maxDurationDays",
+        r.buy_in_amount AS "buyInAmount",
+        UPPER(r.payout_preset::text) AS "payoutPreset",
+        r.pot_coins AS "potCoins",
+        r.funded_prize AS "fundedPrize",
+        r.prize_pool_coins AS "prizePoolCoins",
+        r.prize_coin_unit AS "prizeCoinUnit",
+        r.prize_pool_max_coins AS "prizePoolMaxCoins",
+        r.prize_calculation_version AS "prizeCalculationVersion",
+        r.payout_rounding_version AS "payoutRoundingVersion",
+        r.payout_curve AS "payoutCurve",
+        r.exit_actions_enabled AS "exitActionsEnabled",
+        r.is_team_race AS "isTeamRace",
+        r.team_pool_mult_bps AS "teamPoolMultBps",
+        r.team_payout_version AS "teamPayoutVersion",
+        r.team_winner_reward_coins AS "teamWinnerRewardCoins",
+        seed.kind AS "seedKind",
+        COALESCE(summary.accepted_count, 0)::int AS "acceptedCount",
+        UPPER(summary.viewer_status) AS "viewerStatus",
+        COALESCE(summary.held_pot_coins, 0)::int AS "heldPotCoins",
+        COALESCE(summary.funded_projection_player_count, 0)::int
+          AS "fundedProjectionPlayerCount",
+        GREATEST(
+          COALESCE(summary.team_a_payout_recipient_count, 0),
+          COALESCE(summary.team_b_payout_recipient_count, 0)
+        )::int AS "teamPayoutRecipientCount"
+      FROM races r
+      JOIN race_seeds seed ON seed.id = r.seed_id
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) FILTER (
+            WHERE participant.status = 'accepted'::"RaceParticipantStatus"
+          ) AS accepted_count,
+          MAX(participant.status::text) FILTER (
+            WHERE participant.user_id = ${userId}
+          ) AS viewer_status,
+          COALESCE(SUM(participant.buy_in_amount) FILTER (
+            WHERE participant.buy_in_status = 'held'::"RaceBuyInStatus"
+          ), 0) AS held_pot_coins,
+          COUNT(*) FILTER (
+            WHERE participant.status = 'accepted'::"RaceParticipantStatus"
+              AND NOT (
+                participant.forfeited_at IS NOT NULL AND
+                COALESCE(participant.total_steps, 0) <= 0
+              )
+          ) AS funded_projection_player_count,
+          COUNT(*) FILTER (
+            WHERE participant.status = 'accepted'::"RaceParticipantStatus"
+              AND participant.team = 'team_a'::"RaceTeam"
+              AND participant.forfeited_at IS NULL
+          ) AS team_a_payout_recipient_count,
+          COUNT(*) FILTER (
+            WHERE participant.status = 'accepted'::"RaceParticipantStatus"
+              AND participant.team = 'team_b'::"RaceTeam"
+              AND participant.forfeited_at IS NULL
+          ) AS team_b_payout_recipient_count
+        FROM race_participants participant
+        WHERE participant.race_id = r.id
+      ) summary ON TRUE
+      WHERE r.seed_id IS NOT NULL
+        AND r.status IN (
+          'pending'::"RaceStatus",
+          'active'::"RaceStatus"
+        )
+        AND (${legacyOnly} = FALSE OR r.seeded_bucket_id IS NULL)
+      ORDER BY r.started_at DESC
+    `;
+    return rows.map((row) => ({
+      ...row,
+      seed: { kind: row.seedKind },
+      participants: [],
+      _featuredSummary: {
+        acceptedCount: Number(row.acceptedCount || 0),
+        viewerStatus: row.viewerStatus || null,
+        heldPotCoins: Number(row.heldPotCoins || 0),
+        fundedProjectionPlayerCount: Number(row.fundedProjectionPlayerCount || 0),
+        teamPayoutRecipientCount: Number(row.teamPayoutRecipientCount || 0),
+      },
+    }));
+  },
+
   // Home's featured branch differs from the legacy /races/featured surface:
   // joined/invited and full cards are excluded, expired ACTIVE rows are
   // excluded, and eligibility happens before the one-live-row-per-seed choice.
@@ -1754,4 +1961,4 @@ const Race = {
 
 };
 
-module.exports = { Race };
+module.exports = { Race, hydrateRaceListPeople };

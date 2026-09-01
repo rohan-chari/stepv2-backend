@@ -24,4 +24,9 @@ test("step sync uses lock-and-revalidate semantics without broad repeatable-read
     /SUMMARY_CAPTURE_CLOSURE_CHANGED/,
     "the rare summary dependency-change retry must remain explicit and narrowly scoped",
   );
+  assert.doesNotMatch(
+    source,
+    /const existing = await stepSyncRequestModel\.findByKey\(userId, idempotencyKey\)/,
+    "a fresh unique idempotency key must not pay for a preflight read before its atomic insert",
+  );
 });

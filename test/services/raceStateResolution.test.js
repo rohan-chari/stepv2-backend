@@ -34,6 +34,7 @@ function makeContext(overrides = {}) {
   const finishCalls = [];
   const placementCalls = [];
   const completeCalls = [];
+  const globalEventUserIdCalls = [];
 
   const participants = overrides.participants || [];
   const race = {
@@ -133,6 +134,7 @@ function makeContext(overrides = {}) {
     },
     GlobalStepEvent: {
       async findEligibleByRace({ userIds }) {
+        globalEventUserIdCalls.push([...userIds]);
         return new Map(userIds.map((userId) => [userId, []]));
       },
     },
@@ -147,9 +149,27 @@ function makeContext(overrides = {}) {
     finishCalls,
     placementCalls,
     completeCalls,
+    globalEventUserIdCalls,
     deps,
   };
 }
+
+test("a scoped resolution loads global-event eligibility only for scored participants", async () => {
+  const participants = [
+    makeParticipant("rp-1", "user-1", "Alice"),
+    makeParticipant("rp-2", "user-2", "Bob"),
+    makeParticipant("rp-3", "user-3", "Carol"),
+  ];
+  const ctx = makeContext({ participants });
+  const resolveRaceState = buildResolveRaceState(ctx.deps);
+
+  await resolveRaceState({
+    raceId: "race-1",
+    scoreParticipantIds: ["rp-2"],
+  });
+
+  assert.deepEqual(ctx.globalEventUserIdCalls, [["user-2"]]);
+});
 
 test("resolveRaceState freezes finished participant totals on later syncs", async () => {
   const alice = makeParticipant("rp-1", "user-1", "Alice", {

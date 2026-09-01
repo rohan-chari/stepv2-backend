@@ -17,6 +17,7 @@ async function main() {
   prepareLocalCapacityProcess();
   const role = process.env.STEPS_PROCESS_ROLE || "all";
   const eventProfiles = new Set([
+    "event-open-surge",
     "event_provisioning_10000",
     "event_boundary_10000",
     "event_provider_outage_10000",

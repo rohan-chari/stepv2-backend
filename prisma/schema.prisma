@@ -602,12 +602,16 @@ model InboxDeliveryOutbox {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
   expiresAt          DateTime? @map("expires_at")
+  admissionClass     String?   @map("admission_class") @db.VarChar(64)
+  admissionSequence  BigInt?   @map("admission_sequence")
+  admissionExpiresAt DateTime? @map("admission_expires_at") @db.Timestamptz(3)
 
   alert          InboxAlert                   @relation(fields: [alertId], references: [id], onDelete: Cascade)
   deviceAttempts InboxDeliveryDeviceAttempt[]
 
   @@unique([alertId, kind])
   @@index([status, availableAt, leaseUntil])
+  @@index([admissionClass, status, availableAt, admissionSequence, id])
   @@map("inbox_delivery_outbox")
 }
 
@@ -663,13 +667,25 @@ model NotificationSchedule {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
   sourceRevision     Int       @default(0) @map("source_revision")
+  admissionClass     String?   @map("admission_class") @db.VarChar(64)
+  admissionSequence  BigInt?   @map("admission_sequence")
 
   user User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
 
   @@unique([recipientUserId, deliveryKey])
   @@index([status, availableAt, id])
+  @@index([admissionClass, status, availableAt, admissionSequence, id])
   @@index([recipientUserId, createdAt])
   @@map("notification_schedules")
+}
+
+model NotificationReleaseLane {
+  admissionClass String   @id @map("admission_class") @db.VarChar(64)
+  nextTokenAt    DateTime @map("next_token_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("notification_release_lanes")
 }
 
 model FeedbackThread {
@@ -3346,6 +3362,7 @@ model RaceResolutionJobV2 {
   dirtyParticipantIds             Json                   @default("[]") @map("dirty_participant_ids")
   dirtyPowerupTypes               Json                   @default("[]") @map("dirty_powerup_types")
   dirtyPriority                   String                 @default("IMMEDIATE") @map("dirty_priority") @db.VarChar(16)
+  fullTriggerSeedOnly             Boolean                @default(false) @map("full_trigger_seed_only")
   // Durable queue priority is separate from the legacy dirty-priority field.
   // The latter remains COALESCE/IMMEDIATE for old workers and diagnostics;
   // this field orders the race-keyed queue across live, recovery, settlement,
@@ -3405,6 +3422,23 @@ model RacePlacementTransitionJob {
   @@index([state, notBeforeAt, retryAt, requestedAt, raceId], map: "race_placement_transition_jobs_claim_idx")
   @@index([state, leaseExpiresAt], map: "race_placement_transition_jobs_expired_lease_idx")
   @@map("race_placement_transition_jobs")
+}
+
+// Append-only large-race intake handoff. Deliberately no FK: source intake
+// must not contend on a parent race row, and the bounded promoter discards a
+// trigger whose race no longer has a live queue destination.
+model RaceResolutionFullTrigger {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  raceId                 String   @map("race_id")
+  userId                 String?  @map("user_id")
+  participantId          String?  @map("participant_id")
+  resolutionTimeZone     String?  @map("resolution_time_zone")
+  requestedAt            DateTime @map("requested_at")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  @@index([raceId, requestedAt, id])
+  @@index([requestedAt, id])
+  @@map("race_resolution_full_triggers")
 }
 
 model UserScoringInputVersion {

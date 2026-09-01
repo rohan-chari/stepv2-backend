@@ -54,6 +54,63 @@ async function insertSamplesOn(client, userId, samples) {
   await client.$executeRawUnsafe(sql, ...params);
 }
 
+async function replaceSamplesOn(client, userId, samples) {
+  if (!samples || samples.length === 0) return;
+  const values = [];
+  const params = [];
+  let p = 1;
+  for (const sample of samples) {
+    values.push(
+      `(gen_random_uuid(), $${p++}, $${p++}::timestamp, $${p++}::timestamp, $${p++}::int, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}::jsonb, now())`,
+    );
+    params.push(
+      userId,
+      new Date(sample.periodStart).toISOString(),
+      new Date(sample.periodEnd).toISOString(),
+      sample.steps,
+      typeof sample.sourceName === "string" ? sample.sourceName : null,
+      typeof sample.sourceId === "string" ? sample.sourceId : null,
+      typeof sample.sourceDeviceId === "string" ? sample.sourceDeviceId : null,
+      typeof sample.deviceModel === "string" ? sample.deviceModel : null,
+      typeof sample.recordingMethod === "string" ? sample.recordingMethod : null,
+      Object.prototype.hasOwnProperty.call(sample, "metadata") && sample.metadata != null
+        ? JSON.stringify(sample.metadata)
+        : null,
+    );
+  }
+  const deleteUser = p++;
+  const starts = p++;
+  const ends = p++;
+  params.push(
+    userId,
+    samples.map((sample) => new Date(sample.periodStart).toISOString()),
+    samples.map((sample) => new Date(sample.periodEnd).toISOString()),
+  );
+  await client.$executeRawUnsafe(
+    `WITH deleted AS (
+       DELETE FROM step_samples stored
+       USING unnest($${starts}::timestamp[], $${ends}::timestamp[])
+         AS input_window(period_start,period_end)
+       WHERE stored.user_id=$${deleteUser}
+         AND stored.period_end > input_window.period_start
+         AND stored.period_start < input_window.period_end
+         AND NOT (stored.period_start = ANY($${starts}::timestamp[]))
+       RETURNING stored.id
+     )
+     INSERT INTO step_samples
+       (id,user_id,period_start,period_end,steps,source_name,source_id,
+        source_device_id,device_model,recording_method,metadata,created_at)
+     VALUES ${values.join(", ")}
+     ON CONFLICT (user_id, period_start) DO UPDATE SET
+       period_end=EXCLUDED.period_end,steps=EXCLUDED.steps,
+       source_name=EXCLUDED.source_name,source_id=EXCLUDED.source_id,
+       source_device_id=EXCLUDED.source_device_id,
+       device_model=EXCLUDED.device_model,
+       recording_method=EXCLUDED.recording_method,metadata=EXCLUDED.metadata`,
+    ...params,
+  );
+}
+
 const StepSample = {
   // Granularity-aware overlap resolution (§3.3). Replaces the old blind
   // upsert-on-(user, period_start): with mixed hourly/5-min data a blind upsert
@@ -74,9 +131,16 @@ const StepSample = {
     noopSuppression = false,
     manageScoringVersion = true,
     lockScoringInput = false,
+    returnCanonicalInput = false,
   } = {}) {
     if (!samples || samples.length === 0) {
-      return { storageChanged: false, scoringChanged: false };
+      return {
+        storageChanged: false,
+        scoringChanged: false,
+        ...(returnCanonicalInput
+          ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
+          : {}),
+      };
     }
     if (lockScoringInput && !(noopSuppression && manageScoringVersion)) {
       await lockScoringInputState(client, userId);
@@ -102,7 +166,10 @@ const StepSample = {
     // `steps` is read so the span guard only fires when the non-spanned overhang
     // actually carries step credit to protect.
     const storedRaw = await client.$queryRawUnsafe(
-      `SELECT period_start AS "start", period_end AS "end", steps
+      `SELECT period_start AS "start", period_end AS "end", steps,
+              source_name AS "sourceName", source_id AS "sourceId",
+              source_device_id AS "sourceDeviceId",device_model AS "deviceModel",
+              recording_method AS "recordingMethod",metadata
        FROM step_samples
        WHERE user_id = $1
          AND period_end > $2::timestamp
@@ -115,6 +182,12 @@ const StepSample = {
       start: r.start.getTime(),
       end: r.end.getTime(),
       steps: r.steps,
+      sourceName: r.sourceName,
+      sourceId: r.sourceId,
+      sourceDeviceId: r.sourceDeviceId,
+      deviceModel: r.deviceModel,
+      recordingMethod: r.recordingMethod,
+      metadata: r.metadata,
     }));
 
     // Rules 1 & 2 decide which incoming samples to KEEP.
@@ -162,36 +235,71 @@ const StepSample = {
     });
 
     if (kept.length === 0) {
-      if (!state) return { storageChanged: false, scoringChanged: false };
-      const unchangedCanonical = await readCanonicalSampleInput(client, userId);
+      const unchangedCanonical = (state || returnCanonicalInput)
+        ? await readCanonicalSampleInput(client, userId)
+        : null;
+      if (!state) return {
+        storageChanged: false,
+        scoringChanged: false,
+        ...(returnCanonicalInput ? { canonicalInput: unchangedCanonical } : {}),
+      };
       const decisionState = { ...state, dbNow: unchangedCanonical.dbNow };
       const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
         state.scoringWatermark !== unchangedCanonical.scoringWatermark;
       await persistScoringInputState(
         client, userId, state, unchangedCanonical, scoringChanged
       );
-      return { storageChanged: false, scoringChanged };
+      return {
+        storageChanged: false,
+        scoringChanged,
+        ...(returnCanonicalInput ? { canonicalInput: unchangedCanonical } : {}),
+      };
+    }
+
+    const normalized = (row) => JSON.stringify({
+      periodStart: new Date(row.periodStart ?? row.start).toISOString(),
+      periodEnd: new Date(row.periodEnd ?? row.end).toISOString(),
+      steps: Number(row.steps),
+      sourceName: row.sourceName ?? null,
+      sourceId: row.sourceId ?? null,
+      sourceDeviceId: row.sourceDeviceId ?? null,
+      deviceModel: row.deviceModel ?? null,
+      recordingMethod: row.recordingMethod ?? null,
+      metadata: row.metadata ?? null,
+    });
+    const replacedStored = stored.filter((row) => kept.some((incomingRow) =>
+      row.end > incomingRow.start && row.start < incomingRow.end
+    ));
+    const exactNoop = replacedStored.length === kept.length &&
+      replacedStored.map(normalized).sort().every((value, index) =>
+        value === kept.map((row) => normalized(row.raw)).sort()[index]
+      );
+    if (exactNoop) {
+      const canonicalInput = (state || returnCanonicalInput)
+        ? await readCanonicalSampleInput(client, userId)
+        : null;
+      if (state) {
+        const decisionState = { ...state, dbNow: canonicalInput.dbNow };
+        const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
+          state.scoringWatermark !== canonicalInput.scoringWatermark;
+        await persistScoringInputState(client, userId, state, canonicalInput, scoringChanged);
+        return { storageChanged: false, scoringChanged, ...(returnCanonicalInput ? { canonicalInput } : {}) };
+      }
+      return { storageChanged: false, scoringChanged: false, ...(returnCanonicalInput ? { canonicalInput } : {}) };
     }
 
     // Rule 3: delete every stored sample overlapping ANY kept incoming window in
     // one set-based DELETE (parallel-array unnest), then batch-insert the kept
     // samples.
-    const startArr = kept.map((i) => new Date(i.start).toISOString());
-    const endArr = kept.map((i) => new Date(i.end).toISOString());
-    await client.$executeRawUnsafe(
-      `DELETE FROM step_samples s
-       USING unnest($2::timestamp[], $3::timestamp[]) AS w(w_start, w_end)
-       WHERE s.user_id = $1
-         AND s.period_end > w.w_start
-         AND s.period_start < w.w_end`,
-      userId,
-      startArr,
-      endArr
-    );
-
-    await insertSamplesOn(client, userId, kept.map((i) => i.raw));
+    await replaceSamplesOn(client, userId, kept.map((i) => i.raw));
     if (!manageScoringVersion) {
-      return { storageChanged: true, scoringChanged: true };
+      return {
+        storageChanged: true,
+        scoringChanged: true,
+        ...(returnCanonicalInput
+          ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
+          : {}),
+      };
     }
     if (!state) {
       await bumpScoringInputVersion(client, userId);
@@ -204,7 +312,11 @@ const StepSample = {
     const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
       state.scoringWatermark !== afterCanonical.scoringWatermark;
     await persistScoringInputState(client, userId, state, afterCanonical, scoringChanged);
-    return { storageChanged, scoringChanged };
+    return {
+      storageChanged,
+      scoringChanged,
+      ...(returnCanonicalInput ? { canonicalInput: afterCanonical } : {}),
+    };
   },
 
   async findByUserIdAndTimeRange(userId, startTime, endTime) {
@@ -407,4 +519,4 @@ function prorateSamplesIntoWindow(samples, windowStartMs, windowEndMs) {
   return total;
 }
 
-module.exports = { StepSample, prorateSamplesIntoWindow };
+module.exports = { StepSample, prorateSamplesIntoWindow, replaceSamplesOn };

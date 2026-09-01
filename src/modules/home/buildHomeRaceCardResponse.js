@@ -11,6 +11,21 @@ const { buildServiceBanner } = require("./services/buildServiceBanner");
 const {
   resolveActiveContestBanner: defaultResolveActiveContestBanner,
 } = require("../giveaways");
+const {
+  eventSurgeTelemetry: defaultEventSurgeTelemetry,
+} = require("../../shared/observability/eventSurgeTelemetry");
+
+async function timedPhase(telemetry, phase, task) {
+  const started = process.hrtime.bigint();
+  try {
+    return await task();
+  } finally {
+    telemetry?.recordHomePhase?.({
+      phase,
+      durationMs: Number(process.hrtime.bigint() - started) / 1e6,
+    });
+  }
+}
 
 async function settle(task, logger, label) {
   try {
@@ -35,6 +50,7 @@ function buildHomeRaceCardResponse(dependencies) {
     appSettings,
     prisma,
     resolveActiveContestBanner = defaultResolveActiveContestBanner,
+    eventSurgeTelemetry = defaultEventSurgeTelemetry,
     logger = console,
   } = dependencies;
 
@@ -64,8 +80,8 @@ function buildHomeRaceCardResponse(dependencies) {
 
     // Wave 1: the core card and the two optional shell branches. At most three
     // DB-backed tasks are in flight; absent branches are resolved no-ops.
-    const [core, presentation, friends] = await Promise.all([
-      settle(() => getHomeRaceCard({
+    const [core, presentation, friends] = await timedPhase(eventSurgeTelemetry, "wave-1-core", () => Promise.all([
+      timedPhase(eventSurgeTelemetry, "core-race-card", () => settle(() => getHomeRaceCard({
         userId: user.id,
         homeActiveRaces,
         homePersistedTotals,
@@ -77,20 +93,20 @@ function buildHomeRaceCardResponse(dependencies) {
         privacySafeDisplayRanks,
         leanLiveEnabled,
         snapshotReuseEnabled,
-      }), logger, "core"),
+      }), logger, "core")),
       compactShell
-        ? settle(() => getHomeShellPresentation({
+        ? timedPhase(eventSurgeTelemetry, "core-presentation", () => settle(() => getHomeShellPresentation({
             userId: user.id,
             coins: user.coins,
             channel: releaseChannel,
             supportsCharacters,
             supportsRemoteAssets,
-          }), logger, "presentation")
+          }), logger, "presentation"))
         : Promise.resolve({ ok: true, value: null }),
       compactShell
-        ? settle(() => getFriendsSummary(user.id), logger, "friends")
+        ? timedPhase(eventSurgeTelemetry, "core-friends", () => settle(() => getFriendsSummary(user.id), logger, "friends"))
         : Promise.resolve({ ok: true, value: null }),
-    ]);
+    ]));
     if (!core.ok) throw new Error("Home race-card core unavailable");
     const result = core.value;
     result.characterPowersEnabled = false;
@@ -103,7 +119,7 @@ function buildHomeRaceCardResponse(dependencies) {
       : null;
 
     // Wave 2: next-race resolution, global event, and milestones.
-    const [nextRace, activeEvent, milestones] = await Promise.all([
+    const [nextRace, activeEvent, milestones] = await timedPhase(eventSurgeTelemetry, "wave-2-event", () => Promise.all([
       supportsNextRace
         ? settle(async () => {
             const [discoveryEnabled, createEnabled] = await Promise.all([
@@ -144,7 +160,7 @@ function buildHomeRaceCardResponse(dependencies) {
             localDate,
           }), logger, "stepMilestones lookup")
         : Promise.resolve({ ok: true, value: null }),
-    ]);
+    ]));
     if (supportsNextRace) {
       result.nextRace = nextRace.ok
         ? nextRace.value
@@ -169,7 +185,7 @@ function buildHomeRaceCardResponse(dependencies) {
     }
 
     // Wave 3: ad status, impact summary, and inbox count.
-    const [adStatus, impactSummary, inboxCount] = await Promise.all([
+    const [adStatus, impactSummary, inboxCount] = await timedPhase(eventSurgeTelemetry, "wave-3-auxiliary", () => Promise.all([
       dailyReward?.claimedToday === true &&
       adRewardsConfig.ADS_EXTRA_SPIN_ENABLED && supportsAds
         ? settle(() => getAdExtraSpinStatus({
@@ -210,7 +226,7 @@ function buildHomeRaceCardResponse(dependencies) {
             });
           })()
         : Promise.resolve(null),
-    ]);
+    ]));
     if (dailyReward && adStatus.ok && adStatus.value != null) {
       dailyReward.adExtraSpin = adStatus.value;
     }
@@ -222,19 +238,25 @@ function buildHomeRaceCardResponse(dependencies) {
     }
 
     // Wave 4: service settings and assembly of already-settled results.
-    const automaticBanner = supportsReferralContest
-      ? await resolveActiveContestBanner({ prisma, now, includeEligibilityMode: true })
-      : null;
+    const [automaticBanner, serviceBanner] = await timedPhase(
+      eventSurgeTelemetry,
+      "wave-4-banners",
+      () => Promise.all([
+        supportsReferralContest
+          ? resolveActiveContestBanner({ prisma, now, includeEligibilityMode: true })
+          : null,
+        buildServiceBanner({
+          settings: appSettings,
+          prisma,
+          supportsReferralContest,
+          now,
+        }),
+      ]),
+    );
     if (automaticBanner && (automaticBanner.eligibilityMode !== "BARA_ACCOUNT" || supportsGlobalReferralContest)) {
       delete automaticBanner.eligibilityMode;
       result.homeGiveawayBanner = automaticBanner;
     }
-    const serviceBanner = await buildServiceBanner({
-      settings: appSettings,
-      prisma,
-      supportsReferralContest,
-      now,
-    });
     if (serviceBanner) result.homeServiceBanner = serviceBanner;
     if (compactShell) {
       result.contract = "home-shell-v1";

@@ -1,5 +1,8 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { TEAM_RACES_FEATURE } = require("../../races/teamRaces");
+const {
+  homeLaunchAuxiliaryBatch: defaultHomeLaunchAuxiliaryBatch,
+} = require("../../home/services/homeLaunchAuxiliaryBatch");
 
 const summaryUserSelect = {
   id: true,
@@ -21,13 +24,25 @@ const pendingUserSelect = {
 
 function buildGetFriendsSummary(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
+  const launchBatch = dependencies.homeLaunchAuxiliaryBatch ||
+    (prisma === defaultPrisma ? defaultHomeLaunchAuxiliaryBatch : null);
   return async function getFriendsSummary(userId) {
     // One relationship read is enough for all three buckets. The previous
     // implementation issued three concurrent queries over the same indexed
     // user/status predicates on every Home refresh. Keep the response shape
     // unchanged by projecting pending users back to their narrower contract.
-    const relationships = await prisma.friendship.findMany({
-      where: {
+    const select = {
+      id: true,
+      status: true,
+      requesterId: true,
+      addresseeId: true,
+      requester: { select: summaryUserSelect },
+      addressee: { select: summaryUserSelect },
+    };
+    const relationships = launchBatch
+      ? await launchBatch.loadFriendships({ prisma, userId, select })
+      : await prisma.friendship.findMany({
+        where: {
         OR: [
           { status: "ACCEPTED", requesterId: userId },
           { status: "ACCEPTED", addresseeId: userId },
@@ -35,15 +50,8 @@ function buildGetFriendsSummary(dependencies = {}) {
           { status: "PENDING", addresseeId: userId },
         ],
       },
-      select: {
-        id: true,
-        status: true,
-        requesterId: true,
-        addresseeId: true,
-        requester: { select: summaryUserSelect },
-        addressee: { select: summaryUserSelect },
-      },
-    });
+        select,
+      });
     const accepted = relationships.filter((row) => row.status === "ACCEPTED");
     const incoming = relationships.filter(
       (row) => row.status === "PENDING" && row.addresseeId === userId

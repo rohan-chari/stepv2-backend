@@ -7,7 +7,12 @@ const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnab
 const { stepInputIntake: defaultStepInputIntake } = require("../services/stepInputIntake");
 const {
   measureStepTelemetryPhase,
+  releaseStepAdmission,
 } = require("../../../shared/observability/stepTelemetryContext");
+const { prisma: defaultPrisma } = require("../../../db");
+const {
+  lastStepSyncWriteBatch,
+} = require("../services/lastStepSyncWriteBatch");
 
 // Worker-owned, best-effort rival nudge computation. Step intake never calls
 // this helper; the queue worker invokes it only after its fenced commit.
@@ -114,6 +119,9 @@ function buildRecordSteps(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const settings = dependencies.appSettings || defaultAppSettings;
   const stepInputIntake = dependencies.stepInputIntake || defaultStepInputIntake;
+  const stampLastStepSyncAt = dependencies.User
+    ? (userId, at) => userModel.update(userId, { lastStepSyncAt: at })
+    : (userId, at) => lastStepSyncWriteBatch.stamp({ prisma: defaultPrisma, userId, at });
 
   return async function recordSteps({
     userId,
@@ -125,10 +133,12 @@ function buildRecordSteps(dependencies = {}) {
     skipRaceResolution = false,
   }) {
     void skipRaceResolution;
-    const [burstCoalescing, queuedGenerationMerge] = await Promise.all([
-      isStrictFlagEnabled(settings, "raceResolutionBurstCoalescingV1Enabled"),
-      isStrictFlagEnabled(settings, "raceResolutionQueuedGenerationMergeV1Enabled"),
-    ]);
+    const burstCoalescing = await isStrictFlagEnabled(
+      settings, "raceResolutionBurstCoalescingV1Enabled",
+    );
+    const queuedGenerationMerge = await isStrictFlagEnabled(
+      settings, "raceResolutionQueuedGenerationMergeV1Enabled",
+    );
     const result = await stepInputIntake({
       userId,
       daily: { date, steps },
@@ -139,25 +149,30 @@ function buildRecordSteps(dependencies = {}) {
       burstCoalescing,
       queuedGenerationMerge,
     });
+    releaseStepAdmission();
 
     await measureStepTelemetryPhase("post_commit", async () => {
       // Bookkeeping and projections intentionally remain outside the durability
       // transaction. Their failure cannot turn committed source+queue into 5xx.
-      try {
-        await userModel.update(userId, { lastStepSyncAt: now() });
-      } catch (error) {
-        console.error("steps lastStepSyncAt update failed:", error);
+      if (result.lastStepSyncStamped !== true) {
+        try {
+          await stampLastStepSyncAt(userId, now());
+        } catch (error) {
+          console.error("steps lastStepSyncAt update failed:", error);
+        }
       }
       try {
         await require("../services/dailyStepsCache").invalidateSafe(userId, date);
       } catch (error) {
         console.error("steps daily cache invalidation failed:", error);
       }
-      events.emit(result.dailyExisted ? "STEPS_UPDATED" : "STEPS_RECORDED", {
-        userId,
-        steps,
-        date,
-      });
+      try {
+        events.emit(result.dailyExisted ? "STEPS_UPDATED" : "STEPS_RECORDED", {
+          userId, steps, date,
+        });
+      } catch (error) {
+        console.error("steps step event emission failed:", error);
+      }
     });
     return {
       ...result.record,

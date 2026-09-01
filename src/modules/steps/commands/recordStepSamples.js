@@ -1,6 +1,7 @@
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const { stepInputIntake: defaultStepInputIntake } = require("../services/stepInputIntake");
+const { releaseStepAdmission } = require("../../../shared/observability/stepTelemetryContext");
 
 class StepSampleError extends Error {
   constructor(message, statusCode) {
@@ -75,10 +76,12 @@ function buildRecordStepSamples(dependencies = {}) {
       throw new StepSampleError("samples must be a non-empty array", 400);
     }
     const cleaned = removeOverlaps(normalizeSamples(samples));
-    const [burstCoalescing, queuedGenerationMerge] = await Promise.all([
-      isStrictFlagEnabled(settings, "raceResolutionBurstCoalescingV1Enabled"),
-      isStrictFlagEnabled(settings, "raceResolutionQueuedGenerationMergeV1Enabled"),
-    ]);
+    const burstCoalescing = await isStrictFlagEnabled(
+      settings, "raceResolutionBurstCoalescingV1Enabled",
+    );
+    const queuedGenerationMerge = await isStrictFlagEnabled(
+      settings, "raceResolutionQueuedGenerationMergeV1Enabled",
+    );
     await stepInputIntake({
       userId,
       daily: null,
@@ -89,6 +92,7 @@ function buildRecordStepSamples(dependencies = {}) {
       burstCoalescing,
       queuedGenerationMerge,
     });
+    releaseStepAdmission();
     return { count: cleaned.length };
   };
 }

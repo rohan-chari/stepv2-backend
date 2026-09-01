@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -6,9 +8,22 @@ const {
 } = require("../../src/modules/races/queries/getRaceProgress");
 const snapshotStore = require("../../src/modules/races/services/raceProgressSnapshot");
 
+test("production legacy progress checks access with a bounded viewer context before a race-wide fallback", () => {
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../src/modules/races/queries/getRaceProgress.js"), "utf8");
+  assert.match(source, /leanProjectionEnabled[\s\S]*findProgressPageContext\(raceId, userId\)/);
+  assert.match(source, /async function ensureFullScoringContext/);
+  assert.match(
+    source,
+    /race = leanScoringContext[\s\S]*raceModel\.findProgressScoringContext\(raceId\)[\s\S]*raceModel\.findById\(raceId\)/,
+    "a frozen-client roster must use its joined user graph, not fan out through Redis"
+  );
+});
+
 test("worker snapshot uses committed participant totals without replaying steps", async () => {
   let raceReads = 0;
   let effectReads = 0;
+  let presentationReads = 0;
   const race = {
     id: "race-1",
     status: "ACTIVE",
@@ -67,6 +82,12 @@ test("worker snapshot uses committed participant totals without replaying steps"
       {},
       { get() { return async () => assert.fail("sample replay must not run"); } }
     ),
+    userPresentationCache: {
+      async getMany() {
+        presentationReads += 1;
+        return new Map();
+      },
+    },
     raceProgressSnapshot: snapshotStore,
     now: () => new Date("2026-08-13T12:00:00Z"),
   });
@@ -79,6 +100,7 @@ test("worker snapshot uses committed participant totals without replaying steps"
 
   assert.equal(raceReads, 1);
   assert.equal(effectReads, 1);
+  assert.equal(presentationReads, 0, "embedded participant users need no Redis fan-out");
   assert.equal(snapshot.source, "worker-persisted");
   assert.equal(snapshot.participants[0].totalSteps, 4321);
   assert.equal(snapshot.participants[0].baseAdjusted, 4000);

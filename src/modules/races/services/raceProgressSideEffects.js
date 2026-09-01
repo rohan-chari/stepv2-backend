@@ -212,9 +212,19 @@ function buildRaceProgressPostCommit(dependencies = {}) {
   }
 
   /** SET (never DEL) the race's shared standings snapshot. */
-  async function publishSnapshot({ raceId, timeZone, result, sourceGeneration = null }) {
+  async function publishSnapshot({
+    raceId,
+    timeZone,
+    result,
+    sourceGeneration = null,
+    allowSupersededComplete = false,
+  }) {
     try {
-      if (sourceGeneration != null && typeof raceResolutionJobModel.findByRaceId === "function") {
+      if (
+        !allowSupersededComplete &&
+        sourceGeneration != null &&
+        typeof raceResolutionJobModel.findByRaceId === "function"
+      ) {
         const current = await raceResolutionJobModel.findByRaceId(raceId);
         if (!current || Number(current.generation) !== Number(sourceGeneration)) return false;
       }
@@ -245,6 +255,14 @@ function buildRaceProgressPostCommit(dependencies = {}) {
           raceId,
           generation: sourceGeneration,
           snapshot: projection,
+          // A no-powerup, individual, free race has no race-wide mutable
+          // effect graph. During a mass step wave the job generation advances
+          // faster than 10k bounded Redis rows can be written; rejecting that
+          // otherwise-complete baseline leaves every reader to hydrate all
+          // participants from Postgres. Retain the newest complete baseline
+          // instead. Home overlays the viewer's persisted row, and a later
+          // completed generation atomically replaces this one.
+          allowSupersededComplete,
           currentGeneration: async () => {
             const current = await raceResolutionJobModel.findByRaceId(raceId);
             return current?.generation;
@@ -292,6 +310,12 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     const snapshotCommand = {
       raceId,
       timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
+      ...(result?.race?.powerupsEnabled !== true &&
+        result?.race?.isTeamRace !== true &&
+        Number(result?.race?.buyInAmount || 0) === 0 &&
+        Number(result?.race?.potCoins || 0) === 0
+        ? { allowSupersededComplete: true }
+        : {}),
     };
     if (deferSnapshot) {
       return deferDelivery ? { snapshotCommand, intentClaims } : { snapshotCommand };
@@ -311,7 +335,9 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     if (
       !command ||
       typeof command.raceId !== "string" ||
-      typeof command.timeZone !== "string"
+      typeof command.timeZone !== "string" ||
+      (command.allowSupersededComplete != null &&
+        command.allowSupersededComplete !== true)
     ) {
       return false;
     }

@@ -99,6 +99,20 @@ function buildProfiles() {
       fixturePrerequisites: ["synthetic-user"], weight: 1,
     }),
   ];
+  const eventOpenTraffic = [
+    entry("GET", "/auth/me", { fixturePrerequisites: ["synthetic-user"], weight: 100 }),
+    entry("POST", "/notifications/device-token", { fixturePrerequisites: ["synthetic-user"], payloadShape: { deviceToken: "synthetic", platform: "ios", installationId: "deterministic" }, allowedStatuses: [200], weight: 100, readOnly: false, disposableWrite: true }),
+    entry("POST", "/analytics/activation-events", { fixturePrerequisites: ["synthetic-user"], payloadShape: { events: "app-open" }, allowedStatuses: [202], weight: 100, readOnly: false, disposableWrite: true }),
+    entry("POST", "/steps", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true }, allowedStatuses: [200, 400, 500], weight: 18, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
+    entry("POST", "/steps/samples", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { samples: "bounded-realistic-window" }, allowedStatuses: [200, 400, 500], weight: 18, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
+    entry("POST", "/steps/sync-v2", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-Step-Sync-Intent": "home-pull" }, payloadShape: { steps: "integer", samples: "bounded-array", clientRequestId: "deterministic" }, allowedStatuses: [202, 400, 409, 429, 500, 503], weight: 64, readOnly: false, disposableWrite: true, persona: "current", queue: true }),
+    entry("GET", "/home/race-card", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-Client-Features": "characters,remote_assets,inbox_v1" }, weight: 100 }),
+    entry("GET", "/races/discovery-summary", { fixturePrerequisites: ["synthetic-user"], weight: 100 }),
+    entry("GET", "/races", { query: "view=compact-v1", fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-Client-Features": "characters,remote_assets,api_payload_compact_v1,race_participants_paging" }, weight: 100 }),
+    entry("GET", "/inbox/alerts", { fixturePrerequisites: ["synthetic-user"], headers: { "X-Client-Features": "inbox_v1" }, allowedStatuses: [200, 404], weight: 100 }),
+    entry("GET", "/races/:raceId/progress", { fixturePrerequisites: ["synthetic-user", "active-race"], weight: 100 }),
+    entry("GET", "/races/:raceId/bootstrap", { query: "view=participants-v1&offset=0&limit=15&shape=compact-v1", fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-Client-Features": "race_participants_paging,powerups4,api_payload_compact_v1" }, allowedStatuses: [200, 404], weight: 100 }),
+  ];
   return {
     smoke: profile("smoke", [health, authMe, home[0], races[1]], { maxUsers: 2, maxDurationSeconds: 60, maxArrivalRatePerSecond: 10 }),
     home: profile("home", home),
@@ -106,6 +120,36 @@ function buildProfiles() {
     "race-details": profile("race-details", details),
     "full-app": profile("full-app", [health, ...home, ...races, ...details, ...queue]),
     contention: profile("contention", contention, { maxUsers: 100, maxDurationSeconds: 600, maxArrivalRatePerSecond: 100, queue: { workerServiceRatePerSecond: 5 } }),
+    "event-open-surge": Object.freeze({
+      ...profile("event-open-surge", eventOpenTraffic, {
+        fixtureRaces: 3,
+        defaultUsers: 10_000,
+        defaultDuration: "300s",
+        defaultArrivalRatePerSecond: 100,
+        defaultConcurrency: 1000,
+        maxUsers: 10_000,
+        maxDurationSeconds: 600,
+        maxArrivalRatePerSecond: 200,
+        queue: { workerServiceRatePerSecond: 100, lagThresholdMs: 30_000 },
+      }),
+      surgeGate: Object.freeze({
+        incidentEligibleCohort: 517,
+        sustainedSessionsPerSecond: 100,
+        sustainedSeconds: 300,
+        shockSessionsPerSecond: 200,
+        shockSeconds: 60,
+        scaleMultiplier: 10,
+        requiredHeadroom: 0.4,
+        poolBudget: Object.freeze({ http0: 10, http1: 10, resolution: 8, cron: 4, total: 32 }),
+      }),
+      eventOpenFixture: Object.freeze({
+        fixtureUsers: 10_000,
+        warmupSeconds: 120,
+        timezone: "America/New_York",
+        activatesBoundary: true,
+        deterministicProvider: true,
+      }),
+    }),
     "frozen-step-sync-burst": profile(
       "frozen-step-sync-burst",
       [
@@ -199,7 +243,7 @@ function buildProfiles() {
 }
 
 function validateProfileRegistry(registry = PROFILES) {
-  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
+  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
   for (const name of names) {
     const profile = registry[name];
     if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== "1.0.0" || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);

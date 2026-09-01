@@ -465,15 +465,43 @@ function buildGetSystemHealth(dependencies = {}) {
     });
     return parseHistoryRedis(raw, hourKeys);
   });
+  const eventSurgeReader = dependencies.eventSurgeReader || (async () => {
+    try {
+      const values = await Promise.all(EXPECTED.map(({ role, instance }) =>
+        redisCache.getJSON(cacheKeys.eventSurge(role, instance))
+      ));
+      return { ok: true, values };
+    } catch {
+      return { ok: false, values: [] };
+    }
+  });
+
+  function eventSurgeStatus(result, nowMs) {
+    const values = result?.ok && Array.isArray(result.values) ? result.values : [];
+    const snapshots = values.filter((value, index) => {
+      const expected = EXPECTED[index];
+      const capturedAtMs = new Date(value?.capturedAt).getTime();
+      return value?.schema === "event_surge_v1" &&
+        value?.role === expected?.role && String(value?.instance) === expected?.instance &&
+        Number.isFinite(capturedAtMs) && capturedAtMs <= nowMs && nowMs - capturedAtMs <= 150_000;
+    });
+    return {
+      status: snapshots.length === 0 ? "unavailable" : snapshots.length === EXPECTED.length ? "available" : "partial",
+      freshProcesses: snapshots.length,
+      snapshots,
+    };
+  }
 
   return async function getSystemHealth({ window = "60m" } = {}) {
     if (window !== "60m") throw new ValidationError("Unsupported system-health window", "INVALID_WINDOW");
     const current = now();
     const nowMs = current.getTime();
-    const [snapshotResult, history] = await Promise.all([
+    const [snapshotResult, history, eventSurgeResult] = await Promise.all([
       snapshotReader(),
       historyReader({ nowMs }),
+      eventSurgeReader(),
     ]);
+    const eventSurge = eventSurgeStatus(eventSurgeResult, nowMs);
     const historyStatus = resolvedHistoryStatus(history, nowMs);
     const valid = [];
     const missingProcesses = [];
@@ -513,6 +541,7 @@ function buildGetSystemHealth(dependencies = {}) {
         processes: [],
         stepIngestion: null,
         failureWindows: failureWindows(history, nowMs),
+        eventSurge,
       };
     }
     const processes = valid.map(processRow);
@@ -530,6 +559,7 @@ function buildGetSystemHealth(dependencies = {}) {
       processes,
       stepIngestion: combinedStepIngestion(valid),
       failureWindows: failureWindows(history, nowMs),
+      eventSurge,
     };
   };
 }

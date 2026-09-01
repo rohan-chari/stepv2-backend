@@ -5,9 +5,14 @@ const {
   CHARACTER_SLOT,
   serializeShopItem,
 } = require("../../cosmetics");
+const {
+  homeLaunchAuxiliaryBatch: defaultHomeLaunchAuxiliaryBatch,
+} = require("../services/homeLaunchAuxiliaryBatch");
 
 function buildGetHomeShellPresentation(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
+  const launchBatch = dependencies.homeLaunchAuxiliaryBatch ||
+    (prisma === defaultPrisma ? defaultHomeLaunchAuxiliaryBatch : null);
   return async function getHomeShellPresentation({
     userId,
     coins: authenticatedCoins = null,
@@ -22,21 +27,31 @@ function buildGetHomeShellPresentation(dependencies = {}) {
             where: { id: userId },
             select: { coins: true },
           }),
-      prisma.userEquippedAccessory.findMany({
-        where: { userId },
-        include: { shopItem: true },
-      }),
-      prisma.shopItem.findFirst({
-        where: {
+      launchBatch
+        ? launchBatch.loadEquipment({ prisma, userId })
+        : prisma.userEquippedAccessory.findMany({
+            where: { userId },
+            include: { shopItem: true },
+          }),
+      (() => {
+        const where = {
           active: true,
           earnOnly: false,
           assetKey: "cape",
           ...testOnlyFilter(channel),
           ...(supportsCharacters ? {} : { slot: { not: CHARACTER_SLOT } }),
           ...(supportsRemoteAssets ? {} : { remoteOnly: false }),
-        },
-        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      }),
+        };
+        const orderBy = [{ sortOrder: "asc" }, { name: "asc" }];
+        return launchBatch
+          ? launchBatch.loadCape({
+              prisma,
+              cacheKey: `${channel}:${supportsCharacters}:${supportsRemoteAssets}`,
+              where,
+              orderBy,
+            })
+          : prisma.shopItem.findFirst({ where, orderBy });
+      })(),
     ]);
     const visibleEquipped = equippedRows.filter(
       (entry) =>

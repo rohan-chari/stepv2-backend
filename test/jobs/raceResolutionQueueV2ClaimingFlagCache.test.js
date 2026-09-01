@@ -150,3 +150,32 @@ test("claiming a job drops the cached ENABLED answer", async () => {
     "a real claim must drop the cached answer, forcing a fresh read"
   );
 });
+
+test("an idle tick promotes append-only FULL triggers before it claims a race", async () => {
+  const settings = countingSettings([false]);
+  const calls = [];
+  const worker = makeWorker(settings, {
+    bootAt: 0,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() {
+        calls.push("promote");
+        return { promoted: 0, races: 0 };
+      },
+      async claimNext() {
+        calls.push("claim");
+        return null;
+      },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+
+  assert.equal(await worker.processOne(), null);
+  assert.deepEqual(calls, ["promote", "claim"]);
+});

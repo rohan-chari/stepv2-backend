@@ -25,7 +25,11 @@ const {
   capacityPoolProfile,
   roleChildEnvironment,
 } = require("../../../scripts/capacity-cluster");
-const { capacityRunId, globalEventProfile } = require("../../../scripts/lima-capacity");
+const {
+  capacityResourcePlan,
+  capacityRunId,
+  globalEventProfile,
+} = require("../../../scripts/lima-capacity");
 const { applyProvider: applyCapacityProvider } = require("../../../scripts/capacity");
 const { logicalOwnerIdForProcess } = require("../../../src/modules/steps/models/globalStepEventGeneration");
 const { normalizeGlobalEventInfrastructure } = require("../../../src/modules/loadTesting/globalEventInfrastructure");
@@ -37,17 +41,29 @@ const {
   writeImmutableArtifact,
 } = require("../../../src/modules/loadTesting/runner");
 const { assertCapacityRunProfile } = require("../../../src/modules/loadTesting/lifecycle");
-const { writeImmutable: writeImmutableMetrics } = require("../../../scripts/capacity-metrics");
+const {
+  fetchHttpCensus,
+  writeImmutable: writeImmutableMetrics,
+} = require("../../../scripts/capacity-metrics");
 const { observeChildExit } = require("../../../src/modules/loadTesting/metricsProcess");
 const { writeCapacityOperatorMarker } = require("../../../src/modules/loadTesting/capacityDatabaseMarker");
 const { capacityLoadParameter } = require("../../../src/modules/loadTesting/profileParameters");
 const {
+  CAPACITY_IOS_PROVIDER_ENVIRONMENT,
   capacityRaceParticipantRows,
   cleanupSyntheticRun,
   createGlobalEventReliabilityFixtures,
+  fixtureIosProviderEnvironment,
   resetGlobalEventDerivedState,
   selectProvisioningParent,
 } = require("../../../src/modules/loadTesting/globalEventReliabilityFixtures");
+
+test("event-open fixture preinstalls the token environment accepted by the backend", () => {
+  assert.equal(CAPACITY_IOS_PROVIDER_ENVIRONMENT, "production");
+  assert.equal(fixtureIosProviderEnvironment({ NODE_ENV: "production" }), "production");
+  assert.equal(fixtureIosProviderEnvironment({ NODE_ENV: "test" }), "sandbox");
+  assert.equal(fixtureIosProviderEnvironment({ APNS_PRODUCTION: "true" }), "production");
+});
 const {
   cleanupSyntheticRun: cleanupGenericSyntheticRun,
   createSyntheticFixtures,
@@ -59,6 +75,20 @@ const PROFILE_NAMES = [
   "event_boundary_10000",
   "event_provider_outage_10000",
 ];
+
+test("capacity VM models the app server and managed database as separate hardware", () => {
+  assert.deepEqual(capacityResourcePlan({
+    vps_specs: { vcpu: 4, ram_gb: 8 },
+    database_specs: { vcpu: 1, ram_gb: 2 },
+  }), {
+    vmCpu: 5,
+    vmMemoryGb: 10,
+    backendCpu: 4,
+    backendMemoryGb: 8,
+    databaseCpu: 1,
+    databaseMemoryGb: 2,
+  });
+});
 
 test("global-event capacity profiles lock the approved 2m/10m/3-repeat contract", () => {
   assert.equal(validateProfileRegistry(), true);
@@ -186,13 +216,18 @@ test("capacity fixture reset removes only derived global-event notification stat
   const tx = { $executeRawUnsafe: async (sql) => { statements.push(sql); } };
   await resetGlobalEventDerivedState({ $transaction: async (work) => work(tx) });
   const sql = statements.join("\n");
+  assert.match(sql, /LOCK TABLE[\s\S]*global_step_events[\s\S]*ACCESS EXCLUSIVE/i);
+  assert.ok(sql.indexOf("LOCK TABLE") < sql.indexOf("DELETE FROM notification_schedules"));
   for (const table of [
     "notification_schedules", "inbox_alerts", "domain_event_outbox",
+    "global_event_capture_artifacts", "global_event_summary_work",
     "global_event_user_summaries", "global_event_race_impacts",
     "global_step_event_boundary_cursors", "global_step_event_entitlements",
     "global_step_events", "global_step_event_operational_snapshots",
     "global_step_event_operational_counters",
   ]) assert.match(sql, new RegExp(`DELETE FROM ${table}`, "i"));
+  assert.ok(sql.indexOf("DELETE FROM global_event_capture_artifacts") <
+    sql.indexOf("DELETE FROM global_step_events"));
   for (const protectedTable of ["users", "races", "race_participants", "steps", "step_samples"]) {
     assert.doesNotMatch(sql, new RegExp(`DELETE FROM ${protectedTable}(?:\\s|$)`, "i"));
   }
@@ -481,6 +516,21 @@ test("capacity metrics query the mapped PostgreSQL race-resolution enum values",
   assert.match(source, /Promise\.allSettled\(\[\.\.\.inFlight\]\)/);
 });
 
+test("each capacity metrics sample obtains both distinct HTTP worker identities", async () => {
+  const observations = [0, 0, 1].map((instance) => ({
+    capacity: { process: { role: "http", instance } },
+  }));
+  const census = await fetchHttpCensus("http://capacity.invalid/health", {
+    fetchOne: async () => observations.shift(), maximumAttempts: 4,
+  });
+  assert.equal(census.http.capacity.process.instance, 0);
+  assert.equal(census.httpPeer.capacity.process.instance, 1);
+  await assert.rejects(fetchHttpCensus("http://capacity.invalid/health", {
+    fetchOne: async () => ({ capacity: { process: { role: "http", instance: 0 } } }),
+    maximumAttempts: 3,
+  }), /both worker identities/);
+});
+
 test("load traffic cannot use a profile different from the started capacity run", () => {
   assert.equal(assertCapacityRunProfile({ profile: "event_boundary_10000" }, "event_boundary_10000"), true);
   assert.throws(() => assertCapacityRunProfile(
@@ -603,6 +653,10 @@ test("healthy provider stub has exact deterministic latency and failure census",
   assert.equal(providerResultForAttempt({
     profile: "event_boundary_10000", attemptIndex: 0, attemptCount: 10_000,
   }).retryAfterMs, 250);
+  assert.deepEqual(
+    providerResultForAttempt({ profile: "event-open-surge", attemptIndex: 9000, attemptCount: 10_000 }),
+    providerResultForAttempt({ profile: "event_boundary_10000", attemptIndex: 9000, attemptCount: 10_000 }),
+  );
 });
 
 test("provider outage profile fails transiently for 60 seconds then recovers", () => {

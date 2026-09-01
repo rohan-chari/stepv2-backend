@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
+const { activeAdminMetricsEpochCache } = require("../analytics/services/activeAdminMetricsEpochCache");
 const {
   DeviceToken: DefaultDeviceToken,
 } = require("../../shared/push/deviceToken");
@@ -128,11 +129,7 @@ function createNotificationsRouter(dependencies = {}) {
         req.clientFeatures?.has("admin_metrics_v2") === true &&
         (await settings.getFlag("adminMetricsV2TelemetryEnabled")) === true
       ) {
-        const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
-          where: { endedAt: null },
-          orderBy: { startedAt: "desc" },
-          select: { id: true },
-        });
+        const epoch = await activeAdminMetricsEpochCache.get(prisma);
         metricsEpochId = epoch?.id || null;
       }
       const result = await registerDeviceToken({

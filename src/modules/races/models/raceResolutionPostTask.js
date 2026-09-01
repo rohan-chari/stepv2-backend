@@ -36,13 +36,15 @@ function validatePostTaskPayload({ snapshotCommand, intents }) {
     snapshotCommand && typeof snapshotCommand === "object" && !Array.isArray(snapshotCommand)
       ? Object.keys(snapshotCommand).sort()
       : [];
+  const allowedSnapshotKeys = snapshotCommand?.allowSupersededComplete === true
+    ? ["allowSupersededComplete", "raceId", "timeZone"]
+    : ["raceId", "timeZone"];
   if (
     !snapshotCommand ||
     typeof snapshotCommand !== "object" ||
     Array.isArray(snapshotCommand) ||
-    snapshotKeys.length !== 2 ||
-    snapshotKeys[0] !== "raceId" ||
-    snapshotKeys[1] !== "timeZone" ||
+    snapshotKeys.length !== allowedSnapshotKeys.length ||
+    snapshotKeys.some((key, index) => key !== allowedSnapshotKeys[index]) ||
     typeof snapshotCommand.raceId !== "string" ||
     snapshotCommand.raceId.length === 0 ||
     typeof snapshotCommand.timeZone !== "string" ||

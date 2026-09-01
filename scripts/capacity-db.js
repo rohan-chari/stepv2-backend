@@ -82,6 +82,9 @@ async function scrub(client, identity) {
     `);
     for (const column of columns) {
       if (column.table_name === "device_tokens") continue;
+      // Deleting device_tokens already clears this nullable FK via ON DELETE
+      // SET NULL. Replacing it with scrub text would violate the live FK.
+      if (column.table_name === "inbox_delivery_device_attempts" && column.column_name === "device_token_id") continue;
       const table = `"${column.table_name.replaceAll('"', '""')}"`;
       const name = `"${column.column_name.replaceAll('"', '""')}"`;
       const seed = `'load-scrub-' || md5(${sqlLiteral(`${column.table_name}:${column.column_name}:`)} || ctid::text)`;

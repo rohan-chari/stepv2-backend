@@ -3,12 +3,22 @@ const { prisma: defaultPrisma } = require("../../../db");
 const {
   createInboxAlert: defaultCreateInboxAlert,
   invalidateInboxUnread,
+  invalidateInboxUnreadMany,
 } = require("../../inbox/services/inbox");
 const { deferUntilAfterCommit } = require("../../../db");
 const redisCache = require("../../../shared/cache/redisCache");
 const { DeviceToken: defaultDeviceToken } = require("../../../shared/push/deviceToken");
 const { apnsService: defaultApns } = require("../../../shared/push/apns");
 const { fcmService: defaultFcm } = require("../../../shared/push/fcm");
+const {
+  ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+  ADMISSION_PENDING,
+  GLOBAL_EVENT_DELIVERY_SAFETY_MARGIN_MS,
+  admissionSequenceForDeliveryKey,
+  lockNotificationAdmissionLane,
+  releaseEventNotificationPage: releaseEventNotificationPageOn,
+} = require("./notificationAdmission");
+const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("../../../shared/observability/eventSurgeTelemetry");
 
 const SCHEDULE_PENDING = "PENDING";
 const SCHEDULE_CLAIMED = "CLAIMED";
@@ -198,6 +208,8 @@ function buildNotificationIntentService(dependencies = {}) {
   const runTransaction = dependencies.transaction ||
     ((work) => prisma.$transaction(work));
   const scheduleModel = dependencies.notificationSchedule || prisma.notificationSchedule;
+  const eventSurgeTelemetry = dependencies.eventSurgeTelemetry || defaultEventSurgeTelemetry;
+  const invalidateUnreadBatch = dependencies.invalidateInboxUnreadMany || invalidateInboxUnreadMany;
 
   async function writeIntent(intent, tx, current) {
     // Source-backed global-event intents must always cross the boundary
@@ -219,15 +231,34 @@ function buildNotificationIntentService(dependencies = {}) {
     }
 
     const scheduleStore = tx.notificationSchedule || scheduleModel;
+    const admittedEvent = intent.type === "GLOBAL_EVENT_STARTED" && Boolean(intent.sourceRef);
+    const admissionClass = admittedEvent ? ADMISSION_CLASS_GLOBAL_EVENT_STARTED : null;
+    const admissionSequence = admittedEvent
+      ? admissionSequenceForDeliveryKey(intent.deliveryKey)
+      : null;
+    const deliveryExpiry = admittedEvent && intent.expiresAt
+      ? new Date(intent.expiresAt.getTime() - GLOBAL_EVENT_DELIVERY_SAFETY_MARGIN_MS)
+      : intent.expiresAt;
+    if (admittedEvent && (!deliveryExpiry || deliveryExpiry <= intent.availableAt)) {
+      throw new RangeError("global-event delivery safety window is empty");
+    }
     if (!scheduleStore?.upsert) throw new Error("notification schedule store is unavailable");
     let schedule;
     if (typeof tx.$queryRawUnsafe === "function") {
+      if (admittedEvent && typeof tx.$executeRawUnsafe === "function") {
+        await lockNotificationAdmissionLane(tx, { admissionClass, now: current });
+      }
       const rows = await tx.$queryRawUnsafe(
         `INSERT INTO notification_schedules
           (id, recipient_user_id, type, title, body, payload, delivery_key,
            available_at, expires_at, status, source_ref, source_revision,
-           created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,'PENDING',$10,$11,$12,$12)
+           admission_class,admission_sequence,created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,
+                 $8::timestamptz AT TIME ZONE 'UTC',
+                 $9::timestamptz AT TIME ZONE 'UTC',
+                 $10,$11,$12,$13,$14,
+                 $15::timestamptz AT TIME ZONE 'UTC',
+                 $15::timestamptz AT TIME ZONE 'UTC')
          ON CONFLICT (recipient_user_id, delivery_key) DO UPDATE
            SET available_at=EXCLUDED.available_at,
                expires_at=EXCLUDED.expires_at,
@@ -237,14 +268,20 @@ function buildNotificationIntentService(dependencies = {}) {
                type=EXCLUDED.type,
                source_ref=EXCLUDED.source_ref,
                source_revision=EXCLUDED.source_revision,
+               admission_class=COALESCE(EXCLUDED.admission_class,notification_schedules.admission_class),
+               admission_sequence=COALESCE(EXCLUDED.admission_sequence,notification_schedules.admission_sequence),
+               status=CASE WHEN notification_schedules.status='PENDING' AND EXCLUDED.admission_class IS NOT NULL
+                           THEN 'ADMISSION_PENDING' ELSE notification_schedules.status END,
                updated_at=EXCLUDED.updated_at
-         WHERE notification_schedules.status='PENDING'
-           AND notification_schedules.source_revision < EXCLUDED.source_revision
+         WHERE notification_schedules.status IN ('PENDING','ADMISSION_PENDING')
+           AND notification_schedules.source_revision <= EXCLUDED.source_revision
          RETURNING id`,
         crypto.randomUUID(), intent.recipientUserId, intent.type, intent.title,
         intent.body, JSON.stringify(intent.payload), intent.deliveryKey,
-        intent.availableAt, intent.expiresAt, intent.sourceRef,
-        intent.sourceRevision, current,
+        intent.availableAt.toISOString(), deliveryExpiry?.toISOString() || null,
+        admittedEvent ? ADMISSION_PENDING : SCHEDULE_PENDING,
+        intent.sourceRef, intent.sourceRevision,
+        admissionClass, admissionSequence == null ? null : String(admissionSequence), current.toISOString(),
       );
       schedule = rows[0] || await scheduleStore.findUnique({
         where: { recipientUserId_deliveryKey: {
@@ -261,10 +298,13 @@ function buildNotificationIntentService(dependencies = {}) {
       },
       update: intent.sourceRevision > 0 ? {
         availableAt: intent.availableAt,
-        expiresAt: intent.expiresAt,
+        expiresAt: deliveryExpiry,
         payload: intent.payload,
         sourceRef: intent.sourceRef,
         sourceRevision: intent.sourceRevision,
+        status: admittedEvent ? ADMISSION_PENDING : SCHEDULE_PENDING,
+        admissionClass,
+        admissionSequence,
       } : {},
       create: {
         recipientUserId: intent.recipientUserId,
@@ -274,9 +314,12 @@ function buildNotificationIntentService(dependencies = {}) {
         payload: intent.payload,
         deliveryKey: intent.deliveryKey,
         availableAt: intent.availableAt,
-        expiresAt: intent.expiresAt,
+        expiresAt: deliveryExpiry,
         sourceRef: intent.sourceRef,
         sourceRevision: intent.sourceRevision,
+        status: admittedEvent ? ADMISSION_PENDING : SCHEDULE_PENDING,
+        admissionClass,
+        admissionSequence,
       },
     });
     return { kind: "SCHEDULED", scheduleId: schedule?.id || null };
@@ -288,6 +331,13 @@ function buildNotificationIntentService(dependencies = {}) {
     const result = tx
       ? await writeIntent(intent, tx, current)
       : await runTransaction((transaction) => writeIntent(intent, transaction, current));
+    if (intent.type === "GLOBAL_EVENT_STARTED" && intent.sourceRef) {
+      try {
+        eventSurgeTelemetry.recordNotification({
+          eventId: String(intent.payload?.eventId || intent.sourceRef), eligible: 1,
+        });
+      } catch {}
+    }
     const wake = () => safeWake(publishWakeup, scanHint(intent), logger);
     const invalidate = () => invalidateInboxUnread(intent.recipientUserId).catch((error) => {
       logger.error("notification unread invalidation failed", {
@@ -504,6 +554,23 @@ function buildNotificationIntentService(dependencies = {}) {
     return result;
   }
 
+  async function releaseEventNotificationPage({
+    admissionClass = ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+    now: suppliedNow = null,
+    maximumRows = 100,
+  } = {}) {
+    const current = suppliedNow ? asDate(suppliedNow, "now") : asDate(now(), "now");
+    const result = await releaseEventNotificationPageOn({
+      prisma, admissionClass, now: current, maximumRows,
+      telemetry: eventSurgeTelemetry,
+      invalidateUnreadBatch,
+    });
+    if (result.materialized > 0) {
+      await safeWake(publishWakeup, { kind: "ADMISSION_BATCH", admissionClass }, logger);
+    }
+    return result;
+  }
+
   async function releaseOneDue({
     tx,
     recipientUserId,
@@ -577,7 +644,7 @@ function buildNotificationIntentService(dependencies = {}) {
   async function nextDueAt() {
     if (!scheduleModel?.findFirst) return null;
     const row = await scheduleModel.findFirst({
-      where: { status: SCHEDULE_PENDING },
+      where: { status: { in: [SCHEDULE_PENDING, ADMISSION_PENDING] } },
       orderBy: { availableAt: "asc" },
       select: { availableAt: true },
     });
@@ -587,6 +654,7 @@ function buildNotificationIntentService(dependencies = {}) {
   return {
     submit,
     releaseDue,
+    releaseEventNotificationPage,
     releaseOneDue,
     wake,
     nextDueAt,

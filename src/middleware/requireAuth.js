@@ -23,7 +23,11 @@ const {
   invalidateHomeActiveGlobalEvent,
 } = require("../modules/steps/services/globalStepEventEntitlement");
 const authMeCache = require("../modules/users/services/authMeCache");
+const defaultAuthSessionUserCache = require("../modules/users/services/authSessionUserCache");
 const { SAFE_APP_VERSION } = require("../shared/validation/appVersion");
+const {
+  activeAdminMetricsEpochCache,
+} = require("../modules/analytics/services/activeAdminMetricsEpochCache");
 
 // Keep the legacy sticky-version match byte-compatible: unlike analytics and
 // new interstitial ingestion, this older path did not add a separate length
@@ -65,14 +69,18 @@ function buildRequireAuth(dependencies = {}) {
   const ensureUser = dependencies.ensureAppleUser || ensureAppleUser;
   const verifySession = dependencies.verifySessionToken || verifySessionToken;
   const userModel = dependencies.User || User;
+  const sessionUserCache = dependencies.authSessionUserCache ||
+    (dependencies.User ? null : defaultAuthSessionUserCache);
   const prisma = dependencies.prisma || defaultPrisma;
   const settings = dependencies.appSettings || defaultAppSettings;
+  const loadSessionUsers = typeof userModel.findByIds === "function"
+    ? userModel.findByIds.bind(userModel)
+    : null;
   const timezoneReconciliation =
     dependencies.reconcileGlobalEventTimezone ||
     (dependencies.User
       ? null
       : buildGlobalEventTimezoneReconciliation({ ...dependencies, prisma }));
-
   async function recordAdminMetricsEligibility(req, user) {
     try {
       // The Flutter client advertises admin_metrics_v2 only on iOS. Do not use
@@ -83,13 +91,15 @@ function buildRequireAuth(dependencies = {}) {
         typeof userModel.stampMetricsV2Eligibility !== "function" ||
         (await settings.getFlag("adminMetricsV2TelemetryEnabled")) !== true
       ) return;
-      const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
-        where: { endedAt: null },
-        orderBy: { startedAt: "desc" },
-        select: { id: true },
-      });
+      const epoch = await activeAdminMetricsEpochCache.get(prisma);
       if (!epoch || user.metricsV2EligibleEpochId === epoch.id) return;
       await userModel.stampMetricsV2Eligibility(user.id, epoch.id);
+      // `user` is the shared launch-burst cache object in production. Advance
+      // the durable marker after the successful conditional UPDATE so the six
+      // sibling requests made while MainShell opens do not each repeat the
+      // epoch lookup and stamp attempt before cache invalidation arrives.
+      user.metricsV2EligibleEpochId = epoch.id;
+      user.metricsV2EligibleAt = new Date();
     } catch {
       // Analytics eligibility is best-effort and never blocks auth.
     }
@@ -126,6 +136,10 @@ function buildRequireAuth(dependencies = {}) {
       if (!hasNewToken) return; // union already covered — nothing to write
       const union = [...new Set([...stored, ...req.clientFeatures])].sort();
       await userModel.updateClientFeatures(user.id, union);
+      // `user` may be the shared launch-burst cache object. Advance it after
+      // the durable write so the next request does not repeat the same UPDATE
+      // until an asynchronous invalidation reaches this process.
+      user.clientFeatures = union;
     } catch {
       // Never let feature bookkeeping fail the request.
     }
@@ -191,6 +205,7 @@ function buildRequireAuth(dependencies = {}) {
       });
       if (result?.user) {
         req.user = { ...req.user, ...result.user };
+        Object.assign(user, result.user);
         await Promise.allSettled([
           authMeCache.invalidateSafe(user.id),
           result.relocated?.length
@@ -253,6 +268,8 @@ function buildRequireAuth(dependencies = {}) {
         lastSeenAt: now,
         ...(version !== null ? { lastAppVersion: version } : {}),
       });
+      user.lastSeenAt = now;
+      if (version !== null) user.lastAppVersion = version;
     } catch (error) {
       // Never let version bookkeeping fail the request.
       console.warn("recordAppVersion failed (ignored):", error?.message);
@@ -266,7 +283,13 @@ function buildRequireAuth(dependencies = {}) {
       // Strategy 1: Try as session token
       try {
         const payload = verifySession(token);
-        const user = await userModel.findById(payload.sub);
+        const user = sessionUserCache
+          ? await sessionUserCache.read(
+              payload.sub,
+              () => userModel.findById(payload.sub),
+              loadSessionUsers,
+            )
+          : await userModel.findById(payload.sub);
 
         if (!user) {
           return res.status(401).json({ error: "User not found" });

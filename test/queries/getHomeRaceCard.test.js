@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetHomeRaceCard } = require("../../src/modules/home/getHomeRaceCard");
+const {
+  buildGetHomeRaceCard,
+  checkActiveRaceFromSnapshot,
+  checkActiveRacesFromSnapshots,
+} = require("../../src/modules/home/getHomeRaceCard");
 
 const ME_ID = "user-me";
 const FIXED_NOW = new Date("2026-05-21T18:00:00Z");
@@ -641,4 +645,246 @@ test("opt-in with NO active races falls through to legacy single-state logic", a
   // Falls through; not ACTIVE_RACES.
   assert.equal(res.state, "PUBLIC_RACE");
   assert.equal(res.data.seedKind, "DAILY_10K");
+});
+
+test("persisted-total home reuses a fresh shared snapshot and overlays the current viewer row", async () => {
+  let fallbackCalls = 0;
+  let jobReads = 0;
+  const race = {
+    id: "race-shared",
+    name: "Shared surge race",
+    startedAt: new Date("2026-05-21T10:00:00Z"),
+    endsAt: new Date("2026-05-23T10:00:00Z"),
+    timezone: "UTC",
+    status: "ACTIVE",
+    powerupsEnabled: false,
+    isTeamRace: false,
+    teamSize: null,
+    fundedPrize: false,
+    payoutRoundingVersion: null,
+    payoutPreset: null,
+    payoutCurve: null,
+    potCoins: 0,
+    buyInAmount: 0,
+    maxDurationDays: 2,
+    prizeCoinUnit: null,
+    prizePoolMaxCoins: null,
+    teamPoolMultBps: null,
+    teamPayoutVersion: null,
+    teamWinnerRewardCoins: null,
+    creationSource: null,
+    startPolicy: null,
+    exitActionsEnabled: false,
+  };
+  const prisma = {
+    raceParticipant: {
+      async findMany() {
+        return [{
+          id: "rp-me",
+          userId: ME_ID,
+          team: null,
+          totalSteps: 9000,
+          finishedAt: null,
+          finishTotalSteps: null,
+          race,
+        }];
+      },
+    },
+    user: {
+      async findMany() {
+        return [user(ME_ID, "Sugaroro"), user("u-a", "Alice")];
+      },
+    },
+  };
+  const snapshot = {
+    v: 3,
+    asOf: new Date(STEALTH_NOW.getTime() - 1000).toISOString(),
+    scoringTimeZone: "UTC",
+    race: { raceId: race.id, status: "ACTIVE", endsAt: race.endsAt,
+      powerupsEnabled: false, isTeamRace: false, teamSize: null },
+    activeEffects: [],
+    participants: [
+      { participantId: "rp-a", userId: "u-a", totalSteps: 8000, placement: 1 },
+      { participantId: "rp-me", userId: ME_ID, totalSteps: 1000, placement: 2 },
+    ],
+  };
+  const result = await checkActiveRacesFromSnapshots(prisma, ME_ID, {
+    now: STEALTH_NOW,
+    timeZone: "UTC",
+    usePersistedTotals: true,
+    privacySafeDisplayRanks: true,
+    snapshotStore: {
+      isBypassed: () => false,
+      readSupportedSnapshot: async () => snapshot,
+      isFresh: () => false,
+      matchesTimeZone: () => true,
+    },
+    raceResolutionJobModel: {
+      async findByRaceIds() {
+        jobReads += 1;
+        return [];
+      },
+    },
+    fallback: async () => {
+      fallbackCalls += 1;
+      return null;
+    },
+  });
+
+  assert.equal(fallbackCalls, 0);
+  assert.equal(jobReads, 0);
+  assert.equal(result.state, "ACTIVE_RACES");
+  assert.equal(result.data.races[0].userPlacement, 1);
+  assert.equal(result.data.races[0].top3[0].userId, ME_ID);
+  assert.equal(result.data.races[0].top3[0].totalSteps, 9000);
+
+  const legacy = await checkActiveRaceFromSnapshot(prisma, ME_ID, {
+    now: STEALTH_NOW,
+    timeZone: "UTC",
+    privacySafeDisplayRanks: true,
+    snapshotStore: {
+      isBypassed: () => false,
+      readSupportedSnapshot: async () => snapshot,
+      isFresh: () => false,
+      matchesTimeZone: () => true,
+    },
+    raceResolutionJobModel: {
+      async findByRaceIds() {
+        jobReads += 1;
+        return [];
+      },
+    },
+    fallback: async () => {
+      fallbackCalls += 1;
+      return null;
+    },
+  });
+  assert.equal(legacy.state, "ACTIVE_RACE");
+  assert.equal(legacy.data.me.totalSteps, 9000);
+  assert.equal(legacy.data.me.rank, 1);
+  assert.equal(legacy.data.leader.userId, ME_ID);
+  assert.equal(fallbackCalls, 0);
+  assert.equal(jobReads, 0);
+});
+
+test("persisted-total home reads a bounded page projection instead of the full event roster", async () => {
+  const race = {
+    id: "race-page", name: "Bounded event race",
+    startedAt: new Date("2026-05-21T10:00:00Z"),
+    endsAt: new Date("2026-05-23T10:00:00Z"), timezone: "UTC",
+    status: "ACTIVE", powerupsEnabled: false, isTeamRace: false, teamSize: null,
+    fundedPrize: false, payoutRoundingVersion: null, payoutPreset: null,
+    payoutCurve: null, potCoins: 0, buyInAmount: 0, maxDurationDays: 2,
+    prizeCoinUnit: null, prizePoolMaxCoins: null, teamPoolMultBps: null,
+    teamPayoutVersion: null, teamWinnerRewardCoins: null, creationSource: null,
+    startPolicy: null, exitActionsEnabled: false,
+  };
+  let fullSnapshotReads = 0;
+  const prisma = {
+    raceParticipant: { async findMany() { return [{
+      id: "rp-me", userId: ME_ID, team: null, totalSteps: 10,
+      finishedAt: null, finishTotalSteps: null, race,
+    }]; } },
+    user: { async findMany() { return [
+      user("u-a", "Alice"), user("u-b", "Bob"), user("u-c", "Cara"),
+      user(ME_ID, "Sugaroro"),
+    ]; } },
+  };
+  const asOf = new Date(STEALTH_NOW.getTime() - 1000).toISOString();
+  const result = await checkActiveRacesFromSnapshots(prisma, ME_ID, {
+    now: STEALTH_NOW, timeZone: "UTC", usePersistedTotals: true,
+    privacySafeDisplayRanks: true,
+    pageProjection: { async readRaceProgressPageProjection() { return {
+      asOf, total: 10_000,
+      index: { scoringTimeZone: "UTC", race: {
+        raceId: race.id, status: "ACTIVE", endsAt: race.endsAt,
+        powerupsEnabled: false, isTeamRace: false, teamSize: null,
+      } },
+      rows: [
+        { participantId: "rp-a", userId: "u-a", totalSteps: 300, placement: 1 },
+        { participantId: "rp-b", userId: "u-b", totalSteps: 200, placement: 2 },
+        { participantId: "rp-c", userId: "u-c", totalSteps: 100, placement: 3 },
+      ],
+      requesterRow: { participantId: "rp-me", userId: ME_ID,
+        totalSteps: 9, placement: 9_000 },
+    }; } },
+    snapshotStore: {
+      isBypassed: () => false,
+      async readSupportedSnapshot() { fullSnapshotReads += 1; return null; },
+      matchesTimeZone: () => true,
+    },
+    fallback: async () => null,
+  });
+  assert.equal(fullSnapshotReads, 0);
+  assert.equal(result.data.races[0].participantCount, 10_000);
+  assert.equal(result.data.races[0].userPlacement, 9_000);
+  assert.deepEqual(result.data.races[0].top3.map((row) => row.userId),
+    ["u-a", "u-b", "u-c"]);
+});
+
+test("a funded active event uses the bounded roster when its page projection is cold", async () => {
+  const race = {
+    id: "race-funded-cold", name: "Funded daily event",
+    startedAt: new Date("2026-05-21T10:00:00Z"),
+    endsAt: new Date("2026-05-23T10:00:00Z"), timezone: "UTC",
+    status: "ACTIVE", powerupsEnabled: false, isTeamRace: false,
+    fundedPrize: true, exitActionsEnabled: false, payoutRoundingVersion: 1,
+    payoutPreset: null, payoutCurve: null, potCoins: 0, buyInAmount: 0,
+    maxDurationDays: 2, prizeCoinUnit: 10, prizePoolMaxCoins: 1_000_000,
+    teamPoolMultBps: null, teamPayoutVersion: null,
+    teamWinnerRewardCoins: null, creationSource: "SEEDED",
+    startPolicy: null, teamSize: null,
+  };
+  const activeRows = [{
+    id: "rp-me", userId: ME_ID, team: null, totalSteps: 90,
+    finishedAt: null, finishTotalSteps: null, race,
+  }];
+  const boundedRows = [
+    { id: "rp-a", raceId: race.id, userId: "u-a", status: "ACCEPTED",
+      totalSteps: 300, computedPlacement: 1, totalCount: 10_000 },
+    { id: "rp-b", raceId: race.id, userId: "u-b", status: "ACCEPTED",
+      totalSteps: 200, computedPlacement: 2, totalCount: 10_000 },
+    { id: "rp-me", raceId: race.id, userId: ME_ID, status: "ACCEPTED",
+      totalSteps: 90, computedPlacement: 9_000, totalCount: 10_000 },
+  ];
+  let boundedReads = 0;
+  let fullRosterReads = 0;
+  const launchReadBatch = {
+    async loadPendingInvites() { return []; },
+    async loadActiveRows() { return activeRows.map((row) => ({
+      ...row, race: { ...row.race },
+    })); },
+    async loadBoundedLegacyRoster() { boundedReads += 1; return boundedRows; },
+    async loadAcceptedRoster() { fullRosterReads += 1; return []; },
+    async loadUsers() {
+      return [user("u-a", "Alice"), user("u-b", "Bob"), user(ME_ID, "Me")];
+    },
+  };
+  const get = buildGetHomeRaceCard({
+    prisma: {
+      raceParticipant: { async findMany() {
+        throw new Error("unbatched full roster read must not run");
+      } },
+      user: { async findMany() {
+        return [user("u-a", "Alice"), user("u-b", "Bob"), user(ME_ID, "Me")];
+      } },
+    },
+    now: () => STEALTH_NOW,
+    homeLaunchReadBatch: launchReadBatch,
+    raceProgressSnapshot: {
+      isBypassed: () => false,
+      async readSupportedSnapshot() { return null; },
+      matchesTimeZone: () => false,
+    },
+  });
+
+  const result = await get({
+    userId: ME_ID, homeActiveRaces: true, homePersistedTotals: true,
+    leanLiveEnabled: true, snapshotReuseEnabled: true,
+  });
+
+  assert.equal(result.state, "ACTIVE_RACES");
+  assert.equal(result.data.races[0].participantCount, 10_000);
+  assert.equal(boundedReads, 1);
+  assert.equal(fullRosterReads, 0);
 });

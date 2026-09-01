@@ -8,11 +8,13 @@ const {
   readCanonicalSampleInput,
   scoringBoundaryIsSafe,
   persistScoringInputState,
-  stampSourceQueueSemanticsGeneration,
 } = require("./scoringInputVersion");
 const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const {
+  PARTICIPANT_CAP,
+} = require("../../races/services/raceResolutionReasonRegistry");
 const {
   recordStepTelemetryPhase,
   measureStepTelemetryPhase,
@@ -27,6 +29,82 @@ function generationsEqual(left, right) {
 function resultingGeneration(state, scoringChanged) {
   const current = state?.generation == null ? 1n : BigInt(state.generation);
   return scoringChanged && state?.inserted !== true ? current + 1n : current;
+}
+
+// Participant-scoped queue envelopes are intentionally capped. A race whose
+// immutable advertised capacity can exceed that cap is guaranteed to degrade
+// to FULL once enough distinct uploads arrive, so doing it on the first upload
+// avoids serially growing and re-aggregating a hot JSON array on the one
+// race-keyed queue row. FULL is the same conservative correctness contract the
+// queue already uses after the cap: the worker recomputes every participant.
+function buildStepInputDirtyEnvelope({
+  userId,
+  participantId = null,
+  maxParticipants = undefined,
+}) {
+  const requiresFullScope = maxParticipants === null ||
+    (Number.isFinite(Number(maxParticipants)) &&
+      Number(maxParticipants) > PARTICIPANT_CAP);
+  if (requiresFullScope) {
+    return {
+      reason: "FULL",
+      dirtyUserIds: [],
+      dirtyParticipantIds: [],
+      powerupTypes: [],
+      priority: "COALESCE",
+    };
+  }
+  return {
+    reason: "STEP_INPUT_CHANGED",
+    dirtyUserIds: [userId],
+    dirtyParticipantIds: participantId ? [participantId] : [],
+    powerupTypes: [],
+    priority: participantId ? "COALESCE" : "IMMEDIATE",
+  };
+}
+
+async function upsertDailyStep(tx, { userId, date, steps }) {
+  // The per-user scoring fence is already held by the caller, so the prior
+  // row seen here is authoritative. Classify create/update and persist the
+  // value in one statement instead of a read followed by a Prisma upsert.
+  let rows = await tx.$queryRawUnsafe(
+    `WITH prior AS (
+       SELECT EXISTS(
+         SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date
+       ) AS existed
+     ), persisted AS (
+       INSERT INTO steps (id,user_id,date,steps,step_goal,created_at)
+       VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps
+         WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps
+       RETURNING id,user_id AS "userId",steps,step_goal AS "stepGoal",
+                 date,created_at AS "createdAt"
+     )
+     SELECT persisted.*,prior.existed,TRUE AS "storageChanged"
+       FROM persisted CROSS JOIN prior`,
+    userId,
+    new Date(date),
+    Number(steps),
+  );
+  // PostgreSQL returns no row when the conflict value is identical. That is
+  // the uncommon no-op path and can afford its own read; changed launch-wave
+  // writes retain the single short UPSERT statement.
+  if (rows.length === 0) {
+    rows = await tx.$queryRawUnsafe(
+      `SELECT id,user_id AS "userId",steps,step_goal AS "stepGoal",
+              date,created_at AS "createdAt",TRUE AS existed,
+              FALSE AS "storageChanged"
+         FROM steps WHERE user_id=$1 AND date=$2::date`,
+      userId,
+      new Date(date),
+    );
+  }
+  const { existed, storageChanged, ...record } = rows[0];
+  return {
+    record,
+    existed: existed === true,
+    storageChanged: storageChanged === true,
+  };
 }
 
 function buildStepInputIntake(dependencies = {}) {
@@ -54,33 +132,17 @@ function buildStepInputIntake(dependencies = {}) {
       "scoring_state",
       () => lockScoringInputState(tx, userId),
     );
-    const existingDaily = daily
-      ? await measureStepTelemetryPhase("daily", () => tx.step.findUnique({
-          where: { userId_date: { userId, date: new Date(daily.date) } },
-        }))
-      : null;
-    const beforeSamples = await measureStepTelemetryPhase(
-      "sample",
-      () => readCanonicalSampleInput(tx, userId, scoringState.dbNow),
-    );
-
-    let record = existingDaily;
+    let dailyExisted = false;
+    let record = null;
     let dailyStorageChanged = false;
     if (daily) {
-      dailyStorageChanged =
-        !existingDaily || Number(existingDaily.steps) !== Number(daily.steps);
-      record = await measureStepTelemetryPhase("daily", () => tx.step.upsert({
-        where: {
-          userId_date: { userId, date: new Date(daily.date) },
-        },
-        create: {
-          userId,
-          date: new Date(daily.date),
-          steps: daily.steps,
-          stepGoal: null,
-        },
-        update: { steps: daily.steps },
-      }));
+      const persistedDaily = await measureStepTelemetryPhase(
+        "daily",
+        () => upsertDailyStep(tx, { userId, ...daily }),
+      );
+      record = persistedDaily.record;
+      dailyExisted = persistedDaily.existed;
+      dailyStorageChanged = persistedDaily.storageChanged;
     }
 
     let samplePersistence = { storageChanged: false, scoringChanged: false };
@@ -92,35 +154,22 @@ function buildStepInputIntake(dependencies = {}) {
           userId,
           samples,
           new Date(requestTimestamp).getTime(),
-          { noopSuppression: true, manageScoringVersion: false },
+          { noopSuppression: true, manageScoringVersion: false, returnCanonicalInput: true },
         ),
       );
     }
-
-    const afterSamples = await measureStepTelemetryPhase(
-      "sample",
-      () => readCanonicalSampleInput(tx, userId),
+    const canonicalInput = samplePersistence.canonicalInput || await measureStepTelemetryPhase(
+      "sample", () => readCanonicalSampleInput(tx, userId),
     );
-    const decisionState = { ...scoringState, dbNow: afterSamples.dbNow };
+    const decisionState = { ...scoringState, dbNow: canonicalInput.dbNow };
     const sampleScoringChanged =
       !scoringBoundaryIsSafe(decisionState) ||
-      scoringState.scoringWatermark !== afterSamples.scoringWatermark;
+      scoringState.scoringWatermark !== canonicalInput.scoringWatermark;
     const scoringChanged = dailyStorageChanged || sampleScoringChanged;
     const storageChanged =
       dailyStorageChanged ||
-      samplePersistence.storageChanged === true ||
-      beforeSamples.storageWatermark !== afterSamples.storageWatermark;
+      samplePersistence.storageChanged === true;
 
-    await measureStepTelemetryPhase(
-      "scoring_generation",
-      () => persistScoringInputState(
-        tx,
-        userId,
-        scoringState,
-        afterSamples,
-        scoringChanged,
-      ),
-    );
     const generation = resultingGeneration(scoringState, scoringChanged);
     const repairRequired = !generationsEqual(
       scoringState.sourceQueueSemanticsGeneration,
@@ -130,42 +179,41 @@ function buildStepInputIntake(dependencies = {}) {
     let jobs = [];
     let activeRaceCount = 0;
     if (scoringChanged || repairRequired) {
-      const races = await measureStepTelemetryPhase("active_race", () => tx.race.findMany({
-        where: {
-          status: "ACTIVE",
-          participants: { some: { userId, status: "ACCEPTED" } },
-        },
-        select: {
-          id: true,
-          participants: {
-            where: { userId, status: "ACCEPTED" },
-            select: { id: true, userId: true, status: true },
-            take: 1,
-          },
-        },
-        orderBy: { id: "asc" },
-      }));
+      const races = await measureStepTelemetryPhase("active_race", () => tx.$queryRawUnsafe(
+        `SELECT race.id AS "raceId",participant.id AS "participantId",
+                race.max_participants AS "maxParticipants"
+           FROM races race
+           JOIN race_participants participant ON participant.race_id=race.id
+          WHERE race.status='active' AND participant.user_id=$1 AND participant.status='accepted'
+          ORDER BY race.id`,
+        userId,
+      ));
       activeRaceCount = races.length;
       const dirtyEnvelopeByRaceId = new Map();
+      const largeRaceScopeByRaceId = new Map();
       for (const race of races) {
-        const participant = race.participants[0] || null;
-        dirtyEnvelopeByRaceId.set(race.id, {
-          reason: "STEP_INPUT_CHANGED",
-          dirtyUserIds: [userId],
-          dirtyParticipantIds: participant ? [participant.id] : [],
-          powerupTypes: [],
-          priority: participant ? "COALESCE" : "IMMEDIATE",
-        });
+        dirtyEnvelopeByRaceId.set(race.raceId, buildStepInputDirtyEnvelope({
+          userId,
+          participantId: race.participantId,
+          maxParticipants: race.maxParticipants,
+        }));
+        if (Number(race.maxParticipants) > PARTICIPANT_CAP && race.participantId) {
+          largeRaceScopeByRaceId.set(race.raceId, {
+            userId,
+            participantId: race.participantId,
+          });
+        }
       }
       jobs = await measureStepTelemetryPhase(
         "durable_enqueue",
         () => raceResolutionJobModel.enqueueMany(
           {
-            raceIds: races.map((race) => race.id),
+            raceIds: races.map((race) => race.raceId),
             userId,
             resolutionTimeZone: timeZone,
             now: new Date(requestTimestamp),
             dirtyEnvelopeByRaceId,
+            largeRaceScopeByRaceId,
             burstCoalescing,
             queuedGenerationMerge,
             queuePriority: "MAINTENANCE",
@@ -173,28 +221,60 @@ function buildStepInputIntake(dependencies = {}) {
           tx,
         ),
       );
-      await measureStepTelemetryPhase(
-        "scoring_generation",
-        () => stampSourceQueueSemanticsGeneration(tx, userId, generation),
-      );
     }
+
+    // The generation, canonical watermark, and durable-queue ownership fence
+    // become visible atomically. Keeping them in one UPDATE removes a second
+    // database round trip from every accepted launch-wave upload.
+    await measureStepTelemetryPhase(
+      "scoring_generation",
+      () => persistScoringInputState(
+        tx,
+        userId,
+        scoringState,
+        canonicalInput,
+        scoringChanged,
+        (scoringChanged || repairRequired)
+          ? { sourceQueueSemanticsGeneration: generation }
+          : undefined,
+      ),
+    );
+
+    // Reuse the transaction's already-checked-out connection for this tiny
+    // durability stamp. Performing it after commit required a second pool
+    // checkout per successful upload; under a launch wave that wait dominated
+    // the otherwise sub-millisecond update and held the admission permit open.
+    await tx.$executeRawUnsafe(
+      `UPDATE users
+          SET last_step_sync_at = GREATEST(
+            COALESCE(last_step_sync_at, '-infinity'::timestamptz),
+            $2::timestamptz
+          )
+        WHERE id=$1`,
+      userId,
+      requestTimestamp,
+    );
 
     return {
       record,
-      dailyExisted: Boolean(existingDaily),
+      dailyExisted,
       storageChanged,
       scoringChanged,
       repairRequired,
       generation,
-      canonicalCoverageThrough: afterSamples.canonicalCoverageThrough,
-      completedAt: afterSamples.dbNow,
+      canonicalCoverageThrough: canonicalInput.canonicalCoverageThrough,
+      completedAt: canonicalInput.dbNow,
       jobs,
       activeRaceCount,
+      lastStepSyncStamped: true,
     };
   }
 
   return async function stepInputIntake(input, tx = null) {
-    const capacity = startCapacityPhase("step_source_intake");
+    // Keep the established capacity-telemetry surface name stable. The
+    // implementation beneath it is now the single canonical intake path, but
+    // existing dashboards and evidence tests still consume this identifier.
+    const capacity = startCapacityPhase("uploader_reconciliation");
     const endpoint = input?.endpoint || "unknown";
     let outcome = "transaction_error";
     try {
@@ -235,7 +315,9 @@ function buildStepInputIntake(dependencies = {}) {
 const stepInputIntake = buildStepInputIntake();
 
 module.exports = {
+  buildStepInputDirtyEnvelope,
   buildStepInputIntake,
   stepInputIntake,
   generationsEqual,
+  upsertDailyStep,
 };

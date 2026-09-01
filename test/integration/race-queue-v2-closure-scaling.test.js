@@ -36,6 +36,9 @@ const { Race } = require("../../src/modules/races/models/race");
 const {
   RaceActiveEffect,
 } = require("../../src/modules/powerups/models/raceActiveEffect");
+const {
+  RaceResolutionJobV2,
+} = require("../../src/modules/races/models/raceResolutionJobV2");
 const { appSettings } = require("../../src/shared/config/appSettings");
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -54,6 +57,7 @@ beforeEach(async () => {
   await appSettings.setFlag("inlineRaceResolutionFallback", false);
   await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", false);
   await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
+  await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", true);
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
   await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
 });
@@ -138,6 +142,9 @@ async function seedRaceOfSize(size) {
       startedAt,
       endsAt: new Date(Date.now() + 24 * HOUR_MS),
       timezone: "UTC",
+      // This matrix measures ordinary bounded closure cost, not the separate
+      // >1,000-participant trigger-promotion path.
+      maxParticipants: size,
     },
   });
 
@@ -251,7 +258,16 @@ async function measureClosureAtSize(size) {
 
   // Baseline FULL resolution of the whole field.
   const baseline = buildRaceResolutionWorkerV2({ bootAt: 0, logger: { log() {}, error() {} } });
-  for (let i = 0; i < 20 && (await baseline.processOne()); i++) { /* drain */ }
+  await RaceResolutionJobV2.promoteFullScopeTriggers({ now: new Date() });
+  // Target the seeded race so the fixture drains its initial FULL generation
+  // even when production's large-race debounce is still in the future.
+  for (let i = 0; i < 20 && (await baseline.processOne({ raceId })); i++) { /* drain */ }
+  const [remainingTriggers, baselineJob] = await Promise.all([
+    prisma.raceResolutionFullTrigger.count({ where: { raceId } }),
+    prisma.raceResolutionJobV2.findUnique({ where: { raceId } }),
+  ]);
+  assert.equal(remainingTriggers, 0, "baseline must drain durable full triggers");
+  assert.equal(baselineJob?.state, "SUCCEEDED", "baseline must finish before measurement");
 
   // The closure's single edge: the partner leeches the uploader.
   const [targetParticipant, sourceParticipant] = await Promise.all([
@@ -346,7 +362,12 @@ describe("dependency closure — 10/100/350 scaling", () => {
       assert.equal(
         run.line.resolutionPlan,
         "DEPENDENCY_CLOSURE",
-        `size ${run.size}: must have taken the closure plan, else the measurement is of FULL`
+        `size ${run.size}: must have taken the closure plan, else the measurement is of FULL; ` +
+          JSON.stringify({
+            fallback: run.line.shadowClosureFallbackReason,
+            scope: run.line.stepSyncScopeOutcome,
+            reasons: run.line.reasonClasses,
+          })
       );
       assert.equal(
         run.fieldSize,

@@ -15,6 +15,7 @@ const {
   databasePoolTelemetry: defaultDatabasePoolTelemetry,
   databasePoolConfig: defaultDatabasePoolConfig,
 } = require("./db");
+const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("./shared/observability/eventSurgeTelemetry");
 const {
   registerEventHandlers,
   registerNotificationHandlers,
@@ -49,6 +50,7 @@ const {
 const { scheduleInboxExpiry, scheduleInboxDelivery } = require("./modules/inbox");
 const { subscribeNotificationWakeup } = require("./shared/cache/redisCache");
 const { notificationIntentService } = require("./modules/notifications/services/notificationDelivery");
+const { waitForNotificationAdmissionStartupBarrier } = require("./modules/notifications/services/notificationAdmission");
 const {
   scheduleActivationEventCleanup,
   scheduleAdminMetricsActivityCleanup,
@@ -82,6 +84,18 @@ const {
   scheduleDomainEventProjection,
   scheduleDomainEventRetention,
 } = require("./modules/domainEvents");
+
+function configureHttpServer(server) {
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
+  server.requestTimeout = 30_000;
+  // Cluster workers own independent database pools, while mobile clients and
+  // reverse proxies keep TCP connections alive. Rotate an upstream socket
+  // after one launch-sized request graph so a hot connection cannot pin many
+  // consecutive app opens to one worker and strand capacity in its peer.
+  server.maxRequestsPerSocket = 100;
+  return server;
+}
 function startServer({
   app = createApp(),
   port = Number(process.env.PORT || 3000),
@@ -167,6 +181,7 @@ function startServer({
   capacityGlobalEventOnly = false,
   processRole = process.env.STEPS_PROCESS_ROLE || "all",
   databasePoolTelemetry = defaultDatabasePoolTelemetry,
+  eventSurgeTelemetry = defaultEventSurgeTelemetry,
   databasePoolConfig = defaultDatabasePoolConfig,
 } = {}) {
   const jobStopHandles = [];
@@ -178,7 +193,7 @@ function startServer({
   registerNotifications();
   registerRaceListCache();
 
-  const server = app.listen(port, host, () => {
+  const server = configureHttpServer(app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
     logger.log(JSON.stringify({
       event: "database_pool_configuration_v1",
@@ -194,6 +209,14 @@ function startServer({
     // ownership guards. Extra overlapping boots intentionally block readiness.
     retainStopHandle(scheduleGenerationHeartbeatJob());
     retainStopHandle(databasePoolTelemetry?.start?.());
+    retainStopHandle(eventSurgeTelemetry?.start?.());
+    let notificationAdmissionBarrierPromise = null;
+    const notificationAdmissionStartupBarrier = () => {
+      notificationAdmissionBarrierPromise ||= waitForNotificationAdmissionStartupBarrier({
+        prisma: require("./db").prisma,
+      });
+      return notificationAdmissionBarrierPromise;
+    };
     const startCrons = () => {
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup
@@ -221,13 +244,14 @@ function startServer({
         retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
         retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
         retainStopHandle(scheduleDomainEventProjectionJob());
-        retainStopHandle(scheduleNotificationScheduleReleaseJob());
-        retainStopHandle(scheduleNotificationCompletenessReconcilerJob());
+        retainStopHandle(scheduleNotificationScheduleReleaseJob({ startupBarrier: notificationAdmissionStartupBarrier }));
+        retainStopHandle(scheduleNotificationCompletenessReconcilerJob({ startupBarrier: notificationAdmissionStartupBarrier }));
         retainStopHandle(scheduleInboxDeliveryJob({
           subscribeNotificationWakeup,
           // The protected local capacity process disables ordinary fan-outs.
           // This injected override keeps the one pipeline under measurement live.
           userFanoutDisabled: () => false,
+          startupBarrier: notificationAdmissionStartupBarrier,
         }));
         retainStopHandle(scheduleDeviceTokenCleanupJob());
         return;
@@ -255,12 +279,13 @@ function startServer({
       }
       if (!userFanoutDisabled("INBOX_DELIVERY_DISABLED")) {
         retainStopHandle(scheduleDomainEventProjectionJob());
-        retainStopHandle(scheduleNotificationScheduleReleaseJob());
-        retainStopHandle(scheduleNotificationCompletenessReconcilerJob());
+        retainStopHandle(scheduleNotificationScheduleReleaseJob({ startupBarrier: notificationAdmissionStartupBarrier }));
+        retainStopHandle(scheduleNotificationCompletenessReconcilerJob({ startupBarrier: notificationAdmissionStartupBarrier }));
         // The cron owner is the only process that subscribes to the ephemeral
         // wake channel. Postgres polling remains the durable recovery path.
         retainStopHandle(scheduleInboxDeliveryJob({
           subscribeNotificationWakeup,
+          startupBarrier: notificationAdmissionStartupBarrier,
         }));
         retainStopHandle(scheduleDeviceTokenCleanupJob());
       }
@@ -357,7 +382,7 @@ function startServer({
     } else {
       logger.log(`[CRON] Skipping cron scheduling on NODE_APP_INSTANCE=${process.env.NODE_APP_INSTANCE}`);
     }
-  });
+  }));
   server.jobStopHandles = jobStopHandles;
   return server;
 }
@@ -422,6 +447,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  configureHttpServer,
   installProductionShutdownHandlers,
   startServer,
 };

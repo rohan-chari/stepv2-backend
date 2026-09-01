@@ -56,6 +56,14 @@ test("TR-706 first request with team_races persists the tokens", async () => {
   assert.deepEqual(ctx.state.updates[0].features, ["team_races"]);
 });
 
+test("TR-706 a cached user does not rewrite the same new tokens on every launch request", async () => {
+  const ctx = makeCtx({ storedFeatures: [], headerFeatures: ["team_races"] });
+  const requireAuth = buildRequireAuth(ctx.deps);
+  await runMiddleware(requireAuth, ctx.req, ctx.res);
+  await runMiddleware(requireAuth, ctx.req, ctx.res);
+  assert.equal(ctx.state.updates.length, 1);
+});
+
 test("TR-706 unchanged tokens are NOT rewritten (no hot write path)", async () => {
   const ctx = makeCtx({
     storedFeatures: ["team_races"],
@@ -131,4 +139,40 @@ test("TR-706 a persistence failure never breaks the request", async () => {
   });
   assert.equal(nexted, true, "request proceeds despite write failure");
   assert.equal(ctx.res.statusCode, null);
+});
+
+test("admin metrics eligibility is stamped only once across a cached launch burst", async () => {
+  const ctx = makeCtx({
+    storedFeatures: ["admin_metrics_v2"],
+    headerFeatures: ["admin_metrics_v2"],
+  });
+  let epochReads = 0;
+  let stamps = 0;
+  ctx.req.clientFeatures = new Set(["admin_metrics_v2"]);
+  ctx.deps.appSettings = {
+    async getFlag(name) {
+      assert.equal(name, "adminMetricsV2TelemetryEnabled");
+      return true;
+    },
+  };
+  ctx.deps.prisma = {
+    adminMetricsCollectionEpoch: {
+      async findFirst() {
+        epochReads += 1;
+        return { id: "epoch-1" };
+      },
+    },
+  };
+  ctx.deps.User.stampMetricsV2Eligibility = async (id, epochId) => {
+    assert.equal(id, "user-1");
+    assert.equal(epochId, "epoch-1");
+    stamps += 1;
+  };
+  const requireAuth = buildRequireAuth(ctx.deps);
+
+  await runMiddleware(requireAuth, ctx.req, ctx.res);
+  await runMiddleware(requireAuth, ctx.req, ctx.res);
+
+  assert.equal(stamps, 1, "the first request owns the durable stamp");
+  assert.equal(epochReads, 1, "the cached user suppresses later epoch reads");
 });

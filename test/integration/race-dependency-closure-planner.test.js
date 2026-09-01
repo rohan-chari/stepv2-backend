@@ -249,7 +249,7 @@ describe("race scoring dependency closure planner (real DB)", () => {
     assert.equal(teamPlan.fallbackReason, CLOSURE_FALLBACK_REASONS.TEAM_RACE);
   });
 
-  it("an UPCOMING global event is visible to validUntil, and a live one forces FULL", async () => {
+  it("upcoming and live global events bound a participant-local closure", async () => {
     const { race, participants } = await seedRace();
     // Five minutes out. Under the old `now + 5s` global-event horizon this row
     // was not selected at all, so no deadline could ever see it and a closure
@@ -272,7 +272,8 @@ describe("race scoring dependency closure planner (real DB)", () => {
       plan.validUntil.getTime() <= NOW.getTime() + MAX_CLOSURE_VALIDITY_MS
     );
 
-    // Once it is live, it is a veto rather than a boundary.
+    // Once live, the multiplier remains participant-local. The closure stays
+    // bounded and its exclusive deadline moves to the event end.
     await prisma.globalStepEvent.update({
       where: { id: upcoming.id },
       data: { startsAt: new Date("2026-08-14T11:50:00.000Z") },
@@ -280,10 +281,10 @@ describe("race scoring dependency closure planner (real DB)", () => {
     const live = await buildRaceScoringDependencyClosure(
       planInput(race, participants)
     );
-    assert.equal(
-      live.fallbackReason,
-      CLOSURE_FALLBACK_REASONS.GLOBAL_EVENT_ACTIVE
-    );
+    assert.equal(live.plan, "DEPENDENCY_CLOSURE");
+    assert.equal(live.fallbackReason, null);
+    assert.ok(live.closureFingerprint);
+    assert.equal(live.validUntil.getTime(), NOW.getTime() + MAX_CLOSURE_VALIDITY_MS);
   });
 
   it("a Leech source that is no longer accepted forces FULL", async () => {

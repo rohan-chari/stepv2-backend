@@ -219,6 +219,10 @@ const { ifNoneMatchMatches } = require("../../shared/http/representationEtag");
 const {
   canonicalRaceListVariant,
 } = require("./services/raceListCache");
+const { prisma: defaultPrisma } = require("../../db");
+const {
+  raceLaunchAuxiliaryBatch,
+} = require("./services/raceLaunchAuxiliaryBatch");
 
 // A powerup is STEALABLE via Pickpocket only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -446,6 +450,7 @@ function createRacesRouter(dependencies = {}) {
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
   const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
   const logger = dependencies.logger || console;
+  const routePrisma = dependencies.prisma || defaultPrisma;
   const hasLiveUserCreatedRaceFn =
     dependencies.hasLiveUserCreatedRace || hasLiveUserCreatedRace;
 
@@ -544,7 +549,8 @@ function createRacesRouter(dependencies = {}) {
         // early 403 instead of a full forceFullParticipants read that would only
         // be denied afterward anyway.
         previewViewer: allowPreview && hasRacePreviewToken(req.clientFeatures),
-        leanScoringContext,
+        leanScoringContext:
+          leanScoringContext || req.query.view === "compact-v1",
         privacySafeDisplayRanks:
           req.clientFeatures?.has("privacy_safe_display_ranks") ?? false,
       }
@@ -834,6 +840,7 @@ function createRacesRouter(dependencies = {}) {
           sqlSummaryEnabled,
           raceListCacheEnabled,
           raceListCache,
+          compactRaceList: compactRaceListEnabled,
           raceListVariant: canonicalRaceListVariant({
             clientFeatures: req.clientFeatures,
             compact: compactRaceListEnabled,
@@ -887,13 +894,10 @@ function createRacesRouter(dependencies = {}) {
         (await isStrictFlagEnabled(settings, "apiReviewPromptEnabled"))
       ) {
         try {
-          const prisma = require("../../db").prisma;
-          const opportunities = await prisma.appReviewPromptAttempt.findMany({
-            where: {
-              userId: req.user.id, claimedAt: null, expiresAt: { gt: new Date() },
-              raceId: { in: result.completed.map((race) => race.id) },
-            },
-            select: { opportunityId: true, raceId: true, expiresAt: true },
+          const opportunities = await raceLaunchAuxiliaryBatch.loadReviewOpportunities({
+            prisma: routePrisma,
+            userId: req.user.id,
+            raceIds: result.completed.map((race) => race.id),
           });
           const byRace = new Map(opportunities.map((row) => [row.raceId, row]));
           for (const race of result.completed) {

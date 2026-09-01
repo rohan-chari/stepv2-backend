@@ -43,7 +43,7 @@ async function writeJobFence(tx, work, outcome) {
   }
 }
 
-async function pendingWorkRaceIds(client, work) {
+async function pendingWorkRaceScopes(client, work) {
   const impacts = await client.globalEventRaceImpact.findMany({
     where: {
       eventId: work.eventId,
@@ -53,10 +53,24 @@ async function pendingWorkRaceIds(client, work) {
     select: { raceId: true },
     orderBy: { raceId: "asc" },
   });
-  return [...new Set(impacts.map((row) => row.raceId))].sort();
+  const raceIds = [...new Set(impacts.map((row) => row.raceId))].sort();
+  const participants = raceIds.length === 0 ? [] : await client.raceParticipant.findMany({
+    where: {
+      userId: work.userId,
+      raceId: { in: raceIds },
+    },
+    select: { id: true, raceId: true },
+  });
+  return {
+    raceIds,
+    participantIdsByRaceId: new Map(raceIds.map((raceId) => [
+      raceId,
+      participants.filter((row) => row.raceId === raceId).map((row) => row.id),
+    ])),
+  };
 }
 
-async function enqueueWorkRaceIds(client, work, raceIds, current) {
+async function enqueueWorkRaceIds(client, work, raceIds, current, participantIdsByRaceId = new Map()) {
   if (raceIds.length === 0) return [];
   return RaceResolutionJobV2.enqueueMany({
     raceIds,
@@ -65,7 +79,7 @@ async function enqueueWorkRaceIds(client, work, raceIds, current) {
     dirtyEnvelopeByRaceId: new Map(raceIds.map((raceId) => [raceId, {
       reason: "GLOBAL_EVENT_BOUNDARY",
       dirtyUserIds: [work.userId],
-      dirtyParticipantIds: [],
+      dirtyParticipantIds: participantIdsByRaceId.get(raceId) || [],
       powerupTypes: [],
       priority: "IMMEDIATE",
     }])),
@@ -88,8 +102,8 @@ async function reconcileWorkRaceQueues(prisma, current, batchSize, options = {})
       // No summary-work transaction is open here. The sorted C0 queue upsert
       // commits first; only then is the durable handoff stamped. A crash in
       // between retries the idempotent enqueue from the still-null stamp.
-      const raceIds = await pendingWorkRaceIds(prisma, work);
-      await enqueueWorkRaceIds(prisma, work, raceIds, current);
+      const { raceIds, participantIdsByRaceId } = await pendingWorkRaceScopes(prisma, work);
+      await enqueueWorkRaceIds(prisma, work, raceIds, current, participantIdsByRaceId);
       await options.afterSummaryRaceEnqueue?.(work, raceIds);
       const stamped = await prisma.globalEventSummaryWork.updateMany({
         where: {

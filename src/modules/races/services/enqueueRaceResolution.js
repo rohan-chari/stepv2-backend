@@ -7,6 +7,35 @@ const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnab
 const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const redisCache = require("../../../shared/cache/redisCache");
+
+const DISPLAY_REFRESH_ADMISSION_MS = 1000;
+const CLAIM_DISPLAY_REFRESH_LUA = `
+return redis.call('SET', KEYS[1], '1', 'PX', ARGV[1], 'NX')
+`;
+
+async function claimDisplayRefreshAdmission(raceId, cache = redisCache) {
+  if (!raceId) return true;
+  const claim = await cache.evalLua(
+    CLAIM_DISPLAY_REFRESH_LUA,
+    [`v1:race:resolution-display-enqueue:${raceId}`],
+    [DISPLAY_REFRESH_ADMISSION_MS],
+  );
+  // Redis is only an admission accelerator. On an outage or disabled cache,
+  // preserve the durable Postgres enqueue instead of losing refresh work.
+  if (!claim?.ok) return true;
+  return claim.result === "OK";
+}
+
+function normalizeResolutionPriority({ reason, priority, queuePriority = null }) {
+  // DISPLAY_REFRESH is generated after a persisted/stale page has already been
+  // served. It is convergence work, not request-critical work, so never let a
+  // thundering herd promote three full-race replays into the LIVE queue.
+  if (reason === "DISPLAY_REFRESH") {
+    return { priority: "COALESCE", queuePriority: "MAINTENANCE" };
+  }
+  return { priority, queuePriority };
+}
 
 function enqueueCounts(rows, at, { queuedGenerationMerge = false } = {}) {
   const values = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
@@ -105,19 +134,29 @@ async function enqueueRaceResolution(
   tx = null
 ) {
   if (!raceId) return null;
+  if (
+    tx == null &&
+    reason === "DISPLAY_REFRESH" &&
+    !(await claimDisplayRefreshAdmission(raceId))
+  ) return null;
   const capacity = startCapacityPhase("resolution_enqueue");
   let capacityOutcome = "error";
   let result = null;
   let queuedGenerationMerge = false;
   try {
+  const normalizedPriority = normalizeResolutionPriority({
+    reason,
+    priority,
+    queuePriority,
+  });
   const rollout = await capacity.measurePhase("rolloutFlags", () =>
     rolloutOptions({
       reason,
       dirtyUserIds,
       dirtyParticipantIds,
       powerupTypes,
-      priority,
-      queuePriority,
+      priority: normalizedPriority.priority,
+      queuePriority: normalizedPriority.queuePriority,
     })
   );
   queuedGenerationMerge = rollout.queuedGenerationMerge;
@@ -130,7 +169,7 @@ async function enqueueRaceResolution(
       dirtyUserIds,
       dirtyParticipantIds: [],
       powerupTypes: [],
-      priority: "IMMEDIATE",
+      priority: normalizedPriority.priority,
     };
   }
   // EFFECT_BOUNDARY is a correctness/source-consumption envelope, not a
@@ -286,4 +325,9 @@ async function enqueueRaceResolutionForUser(
   }
 }
 
-module.exports = { enqueueRaceResolution, enqueueRaceResolutionForUser };
+module.exports = {
+  claimDisplayRefreshAdmission,
+  normalizeResolutionPriority,
+  enqueueRaceResolution,
+  enqueueRaceResolutionForUser,
+};

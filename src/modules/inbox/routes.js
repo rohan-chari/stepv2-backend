@@ -15,6 +15,9 @@ const { markInboxAlertRead } = require("./commands/markInboxAlertRead");
 const { markInboxReadAll: defaultMarkInboxReadAll } = require("./commands/markInboxReadAll");
 const { markUnreadAlertsRead } = require("./models/inbox");
 const { invalidateInboxUnread } = require("./services/inbox");
+const {
+  inboxFirstPageBatch: defaultInboxFirstPageBatch,
+} = require("./services/inboxFirstPageBatch");
 
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -72,6 +75,8 @@ function createInboxRouter(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const settings = dependencies.appSettings || appSettings;
   const markInboxReadAll = dependencies.markInboxReadAll || defaultMarkInboxReadAll;
+  const inboxFirstPageBatch = dependencies.inboxFirstPageBatch ||
+    (prisma === defaultPrisma ? defaultInboxFirstPageBatch : null);
   router.use(requireAuth);
 
   router.post("/read-all", asyncHandler(async (req, res) => {
@@ -123,17 +128,27 @@ function createInboxRouter(dependencies = {}) {
       const cursor = decodeCursor(req.query.cursor);
       const now = new Date();
       const where = { userId: req.user.id, expiresAt: { gt: now }, ...(beforeCursor(cursor) || {}) };
-      const [rows, unreadCounts] = await Promise.all([
-        prisma.inboxAlert.findMany({
-          where,
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          take: limit + 1,
-          // Notification subtype is retained in the durable delivery intent.
-          // Expose it additively while preserving every shipped Inbox field.
-          include: { outbox: { select: { kind: true, payload: true } } },
-        }),
-        getInboxUnreadCounts({ userId: req.user.id, now, prisma }),
-      ]);
+      const firstPage = !cursor && inboxFirstPageBatch
+        ? await inboxFirstPageBatch.load({
+            prisma, userId: req.user.id, now, limit,
+          })
+        : null;
+      const [rows, unreadCounts] = firstPage
+        ? [firstPage.rows, {
+            unreadCount: firstPage.unreadCount,
+            totalUnreadCount: firstPage.totalUnreadCount,
+          }]
+        : await Promise.all([
+            prisma.inboxAlert.findMany({
+              where,
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: limit + 1,
+              // Notification subtype is retained in the durable delivery intent.
+              // Expose it additively while preserving every shipped Inbox field.
+              include: { outbox: { select: { kind: true, payload: true } } },
+            }),
+            getInboxUnreadCounts({ userId: req.user.id, now, prisma }),
+          ]);
       const more = rows.length > limit;
       const alerts = rows.slice(0, limit);
       res.json({

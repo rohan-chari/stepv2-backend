@@ -143,8 +143,15 @@ function sample(startH, endH, steps) {
 // Alice trails Bob, so Alice can legally place a Bounty on Bob (the wager must
 // target a rival AHEAD of the caster). Returns the created BOUNTY effect row.
 async function placeBountyOnBob(alice, bob, raceId) {
-  await recordSamples(bob.token, [sample(6, 5.5, 9000)]);
-  await recordSamples(alice.token, [sample(6, 5.5, 1000)]);
+  // This suite exercises cleanser semantics, not asynchronous score
+  // projection. Establish the prerequisite standings deterministically, as
+  // the canonical Bounty integration suite does.
+  await prisma.raceParticipant.updateMany({
+    where: { raceId, userId: bob.userId }, data: { totalSteps: 9000 },
+  });
+  await prisma.raceParticipant.updateMany({
+    where: { raceId, userId: alice.userId }, data: { totalSteps: 1000 },
+  });
   const bounty = await giveHeldPowerup(raceId, alice.userId, "BOUNTY", 99801);
   const res = await usePowerup(alice.token, raceId, bounty.id, bob.userId);
   assert.equal(res.status, 200, "Alice can place a Bounty on the rival ahead");

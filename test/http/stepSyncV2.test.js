@@ -126,6 +126,41 @@ test("idempotency conflict maps to 409 IDEMPOTENCY_CONFLICT", async () => {
   );
 });
 
+test("all step POST admission failures happen before auth and preserve the generic 500 body", async () => {
+  for (const [path, requestBody] of [
+    ["/steps", { steps: 1, date: "2026-07-17" }],
+    ["/steps/samples", { samples: [{ periodStart: "2026-07-17T10:00:00Z", periodEnd: "2026-07-17T11:00:00Z", steps: 1 }] }],
+    ["/steps/sync-v2", body],
+  ]) {
+    let authCalls = 0;
+    let commandCalls = 0;
+    const app = express();
+    app.use(express.json());
+    app.use("/steps", createStepsRouter({
+      requireAuth(_req, _res, next) { authCalls += 1; next(); },
+      stepAdmission: { async acquire() { const error = new Error("full"); error.code = "ADMISSION_TIMEOUT"; throw error; }, snapshot() { return { active: 3, queued: 32 }; } },
+      recordSteps: async () => { commandCalls += 1; },
+      recordStepSamples: async () => { commandCalls += 1; },
+      recordStepSyncV2: async () => { commandCalls += 1; },
+    }));
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": KEY },
+        body: JSON.stringify(requestBody),
+      });
+      assert.equal(response.status, 500, path);
+      assert.deepEqual(await response.json(), { error: "Internal server error" });
+      assert.equal(authCalls, 0, `${path} must reject before auth`);
+      assert.equal(commandCalls, 0, `${path} must reject before command/DB work`);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+});
+
 // ── status endpoint ──
 test("GET status: missing/invalid generation → 400 INVALID_GENERATION", async () => {
   await withServer({ RaceResolutionJob: { findById: async () => null } }, async (base) => {

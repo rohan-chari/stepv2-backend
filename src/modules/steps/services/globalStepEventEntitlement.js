@@ -588,7 +588,7 @@ async function processDueEntitlementBoundaries({
 
   // Production uses the existing batch enqueue contract. A caller-supplied
   // single-race seam remains available for narrow tests and legacy doubles.
-  const enqueueRaces = async (tx, entitlement, raceIds) => {
+  const enqueueRaces = async (tx, entitlement, raceIds, participantIdsByRaceId = new Map()) => {
     if (raceIds.length === 0) return;
     if (!enqueueRaceResolution) {
       await defaultEnqueueRaceResolutionForUser({
@@ -597,7 +597,10 @@ async function processDueEntitlementBoundaries({
         now: current,
         reason: "GLOBAL_EVENT_BOUNDARY",
         priority: "IMMEDIATE",
-        reconciledRaces: raceIds.map((raceId) => ({ raceId })),
+        reconciledRaces: raceIds.map((raceId) => ({
+          raceId,
+          participantId: participantIdsByRaceId.get(raceId) || null,
+        })),
       }, tx);
       return;
     }
@@ -665,7 +668,7 @@ async function processDueEntitlementBoundaries({
               OR: [{ endsAt: null }, { endsAt: { gt: entitlement.startsAt } }],
             },
           },
-          select: { raceId: true },
+          select: { id: true, raceId: true },
         });
         const raceIds = [...new Set(participants.map((row) => row.raceId))].sort();
         await createPendingEnrollmentsForRaces(tx, {
@@ -674,7 +677,9 @@ async function processDueEntitlementBoundaries({
           userId: entitlement.userId,
           attributionVersion: entitlement.event?.summaryAttributionVersion,
         });
-        await enqueueRaces(tx, entitlement, raceIds);
+        await enqueueRaces(tx, entitlement, raceIds, new Map(
+          participants.map((row) => [row.raceId, row.id]),
+        ));
 
         if (raceIds.length > 0) {
           await appendDomainEvent(tx, {
@@ -732,7 +737,13 @@ async function processDueEntitlementBoundaries({
         const raceIds = [...new Set(impacts.map((row) => row.raceId))].sort();
         await acquireRaceWriteFences(tx, raceIds);
         await acquireGlobalEnrollmentLock(tx);
-        await enqueueRaces(tx, entitlement, raceIds);
+        const participants = raceIds.length === 0 ? [] : await tx.raceParticipant.findMany({
+          where: { userId: entitlement.userId, raceId: { in: raceIds } },
+          select: { id: true, raceId: true },
+        });
+        await enqueueRaces(tx, entitlement, raceIds, new Map(
+          participants.map((row) => [row.raceId, row.id]),
+        ));
         const {
           createSummaryWorkForEntitlement,
         } = require("./globalEventSummaryLifecycle");
@@ -886,6 +897,7 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
             race: { status: "ACTIVE" },
           },
           select: {
+            id: true,
             userId: true,
             raceId: true,
             joinedAt: true,
@@ -918,6 +930,7 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
           eventId: entitlement.eventId,
           raceId: row.raceId,
           userId: entitlement.userId,
+          participantId: row.id,
           status: "PENDING",
           ...(Number(entitlement.event?.summaryAttributionVersion) === 2
             ? { attributionVersion: 2 }
@@ -927,11 +940,18 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
       (eligible.length ? activeIds : noRaceIds).push(entitlement.id);
     }
     if (impactRows.length) {
-      await tx.globalEventRaceImpact.createMany({ data: impactRows, skipDuplicates: true });
+      await tx.globalEventRaceImpact.createMany({
+        data: impactRows.map(({ participantId: _participantId, ...impact }) => impact),
+        skipDuplicates: true,
+      });
       const impactedRaceIds = [...new Set(impactRows.map((row) => row.raceId))];
       const impactedUsersByRaceId = new Map(impactedRaceIds.map((raceId) => [
         raceId,
         [...new Set(impactRows.filter((row) => row.raceId === raceId).map((row) => row.userId))].sort(),
+      ]));
+      const impactedParticipantsByRaceId = new Map(impactedRaceIds.map((raceId) => [
+        raceId,
+        [...new Set(impactRows.filter((row) => row.raceId === raceId).map((row) => row.participantId))].sort(),
       ]));
       await RaceResolutionJobV2.enqueueMany({
         raceIds: impactedRaceIds,
@@ -940,11 +960,11 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
         dirtyEnvelopeByRaceId: new Map(impactedRaceIds.map((raceId) => [raceId, {
           reason: "GLOBAL_EVENT_BOUNDARY",
           dirtyUserIds: impactedUsersByRaceId.get(raceId),
-          dirtyParticipantIds: [],
+          dirtyParticipantIds: impactedParticipantsByRaceId.get(raceId),
           powerupTypes: [],
-          priority: "IMMEDIATE",
+          priority: "COALESCE",
         }])),
-        bypassDebounce: true,
+        burstCoalescing: true,
         queuePriority: "LIVE",
       }, tx);
     }

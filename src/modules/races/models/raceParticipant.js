@@ -1,4 +1,7 @@
 const { prisma } = require("../../../db");
+const {
+  raceParticipantPresentationRead,
+} = require("../services/raceParticipantPresentationRead");
 
 // Batch 2026-08-08 item 4 (podium): the top finishers of MANY completed races
 // in ONE query, with the cosmetics relations the avatar needs.
@@ -10,6 +13,13 @@ const { prisma } = require("../../../db");
 const PODIUM_PLACEMENTS = [1, 2, 3];
 
 const RaceParticipant = {
+  async findViewerRowsForRaces(userId, raceIds) {
+    const ids = [...new Set(raceIds || [])].filter(Boolean);
+    if (!userId || ids.length === 0) return [];
+    return prisma.raceParticipant.findMany({
+      where: { userId, raceId: { in: ids }, status: { not: "DECLINED" } },
+    });
+  },
   async findUserIdsByRace(raceId) {
     if (!raceId) return [];
     const rows = await prisma.raceParticipant.findMany({
@@ -24,74 +34,14 @@ const RaceParticipant = {
   // summaries establish rank. Bounded by race count rather than participant
   // count, so the hot GET /races query does not materialize every racer's gear.
   async findPresentationsByUserIds(userIds) {
-    if (!Array.isArray(userIds) || userIds.length === 0) return [];
-    return prisma.user.findMany({
-      where: { id: { in: [...new Set(userIds)] } },
-      select: {
-        id: true,
-        displayName: true,
-        equippedAccessories: {
-          include: {
-            shopItem: {
-              select: {
-                id: true,
-                sku: true,
-                name: true,
-                slot: true,
-                assetKey: true,
-                renderMetadata: true,
-                bobble: true,
-                testOnly: true,
-                remoteOnly: true,
-                assetVersion: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    return raceParticipantPresentationRead.findPresentationsByUserIds(userIds);
   },
 
   // Top-3 finishers for each of `raceIds`, for the completed-races list.
   // Returns a flat array; the caller groups by raceId. Ordered so that grouping
   // preserves 1 -> 2 -> 3 without a second sort.
   async findPodiumForRaces(raceIds) {
-    if (!Array.isArray(raceIds) || raceIds.length === 0) return [];
-    return prisma.raceParticipant.findMany({
-      where: {
-        raceId: { in: raceIds },
-        status: "ACCEPTED",
-        placement: { in: PODIUM_PLACEMENTS },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            displayName: true,
-            profilePhotoUrl: true,
-            equippedAccessories: {
-              include: {
-                shopItem: {
-                  select: {
-                    id: true,
-                    sku: true,
-                    name: true,
-                    slot: true,
-                    assetKey: true,
-                    renderMetadata: true,
-                    bobble: true,
-                    testOnly: true,
-                    remoteOnly: true,
-                    assetVersion: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: [{ raceId: "asc" }, { placement: "asc" }],
-    });
+    return raceParticipantPresentationRead.findPodiumForRaces(raceIds);
   },
 
   async findById(id) {

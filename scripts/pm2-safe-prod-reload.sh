@@ -20,7 +20,26 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
   node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution --baseline-file="$BASELINE_FILE"
 
-  pm2 startOrReload "$CONFIG" --only steps-tracker-cron
+  OLD_CRON_PID="$(pm2 pid steps-tracker-cron | tail -n 1 | tr -d "[:space:]")"
+  case "$OLD_CRON_PID" in
+    ""|0|*[!0-9]*) echo "safe reload requires one live steps-tracker-cron PID" >&2; exit 1 ;;
+  esac
+  OLD_CRON_START="$(awk "{print \$22}" "/proc/$OLD_CRON_PID/stat")"
+  pm2 stop steps-tracker-cron
+  CRON_EXIT_DEADLINE="$(( $(date +%s) + 120 ))"
+  while kill -0 "$OLD_CRON_PID" 2>/dev/null; do
+    CURRENT_CRON_START="$(awk "{print \$22}" "/proc/$OLD_CRON_PID/stat" 2>/dev/null || true)"
+    [ "$CURRENT_CRON_START" != "$OLD_CRON_START" ] && break
+    [ "$(date +%s)" -ge "$CRON_EXIT_DEADLINE" ] && {
+      echo "old cron PID did not exit before safe-reload deadline" >&2
+      exit 1
+    }
+    sleep 1
+  done
+  # The exact old owner is gone. Wait the full legacy delivery lease before a
+  # new cron can claim any row that an old binary might have held.
+  sleep 30
+  pm2 start "$CONFIG" --only steps-tracker-cron
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
   node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution,cron --baseline-file="$BASELINE_FILE"
 

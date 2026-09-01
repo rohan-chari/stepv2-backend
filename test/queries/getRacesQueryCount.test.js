@@ -120,3 +120,64 @@ test("bulk effect/inventory query count is constant for 1 vs 50 active powerup r
   assert.equal(sample.mysteryBoxCount, 1);
   assert.equal(sample.slotItems.length, 2); // HELD + MYSTERY_BOX
 });
+
+test("legacy mixed lists keep projected active races out of the SQL ranker", async () => {
+  const raceModule = require("../../src/modules/races/models/race");
+  const participantModule = require("../../src/modules/races/models/raceParticipant");
+  const originals = { Race: raceModule.Race, RaceParticipant: participantModule.RaceParticipant };
+  const active = {
+    ...activePowerupRace("active-large"),
+    powerupsEnabled: false,
+    _viewerParticipant: activePowerupRace("active-large").participants[0],
+  };
+  active._viewerParticipant.raceId = active.id;
+  const completed = {
+    ...activePowerupRace("completed-small"),
+    status: "COMPLETED",
+    powerupsEnabled: false,
+    completedAt: new Date(),
+  };
+  const rankedRaceIds = [];
+  Object.assign(raceModule, { Race: {
+    async findBoundedRaceListForUser() { return [active, completed]; },
+    async findRaceListStableForUser() { throw new Error("bounded list should be used"); },
+    async findSqlSummariesForUser(_userId, _extraIds, { stableRaces }) {
+      rankedRaceIds.push(stableRaces.map((race) => race.id));
+      return { ambiguousFinisherOrder: false, races: stableRaces };
+    },
+  } });
+  Object.assign(participantModule, { RaceParticipant: {
+    async findViewerRowsForRaces() { throw new Error("embedded viewer should be used"); },
+  } });
+  try {
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+    const { getRaces } = require("../../src/modules/races/queries/getRaces");
+    const result = await getRaces("viewer", false, {
+      raceListCacheEnabled: true,
+      compactRaceList: false,
+      raceListCache: {
+        isEnabled: () => true,
+        async getStableMembership() {
+          return { races: [active, completed], source: "redis" };
+        },
+      },
+      raceProgressPageProjection: {
+        async readRaceProgressPageProjection({ raceId }) {
+          assert.equal(raceId, active.id);
+          return {
+            total: 2, asOf: new Date().toISOString(), requesterRow: { placement: 2 },
+            rows: [{ participantId: `${active.id}-p2`, userId: "rival", placement: 1, totalSteps: 200 }],
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(rankedRaceIds, [[completed.id]]);
+    assert.equal(result.active[0].id, active.id);
+    assert.equal(result.completed[0].id, completed.id);
+  } finally {
+    Object.assign(raceModule, { Race: originals.Race });
+    Object.assign(participantModule, { RaceParticipant: originals.RaceParticipant });
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+  }
+});

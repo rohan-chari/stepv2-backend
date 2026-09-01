@@ -41,7 +41,7 @@ const bodyFor = (steps) => ({ date: "2026-07-17", steps, samples: [] });
 const HOUR_MS = 60 * 60 * 1000;
 const STEP_INTAKE_SEMANTICS = "CANONICAL_SOURCE_QUEUE_V1";
 
-async function activeRaceWith(userId, name) {
+async function activeRaceWith(userId, name, maxParticipants = 10) {
   const startedAt = new Date(Date.now() - 3 * HOUR_MS);
   const race = await prisma.race.create({
     data: {
@@ -51,7 +51,7 @@ async function activeRaceWith(userId, name) {
       isPublic: false,
       timeBased: true,
       timezone: "UTC",
-      maxParticipants: 10,
+      maxParticipants,
       maxDurationDays: 7,
       status: "ACTIVE",
       startedAt,
@@ -241,6 +241,10 @@ describe("POST /steps/sync-v2 (integration)", () => {
       }),
     ]);
     assert.deepEqual(responses.map((response) => response.status), [202, 202]);
+    const emissionDeadline = Date.now() + 500;
+    while (recorded.length + updated.length < 2 && Date.now() < emissionDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     assert.equal(recorded.length, 1, "only the locked creator emits STEPS_RECORDED");
     assert.equal(updated.length, 1, "the serialized second intake emits STEPS_UPDATED");
     const intents = await prisma.stepSyncRequest.findMany({
@@ -648,6 +652,63 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(jobs[0].generation, 1);
     assert.equal(jobs[0].state, "queued");
     assert.deepEqual(jobs[0].triggeredByUserIds, [user.id]);
+  });
+
+  it("shares one FULL generation across uploaders in a large race without growing the hot row", async () => {
+    const firstUser = await createTestUser();
+    const secondUser = await createTestUser();
+    const raceId = await activeRaceWith(
+      firstUser.user.id,
+      "Large shared generation race",
+      10_000,
+    );
+    await prisma.raceParticipant.create({
+      data: {
+        raceId,
+        userId: secondUser.user.id,
+        status: "ACCEPTED",
+        joinedAt: new Date(Date.now() - HOUR_MS),
+      },
+    });
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", true);
+    await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", true);
+
+    const first = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token: firstUser.token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(100),
+    });
+    const second = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token: secondUser.token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(200),
+    });
+
+    assert.equal(first.status, 202);
+    assert.equal(second.status, 202);
+    const [job] = await prisma.$queryRawUnsafe(
+      `SELECT generation,state::text AS state,
+              dirty_reasons AS "dirtyReasons",
+              triggered_by_user_ids AS "triggeredByUserIds"
+         FROM race_resolution_jobs_v2 WHERE race_id=$1`,
+      raceId,
+    );
+    assert.equal(Number(job.generation), 1);
+    assert.equal(job.state, "queued");
+    assert.deepEqual(job.dirtyReasons, ["FULL"]);
+    assert.deepEqual(job.triggeredByUserIds, []);
+    assert.equal(
+      await prisma.raceResolutionFullTrigger.count({ where: { raceId } }),
+      2,
+    );
+    const promoted = await RaceResolutionJobV2.promoteFullScopeTriggers();
+    assert.equal(promoted.promoted, 2);
+    assert.equal(promoted.races, 1);
+    assert.equal(
+      await prisma.raceResolutionFullTrigger.count({ where: { raceId } }),
+      0,
+    );
   });
 
   it("bumps a claimed generation and preserves the follow-up when queued-generation merge is enabled", async () => {

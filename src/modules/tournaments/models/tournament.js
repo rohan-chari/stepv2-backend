@@ -1,4 +1,7 @@
 const { prisma } = require("../../../db");
+const {
+  tournamentForUserReadBatch,
+} = require("../services/tournamentForUserReadBatch");
 
 // User shape reused across participant + matchup-race player payloads so the
 // bracket view can render capybaras with equipped cosmetics.
@@ -212,20 +215,10 @@ const Tournament = {
   // they are INVITED to only while still PENDING (a stale invite to a started/
   // finished bracket must not linger). Summary include.
   async findForUser(userId) {
-    return prisma.tournament.findMany({
-      where: {
-        status: { not: "CANCELLED" },
-        participants: {
-          some: {
-            OR: [
-              { userId, status: "ACCEPTED" },
-              { userId, status: "INVITED", tournament: { status: "PENDING" } },
-            ],
-          },
-        },
-      },
+    return tournamentForUserReadBatch.load({
+      prisma,
+      userId,
       include: summaryInclude,
-      orderBy: { createdAt: "desc" },
     });
   },
 

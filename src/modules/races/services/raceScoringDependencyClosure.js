@@ -24,6 +24,7 @@ const {
   SNAPSHOT_AT_EXPIRY_TYPES,
   EXPIRY_CONSEQUENCE_TYPES,
 } = require("../../powerups/constants/expiryEffectTypes");
+const { digestPayload } = require("./raceResolutionDisplayArtifact");
 
 // The five authoritative source lists a SCORING_INERT classification must be
 // absent from. Derived here, never hand-listed: a type added to any of these
@@ -552,7 +553,12 @@ const { multiplierBoundaries } = require("./effectMultiplier");
 const HOUR_MS = 60 * 60 * 1000;
 
 // Spec rule 5.
-const MAX_DEPENDENCY_CLOSURE_PARTICIPANTS = 64;
+// The intake queue already enforces this exact 1,000-participant envelope cap.
+// Keeping a smaller planner cap turned a valid coalesced launch wave into a
+// 10,000-row FULL recomputation, often repeatedly while uploads continued.
+// The closure remains strictly bounded, but can now consume the complete
+// durable envelope that upstream is allowed to produce.
+const MAX_DEPENDENCY_CLOSURE_PARTICIPANTS = 1000;
 // Hard ceiling on the closure's exclusive validity deadline. `validUntil` is a
 // NECESSARY condition only — it says "no boundary we can SEE crosses before
 // this". Sufficiency comes from the in-fence fingerprint re-verify, never from
@@ -747,6 +753,67 @@ function participantTotalsFrom(rows) {
     };
   }
   return totals;
+}
+
+// A closure commit must fence every input that can affect the participants it
+// writes, but it must not be invalidated by an unrelated runner uploading while
+// a 10k-person event race is being processed. The display-artifact digest is
+// deliberately race-wide and includes every user's scoring generation and
+// mutable total, so it cannot serve that purpose during a launch wave.
+//
+// This projection is derived from the SAME authoritative fingerprint read:
+// membership/race structure and the complete effect graph remain race-wide;
+// mutable participant state, user scoring generations, and local-event
+// entitlements are retained only for the closure. Trail mines keep the full
+// totals projection because their candidate choice is field-wide.
+function buildClosureFingerprintDigest(fingerprint, {
+  participantIds = [],
+  minesActive = false,
+  balanceConfigVersion = null,
+} = {}) {
+  if (!fingerprint?.race || !Array.isArray(fingerprint.participants)) return null;
+  const closure = new Set(participantIds);
+  const closureUsers = new Set();
+  const participants = fingerprint.participants.map((row) => {
+    if (closure.has(row.id)) {
+      closureUsers.add(row.userId);
+      return row;
+    }
+    const structural = {
+      id: row.id,
+      userId: row.userId,
+      status: row.status,
+      finishedAt: row.finishedAt,
+      forfeitedAt: row.forfeitedAt,
+      joinedAt: row.joinedAt,
+      team: row.team,
+    };
+    return minesActive
+      ? {
+          ...structural,
+          totalSteps: row.totalSteps,
+          finishTotalSteps: row.finishTotalSteps,
+        }
+      : structural;
+  });
+  const inputs = (fingerprint.inputs || []).filter(
+    (row) => closureUsers.has(row.userId),
+  );
+  const events = (fingerprint.globalEvents || []).filter(
+    (row) => row.userId == null || closureUsers.has(row.userId),
+  );
+  return digestPayload({
+    schema: 1,
+    race: fingerprint.race,
+    participants,
+    inputs,
+    effects: fingerprint.activeEffects || [],
+    expiredScoringEffects: fingerprint.expiredScoringEffects || [],
+    events,
+    balanceConfigVersion: balanceConfigVersion == null
+      ? "code-default"
+      : String(balanceConfigVersion),
+  });
 }
 
 function normalizeTotalsInput(participantTotals) {
@@ -995,27 +1062,46 @@ async function buildRaceScoringDependencyClosure({
     if (!fingerprint || typeof fingerprint.digest !== "string") {
       return fallback(CLOSURE_FALLBACK_REASONS.FINGERPRINT_UNAVAILABLE);
     }
-    const raceModel = Race;
-    const effectModel = RaceActiveEffect;
-    if (
-      !raceModel ||
-      typeof raceModel.findById !== "function" ||
-      !effectModel ||
-      typeof effectModel.findActiveForRace !== "function" ||
-      typeof effectModel.findRaceEffectsByType !== "function"
-    ) {
-      return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+    // The shipped fingerprint already returns the complete race row, roster,
+    // ACTIVE effect set, and retained EXPIRED dependency rows. Reuse that one
+    // coherent graph instead of immediately loading the same 10k-person race
+    // and effect history a second time. The model path remains a fail-closed
+    // compatibility seam for injected/older fingerprint builders.
+    const fingerprintHasGraph =
+      fingerprint.race &&
+      Array.isArray(fingerprint.participants) &&
+      Array.isArray(fingerprint.activeEffects) &&
+      Array.isArray(fingerprint.expiredScoringEffects);
+    if (fingerprintHasGraph) {
+      race = { ...fingerprint.race, participants: fingerprint.participants };
+      activeEffects = fingerprint.activeEffects;
+      const retainedEffects = dedupeById([
+        fingerprint.activeEffects,
+        fingerprint.expiredScoringEffects,
+      ]);
+      leechHistory = retainedEffects.filter((effect) => effect.type === "LEECH");
+      hitchhikeHistory = retainedEffects.filter(
+        (effect) => effect.type === "HITCHHIKE",
+      );
+    } else {
+      const raceModel = Race;
+      const effectModel = RaceActiveEffect;
+      if (
+        !raceModel ||
+        typeof raceModel.findById !== "function" ||
+        !effectModel ||
+        typeof effectModel.findActiveForRace !== "function" ||
+        typeof effectModel.findRaceEffectsByType !== "function"
+      ) {
+        return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+      }
+      [race, activeEffects, leechHistory, hitchhikeHistory] = await Promise.all([
+        raceModel.findById(raceId),
+        effectModel.findActiveForRace(raceId),
+        effectModel.findRaceEffectsByType(raceId, "LEECH"),
+        effectModel.findRaceEffectsByType(raceId, "HITCHHIKE"),
+      ]);
     }
-    // Bounded, race-scoped, and INDEPENDENT of participant count: the active
-    // set plus the two canonical cross-participant histories. findRaceEffectsByType
-    // is the exact read collectRaceHitchhikeCopies uses (status IN ACTIVE,
-    // EXPIRED), which is also the status set the LEECH scorer consumes.
-    [race, activeEffects, leechHistory, hitchhikeHistory] = await Promise.all([
-      raceModel.findById(raceId),
-      effectModel.findActiveForRace(raceId),
-      effectModel.findRaceEffectsByType(raceId, "LEECH"),
-      effectModel.findRaceEffectsByType(raceId, "HITCHHIKE"),
-    ]);
   } catch {
     return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
   }
@@ -1100,16 +1186,15 @@ async function buildRaceScoringDependencyClosure({
     }
   }
 
-  // Any global event overlapping the as-of instant forces FULL (spec rule 5).
-  // Non-overlapping edges still contribute to the validity deadline below.
+  // Global-event multipliers are participant-local scoring inputs. They do not
+  // create an edge between runners, so a live daily event remains closure-safe;
+  // its start/end still enters the exclusive validity deadline and the scoped
+  // fence retains the affected users' entitlement rows.
   const globalEvents = fingerprint.globalEvents || [];
   for (const event of globalEvents) {
     const startsAt = toMsOrNull(event.startsAt);
     const endsAt = toMsOrNull(event.endsAt);
     if (startsAt == null || endsAt == null) {
-      return fallback(CLOSURE_FALLBACK_REASONS.GLOBAL_EVENT_ACTIVE);
-    }
-    if (startsAt <= asOfMs && endsAt > asOfMs) {
       return fallback(CLOSURE_FALLBACK_REASONS.GLOBAL_EVENT_ACTIVE);
     }
   }
@@ -1316,6 +1401,14 @@ async function buildRaceScoringDependencyClosure({
   const participantTotals = participantTotalsFrom(
     totalsSource.length > 0 ? totalsSource : accepted
   );
+  const closureFingerprint = buildClosureFingerprintDigest(fingerprint, {
+    participantIds: [...closure],
+    minesActive: mines.length > 0,
+    balanceConfigVersion,
+  });
+  if (!closureFingerprint) {
+    return fallback(CLOSURE_FALLBACK_REASONS.FINGERPRINT_UNAVAILABLE);
+  }
 
   return {
     plan: "DEPENDENCY_CLOSURE",
@@ -1323,6 +1416,7 @@ async function buildRaceScoringDependencyClosure({
     scoringParticipantIds: [...closure].sort(),
     sourceParticipantIds,
     graphFingerprint: fingerprint.digest,
+    closureFingerprint,
     balanceConfigVersion,
     asOf,
     fallbackReason: null,
@@ -1357,6 +1451,7 @@ module.exports = {
   SUPPORTED_HITCHHIKE_SCORING_VERSIONS,
   DUE_EXPIRY_VETO_TYPES,
   buildRaceScoringDependencyClosure,
+  buildClosureFingerprintDigest,
   wouldTrailMineEscalate,
   SCORING_CLASSIFICATION_BY_TYPE,
   CLASSIFICATIONS,

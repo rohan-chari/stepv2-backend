@@ -53,6 +53,21 @@ async function fetchHealth(url) {
   }
 }
 
+async function fetchHttpCensus(url, { fetchOne = fetchHealth, maximumAttempts = 20 } = {}) {
+  const byIdentity = new Map();
+  for (let attempt = 0; attempt < maximumAttempts && byIdentity.size < 2; attempt += 1) {
+    const health = await fetchOne(url);
+    const capacity = health?.capacity;
+    if (capacity?.process?.role === "http" && [0, 1].includes(Number(capacity.process.instance))) {
+      byIdentity.set(`http:${Number(capacity.process.instance)}`, health);
+    }
+  }
+  if (!byIdentity.has("http:0") || !byIdentity.has("http:1")) {
+    throw new Error("capacity HTTP health census did not observe both worker identities");
+  }
+  return { http: byIdentity.get("http:0"), httpPeer: byIdentity.get("http:1") };
+}
+
 function writeImmutable(file, value) {
   if (fs.existsSync(file)) throw new Error(`capacity metrics artifact already exists: ${file}`);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -102,12 +117,12 @@ function createCollector({
   }
 
   async function sample() {
-    const [http, resolution, cron, database, containers] = await Promise.all([
-      fetchHealth(urls.http), fetchHealth(urls.resolution), fetchHealth(urls.cron),
+    const [httpCensus, resolution, cron, database, containers] = await Promise.all([
+      fetchHttpCensus(urls.http), fetchHealth(urls.resolution), fetchHealth(urls.cron),
       databaseSample(), dockerStats(config),
     ]);
     samples.push({
-      at: new Date().toISOString(), health: { http, resolution, cron },
+      at: new Date().toISOString(), health: { ...httpCensus, resolution, cron },
       containers, ...database,
     });
   }
@@ -158,4 +173,4 @@ if (require.main === module) main().catch((error) => {
   process.exitCode = 1;
 });
 
-module.exports = { createCollector, roleUrls, writeImmutable };
+module.exports = { createCollector, fetchHttpCensus, roleUrls, writeImmutable };
