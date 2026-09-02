@@ -210,6 +210,94 @@ test("race scoring prefetch collapses participant reads into three bulk reads", 
   );
 });
 
+test("generation-local effect snapshot serves race-active and shield reads and tracks successful writes", async () => {
+  const start = new Date("2026-08-10T00:00:00Z");
+  const effects = [
+    {
+      id: "mine-1", raceId: "race-1", targetParticipantId: "participant-1",
+      targetUserId: "user-1", sourceUserId: "user-1", type: "TRAIL_MINE",
+      status: "ACTIVE", createdAt: start,
+    },
+    {
+      id: "outside-mine", raceId: "race-1", targetParticipantId: "outside-participant",
+      targetUserId: "outside-user", sourceUserId: "outside-user", type: "TRAIL_MINE",
+      status: "ACTIVE", createdAt: new Date(start.getTime() + 1),
+    },
+    {
+      id: "shield-1", raceId: "race-1", targetParticipantId: "participant-2",
+      targetUserId: "user-2", sourceUserId: "user-2", type: "COMPRESSION_SOCKS",
+      status: "ACTIVE", createdAt: new Date(start.getTime() + 2),
+    },
+    {
+      id: "old-1", raceId: "race-1", targetParticipantId: "participant-2",
+      targetUserId: "user-2", sourceUserId: "user-2", type: "LEG_CRAMP",
+      status: "EXPIRED", createdAt: new Date(start.getTime() + 3),
+    },
+  ];
+  let bulkReads = 0;
+  const writes = [];
+  const scoped = await prefetchRaceScoringModels({
+    races: [{
+      id: "race-1", startedAt: start, powerupsEnabled: true,
+      participants: [
+        { id: "participant-1", userId: "user-1" },
+        { id: "participant-2", userId: "user-2" },
+      ],
+    }],
+    now: new Date("2026-08-10T12:00:00Z"),
+    strictWorkerMode: true,
+    stepSampleModel: { async findRowsForUserRanges() { return []; } },
+    stepsModel: { async findByUserIdsAndDateRange() { return []; } },
+    raceActiveEffectModel: {
+      async findResolutionEffectsForRaces(raceIds, historyTypes) {
+        bulkReads += 1;
+        assert.deepEqual(raceIds, ["race-1"]);
+        assert.deepEqual(historyTypes, PREFETCH_EFFECT_TYPES);
+        return effects.map((effect) => ({ ...effect }));
+      },
+      async findEffectsForRaceParticipantsByTypes() {
+        assert.fail("the complete generation snapshot must replace the typed bulk read");
+      },
+      async findActiveForRace() {
+        assert.fail("race-active reads must use the generation snapshot");
+      },
+      async findActiveByTypeForParticipant() {
+        assert.fail("shield reads must use the generation snapshot");
+      },
+      async update(id, fields) {
+        writes.push({ id, fields });
+        return { id, ...fields };
+      },
+    },
+  });
+
+  assert.equal(bulkReads, 1);
+  assert.deepEqual(
+    (await scoped.raceActiveEffectModel.findActiveForRace("race-1")).map(({ id }) => id),
+    ["mine-1", "outside-mine", "shield-1"],
+    "race-wide order and an active effect outside the scoped participant set are preserved",
+  );
+  assert.equal(
+    (await scoped.raceActiveEffectModel.findActiveByTypeForParticipant(
+      "participant-2", "COMPRESSION_SOCKS",
+    )).id,
+    "shield-1",
+  );
+  await scoped.raceActiveEffectModel.update("shield-1", { status: "BLOCKED" });
+  assert.deepEqual(writes, [{ id: "shield-1", fields: { status: "BLOCKED" } }]);
+  assert.equal(
+    await scoped.raceActiveEffectModel.findActiveByTypeForParticipant(
+      "participant-2", "COMPRESSION_SOCKS",
+    ),
+    null,
+    "the same generation must not reuse a row after its authoritative write",
+  );
+  assert.deepEqual(
+    (await scoped.raceActiveEffectModel.findActiveForRace("race-1")).map(({ id }) => id),
+    ["mine-1", "outside-mine"],
+  );
+});
+
 test("race scoring prefetch preserves closed-bucket semantics", async () => {
   const start = new Date("2026-08-10T00:00:00Z");
   const scoped = await prefetchRaceScoringModels({

@@ -327,6 +327,24 @@ const RaceActiveEffect = {
     return byParticipant;
   },
 
+  // Generation-local snapshot for race resolution. One ordered read covers
+  // every race-wide ACTIVE check plus EXPIRED history for the effect types used
+  // by scoring. Terminal BLOCKED rows have never been visible to either caller
+  // and remain excluded.
+  async findResolutionEffectsForRaces(raceIds, historyTypes) {
+    if (!raceIds || raceIds.length === 0) return [];
+    return prisma.raceActiveEffect.findMany({
+      where: {
+        raceId: { in: raceIds },
+        OR: [
+          { status: "ACTIVE" },
+          { status: "EXPIRED", type: { in: historyTypes } },
+        ],
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
   // Every effect row of one TYPE across a whole race, in one query. Used by the
   // Hitchhike scorer (§7.3), which — unlike the per-participant helpers above —
   // must also see links whose TARGET has finished or forfeited: their window is

@@ -1501,11 +1501,10 @@ function buildResolveRaceState(dependencies = {}) {
       // computed a credit destined for the floor, which is what keeps the
       // closure's scoring cost O(C) instead of O(links-in-race).
       //
-      // ONLY `findRaceEffectsByType` is intercepted. `computeHitchhikeCopiedSteps`
-      // reaches back through this same model for the v2 scoring version via
-      // `findEffectsForRaceByTypes`, and `triggerTrailMines`/`calculateCurrentTotal`
-      // use `findActiveForRace`/`findEffectsForRaceByTypes` — all pass straight
-      // through untouched.
+      // ONLY `findRaceEffectsByType` is narrowed here. The generation-local
+      // prefetch model may also serve participant/race active-effect reads from
+      // its one authoritative snapshot, but this wrapper does not change those
+      // results; it only removes Hitchhike links whose caster is outside C.
       //
       // Built as a SPREAD, not `Object.create`: these effect models are passed
       // around and re-wrapped by spread elsewhere (raceScoringPrefetch.js's

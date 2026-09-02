@@ -761,7 +761,9 @@ async function prefetchRaceScoringModelsImpl({
     : prepareSampleUsers(userIds).then(() => samplesByUser);
 
   const uncachedUserIds = userIds.filter((userId) => !cachedByUser.has(userId));
-  const [, dailyRows, effectsByParticipant, powerupEvents] = await Promise.all([
+  const completeEffectSnapshot = participantIds.length > 0 &&
+    typeof raceActiveEffectModel.findResolutionEffectsForRaces === "function";
+  const [, dailyRows, prefetchedEffects, powerupEvents] = await Promise.all([
     sampleRowsPromise,
     uncachedUserIds.length > 0
       ? stepsModel.findByUserIdsAndDateRange(
@@ -769,11 +771,15 @@ async function prefetchRaceScoringModelsImpl({
         )
       : Promise.resolve([]),
     participantIds.length > 0
-      ? raceActiveEffectModel.findEffectsForRaceParticipantsByTypes(
-          raceIds,
-          participantIds,
-          PREFETCH_EFFECT_TYPES
-        )
+      ? completeEffectSnapshot
+        ? raceActiveEffectModel.findResolutionEffectsForRaces(
+            raceIds, PREFETCH_EFFECT_TYPES,
+          )
+        : raceActiveEffectModel.findEffectsForRaceParticipantsByTypes(
+            raceIds,
+            participantIds,
+            PREFETCH_EFFECT_TYPES
+          )
       : Promise.resolve({}),
     powerupEventModel && typeof powerupEventModel.findByRaceAsc === "function"
       ? Promise.all(started.map((race) => powerupEventModel.findByRaceAsc(race.id)))
@@ -797,6 +803,15 @@ async function prefetchRaceScoringModelsImpl({
   const dailyStartMs = dailyRangeStart.getTime();
   const dailyEndMs = dailyRangeEnd.getTime();
   const prefetchedTypes = new Set(PREFETCH_EFFECT_TYPES);
+  const effectsByParticipant = completeEffectSnapshot
+    ? Object.fromEntries(participantIds.map((participantId) => [participantId, {}]))
+    : prefetchedEffects;
+  if (completeEffectSnapshot) {
+    for (const effect of prefetchedEffects || []) {
+      const byType = (effectsByParticipant[effect.targetParticipantId] ||= {});
+      (byType[effect.type] ||= []).push(effect);
+    }
+  }
 
   function fallbackOrThrow(message, operation) {
     if (strictWorkerMode) {
@@ -957,9 +972,14 @@ async function prefetchRaceScoringModelsImpl({
     },
   };
 
-  const allEffects = Object.values(effectsByParticipant || {}).flatMap(
-    (byType) => Object.values(byType || {}).flat()
-  );
+  // Keep the model's global createdAt ordering for race-wide consumers. In
+  // particular, Trail Mines are sequential and must not be reordered by the
+  // participant/type grouping used for participant-local scoring reads.
+  const allEffects = completeEffectSnapshot
+    ? prefetchedEffects || []
+    : Object.values(effectsByParticipant || {}).flatMap(
+        (byType) => Object.values(byType || {}).flat()
+      );
   const scopedEffects = {
     ...raceActiveEffectModel,
     async findEffectsForRaceByTypes(raceId, participantId, types) {
@@ -995,6 +1015,37 @@ async function prefetchRaceScoringModelsImpl({
       return allEffects.filter(
         (effect) => effect.raceId === raceId && effect.type === type
       );
+    },
+    async findActiveForRace(raceId) {
+      if (!completeEffectSnapshot) {
+        return raceActiveEffectModel.findActiveForRace(raceId);
+      }
+      return allEffects.filter(
+        (effect) => effect.raceId === raceId && effect.status === "ACTIVE"
+      );
+    },
+    async findActiveByTypeForParticipant(participantId, type, options = {}) {
+      if (!completeEffectSnapshot) {
+        return raceActiveEffectModel.findActiveByTypeForParticipant(
+          participantId, type, options,
+        );
+      }
+      const expiresAfter = options?.expiresAfter
+        ? new Date(options.expiresAfter).getTime()
+        : null;
+      return (effectsByParticipant?.[participantId]?.[type] || []).find(
+        (effect) => effect.status === "ACTIVE" &&
+          (expiresAfter == null || (effect.expiresAt &&
+            new Date(effect.expiresAt).getTime() > expiresAfter))
+      ) || null;
+    },
+    async update(id, fields) {
+      const updated = await raceActiveEffectModel.update(id, fields);
+      if (completeEffectSnapshot) {
+        const cached = allEffects.find((effect) => effect.id === id);
+        if (cached) Object.assign(cached, fields, updated || {});
+      }
+      return updated;
     },
   };
 
