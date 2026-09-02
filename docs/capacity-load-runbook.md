@@ -97,11 +97,163 @@ destroys the environment.
   containers are destroyed after the run.
 - A cleanup warning such as `baseline integrity changed during synthetic
   cleanup` means background cron/resolution work changed baseline rows during
-  the run. The load report is written before cleanup, and destroying the VM
-  removes all synthetic data. Treat it as a fixture-cleanup observability issue,
-  not as a request error.
+  the run. The cleanup artifact identifies every changed integrity table with
+  its before/after count and checksum. It is not a request error, but it fails a
+  `home-open` candidate and blocks escalation; destroy the disposable run after
+  retaining the evidence.
 - Do not increase the application pool solely because it waits. Check Postgres
   CPU, slow queries, lock/wait data, and query plans first.
+
+## Home-open capacity ladder
+
+`home-open` measures complete authenticated Home opens per second. It is not
+the older request-weighted `home` profile. Each session persists steps first,
+then reproduces the shipped Home dependency graph and parallelism, including
+response-dependent presentation and friends fallbacks, Me-triggered and
+presentation-triggered asset manifests, and bounded resolution polling.
+
+The containing Lima VM is 7 vCPU/12 GiB. Inside it, cgroups retain the measured
+production-shaped allocations: backend 4 vCPU/8 GiB, Postgres 1 vCPU/2 GiB,
+Redis 1 vCPU/256 MiB, and 1 vCPU/~1.75 GiB reserved for the guest, container
+runtime, and one-second monitoring. k6 runs on the host outside that envelope.
+The restore hook does not trust an existing Lima instance: it stops and edits
+any resource drift, starts it, then re-reads and stamps the actual 7-vCPU,
+12-GiB, configured-disk census into the run provenance.
+
+Every smoke, candidate, and boundary repeat requires a unique run id and a
+newly restored/scrubbed disposable state. Never overwrite a prior artifact.
+Load `.env.capacity.local`, then run the smoke:
+
+```sh
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile home-open --run-id <smoke-run-id>
+CAPACITY_MODE=true CAPACITY_OUTBOUND_DISABLED=true \
+  npm run load-test:k6:home-open -- --config docs/capacity-load.config.json \
+  --run-id <smoke-run-id> --mode smoke
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile home-open --run-id <smoke-run-id>
+```
+
+Smoke is fixed at 1 Home open/second for 120 seconds. Do not start the ladder
+unless its fixture topology, exact process census, session accounting,
+telemetry, queue drain, cleanup, and every gate pass.
+
+k6 can invoke a constant-arrival-rate iteration on the exact duration boundary.
+The script applies an exact per-scenario quota using k6's cross-VU-unique local
+scenario iteration index before observer or backend work. Such executor-only
+iterations are reported as `quotaRejected`; raw executor iterations minus that
+counter must equal the exact configured arrivals. They never count as offered
+Home opens and do not weaken the zero dropped-iteration gate.
+
+Before fixture baseline capture or any smoke, warm-up, or measured session is
+offered, the harness polls the dedicated resolution process until the actual
+worker reports both its intentional 60-second startup quiet period and old-queue
+handoff check complete. It then requires two consecutive observations in which
+every restored V2 resolution job is succeeded at its latest generation. This
+keeps restored-snapshot work outside both the cleanup baseline and load window.
+The boot/drain wait stays outside metrics; the measured queue gate remains
+unchanged at p95 at most 30 seconds, including for smoke.
+
+After resolution readiness, restored-queue quiescence, and fixture creation, the harness starts an idempotent,
+run-bound DB-pool measurement epoch on both HTTP workers, the resolution
+process, and the cron process. Metrics and k6 start only after the exact
+four-process reset census succeeds. Every health sample must retain the same
+process PID, measurement id, generation, and start timestamp; a missing,
+restarted, or re-reset process fails closed. This excludes startup checkout
+samples without changing the measured p99 checkout-wait gate of 50 ms.
+
+For each initial rate `2 5 10 20 30 40 60 80 100`, use the previous passing
+rate as `<lower-rate>`, choose a fresh run id, and run:
+
+```sh
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile home-open --run-id <candidate-run-id>
+CAPACITY_MODE=true CAPACITY_OUTBOUND_DISABLED=true \
+  npm run load-test:k6:home-open -- --config docs/capacity-load.config.json \
+  --run-id <candidate-run-id> --mode level --rate <candidate-rate> \
+  --warmup-rate <lower-rate>
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile home-open --run-id <candidate-run-id>
+```
+
+Each candidate has a separately tagged 120-second warm-up and 600-second
+measurement. After warm-up arrivals stop, the runner leaves a 16-second drain
+gap (the 15-second session deadline plus one launch bucket) before measurement,
+so warm-up tails cannot overlap or improve/degrade measured evidence. Stop at
+the first failure. If 100 passes, continue with 150, 225,
+340, and 500 until failure. If 500 passes, report only “at least 500 Home
+opens/second”; there is no extrapolated maximum or 70% ceiling.
+
+Bracket between the highest pass and lowest failure until the gap is within
+10% or 2 Home opens/second, whichever is larger. Then run the chosen boundary
+three times with `--mode boundary --repeat <1|2|3>`, a unique run id, and clean
+fixture state each time. The repeatable supported maximum is the highest rate
+for which all three pass; its safe operating ceiling is 70%.
+
+Artifacts are grouped by run under
+`results/capacity/home-open/<run-id>/<run-id>.home-open.<mode>.<rate>` and include k6 summary, one-second
+infrastructure metrics, generator metrics, identifier-free topology, JSON
+verification, and text summary. The orchestrator prints a progress record once
+per minute with completed/failed sessions, current critical latency and HTTP
+error evidence, generator use, and live infrastructure health. Progress reads
+k6's live REST `sample` values from the current warmup or measurement submetric;
+unavailable counts, rates, or percentiles remain `null` rather than being
+reported as zero. The JSON report
+also contains every endpoint's status/timeout counts and p50/p95/p99, every
+measurement-second's offered/started/dropped/completed/failed accounting, and
+average/peak in-flight sessions. Missing or non-finite evidence fails closed.
+A host-loopback observer records every measured session start and completion to
+calculate true time-weighted average and peak in-flight sessions; the report
+stamps its overhead of two synchronous loopback requests per Home open. These
+requests are tagged as generator telemetry and excluded from SUT HTTP rates.
+Critical and all-settled clocks begin at the open-loop scheduled launch instant,
+before the synchronous observer start call, so scheduler and observer delay are
+included exactly once in session latency and in the bounded deadline.
+A nonzero k6 exit, cleanup drift, process restart/extra identity, incomplete
+recovery window, or nonzero exit after artifacts are written means that level
+failed and escalation must stop.
+
+A restored production snapshot may contain a currently active global event.
+Home fixture setup first samples its aggregate topology, then removes the
+complete global-event derived domain from the guarded disposable capacity
+database before recording the cleanup baseline. For `home-open` only, the
+capacity cron process also omits global-event creation, boundary,
+entitlement-reconciliation, and summary ticks so those rows cannot reappear
+during a level. The identifier-free topology artifact records the snapshot,
+removed, and verified-zero isolation census. Production and staging are never
+changed by this isolation.
+After synthetic cleanup, the harness performs a second read-only census and
+stamps it into both JSON and text reports. Any global-event row (including a
+future scheduled row), any active event, any summary-work row, or
+missing/non-finite census evidence fails the level; this catches cron or
+external contamination that reappears after fixture setup.
+
+To interrupt, press Ctrl-C once, retain every artifact already emitted, then
+destroy the exact run immediately:
+
+```sh
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile home-open --run-id <interrupted-run-id>
+```
+
+Do not reuse an interrupted or failed run id. This workflow never contacts
+production or staging, never creates a production snapshot, and never changes
+public API behavior.
+
+After all three immutable boundary repeats pass, build the final ladder report
+without starting a VM. Every input must have a unique run id and identical
+backend commit, profile version, scrub attestation, source-tree, snapshot,
+approved-manifest, and resource provenance:
+
+```sh
+npm run load-test:k6:home-open -- --mode aggregate \
+  --reports results/capacity/home-open/<run-1>/<repeat-1>.json,results/capacity/home-open/<run-2>/<repeat-2>.json,results/capacity/home-open/<run-3>/<repeat-3>.json \
+  --output results/capacity/home-open/home-open-capacity-final.json
+```
+
+The final artifact reports the repeatable maximum, 70% safe ceiling (or only
+the proved `at least 500/s` lower bound), opens/minute, in-flight sessions,
+latency and endpoint/infrastructure bottlenecks, and conversion limitations.
 
 ## Global-event deployment gate
 

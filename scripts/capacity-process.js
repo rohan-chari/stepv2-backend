@@ -12,6 +12,9 @@ async function main() {
   await assertCapacityDatabaseMarker();
   const safety = prepareLocalCapacityProcess();
   const { installProductionShutdownHandlers, startServer } = require("../src/index");
+  const {
+    registerCapacityResolutionWorker,
+  } = require("../src/shared/observability/capacityResolutionReadiness");
   // src/index retains dotenv startup for ordinary entrypoints. Revalidate after
   // importing it so a checkout-local .env cannot redirect this process.
   prepareLocalCapacityProcess();
@@ -24,13 +27,22 @@ async function main() {
   ]);
   const capacityGlobalEventOnly = role === "cron" &&
     eventProfiles.has(process.env.CAPACITY_GLOBAL_EVENT_PROFILE);
-  const server = startServer({ capacityGlobalEventOnly });
+  const capacityHomeOpenIsolation = role === "cron" &&
+    process.env.CAPACITY_GLOBAL_EVENT_PROFILE === "home-open";
+  const server = startServer({
+    capacityGlobalEventOnly,
+    capacityHomeOpenIsolation,
+    reportCapacityResolutionWorker: role === "resolution"
+      ? registerCapacityResolutionWorker
+      : null,
+  });
   installProductionShutdownHandlers({ server });
   console.log(JSON.stringify({
     event: "capacity_process_started",
     runId: safety.runId,
     role,
     capacityGlobalEventOnly,
+    capacityHomeOpenIsolation,
     deterministicProvider: safety.notificationSink.deterministicProvider === true,
   }));
 }

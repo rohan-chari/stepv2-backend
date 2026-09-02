@@ -226,6 +226,57 @@ test("http and resolution process roles do not start the wrong schedulers", () =
   ]);
 });
 
+test("home-open capacity keeps the cron process idle", () => {
+  const run = (capacityHomeOpenIsolation) => {
+    const calls = [];
+    const track = (name) => () => calls.push(name);
+    startServer({
+      app: { listen(...args) { args[2](); return { close() {} }; } },
+      processRole: "cron", cronStartDelayMs: 0, capacityHomeOpenIsolation,
+      registerEventHandlers() {}, registerNotificationHandlers() {},
+      registerRaceListCacheInvalidation() {},
+      scheduleGenerationHeartbeat: track("heartbeat"),
+      scheduleRaceExpiryCheck: track("raceExpiry"),
+      scheduleSeededRaceRenewal: track("seededRenewal"),
+      scheduleTournamentSeedRenewal: track("tournamentRenewal"),
+      scheduleComputeRanks: track("ranks"), scheduleComputeRankedWeeks: track("rankedWeeks"),
+      scheduleGlobalStepEvents: track("globalEvents"),
+      scheduleGlobalEventBoundaryDrain: track("globalBoundary"),
+      scheduleGlobalEventEntitlementEventReconciler: track("globalEntitlementReconciler"),
+      scheduleGlobalEventSummaryTick: track("globalSummary"),
+      scheduleAutoStartScheduledRaces: track("autoStart"),
+      scheduleRecomputePlacements: track("placements"),
+      scheduleNotificationCleanup: track("notificationCleanup"),
+      scheduleInboxExpiry: track("inboxExpiry"), scheduleInboxDelivery: track("inboxDelivery"),
+      scheduleDomainEventProjection: track("domainProjection"),
+      scheduleDomainEventRetention: track("domainRetention"),
+      scheduleNotificationScheduleRelease: track("notificationRelease"),
+      scheduleNotificationCompletenessReconciler: track("notificationCompleteness"),
+      scheduleDeviceTokenCleanup: track("deviceTokenCleanup"),
+      scheduleActivationEventCleanup: track("activationCleanup"),
+      scheduleAdminMetricsActivityCleanup: track("metricsCleanup"),
+      schedulePushDeliveryCleanup: track("pushCleanup"),
+      scheduleReferralLinkOpenCleanup: track("referralCleanup"),
+      scheduleGiveawayRetention: track("giveawayRetention"),
+      scheduleFeedbackEmailAttemptExpiry: track("feedbackExpiry"),
+      scheduleDailyMover: track("dailyMover"),
+      scheduleDailyRewardReminder: track("dailyReward"),
+      scheduleStepMilestoneReminder: track("milestone"),
+      scheduleStepSampleRetention: track("sampleRetention"),
+      scheduleRacePayoutDoubleReconcile: track("payoutReconcile"),
+      scheduleFixedTeamPayoutMonitoring: track("teamPayoutMonitor"),
+      logger: { log() {} },
+    });
+    return calls;
+  };
+  const ordinary = run(false);
+  const isolated = run(true);
+  assert.ok(ordinary.includes("raceExpiry"), "default false must preserve ordinary cron behavior");
+  assert.ok(ordinary.includes("domainProjection"), "default false must preserve delivery cron behavior");
+  assert.deepEqual(isolated, ["heartbeat"],
+    "home isolation must retain process telemetry without unrelated database writers");
+});
+
 test("capacity event-only cron starts the event and delivery pipeline without unrelated fan-outs", () => {
   const calls = [];
   let deliveryDependencies;

@@ -26,9 +26,11 @@ const {
   roleChildEnvironment,
 } = require("../../../scripts/capacity-cluster");
 const {
+  capacityParityOverlay,
   capacityResourcePlan,
   capacityRunId,
   globalEventProfile,
+  homeOpenResolutionConcurrency,
 } = require("../../../scripts/lima-capacity");
 const { applyProvider: applyCapacityProvider } = require("../../../scripts/capacity");
 const { logicalOwnerIdForProcess } = require("../../../src/modules/steps/models/globalStepEventGeneration");
@@ -76,17 +78,21 @@ const PROFILE_NAMES = [
   "event_provider_outage_10000",
 ];
 
-test("capacity VM models the app server and managed database as separate hardware", () => {
+test("capacity VM keeps component caps separate and reserves Redis/monitoring overhead", () => {
   assert.deepEqual(capacityResourcePlan({
     vps_specs: { vcpu: 4, ram_gb: 8 },
     database_specs: { vcpu: 1, ram_gb: 2 },
   }), {
-    vmCpu: 5,
-    vmMemoryGb: 10,
+    vmCpu: 7,
+    vmMemoryGb: 12,
     backendCpu: 4,
     backendMemoryGb: 8,
     databaseCpu: 1,
     databaseMemoryGb: 2,
+    redisCpu: 1,
+    redisMemoryMb: 256,
+    overheadCpu: 1,
+    overheadMemoryMb: 1792,
   });
 });
 
@@ -402,6 +408,26 @@ test("production-shaped capacity roles advertise the exact four-owner census", (
   );
   assert.match(clusterSource, /capacityPoolLimits\(capacityPoolProfile\(process\.env\)\)/);
   assert.match(clusterSource, /STEPS_PROCESS_ROLE: "http"[\s\S]*DB_POOL_MAX: limits\.http/);
+});
+
+test("home-open capacity requires the production resolution concurrency", () => {
+  const parity = capacityParityOverlay();
+  assert.equal(parity.ASYNC_RACE_RESOLUTION_CONCURRENCY, "2");
+  assert.equal(parity.RACE_RESOLVE_DEBOUNCE_MS, "30000");
+  assert.equal(parity.SYNC_V2_INLINE_UPLOADER_RECONCILIATION, "false");
+  assert.equal(homeOpenResolutionConcurrency(
+    { profile: "home-open" },
+    { ASYNC_RACE_RESOLUTION_CONCURRENCY: "2" },
+  ), "2");
+  assert.equal(homeOpenResolutionConcurrency({ profile: "home-open" }, {}), "2");
+  assert.throws(
+    () => homeOpenResolutionConcurrency(
+      { profile: "home-open" },
+      { ASYNC_RACE_RESOLUTION_CONCURRENCY: "1" },
+    ),
+    /requires ASYNC_RACE_RESOLUTION_CONCURRENCY=2/,
+  );
+  assert.equal(homeOpenResolutionConcurrency({ profile: "full-app" }, {}), null);
 });
 
 test("capacity pool profile reproducibly selects legacy baseline or role-budget candidate", () => {

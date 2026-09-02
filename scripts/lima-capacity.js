@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-require("dotenv").config();
+const dotenv = require("dotenv");
+dotenv.config();
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -52,6 +53,29 @@ function globalEventProfile(settings, environment = process.env) {
   return environment.CAPACITY_GLOBAL_EVENT_PROFILE || settings.profile || "";
 }
 
+function capacityParityOverlay() {
+  const overlayPath = path.resolve(__dirname, "../.env.capacity-prod-flags");
+  const parsed = dotenv.parse(fs.readFileSync(overlayPath));
+  for (const name of ["NODE_ENV", "ASYNC_RACE_RESOLUTION_CONCURRENCY",
+    "RACE_RESOLVE_DEBOUNCE_MS", "SYNC_V2_INLINE_UPLOADER_RECONCILIATION"]) {
+    if (!String(parsed[name] || "").trim()) {
+      throw new Error(`capacity production parity overlay is missing ${name}`);
+    }
+  }
+  return parsed;
+}
+
+function homeOpenResolutionConcurrency(settings, environment = process.env) {
+  if (globalEventProfile(settings, environment) !== "home-open") return null;
+  const parity = capacityParityOverlay();
+  const concurrency = String(environment.ASYNC_RACE_RESOLUTION_CONCURRENCY ||
+    parity.ASYNC_RACE_RESOLUTION_CONCURRENCY || "").trim();
+  if (concurrency !== "2") {
+    throw new Error("home-open capacity requires ASYNC_RACE_RESOLUTION_CONCURRENCY=2 for production parity");
+  }
+  return concurrency;
+}
+
 function capacityRunId(settings, environment = process.env) {
   return required(environment.CAPACITY_RUN_ID || settings.run_id, "run_id");
 }
@@ -71,29 +95,68 @@ function capacityResourcePlan(settings) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`capacity config requires positive ${name}`);
   }
   return {
-    vmCpu: backendCpu + databaseCpu,
-    vmMemoryGb: backendMemoryGb + databaseMemoryGb,
+    // The generator runs on the host. The containing VM reserves explicit
+    // capacity for Redis and for the guest/container/telemetry overhead while
+    // the backend and database retain their production-shaped cgroup caps.
+    vmCpu: backendCpu + databaseCpu + 2,
+    vmMemoryGb: backendMemoryGb + databaseMemoryGb + 2,
     backendCpu,
     backendMemoryGb,
     databaseCpu,
     databaseMemoryGb,
+    redisCpu: 1,
+    redisMemoryMb: 256,
+    overheadCpu: 1,
+    overheadMemoryMb: 1792,
   };
 }
 
-function startVm(settings) {
+function parseLimaResources(raw) {
+  const value = typeof raw === "string" ? JSON.parse(raw.trim().split(/\r?\n/).filter(Boolean).at(-1)) : raw;
+  const bytesToGiB = (bytes) => Number(bytes) / 1024 ** 3;
+  return {
+    cpu: Number(value.cpus ?? value.CPUs ?? value.cpu),
+    memoryGb: Number(value.memoryGiB ?? value.memory_gib ?? (value.memory ? bytesToGiB(value.memory) : NaN)),
+    diskGb: Number(value.diskGiB ?? value.disk_gib ?? (value.disk ? bytesToGiB(value.disk) : NaN)),
+  };
+}
+
+function inspectVmResources(name) {
+  return parseLimaResources(output("limactl", ["list", "--format", "json", name]));
+}
+
+function ensureVmResources(settings, dependencies = {}) {
   const name = limaName(settings);
-  if (isPresent(name)) {
-    run("limactl", ["start", "--yes", name]);
-    return;
-  }
+  const present = dependencies.present || isPresent;
+  const execute = dependencies.execute || run;
+  const inspect = dependencies.inspect || inspectVmResources;
   const resources = capacityResourcePlan(settings);
-  run("limactl", [
+  const desired = { cpu: resources.vmCpu, memoryGb: resources.vmMemoryGb,
+    diskGb: Number(settings.vps_specs.disk_gb) };
+  if (present(name)) {
+    const before = inspect(name);
+    if (JSON.stringify(before) !== JSON.stringify(desired)) {
+      execute("limactl", ["stop", "--force", name]);
+      execute("limactl", ["edit", "--yes", `--cpus=${desired.cpu}`,
+        `--memory=${desired.memoryGb}`, `--disk=${desired.diskGb}`, name]);
+    }
+    execute("limactl", ["start", "--yes", name]);
+  } else execute("limactl", [
     "start", "--yes", `--name=${name}`, `--cpus=${resources.vmCpu}`,
     `--memory=${resources.vmMemoryGb}`, `--disk=${settings.vps_specs.disk_gb}`,
     `--mount=${repo(settings)}:w`, "--port-forward=3000:3000",
     "--port-forward=3010:3010", "--port-forward=3011:3011",
     `--port-forward=${settings.db_host_port || 55433}:5432`, "template:docker",
   ]);
+  const actual = inspect(name);
+  if (JSON.stringify(actual) !== JSON.stringify(desired)) {
+    throw new Error(`capacity VM resource mismatch: expected ${JSON.stringify(desired)}, actual ${JSON.stringify(actual)}`);
+  }
+  return actual;
+}
+
+function startVm(settings) {
+  return ensureVmResources(settings);
 }
 
 function shell(settings, command) {
@@ -174,7 +237,11 @@ function startBackend(settings) {
   const capacityProfile = globalEventProfile(settings);
   const databasePoolProfile = capacityPoolProfile(settings);
   const runId = capacityRunId(settings);
+  const resolutionConcurrency = homeOpenResolutionConcurrency(settings);
+  const parityOverlay = capacityProfile === "home-open" ? capacityParityOverlay() : {};
   const env = [
+    ...Object.entries(parityOverlay).map(([name, value]) =>
+      `-e ${name}=${JSON.stringify(String(value))}`),
     `-e DATABASE_URL=${JSON.stringify(databaseUrl)}`,
     `-e CAPACITY_MODE=true`, `-e CAPACITY_OUTBOUND_DISABLED=true`,
     `-e CAPACITY_RUN_ID=${JSON.stringify(runId)}`,
@@ -186,6 +253,9 @@ function startBackend(settings) {
     `-e CACHE_ENV_PREFIX=${JSON.stringify(`capacity:${runId}:`)}`,
     `-e CAPACITY_GLOBAL_EVENT_PROFILE=${JSON.stringify(capacityProfile)}`,
     `-e CAPACITY_DATABASE_POOL_PROFILE=${JSON.stringify(databasePoolProfile)}`,
+    ...(resolutionConcurrency == null
+      ? []
+      : [`-e ASYNC_RACE_RESOLUTION_CONCURRENCY=${JSON.stringify(resolutionConcurrency)}`]),
     `-e CAPACITY_PROVIDER_ATTEMPT_COUNT=12000`,
     `-e CAPACITY_AUTH_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e SESSION_TOKEN_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
@@ -304,4 +374,5 @@ if (require.main === module) {
   main().catch((error) => { process.stderr.write(`${error.stack || error.message}\n`); process.exitCode = 1; });
 }
 
-module.exports = { capacityResourcePlan, capacityRunId, executeFault, faultPlan, globalEventProfile };
+module.exports = { capacityParityOverlay, capacityResourcePlan, capacityRunId, ensureVmResources, executeFault, faultPlan,
+  globalEventProfile, homeOpenResolutionConcurrency, inspectVmResources, parseLimaResources };

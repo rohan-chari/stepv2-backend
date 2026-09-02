@@ -140,7 +140,7 @@ function capacityRaceParticipantRows({
 }
 
 async function resetGlobalEventDerivedState(prisma) {
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     // The capacity clone keeps the real cron topology running. Freeze every
     // global-event derived table for this short reset transaction; otherwise a
     // worker can insert a new RESTRICT child after its table was cleared but
@@ -163,6 +163,13 @@ async function resetGlobalEventDerivedState(prisma) {
          global_step_event_operational_counters
        IN ACCESS EXCLUSIVE MODE`
     );
+    const [census] = typeof tx.$queryRawUnsafe === "function"
+      ? await tx.$queryRawUnsafe(`
+          SELECT
+            (SELECT count(*)::int FROM global_step_events) AS "eventCount",
+            (SELECT count(*)::int FROM global_event_summary_work) AS "summaryWorkCount"
+        `)
+      : [{}];
     await tx.$executeRawUnsafe(
       "DELETE FROM notification_schedules WHERE type='GLOBAL_EVENT_STARTED'"
     );
@@ -193,6 +200,10 @@ async function resetGlobalEventDerivedState(prisma) {
     await tx.$executeRawUnsafe("DELETE FROM global_step_events");
     await tx.$executeRawUnsafe("DELETE FROM global_step_event_operational_snapshots");
     await tx.$executeRawUnsafe("DELETE FROM global_step_event_operational_counters");
+    return {
+      removedEventCount: Number(census?.eventCount || 0),
+      removedSummaryWorkCount: Number(census?.summaryWorkCount || 0),
+    };
   }, { maxWait: 10_000, timeout: 60_000 });
 }
 

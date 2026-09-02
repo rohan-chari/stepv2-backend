@@ -4,6 +4,36 @@ const { assertCapacityDatabase } = require("../../localCapacitySafety");
 
 const INTEGRITY_TABLES = ["users", "races", "race_participants", "steps", "step_samples"];
 
+class SyntheticBaselineDriftError extends Error {
+  constructor(before, after) {
+    super("baseline integrity changed during synthetic cleanup");
+    this.name = "SyntheticBaselineDriftError";
+    this.code = "SYNTHETIC_BASELINE_DRIFT";
+    this.baselineDrift = {
+      schema: "synthetic-baseline-drift-v1",
+      tables: baselineIntegrityDiff(before, after),
+    };
+  }
+}
+
+function baselineIntegrityDiff(before = {}, after = {}) {
+  const tables = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+  return tables.flatMap((table) => {
+    const previous = before[table] || {};
+    const current = after[table] || {};
+    const beforeCount = typeof previous.count === "number" && Number.isFinite(previous.count)
+      ? previous.count : null;
+    const afterCount = typeof current.count === "number" && Number.isFinite(current.count)
+      ? current.count : null;
+    const beforeChecksum = previous.checksum ?? null;
+    const afterChecksum = current.checksum ?? null;
+    if (beforeCount === afterCount && beforeChecksum === afterChecksum) return [];
+    return [{ table, beforeCount, afterCount,
+      countDelta: beforeCount == null || afterCount == null ? null : afterCount - beforeCount,
+      beforeChecksum, afterChecksum }];
+  });
+}
+
 function assertRunId(runId) {
   if (!/^[a-z0-9][a-z0-9._-]{5,63}$/.test(runId)) throw new Error("runId must be 6-64 lowercase safe characters");
 }
@@ -162,8 +192,11 @@ async function cleanupSyntheticRun({ prisma, manifest }) {
   }, { maxWait: 5_000, timeout: 60_000 });
   const after = await baselineIntegrity(prisma);
   await assertNoSyntheticRows(prisma, ids);
-  if (JSON.stringify(after) !== JSON.stringify(manifest.baseline)) throw new Error("baseline integrity changed during synthetic cleanup");
+  if (JSON.stringify(after) !== JSON.stringify(manifest.baseline)) {
+    throw new SyntheticBaselineDriftError(manifest.baseline, after);
+  }
   return { cleaned: true, baselineUnchanged: true };
 }
 
-module.exports = { assertFixtureDatabase, assertNoSyntheticRows, baselineIntegrity, cleanupSyntheticRun, createSyntheticFixtures };
+module.exports = { SyntheticBaselineDriftError, assertFixtureDatabase, assertNoSyntheticRows,
+  baselineIntegrity, baselineIntegrityDiff, cleanupSyntheticRun, createSyntheticFixtures };

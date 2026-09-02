@@ -113,6 +113,40 @@ function buildProfiles() {
     entry("GET", "/races/:raceId/progress", { fixturePrerequisites: ["synthetic-user", "active-race"], weight: 100 }),
     entry("GET", "/races/:raceId/bootstrap", { query: "view=participants-v1&offset=0&limit=15&shape=compact-v1", fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-Client-Features": "race_participants_paging,powerups4,api_payload_compact_v1" }, allowedStatuses: [200, 404], weight: 100 }),
   ];
+  const homeOpenTraffic = [
+    entry("POST", "/steps/sync-v2", {
+      fixturePrerequisites: ["synthetic-user", "active-race"],
+      payloadShape: { date: "YYYY-MM-DD", steps: "integer", samples: "bounded-array" },
+      allowedStatuses: [202, 400, 404, 409, 429, 503], readOnly: false,
+      disposableWrite: true, queue: true,
+    }),
+    entry("POST", "/steps", {
+      fixturePrerequisites: ["synthetic-user", "active-race"],
+      payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true },
+      allowedStatuses: [200, 400, 429], readOnly: false, disposableWrite: true,
+      persona: "legacy", queue: true,
+    }),
+    entry("POST", "/steps/samples", {
+      fixturePrerequisites: ["synthetic-user"],
+      payloadShape: { samples: "bounded-realistic-window" },
+      allowedStatuses: [200, 400, 429], readOnly: false, disposableWrite: true,
+      persona: "legacy",
+    }),
+    entry("GET", "/home/race-card", {
+      query: "view=shell-v1&homeActiveRaces=1&localDate={{today}}",
+      fixturePrerequisites: ["synthetic-user", "active-race"],
+    }),
+    entry("GET", "/races", { query: "view=compact-v1", fixturePrerequisites: ["synthetic-user", "active-race"] }),
+    entry("GET", "/home/suggested-races", { fixturePrerequisites: ["synthetic-user"] }),
+    entry("GET", "/shop/catalog", { fixturePrerequisites: ["synthetic-user"] }),
+    entry("GET", "/friends", { query: "view=summary-v1", fixturePrerequisites: ["synthetic-user"] }),
+    entry("GET", "/auth/me", { query: "view=shell-v1", fixturePrerequisites: ["synthetic-user"] }),
+    entry("GET", "/assets/manifest", { headers: { "X-Release-Channel": "prod" }, fixturePrerequisites: [] }),
+    entry("GET", "/steps/race-resolution/:jobId", {
+      query: "generation={{generation}}", fixturePrerequisites: ["synthetic-user", "queue-job"],
+      allowedStatuses: [200, 400, 404], queue: true,
+    }),
+  ];
   return {
     smoke: profile("smoke", [health, authMe, home[0], races[1]], { maxUsers: 2, maxDurationSeconds: 60, maxArrivalRatePerSecond: 10 }),
     home: profile("home", home),
@@ -148,6 +182,52 @@ function buildProfiles() {
         timezone: "America/New_York",
         activatesBoundary: true,
         deterministicProvider: true,
+      }),
+    }),
+    "home-open": Object.freeze({
+      ...profile("home-open", homeOpenTraffic, {
+        fixtureRaces: 20,
+        defaultUsers: 5000,
+        defaultDuration: "600s",
+        defaultArrivalRatePerSecond: 1,
+        defaultConcurrency: 5000,
+        maxUsers: 5000,
+        maxDurationSeconds: 900,
+        maxArrivalRatePerSecond: 500,
+        queue: { workerServiceRatePerSecond: 500, lagThresholdMs: 30_000 },
+      }),
+      version: "2.1.0",
+      ladder: Object.freeze({
+        smoke: Object.freeze({ rate: 1, seconds: 120 }),
+        warmupSeconds: 120,
+        measurementSeconds: 600,
+        rates: Object.freeze([2, 5, 10, 20, 30, 40, 60, 80, 100, 150, 225, 340, 500]),
+        hardCap: 500,
+        boundaryRepeats: 3,
+      }),
+      homeOpen: Object.freeze({
+        schema: "home-open-session-v1",
+        clientHeaderProfile: "current-home-2.3.11-ios-v1",
+        clientFeatures: Object.freeze([
+          "characters", "ads", "ad_coin_random", "jammer", "spinpowerups", "team_races",
+          "tournaments", "race_leave", "powerups2", "powerups3", "powerups4", "powerups5",
+          "stealth_runner_duration", "hitchhike_effective_steps", "remote_assets",
+          "remote_asset_preferred", "next_race_cta", "discoverable_identity",
+          "home_suggested_races", "seeded_race_buckets", "home_invite_modal",
+          "race_participants_paging", "race_preview", "privacy_safe_display_ranks",
+          "powerup_stacking_guide_v1", "impact_notices", "active_impact_notices_v1",
+          "resolved_impact_events_v2", "impact_summaries", "impact_summary_expiry_v1",
+          "review_prompt", "inbox_v1", "privateJoinApproval", "api_payload_compact_v1",
+          "referral_contest_v1", "referral_contest_global_v1", "admin_metrics_v2",
+          "race_payout_flat_50",
+        ]),
+        arrivalBucketMs: 1000,
+        allSettledDeadlineMs: 15_000,
+        resolutionPollWaitMs: Object.freeze([750, 1500, 3000, 5000]),
+        criticalEndpoints: Object.freeze([
+          "POST /steps/sync-v2", "POST /steps", "GET /home/race-card",
+          "GET /races", "GET /shop/catalog", "GET /friends", "GET /auth/me",
+        ]),
       }),
     }),
     "frozen-step-sync-burst": profile(
@@ -243,10 +323,11 @@ function buildProfiles() {
 }
 
 function validateProfileRegistry(registry = PROFILES) {
-  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
+  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "home-open", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
   for (const name of names) {
     const profile = registry[name];
-    if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== "1.0.0" || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);
+    const expectedVersion = name === "home-open" ? "2.1.0" : "1.0.0";
+    if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== expectedVersion || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);
     for (const item of profile.entries) {
       if (!/^(GET|POST|PUT|PATCH|DELETE)$/.test(item.method) || !item.path.startsWith("/")) throw new Error(`invalid load profile path: ${name}`);
       if (!Number.isFinite(item.weight) || item.weight < 0 || item.weight > 100) throw new Error(`invalid load profile weight: ${name}`);

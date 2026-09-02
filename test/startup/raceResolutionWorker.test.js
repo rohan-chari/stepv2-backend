@@ -99,6 +99,29 @@ test("capacity HTTP+resolution mode schedules only resolution workers", () => {
   ]);
 });
 
+test("capacity resolution startup reports the exact scheduled worker readiness handle", () => {
+  const worker = { startupReadiness() { return { ready: false }; } };
+  let reported = null;
+  startServer({
+    app: fakeApp(),
+    port: 3010,
+    cronStartDelayMs: 0,
+    processRole: "resolution",
+    registerEventHandlers() {},
+    registerNotificationHandlers() {},
+    scheduleGenerationHeartbeat() {},
+    ...noopSchedulers,
+    scheduleRaceResolutionWorker() { return { worker }; },
+    scheduleRaceAdminCommands() {},
+    scheduleResolvedImpactBoundaries() {},
+    reportCapacityResolutionWorker(value) { reported = value; },
+    databasePoolTelemetry: { start() {} },
+    eventSurgeTelemetry: { start() {} },
+    logger: { log() {} },
+  });
+  assert.equal(reported, worker);
+});
+
 test("normal startup ignores the capacity-only environment variable", () => {
   const previous = process.env.CAPACITY_HTTP_RESOLUTION_ONLY;
   process.env.CAPACITY_HTTP_RESOLUTION_ONLY = "true";

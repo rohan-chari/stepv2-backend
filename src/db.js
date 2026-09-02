@@ -93,6 +93,9 @@ let poolWaitCount = 0;
 let poolWaitMsMax = 0;
 let poolConnectFailures = 0;
 const poolWaitSamples = [];
+let poolMeasurementId = "process-lifetime";
+let poolMeasurementGeneration = 0;
+let poolMeasurementStartedAtMs = Date.now();
 const rawPoolConnect = pool.connect.bind(pool);
 const processRole = process.env.STEPS_PROCESS_ROLE || "all";
 let connectionBulkhead = null;
@@ -118,7 +121,11 @@ if (processRole === "http" && databasePoolMax >= 3) {
 }
 pool.connect = (callback) => {
   const started = process.hrtime.bigint();
+  const measurementGenerationAtStart = poolMeasurementGeneration;
   const record = () => {
+    // A checkout that began before the capacity measurement reset belongs to
+    // startup, even if its callback settles after the synchronous epoch swap.
+    if (measurementGenerationAtStart !== poolMeasurementGeneration) return false;
     const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
     poolWaitMsTotal += elapsedMs;
     poolWaitCount += 1;
@@ -129,11 +136,12 @@ pool.connect = (callback) => {
         poolWaitSamples.splice(0, poolWaitSamples.length - 100_000);
       }
     }
+    return true;
   };
   if (typeof callback === "function") {
     return basePoolConnect((error, client, release) => {
-      record();
-      if (error) poolConnectFailures += 1;
+      const recorded = record();
+      if (error && recorded) poolConnectFailures += 1;
       callback(error, client, release);
     });
   }
@@ -141,8 +149,8 @@ pool.connect = (callback) => {
     record();
     return client;
   }, (error) => {
-    record();
-    poolConnectFailures += 1;
+    const recorded = record();
+    if (recorded) poolConnectFailures += 1;
     throw error;
   });
 };
@@ -166,10 +174,51 @@ function getDbPoolPressure() {
     waitMsP99,
     waitMsAverage: poolWaitCount ? poolWaitMsTotal / poolWaitCount : 0,
     connectionFailures: poolConnectFailures,
+    measurementId: poolMeasurementId,
+    measurementGeneration: poolMeasurementGeneration,
+    measurementStartedAtMs: poolMeasurementStartedAtMs,
+  };
+}
+
+function resetDbPoolPressureForCapacity({ runId, measurementId, env = process.env } = {}) {
+  const capacityMode = env.CAPACITY_MODE === "true" || env.CAPACITY_MODE === "1";
+  if (!capacityMode || env.CAPACITY_GLOBAL_EVENT_PROFILE !== "home-open" ||
+      typeof runId !== "string" || runId !== env.CAPACITY_RUN_ID) {
+    throw new Error("capacity DB-pool measurement reset is not authorized");
+  }
+  if (typeof measurementId !== "string" || !/^[a-zA-Z0-9:._-]{1,160}$/.test(measurementId)) {
+    throw new Error("capacity DB-pool measurement id is invalid");
+  }
+  if (poolMeasurementId !== measurementId) {
+    poolWaitMsTotal = 0;
+    poolWaitCount = 0;
+    poolWaitMsMax = 0;
+    poolConnectFailures = 0;
+    poolWaitSamples.splice(0, poolWaitSamples.length);
+    poolMeasurementId = measurementId;
+    poolMeasurementGeneration += 1;
+    poolMeasurementStartedAtMs = Date.now();
+  }
+  return {
+    schema: "capacity-db-pool-measurement-reset-v1",
+    runId,
+    process: {
+      role: processRole,
+      instance: process.env.NODE_APP_INSTANCE == null ? "0" : String(process.env.NODE_APP_INSTANCE),
+      pid: process.pid,
+    },
+    measurement: {
+      id: poolMeasurementId,
+      generation: poolMeasurementGeneration,
+      startedAtMs: poolMeasurementStartedAtMs,
+    },
   };
 }
 
 const adapter = new PrismaPg(pool);
+const databasePoolTestSeam = process.env.NODE_ENV === "test"
+  ? Object.freeze({ connect: () => pool.connect() })
+  : null;
 
 const {
   createDatabasePoolTelemetry,
@@ -268,7 +317,9 @@ async function runAfterCommitTasks(tasks, logger = console) {
 module.exports = {
   prisma,
   databasePoolConfig,
+  databasePoolTestSeam,
   getDbPoolPressure,
+  resetDbPoolPressureForCapacity,
   databasePoolTelemetry,
   runInPrismaTransaction,
   deferUntilAfterCommit,

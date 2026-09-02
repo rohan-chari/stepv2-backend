@@ -28,6 +28,10 @@ build/
 # Local k6 event-open tuning artifacts (preserved locally, never committed).
 results/eocandidate/
 
+# Generated local capacity reports. Keep historical checked-in reports at the
+# results root, but place every new run under this ignored hierarchy.
+results/capacity/
+
 # EXCEPTION: the built marketing site IS committed. The documented rollback
 # procedure (DEPLOYMENT.md) is `git checkout <tag> && npm install && pm2
 # restart` with NO build step, so a build-artifact-only dist would leave

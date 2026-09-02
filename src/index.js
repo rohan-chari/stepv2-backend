@@ -179,6 +179,10 @@ function startServer({
   // production environment switch: it runs the complete event notification
   // path while excluding unrelated whole-base jobs from the measurement.
   capacityGlobalEventOnly = false,
+  // Injected only by the local capacity entrypoint. Production startup cannot
+  // use this to suppress cron work.
+  capacityHomeOpenIsolation = false,
+  reportCapacityResolutionWorker = null,
   processRole = process.env.STEPS_PROCESS_ROLE || "all",
   databasePoolTelemetry = defaultDatabasePoolTelemetry,
   eventSurgeTelemetry = defaultEventSurgeTelemetry,
@@ -218,12 +222,19 @@ function startServer({
       return notificationAdmissionBarrierPromise;
     };
     const startCrons = () => {
+      const scheduleTrackedResolutionWorker = () => {
+        const handle = scheduleRaceResolution();
+        if (reportCapacityResolutionWorker) {
+          reportCapacityResolutionWorker(handle?.worker);
+        }
+        return handle;
+      };
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup
       // tests, but never let HTTP workers claim durable resolution work.
       if (processRole === "http") return;
       if (processRole === "resolution") {
-        scheduleRaceResolution();
+        scheduleTrackedResolutionWorker();
         schedulePlacementTransitions();
         scheduleAdminCommands();
         scheduleImpactBoundaries();
@@ -233,7 +244,7 @@ function startServer({
         return;
       }
       if (capacityHttpResolutionOnly) {
-        scheduleRaceResolution();
+        scheduleTrackedResolutionWorker();
         schedulePlacementTransitions();
         scheduleAdminCommands();
         scheduleResolutionPostTasks();
@@ -256,6 +267,11 @@ function startServer({
         retainStopHandle(scheduleDeviceTokenCleanupJob());
         return;
       }
+      // Home-open capacity runs retain the production cron process and its
+      // telemetry/resource footprint, but isolate the database from unrelated
+      // time-driven writers. The measured Home flow still exercises its real
+      // HTTP and dedicated resolution processes.
+      if (capacityHomeOpenIsolation) return;
       scheduleRaceExpiry();
       scheduleSeededRenewal();
       scheduleTournamentRenewal();
@@ -346,7 +362,7 @@ function startServer({
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       if (processRole !== "cron") {
-        scheduleRaceResolution();
+        scheduleTrackedResolutionWorker();
         schedulePlacementTransitions();
         scheduleAdminCommands();
         scheduleImpactBoundaries();

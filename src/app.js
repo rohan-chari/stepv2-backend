@@ -73,6 +73,7 @@ const {
   prisma: defaultPrisma,
   getDbPoolPressure,
   databasePoolTelemetry,
+  resetDbPoolPressureForCapacity,
 } = require("./db");
 const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
@@ -83,6 +84,9 @@ const {
 const { appSettings } = require("./shared/config/appSettings");
 const { readCapacityProviderCensus } = require("./localCapacitySafety");
 const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("./shared/observability/eventSurgeTelemetry");
+const {
+  readCapacityResolutionReadiness,
+} = require("./shared/observability/capacityResolutionReadiness");
 
 const SMALL_LAUNCH_RESPONSE_BYTES = 8 * 1024;
 
@@ -231,9 +235,27 @@ function createApp(dependencies = {}) {
         cpu: process.cpuUsage(),
         eventLoop,
         providerCensus: readCapacityProviderCensus(),
+        resolutionWorker: readCapacityResolutionReadiness(),
       };
     }
     res.json(response);
+  });
+
+  app.post("/internal/capacity/db-pool-measurement/reset", (req, res) => {
+    if (!(process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1")) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    try {
+      const reset = (dependencies.resetDbPoolPressureForCapacity ||
+        resetDbPoolPressureForCapacity)({
+        runId: req.get("X-Capacity-Run-Id"),
+        measurementId: req.get("X-Capacity-Measurement-Id"),
+        env: dependencies.env || process.env,
+      });
+      return res.json(reset);
+    } catch (error) {
+      return res.status(403).json({ error: error.message });
+    }
   });
 
   // ---- Shareable race links (deep-link verification + web landing page) ----

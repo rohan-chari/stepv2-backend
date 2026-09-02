@@ -451,6 +451,11 @@ function quietPeriodMs() {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60 * 1000;
 }
 
+function effectiveResolutionConcurrency(environment = process.env) {
+  return Math.min(3, Math.max(1,
+    Number(environment.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1));
+}
+
 // Thrown by the fenced write transaction when the job row no longer matches our
 // lease token. It means the lease expired and someone else re-claimed the race,
 // so we must roll back HAVING WRITTEN NOTHING and walk away without touching the
@@ -811,6 +816,22 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   const bootAt = dependencies.bootAt ?? Date.now();
   let oldQueueDrainedObserved = false;
 
+  function startupReadiness() {
+    const startupQuietPeriodMs = quietPeriodMs();
+    const remainingQuietMs = Math.max(0, startupQuietPeriodMs - (Date.now() - bootAt));
+    const quietPeriodElapsed = remainingQuietMs === 0;
+    const ready = quietPeriodElapsed && oldQueueDrainedObserved;
+    return {
+      state: ready ? "ready" : quietPeriodElapsed ? "old-queue-handoff" : "startup-quiet",
+      ready,
+      quietPeriodElapsed,
+      oldQueueDrainedObserved,
+      quietPeriodMs: startupQuietPeriodMs,
+      remainingQuietMs,
+      effectiveConcurrency: effectiveResolutionConcurrency(),
+    };
+  }
+
   // (a) 60s quiet period after boot AND (b) one observation of the OLD table
   // with zero RUNNING-with-unexpired-lease rows. Once observed, the check is
   // never repeated: pm2 kills old workers within seconds of reload, so a single
@@ -942,6 +963,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         force: raceId != null,
       }));
     if (!job) return null;
+    const startMs = Date.now();
+    logger.log(JSON.stringify({
+      event: "race_resolution_v2_claim",
+      schemaVersion: 2,
+      observedAt: new Date(startMs).toISOString(),
+      queuePriority: job.processingQueuePriority || "LIVE",
+      queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
+    }));
     // Real work claimed => stop coasting on the cached kill-switch answer (see
     // CLAIMING_FLAG_TTL_MS). Only idle ticks are allowed to reuse it.
     invalidateClaimingFlagCache();
@@ -1047,7 +1076,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         }
     }
 
-    const startMs = Date.now();
     const triggeringUserIds = Array.isArray(job.processingTriggeredByUserIds)
       ? job.processingTriggeredByUserIds.filter(Boolean)
       : [];
@@ -1063,6 +1091,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     const stepSyncScopePhaseMs = { activeEffects: 0, raceHydration: 0 };
     let stepSyncScopeOutcome = "not_attempted";
     let stepSyncScopeActiveEffectCount = 0;
+    let resolutionPlan = "FULL";
 
     try {
       // ── Step 2: computation, outside every transaction. ──────────────────
@@ -1089,7 +1118,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       let discarded = false;
       let writeMs = 0;
       let participantWrites = [];
-      let resolutionPlan = baseResolutionPlan;
+      resolutionPlan = baseResolutionPlan;
       let forceFull = false;
       let artifactHit = false;
       let artifactFallbackReason = null;
@@ -1862,7 +1891,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       if (discarded) {
         logger.log(JSON.stringify({
           event: "race_resolution_v2",
+          schemaVersion: 2,
+          observedAt: new Date().toISOString(),
           outcome: "superseded_discard",
+          queuePriority: job.processingQueuePriority || "LIVE",
           reasonClasses: job.processingDirtyReasons || ["FULL"],
           resolutionPlan,
           dirtyParticipantCount: job.processingDirtyParticipantIds?.length || 0,
@@ -1870,6 +1902,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           computeMs,
           writeMs,
           durationMs: Math.max(0, Date.now() - startMs),
+          coreMs: Math.max(0, Date.now() - startMs),
+          queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
           phaseMs: phaseTimer.snapshot(),
           computePhaseMs,
           computePhaseQueryCaptureEnabled,
@@ -1971,11 +2005,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         }
         stopPowerupStateSync();
 
-        const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
         const nudgeBatchEnabled = await phaseTimer.measure(
           "postSettings",
           () => isStrictFlagEnabled(settings, "raceResolutionNudgeBatchV1Enabled")
         );
+        const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
         const nudgeTriggerGroups = nudgeBatchEnabled
           ? [orderedTriggeringUserIds]
           : orderedTriggeringUserIds.map((id) => [id]);
@@ -2073,7 +2107,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
       logger.log(JSON.stringify({
         event: "race_resolution_v2",
+        schemaVersion: 2,
+        observedAt: new Date().toISOString(),
         outcome: superseded ? "superseded_commit" : "commit",
+        queuePriority: job.processingQueuePriority || "LIVE",
         reasonClasses: job.processingDirtyReasons?.length
           ? job.processingDirtyReasons
           : ["FULL"],
@@ -2130,7 +2167,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // whoever re-claimed it — recording a failure here would stomp them.
         logger.log(JSON.stringify({
           event: "race_resolution_v2",
+          schemaVersion: 2,
+          observedAt: new Date().toISOString(),
           outcome: "fence_lost",
+          queuePriority: job.processingQueuePriority || "LIVE",
+          resolutionPlan,
+          coreMs: Math.max(0, Date.now() - startMs),
+          queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
           reasonClasses: job.processingDirtyReasons || ["FULL"],
           phaseMs: phaseTimer.snapshot(),
           computePhaseMs,
@@ -2146,7 +2189,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       }
       logger.error(JSON.stringify({
         event: "race_resolution_v2",
+        schemaVersion: 2,
+        observedAt: new Date().toISOString(),
         outcome: "failed",
+        queuePriority: job.processingQueuePriority || "LIVE",
+        resolutionPlan,
+        coreMs: Math.max(0, Date.now() - startMs),
+        queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
         reasonClasses: job.processingDirtyReasons || ["FULL"],
         errorCode: error?.code || "WORKER_ERROR",
         phaseMs: phaseTimer.snapshot(),
@@ -2234,10 +2283,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   async function tick({ concurrencyOverride = null } = {}) {
     if (raceResolutionWorkerDisabled()) return 0;
     const concurrency = concurrencyOverride == null
-      ? Math.min(
-          3,
-          Math.max(1, Number(process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1)
-        )
+      ? effectiveResolutionConcurrency()
       : Math.min(3, Math.max(1, Number(concurrencyOverride) || 1));
     return runBoundedRaceResolutionJobs(concurrency, processOne);
   }
@@ -2326,6 +2372,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     tick,
     logQueueLag,
     readyToClaim,
+    startupReadiness,
     claimingDisabled,
     FenceLostError,
   };
@@ -2434,6 +2481,7 @@ module.exports = {
   createWriteCapture,
   runBoundedRaceResolutionJobs,
   quietPeriodMs,
+  effectiveResolutionConcurrency,
   POLL_INTERVAL_MS,
   participantTotalWriteChangesRow,
   retainTeamAsOfHeartbeat,

@@ -182,6 +182,335 @@ async function runEventOpenSession({
     ),
   };
 }
+
+function classifyHomeSyncV2(sample = {}) {
+  const status = Number(sample.status || 0);
+  const body = isJsonMap(sample.body) ? sample.body : null;
+  if (sample.timeout === true || status === 0 || status >= 500 &&
+      !(status === 503 && body?.code === "ASYNC_DISABLED")) {
+    return { persisted: false, usePersistedHome: false, retry: true, legacy: false,
+      job: null, decision: "ambiguous-retry" };
+  }
+  if (status === 404 || status === 503 && body?.code === "ASYNC_DISABLED") {
+    return { persisted: false, usePersistedHome: false, retry: false, legacy: true,
+      job: null, decision: status === 404 ? "unsupported" : "async-disabled" };
+  }
+  if (status >= 200 && status < 300) {
+    if (!body) return { persisted: false, usePersistedHome: false, retry: false,
+      legacy: false, job: null, decision: "malformed" };
+    const reconciliation = body.uploaderReconciliation;
+    const current = reconciliation && typeof reconciliation === "object" &&
+      reconciliation.state === "CURRENT";
+    const receipt = body.raceResolution;
+    const job = receipt && typeof receipt === "object" &&
+      typeof receipt.jobId === "string" && receipt.jobId.length > 0 &&
+      Number.isInteger(receipt.generation)
+      ? { id: receipt.jobId, generation: receipt.generation } : null;
+    return { persisted: true, usePersistedHome: Boolean(current), retry: false,
+      legacy: false, job, decision: current ? "current" : "deferred" };
+  }
+  if (status === 409) {
+    return { persisted: true, usePersistedHome: false, retry: false, legacy: false,
+      job: null, decision: "persisted-status-unknown" };
+  }
+  return { persisted: false, usePersistedHome: false, retry: false, legacy: false,
+    job: null, decision: status === 429 ? "cooldown" : "rejected" };
+}
+
+function isJsonMap(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validHomeFriendsBody(body) {
+  return isJsonMap(body) && Array.isArray(body.friends) &&
+    body.friends.every(isJsonMap) && isJsonMap(body.pending) &&
+    Array.isArray(body.pending.incoming) && Array.isArray(body.pending.outgoing);
+}
+
+function validHomeMeBody(body) {
+  return isJsonMap(body) && isJsonMap(body.user);
+}
+
+function validHomeRacesBody(body) {
+  return isJsonMap(body) && [body.active, body.pending, body.completed].every(Array.isArray);
+}
+
+function validHomeCatalogBody(body) {
+  return isJsonMap(body) && typeof body.coins === "number" && Number.isFinite(body.coins) &&
+    isJsonMap(body.equipped) && Array.isArray(body.items);
+}
+
+function classifyHomeRaceCard(body) {
+  if (!isJsonMap(body) || body.contract !== "home-shell-v1") {
+    return { presentationResolved: false, friendsResolved: false };
+  }
+  const resolved = body.resolved;
+  const presentation = body.presentation;
+  const friends = body.friends;
+  const presentationResolved = isJsonMap(resolved) &&
+    resolved.presentation === true && isJsonMap(presentation) &&
+    isJsonMap(presentation.equipped) &&
+    typeof presentation.coins === "number" && Number.isFinite(presentation.coins) &&
+    Object.prototype.hasOwnProperty.call(presentation, "cape") &&
+    (presentation.cape == null || isJsonMap(presentation.cape));
+  const friendsResolved = isJsonMap(resolved) && resolved.friends === true &&
+    validHomeFriendsBody(friends);
+  return { presentationResolved: Boolean(presentationResolved), friendsResolved: Boolean(friendsResolved) };
+}
+
+function homeSampleSucceeded(sample, statuses = [200]) {
+  return sample?.timeout !== true && statuses.includes(Number(sample?.status)) &&
+    sample?.unexpectedStatus !== true;
+}
+
+async function runHomeOpenSession({
+  profile = PROFILES["home-open"], requestOne = oneRequest, fetchImpl, baseUrl,
+  context, sequence, timeoutMs, wait = sleep, clock = Date.now,
+} = {}) {
+  if (!profile?.homeOpen || !context) throw new Error("home-open session contract is required");
+  const byPath = (pathName) => {
+    const value = profile.entries.find((row) => row.path === pathName);
+    if (!value) throw new Error(`home-open endpoint missing: ${pathName}`);
+    return value;
+  };
+  const samples = [];
+  const decisions = {
+    syncRetry: 0, syncLegacyFallback: 0, legacyStepRetry: 0,
+    raceCardPresentationFallback: 0, raceCardFriendsFallback: 0,
+    resolutionPolls: 0, resolutionFanouts: 0,
+  };
+  const request = async (entry, extra = {}) => {
+    const clientEntry = { ...entry, headers: { "X-App-Version": "2.3.11",
+      "X-Client-Features": profile.homeOpen.clientFeatures.join(","),
+      "X-Timezone": "America/New_York", "X-Release-Channel": "prod", "X-Platform": "ios",
+      ...entry.headers } };
+    const sample = await requestOne({ fetchImpl, baseUrl, entry: clientEntry, context, sequence,
+      timeoutMs, sourceChangedExpected: !entry.readOnly, captureResponseBody: true, ...extra });
+    samples.push(sample);
+    return sample;
+  };
+  const startedAtMs = clock();
+  const syncEntry = byPath("/steps/sync-v2");
+  let syncSample = await request(syncEntry);
+  let sync = classifyHomeSyncV2(syncSample);
+  if (sync.retry) {
+    decisions.syncRetry += 1;
+    syncSample = await request(syncEntry);
+    sync = classifyHomeSyncV2(syncSample);
+  }
+  let persistenceSucceeded = sync.persisted;
+  if (sync.legacy) {
+    decisions.syncLegacyFallback += 1;
+    const legacyEntry = byPath("/steps");
+    let legacy = await request(legacyEntry);
+    if (!homeSampleSucceeded(legacy, [200]) || !isJsonMap(legacy.body)) {
+      decisions.legacyStepRetry += 1;
+      await wait(1000);
+      legacy = await request(legacyEntry);
+    }
+    persistenceSucceeded = homeSampleSucceeded(legacy, [200]) && isJsonMap(legacy.body);
+    if (persistenceSucceeded) await request(byPath("/steps/samples"));
+  }
+
+  const raceCardEntry = {
+    ...byPath("/home/race-card"),
+    query: `view=shell-v1&homeActiveRaces=1&localDate={{today}}${sync.usePersistedHome ? "&homePersistedTotals=1" : ""}`,
+  };
+  const raceCardPromise = request(raceCardEntry);
+  const racesPromise = request(byPath("/races"));
+  const suggestedPromise = request(byPath("/home/suggested-races"));
+  const manifestPromises = [];
+  const manifest = () => {
+    const promise = request(byPath("/assets/manifest"));
+    manifestPromises.push(promise);
+    return promise;
+  };
+
+  const raceCard = await raceCardPromise;
+  const raceCardBodyValid = homeSampleSucceeded(raceCard) && isJsonMap(raceCard.body);
+  const raceCardState = raceCardBodyValid ? classifyHomeRaceCard(raceCard.body) :
+    { presentationResolved: false, friendsResolved: false };
+  if (raceCardState.presentationResolved) manifest();
+  const presentationPromise = raceCardState.presentationResolved ? Promise.resolve(true) : (async () => {
+    decisions.raceCardPresentationFallback += 1;
+    const catalog = await request(byPath("/shop/catalog"));
+    const valid = homeSampleSucceeded(catalog) && validHomeCatalogBody(catalog.body);
+    if (valid) manifest();
+    return valid;
+  })();
+  const friendsPromise = raceCardState.friendsResolved ? Promise.resolve(true) : (async () => {
+    decisions.raceCardFriendsFallback += 1;
+    const friends = await request(byPath("/friends"));
+    return homeSampleSucceeded(friends) && validHomeFriendsBody(friends.body);
+  })();
+  const mePromise = (async () => {
+    const me = await request(byPath("/auth/me"));
+    const valid = homeSampleSucceeded(me) && validHomeMeBody(me.body);
+    if (valid) manifest();
+    return valid;
+  })();
+  const [races, presentationOk, friendsOk, meOk] = await Promise.all([
+    racesPromise, presentationPromise, friendsPromise, mePromise,
+  ]);
+  const criticalComplete = persistenceSucceeded && raceCardBodyValid &&
+    homeSampleSucceeded(races) && validHomeRacesBody(races.body) &&
+    presentationOk && friendsOk && meOk;
+  const criticalHomeMs = Math.max(0, clock() - startedAtMs);
+
+  const resolutionPromise = sync.job ? (async () => {
+    let terminalSuccess = false;
+    for (const delay of profile.homeOpen.resolutionPollWaitMs) {
+      await wait(delay);
+      decisions.resolutionPolls += 1;
+      const entry = { ...byPath("/steps/race-resolution/:jobId") };
+      const previous = { jobId: context.jobId, generation: context.generation };
+      context.jobId = sync.job.id;
+      context.generation = sync.job.generation;
+      const poll = await request(entry);
+      context.jobId = previous.jobId;
+      context.generation = previous.generation;
+      const state = String(poll.body?.raceResolution?.state || "").toUpperCase();
+      if (["SUCCEEDED", "FAILED", "SUPERSEDED", "NOT_FOUND"].includes(state) ||
+          [400, 404].includes(Number(poll.status))) {
+        terminalSuccess = state === "SUCCEEDED";
+        break;
+      }
+    }
+    if (terminalSuccess) {
+      decisions.resolutionFanouts += 1;
+      const replayRaceCard = request(byPath("/home/race-card")).then((sample) => {
+        if (homeSampleSucceeded(sample) && classifyHomeRaceCard(sample.body).presentationResolved) manifest();
+        return sample;
+      });
+      const replayRaces = request(byPath("/races"));
+      const replayMe = request(byPath("/auth/me")).then((sample) => {
+        if (homeSampleSucceeded(sample)) manifest();
+        return sample;
+      });
+      await Promise.all([replayRaceCard, replayRaces, replayMe]);
+    }
+    return terminalSuccess;
+  })() : Promise.resolve(true);
+
+  let deadlineTimer;
+  const deadline = new Promise((resolve) => {
+    deadlineTimer = setTimeout(() => resolve("deadline"), profile.homeOpen.allSettledDeadlineMs);
+  });
+  const settled = Promise.all([suggestedPromise, resolutionPromise])
+    .then(async () => { await Promise.all(manifestPromises); return "settled"; });
+  const allState = await Promise.race([settled, deadline]);
+  clearTimeout(deadlineTimer);
+  const allSettled = allState === "settled";
+  return { samples, criticalComplete, allSettled, failed: !criticalComplete,
+    criticalHomeMs, allHomeMs: Math.max(0, clock() - startedAtMs), decisions };
+}
+
+function assertHomeOpenGates(result = {}) {
+  const finite = (value) => Number.isFinite(Number(value));
+  const rate = Number(result.parameters?.arrivalRatePerSecond);
+  const seconds = Number(result.parameters?.measurementSeconds);
+  const expected = rate * seconds;
+  const sessions = result.sessions || {};
+  const generator = result.generator || {};
+  if (!Number.isFinite(expected) || ![sessions.expected, sessions.offered, sessions.started,
+      sessions.criticalComplete, sessions.allSettled, sessions.failed, sessions.late, sessions.dropped,
+      generator.iterations, generator.quotaRejected, generator.droppedIterations].every(finite) ||
+      Number(sessions.expected) !== expected ||
+      Number(sessions.offered) !== expected || Number(sessions.started) !== expected ||
+      Number(sessions.criticalComplete) !== expected ||
+      Number(sessions.failed) !== 0 ||
+      Number(sessions.late) !== 0 || Number(sessions.dropped) !== 0 ||
+      !Number.isInteger(Number(generator.iterations)) ||
+      !Number.isInteger(Number(generator.quotaRejected)) ||
+      Number(generator.quotaRejected) < 0 ||
+      Number(generator.iterations) - Number(generator.quotaRejected) !== expected ||
+      Number(generator.droppedIterations) !== 0) {
+    throw new Error("home-open capacity gate failed: exact session accounting");
+  }
+  if (!finite(result.summary?.errorRate) || !finite(generator.networkErrors)) {
+    throw new Error("home-open capacity gate failed: missing or non-finite evidence");
+  }
+  if (Number(result.summary?.errorRate) >= 0.001 || Number(generator.networkErrors) !== 0) {
+    throw new Error("home-open capacity gate failed: HTTP error/timeout/contract rate");
+  }
+  if (![sessions.criticalHomeMs?.p95, sessions.criticalHomeMs?.p99].every(finite)) {
+    throw new Error("home-open capacity gate failed: missing or non-finite latency evidence");
+  }
+  if (Number(sessions.criticalHomeMs?.p95) > 1000 || Number(sessions.criticalHomeMs?.p99) > 2000) {
+    throw new Error("home-open capacity gate failed: critical Home latency");
+  }
+  const sync = result.endpoints?.["POST /steps/sync-v2"]?.latencyMs || {};
+  const legacyEndpoint = result.endpoints?.["POST /steps"] || {};
+  const legacy = legacyEndpoint.latencyMs || {};
+  if (![sync.p95, sync.p99].every(finite) ||
+      Number(legacyEndpoint.requests || 0) > 0 && ![legacy.p95, legacy.p99].every(finite)) {
+    throw new Error("home-open capacity gate failed: missing or non-finite endpoint evidence");
+  }
+  if (Number(sync.p95) > 750 || Number(sync.p99) > 1500) {
+    throw new Error("home-open capacity gate failed: sync-v2 latency");
+  }
+  if (Number(legacy.p95) > 2000 || Number(legacy.p99) > 5000) {
+    throw new Error("home-open capacity gate failed: legacy step latency");
+  }
+  const requiredEndpoints = PROFILES["home-open"].entries.map((entry) => `${entry.method} ${entry.path}`);
+  const alwaysObserved = new Set(["POST /steps/sync-v2", "GET /home/race-card", "GET /races",
+    "GET /home/suggested-races", "GET /auth/me", "GET /assets/manifest"]);
+  for (const endpoint of requiredEndpoints) {
+    const evidence = result.endpoints?.[endpoint];
+    const statuses = evidence?.status || {};
+    const values = [evidence?.requests, evidence?.latencyMs?.p50, evidence?.latencyMs?.p95,
+      evidence?.latencyMs?.p99, statuses["2xx"], statuses["3xx"], statuses["4xx"],
+      statuses["5xx"], statuses.timeout];
+    if (!evidence || !values.every(finite) || values.some((value) => Number(value) < 0) ||
+        Number(evidence.requests) !== ["2xx", "3xx", "4xx", "5xx", "timeout"]
+          .reduce((sum, key) => sum + Number(statuses[key]), 0) ||
+        alwaysObserved.has(endpoint) && Number(evidence.requests) < 1) {
+      throw new Error(`home-open capacity gate failed: endpoint evidence ${endpoint}`);
+    }
+  }
+  const inFlight = sessions.inFlightCounterEvidence || {};
+  if (![sessions.averageInFlight, sessions.peakInFlight, inFlight.started, inFlight.completed,
+      inFlight.activeAtClose, inFlight.invalidEvents].every(finite) ||
+      Number(sessions.averageInFlight) < 0 || Number(sessions.peakInFlight) < 1 ||
+      Number(inFlight.started) !== expected || Number(inFlight.completed) !== expected ||
+      Number(inFlight.activeAtClose) !== 0 || Number(inFlight.invalidEvents) !== 0 ||
+      inFlight.source !== "session-start-completion-counters") {
+    throw new Error("home-open capacity gate failed: in-flight session counter evidence");
+  }
+  if (![result.queue?.p95LagMs, result.queue?.drainSeconds].every(finite)) {
+    throw new Error("home-open capacity gate failed: missing or non-finite queue evidence");
+  }
+  const infra = result.infrastructure || {};
+  if (infra.telemetryComplete !== true || generator.cpuPresent !== true ||
+      generator.memoryPresent !== true || generator.vuUtilizationPresent !== true) {
+    throw new Error("home-open capacity gate failed: telemetry completeness");
+  }
+  if (![infra.dbPoolWaitP99Ms, infra.poolCheckoutFailures, infra.maxEventLoopDelayMs].every(finite)) {
+    throw new Error("home-open capacity gate failed: missing or non-finite infrastructure evidence");
+  }
+  if (infra.processCensusStable !== true || infra.processMemoryWithinLimits !== true ||
+      Number(infra.dbPoolWaitP99Ms) > 50 || Number(infra.poolCheckoutFailures) !== 0 ||
+      infra.recoveredAfterLoad !== true) {
+    throw new Error("home-open capacity gate failed: infrastructure health/recovery");
+  }
+  if (result.cleanup?.cleaned !== true ||
+      result.cleanup?.baselineUnchanged !== true && result.cleanup?.noSyntheticRows !== true ||
+      result.cleanup?.baselineDriftObserved === true) {
+    throw new Error("home-open capacity gate failed: cleanup or baseline drift");
+  }
+  const globalIsolation = result.cleanup?.globalEventIsolation || {};
+  if (![globalIsolation.totalEventCount, globalIsolation.activeEventCount,
+      globalIsolation.summaryWorkCount].every(finite) ||
+      Number(globalIsolation.totalEventCount) !== 0 ||
+      Number(globalIsolation.activeEventCount) !== 0 ||
+      Number(globalIsolation.summaryWorkCount) !== 0) {
+    throw new Error("home-open capacity gate failed: final global-event isolation census");
+  }
+  if (result.provenance?.k6ExitError != null) {
+    throw new Error("home-open capacity gate failed: k6 nonzero exit");
+  }
+  return true;
+}
 function textReport(result) {
   const endpoints = Object.entries(result.endpoints || {});
   const worstLatency = endpoints.sort(([, left], [, right]) => right.latencyMs.p95 - left.latencyMs.p95)[0];
@@ -649,7 +978,9 @@ function assertBurstCapacityGates({
   return true;
 }
 
-async function oneRequest({ fetchImpl, baseUrl, entry, context, sequence, requestIdentitySequence = sequence, timeoutMs, sourceChangedExpected = false }) {
+async function oneRequest({ fetchImpl, baseUrl, entry, context, sequence,
+  requestIdentitySequence = sequence, timeoutMs, sourceChangedExpected = false,
+  captureResponseBody = false }) {
   const headers = { Accept: "application/json", "X-Load-Run-Id": context.runId, "X-Capacity-Run-Id": context.runId, "X-Capacity-Repeat": context.repeat || "1", "X-Synthetic-User": `load:${context.runId}:user:${context.userIndex}`, "X-App-Version": entry.persona === "legacy" ? "1.1.0" : "2.3.8", ...entry.headers, Authorization: `Bearer ${context.token}` };
   if (!entry.readOnly) headers["Content-Type"] = "application/json";
   if (entry.path === "/steps/sync-v2") headers["Idempotency-Key"] = uuidFor(context.runId, context.userIndex, requestIdentitySequence);
@@ -678,7 +1009,16 @@ async function oneRequest({ fetchImpl, baseUrl, entry, context, sequence, reques
           idempotencyKey: headers["Idempotency-Key"] || null,
         }
       : null;
-    return { endpoint: `${entry.method} ${entry.path}`, status: response.status, latencyMs, completedAtMs: Date.now(), sourceChangedExpected, persona: entry.persona, userIndex: context.userIndex, requestIdentitySequence, sourceExpectation, queueJobId: body?.raceResolution?.jobId || body?.jobId || null, queueGeneration: body?.raceResolution?.generation || body?.generation || 1, queueState: body?.state || body?.raceResolution?.state || null, errorDiagnostic: response.status >= 400 ? String(body?.code || body?.error || "").slice(0, 120) : null, allowedStatuses: entry.allowedStatuses, unexpectedStatus: !entry.allowedStatuses.includes(response.status), timeout: false };
+    return { endpoint: `${entry.method} ${entry.path}`, status: response.status,
+      body: captureResponseBody ? body : null, latencyMs, completedAtMs: Date.now(),
+      sourceChangedExpected, persona: entry.persona, userIndex: context.userIndex,
+      requestIdentitySequence, sourceExpectation,
+      queueJobId: body?.raceResolution?.jobId || body?.jobId || null,
+      queueGeneration: body?.raceResolution?.generation || body?.generation || 1,
+      queueState: body?.state || body?.raceResolution?.state || null,
+      errorDiagnostic: response.status >= 400 ? String(body?.code || body?.error || "").slice(0, 120) : null,
+      allowedStatuses: entry.allowedStatuses, unexpectedStatus: !entry.allowedStatuses.includes(response.status),
+      timeout: false };
   } catch (error) {
     return { endpoint: `${entry.method} ${entry.path}`, status: 0, latencyMs: Number(process.hrtime.bigint() - started) / 1e6, completedAtMs: Date.now(), sourceChangedExpected, persona: entry.persona, userIndex: context.userIndex, errorDiagnostic: String(error?.code || error?.message || "request error").slice(0, 120), allowedStatuses: entry.allowedStatuses, unexpectedStatus: true, timeout: error.name === "AbortError" || error.message.includes("timeout") };
   } finally { clearTimeout(timer); }
@@ -1394,4 +1734,4 @@ function capacityResolutionJobInput({ fixture, sequence, at = new Date() } = {})
   };
 }
 
-module.exports = { assertAcceptedStepSourcePersistence, assertBurstCapacityGates, assertChangedUploadSettlement, assertEventOpenSurgeGates, assertFixtureParity, assertGlobalEventArtifactSet, capacityResolutionJobInput, eventOpenSessionEntries, oneRequest, payloadFor, phaseEvidenceFromTelemetry, requestUrl, runEventOpenSession, runLoad, runPacedBackgroundProducer, selectSyntheticFixtureLifecycle, uuidFor, weightedChoice, writeImmutableArtifact };
+module.exports = { assertAcceptedStepSourcePersistence, assertBurstCapacityGates, assertChangedUploadSettlement, assertEventOpenSurgeGates, assertFixtureParity, assertGlobalEventArtifactSet, assertHomeOpenGates, capacityResolutionJobInput, classifyHomeRaceCard, classifyHomeSyncV2, eventOpenSessionEntries, oneRequest, payloadFor, phaseEvidenceFromTelemetry, requestUrl, runEventOpenSession, runHomeOpenSession, runLoad, runPacedBackgroundProducer, selectSyntheticFixtureLifecycle, uuidFor, validHomeCatalogBody, validHomeFriendsBody, validHomeMeBody, validHomeRacesBody, weightedChoice, writeImmutableArtifact };
