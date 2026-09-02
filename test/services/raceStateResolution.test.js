@@ -35,6 +35,7 @@ function makeContext(overrides = {}) {
   const placementCalls = [];
   const completeCalls = [];
   const globalEventUserIdCalls = [];
+  const globalEventMembershipCalls = [];
 
   const participants = overrides.participants || [];
   const race = {
@@ -133,8 +134,9 @@ function makeContext(overrides = {}) {
       },
     },
     GlobalStepEvent: {
-      async findEligibleByRace({ userIds }) {
+      async findEligibleByRace({ userIds, participantMemberships }) {
         globalEventUserIdCalls.push([...userIds]);
+        globalEventMembershipCalls.push(participantMemberships);
         return new Map(userIds.map((userId) => [userId, []]));
       },
     },
@@ -150,6 +152,7 @@ function makeContext(overrides = {}) {
     placementCalls,
     completeCalls,
     globalEventUserIdCalls,
+    globalEventMembershipCalls,
     deps,
   };
 }
@@ -169,6 +172,10 @@ test("a scoped resolution loads global-event eligibility only for scored partici
   });
 
   assert.deepEqual(ctx.globalEventUserIdCalls, [["user-2"]]);
+  assert.deepEqual(ctx.globalEventMembershipCalls, [[{
+    userId: "user-2",
+    joinedAt: RACE_START,
+  }]]);
 });
 
 test("resolution tears down generation scoring input when authoritative capture fails", async () => {

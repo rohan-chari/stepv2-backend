@@ -1534,6 +1534,10 @@ function buildResolveRaceState(dependencies = {}) {
             // the other 9,999 members adds no scoring input and turns an O(C)
             // resolution back into O(field size) during the daily event.
             userIds: scoredParticipants.map((participant) => participant.userId),
+            participantMemberships: scoredParticipants.map((participant) => ({
+              userId: participant.userId,
+              joinedAt: participant.joinedAt,
+            })),
             rangeStart: race.startedAt,
             rangeEnd: currentTime,
           })

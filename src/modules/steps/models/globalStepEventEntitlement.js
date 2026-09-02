@@ -16,12 +16,20 @@ async function findEligibleByRace({
   rangeEnd,
   client = prisma,
   allowMissingImpactEventUserKeys = null,
+  participantMemberships = null,
 }) {
   const queryStartedAt = Date.now();
   const ids = [...new Set((userIds || []).filter(Boolean))];
   const map = new Map(ids.map((id) => [id, []]));
   if (ids.length === 0) return map;
 
+  const suppliedMemberships = Array.isArray(participantMemberships)
+    ? participantMemberships.filter((row) => ids.includes(row?.userId))
+    : null;
+  const suppliedMembershipIds = new Set((suppliedMemberships || []).map((row) => row.userId));
+  const hasCompleteSuppliedMemberships = suppliedMemberships !== null &&
+    suppliedMembershipIds.size === ids.length &&
+    ids.every((id) => suppliedMembershipIds.has(id));
   const [legacyEvents, impacts, memberships] = await Promise.all([
     client.globalStepEvent.findMany({
       where: {
@@ -35,12 +43,14 @@ async function findEligibleByRace({
       where: { raceId, userId: { in: ids } },
       select: { id: true, eventId: true, userId: true, status: true },
     }),
-    typeof client.raceParticipant?.findMany === "function"
+    hasCompleteSuppliedMemberships
+      ? Promise.resolve(suppliedMemberships)
+      : typeof client.raceParticipant?.findMany === "function"
       ? client.raceParticipant.findMany({
           where: { raceId, userId: { in: ids }, status: "ACCEPTED" },
           select: { userId: true, joinedAt: true },
         })
-      : Promise.resolve([]),
+        : Promise.resolve([]),
   ]);
   for (const id of ids) map.get(id).push(...legacyEvents);
 

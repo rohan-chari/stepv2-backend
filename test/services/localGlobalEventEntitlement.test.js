@@ -387,6 +387,55 @@ test("eligible local windows are clipped to the participant join instant", async
   assert.equal(eventsForUser(map, "user-1")[0].startsAt.toISOString(), "2026-08-20T14:12:00.000Z");
 });
 
+test("prefetched scoped memberships preserve IDs and clipping without a participant query", async () => {
+  const client = {
+    globalStepEvent: { async findMany() { return []; } },
+    globalEventRaceImpact: {
+      async findMany() {
+        return [
+          { id: "impact-1", eventId: "event-1", userId: "user-1", status: "PENDING" },
+          { id: "impact-2", eventId: "event-1", userId: "user-2", status: "PENDING" },
+        ];
+      },
+    },
+    globalStepEventEntitlement: {
+      async findMany() {
+        return ["user-1", "user-2"].map((userId) => ({
+          id: `ent-${userId}`, eventId: "event-1", userId,
+          startsAt: new Date("2026-08-20T14:00:00Z"),
+          endsAt: new Date("2026-08-20T14:30:00Z"),
+          event: EVENT,
+        }));
+      },
+    },
+    raceParticipant: {
+      async findMany() { throw new Error("participant membership was reloaded"); },
+    },
+  };
+  const participantMemberships = [
+    { userId: "user-1", joinedAt: new Date("2026-08-20T14:12:00Z") },
+    { userId: "user-2", joinedAt: new Date("2026-08-20T14:15:00Z") },
+  ];
+  const map = await findEligibleByRace({
+    raceId: "race-1",
+    userIds: participantMemberships.map((row) => row.userId),
+    participantMemberships,
+    rangeStart: new Date("2026-08-20T14:05:00Z"),
+    rangeEnd: new Date("2026-08-20T14:30:00Z"),
+    client,
+  });
+
+  assert.deepEqual([...map.keys()], ["user-1", "user-2"]);
+  assert.equal(map.size, 2);
+  assert.deepEqual(
+    [...map].map(([userId, events]) => [userId, events[0].startsAt.toISOString()]),
+    [
+      ["user-1", "2026-08-20T14:12:00.000Z"],
+      ["user-2", "2026-08-20T14:15:00.000Z"],
+    ],
+  );
+});
+
 test("viewer active lookup requires an accepted non-forfeited live membership", async () => {
   let impactWhere;
   const client = {
