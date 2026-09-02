@@ -213,6 +213,31 @@ test("scheduled cleanup does not overlap an in-flight cleanup", async () => {
   }
 });
 
+test("scheduled qualification recovery uses the scheduler-owned dependency", async () => {
+  let recoveries = 0;
+  const scheduled = scheduleRaceResolutionPostTaskRunner({
+    env: {},
+    drainOnStart: false,
+    pollIntervalMs: 60_000,
+    cleanupIntervalMs: 60_000,
+    qualificationRecoveryIntervalMs: 5,
+    subscribeWake: async () => () => {},
+    recoverReferralQualificationIntents: async () => { recoveries += 1; },
+    RaceResolutionPostTask: {
+      async nextDueAt() { return null; },
+    },
+  });
+  try {
+    const deadline = Date.now() + 250;
+    while (recoveries === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(recoveries > 0);
+  } finally {
+    await scheduled.stop();
+  }
+});
+
 test("readiness requires a recent DB claim probe, bounded lag, and no ambiguous lease", async () => {
   let now = new Date("2026-08-13T12:00:00.000Z");
   let health = { oldestPendingLagMs: 10_000, expiredAttemptCount: 0 };

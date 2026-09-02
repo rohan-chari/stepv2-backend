@@ -290,6 +290,9 @@ const raceResolutionPostTaskRunner = buildRaceResolutionPostTaskRunner();
 function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   const env = dependencies.env || process.env;
   if (postTaskWorkerDisabled(env)) return null;
+  const recoverQualificationIntents =
+    dependencies.recoverReferralQualificationIntents ||
+    (() => recoverReferralQualificationIntents());
   const runner = Object.keys(dependencies).length === 0
     ? raceResolutionPostTaskRunner
     : buildRaceResolutionPostTaskRunner(dependencies);
