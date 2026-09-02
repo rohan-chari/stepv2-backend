@@ -180,6 +180,93 @@ test("an idle tick promotes append-only FULL triggers before it claims a race", 
 
   assert.equal(await worker.processOne(), null);
   assert.deepEqual(calls, ["promote", "claim"]);
+
+  await worker.processOne();
+  assert.deepEqual(
+    calls,
+    ["promote", "claim", "claim"],
+    "a second claim in the same drain must not rescan the trigger table",
+  );
+
+  worker.beginDrain();
+  await worker.processOne();
+  assert.deepEqual(
+    calls,
+    ["promote", "claim", "claim", "promote", "claim"],
+    "a later wake/recovery drain must restore durable trigger discovery",
+  );
+});
+
+test("parallel worker lanes share one FULL-trigger promotion per drain", async () => {
+  let promotions = 0;
+  let claims = 0;
+  let releasePromotion;
+  const promotionGate = new Promise((resolve) => { releasePromotion = resolve; });
+  const worker = makeWorker(countingSettings([false]), {
+    bootAt: 0,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() {
+        promotions += 1;
+        await promotionGate;
+        return { promoted: 0, races: 0 };
+      },
+      async claimNext() { claims += 1; return null; },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+
+  const lanes = [worker.processOne(), worker.processOne(), worker.processOne()];
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promotions, 1);
+  releasePromotion();
+  await Promise.all(lanes);
+  assert.equal(promotions, 1);
+  assert.equal(claims, 3);
+});
+
+test("a wake arriving during FULL-trigger promotion survives its stale result", async () => {
+  let promotions = 0;
+  let releaseFirstPromotion;
+  const firstPromotionGate = new Promise((resolve) => { releaseFirstPromotion = resolve; });
+  const worker = makeWorker(countingSettings([false]), {
+    bootAt: 0,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() {
+        promotions += 1;
+        if (promotions === 1) await firstPromotionGate;
+        return { promoted: 0, races: 0 };
+      },
+      async claimNext() { return null; },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+
+  const first = worker.processOne();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promotions, 1);
+  worker.beginDrain();
+  releaseFirstPromotion();
+  await first;
+  await worker.processOne();
+  assert.equal(
+    promotions,
+    2,
+    "the stale non-saturated result must not erase a newer wake signal",
+  );
 });
 
 test("production HTTP and cron roles cannot claim or occupy a resolution lane", async () => {

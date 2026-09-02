@@ -8,6 +8,7 @@ const {
   RaceResolutionJobV2: defaultJobModel,
   newLeaseToken,
   LEASE_MS,
+  FULL_TRIGGER_PROMOTION_BATCH_SIZE,
 } = require("../models/raceResolutionJobV2");
 const {
   RacePlacementTransitionJob: defaultPlacementJobModel,
@@ -1089,6 +1090,35 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
   const bootAt = dependencies.bootAt ?? Date.now();
   let oldQueueDrainedObserved = false;
+  let fullTriggerPromotionNeeded = true;
+  let fullTriggerPromotionPromise = null;
+  let fullTriggerPromotionSignal = 0;
+
+  function beginDrain() {
+    fullTriggerPromotionNeeded = true;
+    fullTriggerPromotionSignal += 1;
+  }
+
+  async function promoteFullScopeTriggersOnce(currentTime, phaseTimer) {
+    if (!fullTriggerPromotionNeeded ||
+        typeof jobModel.promoteFullScopeTriggers !== "function") return;
+    if (!fullTriggerPromotionPromise) {
+      const signalAtStart = fullTriggerPromotionSignal;
+      fullTriggerPromotionPromise = phaseTimer.measure(
+        "fullTriggerPromotion",
+        () => jobModel.promoteFullScopeTriggers({ now: currentTime }),
+      ).then((promotion) => {
+        // A saturated bounded page deliberately keeps the signal set so the
+        // next worker tick continues the backlog within this same drain.
+        fullTriggerPromotionNeeded =
+          Number(promotion?.promoted || 0) >= FULL_TRIGGER_PROMOTION_BATCH_SIZE ||
+          fullTriggerPromotionSignal !== signalAtStart;
+      }).finally(() => {
+        fullTriggerPromotionPromise = null;
+      });
+    }
+    await fullTriggerPromotionPromise;
+  }
 
   function startupReadiness() {
     const startupQuietPeriodMs = quietPeriodMs();
@@ -1227,12 +1257,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // before claiming. The promotion is bounded and SKIP LOCKED, so parallel
     // worker lanes cooperate without making HTTP uploaders contend on the
     // race-keyed job row.
-    if (!raceId && typeof jobModel.promoteFullScopeTriggers === "function") {
-      await phaseTimer.measure(
-        "fullTriggerPromotion",
-        () => jobModel.promoteFullScopeTriggers({ now: currentTime }),
-      );
-    }
+    if (!raceId) await promoteFullScopeTriggersOnce(currentTime, phaseTimer);
 
     const job = await phaseTimer.measure("claim", () => jobModel.claimNext({
         now: currentTime,
@@ -3131,6 +3156,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     logQueueLag,
     readyToClaim,
     startupReadiness,
+    beginDrain,
     claimingDisabled,
     FenceLostError,
   };
@@ -3234,9 +3260,18 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
     queue: "resolution",
     fallbackIntervalMs: dependencies.pollIntervalMs || 5_000,
     drain: runScheduledWork,
-    nextDueAt: () => (dependencies.RaceResolutionJobV2 || defaultJobModel).nextDueAt?.(),
+    nextDueAt: () => {
+      const readiness = worker.startupReadiness?.();
+      if (readiness && !readiness.ready) {
+        return new Date(Date.now() + Math.max(1_000, readiness.remainingQuietMs || 0));
+      }
+      return (dependencies.RaceResolutionJobV2 || defaultJobModel).nextDueAt?.();
+    },
     subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
     logger,
+    onSignal: () => worker.beginDrain?.(),
+    setTimer: dependencies.setDueTimer,
+    clearTimer: dependencies.clearDueTimer,
   });
   coordinator.start({ drainOnStart: dependencies.drainOnStart !== false }).catch((error) => logger.error(
     "[RACE_RESOLUTION_V2] wake coordinator failed", error,

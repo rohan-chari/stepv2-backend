@@ -14,6 +14,7 @@ function createPostgresWakeCoordinator({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   metrics = defaultMetrics,
+  onSignal = () => {},
 }) {
   if (!queue || typeof drain !== "function") {
     throw new TypeError("queue and drain are required");
@@ -83,6 +84,11 @@ function createPostgresWakeCoordinator({
 
   function requestDrain(_reason = "wake") {
     if (stopped) return Promise.resolve();
+    try {
+      onSignal(_reason);
+    } catch (error) {
+      logger.error(`[DURABLE_QUEUE:${queue}] signal hook failed`, error);
+    }
     const currentMs = now().getTime();
     if (!running && currentMs < failureBackoffUntilMs) {
       pendingReason = retainHigherPriorityReason(pendingReason, _reason);
