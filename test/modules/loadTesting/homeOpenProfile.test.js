@@ -17,7 +17,8 @@ const { HOME_OPEN_EXECUTION_FILES, aggregateHomeOpenLadder, executionBundleHash,
   createInFlightTracker, progressFromMetricsRows, resolutionEvidenceFromLog, waitFor,
   resetCapacityDbPoolMeasurements, waitForResolutionQueueQuiescence,
   waitForResolutionWorkerReady } = require("../../../scripts/k6-home-open");
-const { homeStepPayload, scaleHomeTopology } = require("../../../src/modules/loadTesting/homeOpenFixtures");
+const { homeStepPayload, interleaveActiveRaceCounts,
+  scaleHomeTopology } = require("../../../src/modules/loadTesting/homeOpenFixtures");
 const { baselineIntegrityDiff } = require("../../../src/modules/loadTesting/fixtures");
 const { buildRaceResolutionWorkerV2 } = require("../../../src/modules/races/jobs/raceResolutionQueueV2");
 
@@ -819,4 +820,42 @@ test("home-open fixture topology scales aggregate snapshot distributions without
   assert.ok(value.raceCount >= 1 && value.raceCount <= 100);
   assert.equal(JSON.stringify(value).includes("userId"), false);
   assert.equal(JSON.stringify(value).includes("raceId"), false);
+});
+
+test("home-open fixtures interleave active-race cohorts across every traffic prefix", () => {
+  const distribution = { "0": 2, "1": 6, "2": 2 };
+  const sequence = interleaveActiveRaceCounts(distribution);
+  assert.deepEqual(sequence, [1, 0, 1, 2, 1, 1, 0, 1, 2, 1]);
+  assert.deepEqual(sequence.reduce((counts, value) => {
+    counts[value] = (counts[value] || 0) + 1; return counts;
+  }, {}), { "0": 2, "1": 6, "2": 2 });
+
+  for (let prefixLength = 1; prefixLength <= sequence.length; prefixLength += 1) {
+    const prefix = sequence.slice(0, prefixLength);
+    for (const [label, total] of Object.entries(distribution)) {
+      const actual = prefix.filter((value) => value === Number(label)).length;
+      const ideal = prefixLength * total / sequence.length;
+      assert.ok(Math.abs(actual - ideal) <= 1,
+        `prefix ${prefixLength} cohort ${label} differs from its weighted share by more than one`);
+    }
+  }
+});
+
+test("home-open production-shaped fixture does not front-load the zero-race cohort", () => {
+  const distribution = scaleHomeTopology({ syntheticUsers: 5000,
+    activeRaceCountDistribution: [240, 176, 405, 218, 98, 32, 13, 7, 1, 1, 1, 2, 1, 1]
+      .map((users, activeRaceCount) => ({ activeRaceCount, users })),
+    participantBands: [{ band: "10-49", races: 1, medianParticipants: 25 }],
+  }).usersByActiveRaceCount;
+  const sequence = interleaveActiveRaceCounts(distribution);
+  assert.equal(sequence.length, 5000);
+  for (const prefixLength of [300, 900, 1800]) {
+    const prefix = sequence.slice(0, prefixLength);
+    for (const [label, total] of Object.entries(distribution)) {
+      const actual = prefix.filter((value) => value === Number(label)).length;
+      const ideal = prefixLength * total / sequence.length;
+      assert.ok(Math.abs(actual - ideal) <= 1,
+        `production prefix ${prefixLength} cohort ${label} is not proportionally interleaved`);
+    }
+  }
 });

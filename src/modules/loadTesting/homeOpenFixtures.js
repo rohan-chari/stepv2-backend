@@ -61,6 +61,27 @@ function allocateCounts(total, weightedRows, weightKey, labelKey) {
   return Object.fromEntries(result.map((row, index) => [row.label, counts[index]]));
 }
 
+function interleaveActiveRaceCounts(usersByActiveRaceCount) {
+  const cohorts = Object.entries(usersByActiveRaceCount).map(([label, count]) => ({
+    label: Number(label), target: Number(count), allocated: 0,
+  })).filter((row) => Number.isInteger(row.label) && row.label >= 0 &&
+    Number.isInteger(row.target) && row.target > 0)
+    .sort((left, right) => left.label - right.label);
+  const total = cohorts.reduce((sum, row) => sum + row.target, 0);
+  const sequence = [];
+  for (let position = 1; position <= total; position += 1) {
+    const selected = cohorts.filter((row) => row.allocated < row.target)
+      .sort((left, right) => {
+        const leftDeficit = position * left.target / total - left.allocated;
+        const rightDeficit = position * right.target / total - right.allocated;
+        return rightDeficit - leftDeficit || left.label - right.label;
+      })[0];
+    selected.allocated += 1;
+    sequence.push(selected.label);
+  }
+  return sequence;
+}
+
 function scaleHomeTopology({
   syntheticUsers,
   activeRaceCountDistribution = [],
@@ -214,10 +235,8 @@ async function createHomeOpenFixtures({
       } });
       races.push(race); ids.races.push(race.id);
     }
-    const requestedCounts = [];
-    for (const [count, countUsers] of Object.entries(scaled.usersByActiveRaceCount)) {
-      for (let index = 0; index < countUsers; index += 1) requestedCounts.push(Math.min(races.length, Number(count)));
-    }
+    const requestedCounts = interleaveActiveRaceCounts(scaled.usersByActiveRaceCount)
+      .map((count) => Math.min(races.length, count));
     while (requestedCounts.length < userRows.length) requestedCounts.push(0);
     const participantRows = [];
     const capacities = scaled.raceParticipantTargets.map((remaining, index) => ({ index, remaining }));
@@ -249,6 +268,7 @@ async function createHomeOpenFixtures({
     const reuseSeconds = users / Math.max(1, Number(arrivalRate));
     const topology = {
       schema: "home-open-fixture-topology-v1",
+      userCohortOrdering: "weighted-fair-active-race-count-v1",
       syntheticUserCount: users,
       usersByActiveRaceCount: scaled.usersByActiveRaceCount,
       racesByParticipantCountBand: sortedSizes.reduce((result, size) => {
@@ -319,5 +339,6 @@ async function readHomeOpenGlobalIsolationCensus(prisma) {
 }
 
 module.exports = { aggregateSnapshotTopology, cleanupHomeOpenFixtures,
-  createHomeOpenFixtures, homeStepPayload, readHomeOpenGlobalIsolationCensus,
+  createHomeOpenFixtures, homeStepPayload, interleaveActiveRaceCounts,
+  readHomeOpenGlobalIsolationCensus,
   scaleHomeTopology, signHomeOpenFixtureToken };
