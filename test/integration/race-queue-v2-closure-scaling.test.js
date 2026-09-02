@@ -40,6 +40,12 @@ const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
 const { appSettings } = require("../../src/shared/config/appSettings");
+const {
+  buildRaceResolutionPostTaskHandoff,
+} = require("../../src/modules/races/services/raceResolutionPostTaskHandoff");
+const {
+  MAX_BOXES_PER_ROLL,
+} = require("../../src/modules/powerups/commands/rollPowerup");
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -241,6 +247,77 @@ function changedRowIds(before, after) {
     .sort();
 }
 
+function prismaCountingBoxLocks(counters) {
+  return new Proxy(prisma, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return (operation, options) => target.$transaction(async (tx) => {
+          const wrapped = new Proxy(tx, {
+            get(txTarget, txProperty) {
+              if (txProperty === "$executeRawUnsafe") {
+                return (sql, ...params) => {
+                  if (String(sql).includes("pg_advisory_xact_lock")) {
+                    counters.advisoryLockStatements =
+                      (counters.advisoryLockStatements || 0) + 1;
+                  }
+                  return txTarget.$executeRawUnsafe(sql, ...params);
+                };
+              }
+              if (txProperty === "$queryRawUnsafe") {
+                return (sql, ...params) => {
+                  const text = String(sql);
+                  if (text.includes("next_box_at_steps") && text.includes("FOR UPDATE")) {
+                    counters.participantRowLockStatements =
+                      (counters.participantRowLockStatements || 0) + 1;
+                  }
+                  return txTarget.$queryRawUnsafe(sql, ...params);
+                };
+              }
+              if (["raceParticipant", "racePowerup", "racePowerupEvent"].includes(txProperty)) {
+                const delegate = txTarget[txProperty];
+                return new Proxy(delegate, {
+                  get(delegateTarget, method) {
+                    const value = delegateTarget[method];
+                    if (typeof value !== "function") return value;
+                    return (args) => {
+                      if (
+                        txProperty === "raceParticipant" &&
+                        method === "update" &&
+                        Object.keys(args?.data || {}).length === 1 &&
+                        Object.hasOwn(args.data, "nextBoxAtSteps")
+                      ) {
+                        counters.participantCursorUpdates =
+                          (counters.participantCursorUpdates || 0) + 1;
+                      }
+                      if (txProperty === "racePowerup" && ["create", "createMany"].includes(method)) {
+                        counters.boxInsertStatements =
+                          (counters.boxInsertStatements || 0) + 1;
+                      }
+                      if (
+                        txProperty === "racePowerupEvent" &&
+                        ["create", "createMany"].includes(method)
+                      ) {
+                        counters.boxEventInsertStatements =
+                          (counters.boxEventInsertStatements || 0) + 1;
+                      }
+                      return value.call(delegateTarget, args);
+                    };
+                  },
+                });
+              }
+              const value = txTarget[txProperty];
+              return typeof value === "function" ? value.bind(txTarget) : value;
+            },
+          });
+          return operation(wrapped);
+        }, options);
+      }
+      const value = target[property];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 /** Seeds a race of `size`, runs ONE closure generation, and measures it. */
 async function measureClosureAtSize(size) {
   const { raceId, uploader, partner } = await seedRaceOfSize(size);
@@ -347,6 +424,188 @@ async function measureClosureAtSize(size) {
 }
 
 // ── 1. the 10 / 100 / 350 matrix ───────────────────────────────────────────
+
+describe("FULL recovery production-shaped watchdog margin", () => {
+  it("preselects zero-due users without 477 advisory-lock round trips", { timeout: 120_000 }, async () => {
+    const { raceId } = await seedRaceOfSize(477);
+    const baseline = buildRaceResolutionWorkerV2({ bootAt: 0, logger: { log() {}, error() {} } });
+    await RaceResolutionJobV2.promoteFullScopeTriggers({ now: new Date() });
+    for (let index = 0; index < 20 && (await baseline.processOne({ raceId })); index += 1) {}
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, status: "ACCEPTED" },
+      data: { nextBoxAtSteps: 1_000_000 },
+    });
+    const queued = await RaceResolutionJobV2.enqueue({
+      raceId,
+      now: new Date(),
+      dirtyEnvelope: {
+        reason: "FULL",
+        dirtyUserIds: [],
+        dirtyParticipantIds: [],
+        priority: "RECOVERY",
+      },
+    });
+    const counters = { advisoryLockStatements: 0, participantRowLockStatements: 0 };
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      prisma: prismaCountingBoxLocks(counters),
+      logger: { log() {}, error() {} },
+    });
+
+    assert.ok(await worker.processRace({ raceId, generation: Number(queued.generation) }));
+    assert.equal(counters.advisoryLockStatements, 0);
+    assert.ok(counters.participantRowLockStatements <= 1);
+  });
+
+  it("keeps the 477-player production maximum below 15s transaction and 30s p99 attempt", { timeout: 180_000 }, async (t) => {
+    const { raceId } = await seedRaceOfSize(477);
+    await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", true);
+    await appSettings.setFlag("raceResolutionPostTasksV1Enabled", true);
+    const lines = [];
+    const postTaskHandoff = buildRaceResolutionPostTaskHandoff({
+      runner: {
+        async isReady() { return true; },
+        async processTaskId() { assert.fail("healthy runner leaves durable tasks queued"); },
+      },
+    });
+    const boxQueryCounters = {};
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      processRole: "resolution",
+      prisma: prismaCountingBoxLocks(boxQueryCounters),
+      raceResolutionPostTaskHandoff: postTaskHandoff,
+      logger: {
+        log(line) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.event === "race_resolution_v2" && parsed.outcome === "commit") {
+              lines.push(parsed);
+            }
+          } catch {}
+        },
+        error() {},
+      },
+    });
+
+    const members = await prisma.raceParticipant.findMany({
+      where: { raceId, status: "ACCEPTED" },
+      select: { id: true, userId: true },
+    });
+    assert.equal(members.length, 477);
+    const periodEnd = new Date(Date.now() - 7 * HOUR_MS);
+    const periodStart = new Date(periodEnd.getTime() - HOUR_MS);
+    await prisma.stepSample.createMany({
+      data: members.map(({ userId }, index) => ({
+        id: `perf-due-${index}`,
+        userId,
+        periodStart,
+        periodEnd,
+        steps: 2_000,
+      })),
+    });
+
+    // Twenty independent FULL generations make the order statistic meaningful
+    // while exercising the largest production roster. The real post-commit
+    // preparation path assembles its snapshot command and delivery claims;
+    // no trivial onCommitted seam replaces it. The aligned 2,000-step cursor is
+    // genuinely overdue for all 477 members; after the first generation, the
+    // same already-earned threshold exercises idempotent replay while remaining
+    // a real due candidate rather than the malformed-cursor repair path.
+    for (let sample = 0; sample < 20; sample += 1) {
+      await prisma.raceParticipant.updateMany({
+        where: { raceId, status: "ACCEPTED" },
+        data: { nextBoxAtSteps: 2_000 },
+      });
+      const queued = await RaceResolutionJobV2.enqueue({
+        raceId,
+        now: new Date(),
+        dirtyEnvelope: {
+          reason: "FULL", dirtyUserIds: [], dirtyParticipantIds: [], priority: "RECOVERY",
+        },
+      });
+      assert.ok(await worker.processRace({ raceId, generation: Number(queued.generation) }));
+    }
+
+    assert.equal(lines.length, 20);
+    const percentile99 = (values) => {
+      const ordered = [...values].sort((a, b) => a - b);
+      return ordered[Math.ceil(ordered.length * 0.99) - 1];
+    };
+    const attemptP99 = percentile99(lines.map((line) => Number(line.coreMs)));
+    const transactionP99 = percentile99(
+      lines.map((line) => Number(line.phaseMs?.transaction))
+    );
+    t.diagnostic(`477-player FULL p99: attempt=${attemptP99}ms transaction=${transactionP99}ms samples=20`);
+    assert.ok(transactionP99 < 15_000, `FULL transaction p99 ${transactionP99}ms must stay below 15s`);
+    assert.ok(attemptP99 < 30_000, `FULL attempt p99 ${attemptP99}ms must stay below 30s`);
+
+    // The same maximum roster at the supported per-call backlog cap. Start
+    // from empty inventory so every member exercises three visible boxes, one
+    // queued box, the coalesced forfeit path, and all 50 cursor crossings.
+    await prisma.racePowerup.deleteMany({ where: { raceId } });
+    await prisma.racePowerupEvent.deleteMany({ where: { raceId } });
+    await prisma.stepSample.createMany({
+      data: members.map(({ userId }, index) => ({
+        id: `perf-cap-${index}`,
+        userId,
+        periodStart: periodEnd,
+        periodEnd: new Date(periodEnd.getTime() + HOUR_MS),
+        steps: MAX_BOXES_PER_ROLL * 2_000,
+      })),
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, status: "ACCEPTED" },
+      data: { nextBoxAtSteps: 2_000 },
+    });
+    const capped = await RaceResolutionJobV2.enqueue({
+      raceId,
+      now: new Date(),
+      dirtyEnvelope: {
+        reason: "FULL", dirtyUserIds: [], dirtyParticipantIds: [], priority: "RECOVERY",
+      },
+    });
+    const beforeCapQueries = { ...boxQueryCounters };
+    assert.ok(await worker.processRace({ raceId, generation: Number(capped.generation) }));
+    const cappedLine = lines.at(-1);
+    t.diagnostic(
+      `477-player ${MAX_BOXES_PER_ROLL}-threshold cap: attempt=${cappedLine.coreMs}ms ` +
+      `transaction=${cappedLine.phaseMs?.transaction}ms`,
+    );
+    assert.ok(Number(cappedLine.phaseMs?.transaction) < 15_000);
+    assert.ok(Number(cappedLine.coreMs) < 30_000);
+    assert.equal(await prisma.racePowerup.count({ where: { raceId } }), 477 * 4);
+    assert.equal(await prisma.racePowerupEvent.count({
+      where: { raceId, eventType: "POWERUP_FORFEITED" },
+    }), 477);
+    assert.equal(await prisma.raceParticipant.count({
+      where: { raceId, nextBoxAtSteps: 102_000 },
+    }), 477);
+    assert.ok(
+      (boxQueryCounters.participantCursorUpdates || 0) -
+        (beforeCapQueries.participantCursorUpdates || 0) <= 477,
+      `cap cursor writes must be at most one/member, got ${
+        (boxQueryCounters.participantCursorUpdates || 0) -
+        (beforeCapQueries.participantCursorUpdates || 0)
+      }`,
+    );
+    assert.ok(
+      (boxQueryCounters.boxInsertStatements || 0) -
+        (beforeCapQueries.boxInsertStatements || 0) <= 477,
+      `cap box inserts must be batched per member, got ${
+        (boxQueryCounters.boxInsertStatements || 0) -
+        (beforeCapQueries.boxInsertStatements || 0)
+      }`,
+    );
+    assert.ok(
+      (boxQueryCounters.boxEventInsertStatements || 0) -
+        (beforeCapQueries.boxEventInsertStatements || 0) <= 477,
+      `cap box feed inserts must be batched per member, got ${
+        (boxQueryCounters.boxEventInsertStatements || 0) -
+        (beforeCapQueries.boxEventInsertStatements || 0)
+      }`,
+    );
+  });
+});
 
 describe("dependency closure — 10/100/350 scaling", () => {
   it("graph reads stay a bounded constant and writes stay O(C) as the field grows 35x", async () => {

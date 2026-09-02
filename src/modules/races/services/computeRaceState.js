@@ -110,6 +110,7 @@ async function computeRaceState({
   raceId,
   timeZone = "UTC",
   userIds = null,
+  includeAllAcceptedBoxUsers = false,
   dependencies = {},
 } = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
@@ -135,7 +136,9 @@ async function computeRaceState({
       : {}),
   });
 
-  const processed = await resolve({ raceId, userIds, timeZone });
+  const processed = await resolve({
+    raceId, userIds, timeZone, includeAllAcceptedBoxUsers,
+  });
   const result = Array.isArray(processed) ? processed[0] : null;
 
   const totalsByParticipantId = new Map();

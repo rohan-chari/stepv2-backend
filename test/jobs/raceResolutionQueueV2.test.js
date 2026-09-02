@@ -1,9 +1,247 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
+  buildRaceResolutionWorkerV2,
   runBoundedRaceResolutionJobs,
+  createRaceResolutionPhaseTimer,
+  createRaceResolutionAttemptWatchdog,
+  RACE_RESOLUTION_SLOW_PHASE_MS,
+  RACE_RESOLUTION_SLOW_ATTEMPT_MS,
+  RACE_RESOLUTION_WATCHDOG_MS,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
+
+test("watchdog fail-stop fixture drives the shipped worker transaction", () => {
+  const fixture = fs.readFileSync(
+    path.join(__dirname, "../fixtures/raceResolutionWatchdogChild.js"),
+    "utf8"
+  );
+  assert.match(fixture, /buildRaceResolutionWorkerV2\s*\(/);
+  assert.doesNotMatch(fixture, /RaceResolutionJobV2\.claimNext\s*\(/);
+  assert.doesNotMatch(fixture, /createRaceResolutionAttemptWatchdog\s*\(/);
+  assert.doesNotMatch(fixture, /createRaceResolutionPhaseTimer\s*\(/);
+});
+
+test("nested phase timer exposes live state, emits bounded checkpoints, and enforces LIFO", () => {
+  let nanos = 0n;
+  const scheduled = [];
+  const events = [];
+  const timer = createRaceResolutionPhaseTimer(() => nanos, {
+    attemptContext: {
+      attemptId: "00000000-0000-4000-8000-000000000000:11111111-1111-4111-8111-111111111111",
+      queuePriority: "RECOVERY",
+      resolutionPlan: () => "FULL",
+    },
+    emit: (event) => events.push(event),
+    scheduleTimeout: (callback, ms) => {
+      const handle = { callback, ms, cleared: false };
+      scheduled.push(handle);
+      return handle;
+    },
+    clearTimeout: (handle) => { handle.cleared = true; },
+  });
+
+  const stopTransaction = timer.start("transaction");
+  nanos = 2_000_000n;
+  const stopFence = timer.start("fenceAcquire");
+  assert.deepEqual(timer.liveState(), {
+    activePhase: "fenceAcquire",
+    parentPhase: "transaction",
+    phaseStack: ["transaction", "fenceAcquire"],
+    activePhaseElapsedMs: 0,
+    attemptElapsedMs: 2,
+    lastCompletedPhase: null,
+  });
+  assert.throws(stopTransaction, /non-LIFO/);
+
+  nanos = 10_002_000_000n;
+  scheduled[1].callback();
+  scheduled[1].callback();
+  stopFence();
+  stopTransaction();
+
+  assert.equal(events.filter((event) => event.checkpoint === "enter").length, 2);
+  assert.equal(events.filter((event) => event.checkpoint === "slow").length, 2);
+  assert.equal(events[2].activePhase, "fenceAcquire");
+  assert.equal(events[2].parentPhase, "transaction");
+  assert.equal(events[3].activePhase, "transaction");
+  assert.equal(events[3].parentPhase, null);
+  assert.equal(scheduled.every((handle) => handle.cleared), true);
+});
+
+test("a parent phase emits its overdue slow checkpoint after its child completes", () => {
+  let nanos = 0n;
+  const scheduled = [];
+  const events = [];
+  const timer = createRaceResolutionPhaseTimer(() => nanos, {
+    attemptContext: { attemptId: "boot:attempt", queuePriority: "LIVE" },
+    emit: (event) => events.push(event),
+    scheduleTimeout(callback, ms) {
+      const handle = { callback, ms, cleared: false };
+      scheduled.push(handle);
+      return handle;
+    },
+    clearTimeout(handle) { handle.cleared = true; },
+  });
+
+  const stopParent = timer.start("transaction");
+  nanos = 1_000_000n;
+  const stopChild = timer.start("fenceAcquire");
+  nanos = 10_001_000_000n;
+  scheduled[0].callback();
+  assert.equal(events.some((event) => event.checkpoint === "slow"), false);
+
+  stopChild();
+  const slow = events.find((event) => event.checkpoint === "slow");
+  assert.equal(slow?.activePhase, "transaction");
+  assert.equal(slow?.parentPhase, null);
+  stopParent();
+});
+
+test("fresh boot alarms after one watchdog interval with claimable work and no terminal", async () => {
+  let nanos = 0n;
+  const messages = [];
+  const logger = {
+    log(value) { messages.push(value); },
+    warn(value) { messages.push(value); },
+    error(value) { messages.push(value); },
+  };
+  const worker = buildRaceResolutionWorkerV2({
+    nodeEnv: "production",
+    processRole: "resolution",
+    monotonicNow: () => nanos,
+    scheduleTimeout: () => ({ unref() {} }),
+    appSettings: { async getFlag() { return false; } },
+    logger,
+    RaceResolutionJobV2: {
+      async queueServiceSnapshot() {
+        return {
+          oldestRequestAgeMs: 0,
+          claimableCount: 1,
+          oldestClaimableAgeMs: 0,
+          runningCount: 0,
+          expiredRunningCount: 0,
+          settlementCount: 0,
+          recoveryCount: 0,
+          liveCount: 1,
+          maintenanceCount: 0,
+        };
+      },
+    },
+    raceResolutionWorkBudget: {
+      snapshot: () => ({ active: 0, queuedCore: 0, queuedPost: 0 }),
+    },
+  });
+  nanos = BigInt(RACE_RESOLUTION_WATCHDOG_MS + 1) * 1_000_000n;
+
+  await worker.logQueueLag();
+
+  const event = messages
+    .map((value) => typeof value === "string" && value.startsWith("{") ? JSON.parse(value) : null)
+    .find((value) => value?.event === "race_resolution_v2_queue_service");
+  assert.equal(event.lastTerminalAgeMs, null);
+  assert.equal(event.alarm, true);
+});
+
+test("attempt watchdog emits slow marker then fail-stops exactly once after a bounded flush", async () => {
+  assert.equal(RACE_RESOLUTION_SLOW_PHASE_MS, 10_000);
+  assert.equal(RACE_RESOLUTION_SLOW_ATTEMPT_MS, 30_000);
+  assert.equal(RACE_RESOLUTION_WATCHDOG_MS, 60_000);
+  const scheduled = [];
+  const markers = [];
+  const diagnostics = [];
+  const failStops = [];
+  const watchdog = createRaceResolutionAttemptWatchdog({
+    attempt: {
+      attemptId: "boot:attempt",
+      jobId: "job",
+      raceId: "race",
+      leaseExpiresAt: new Date("2026-09-01T00:00:30.000Z"),
+      queueLagMs: 12,
+    },
+    phaseTimer: { liveState: () => ({ activePhase: "transaction", phaseStack: ["transaction"], activePhaseElapsedMs: 60_000, attemptElapsedMs: 60_000, lastCompletedPhase: "compute" }) },
+    workBudget: { snapshot: () => ({ active: 2, queuedCore: 1, queuedPost: 0 }) },
+    scheduleTimeout: (callback, ms) => {
+      const handle = { callback, ms, cleared: false };
+      scheduled.push(handle);
+      return handle;
+    },
+    clearTimeout: (handle) => { handle.cleared = true; },
+    emitDiagnostic: (event) => diagnostics.push(event),
+    writeAlertMarker: (marker) => markers.push(marker),
+    flushDiagnostics: async (deadlineMs) => assert.ok(deadlineMs <= 250),
+    failStop: (code) => failStops.push(code),
+    processRole: "resolution",
+  });
+
+  assert.deepEqual(scheduled.map((entry) => entry.ms), [30_000, 60_000]);
+  await scheduled[0].callback();
+  await scheduled[1].callback();
+  await scheduled[1].callback();
+
+  assert.deepEqual(markers.map((entry) => entry.alertType), ["slow", "watchdog"]);
+  assert.equal(diagnostics.at(-1).event, "race_resolution_v2_watchdog");
+  assert.equal(failStops.length, 1);
+  assert.equal(failStops[0], 70);
+  watchdog.cancel();
+});
+
+test("watchdog is inert outside the dedicated resolution role", () => {
+  const scheduled = [];
+  createRaceResolutionAttemptWatchdog({
+    attempt: {},
+    phaseTimer: { liveState: () => ({}) },
+    scheduleTimeout: (...args) => scheduled.push(args),
+    processRole: "http",
+  });
+  assert.equal(scheduled.length, 0);
+});
+
+test("watchdog fail-stops even when diagnostic snapshot getters throw", async () => {
+  for (const throwingDependency of ["phase", "budget", "siblings", "leases"]) {
+    const scheduled = [];
+    const failStops = [];
+    createRaceResolutionAttemptWatchdog({
+      attempt: { attemptId: "boot:attempt", jobId: "job", raceId: "race" },
+      phaseTimer: {
+        liveState() {
+          if (throwingDependency === "phase") throw new Error("phase exploded");
+          return {};
+        },
+      },
+      workBudget: {
+        snapshot() {
+          if (throwingDependency === "budget") throw new Error("budget exploded");
+          return {};
+        },
+      },
+      getSiblingAttempts() {
+        if (throwingDependency === "siblings") throw new Error("siblings exploded");
+        return [];
+      },
+      expiredLeaseCount() {
+        if (throwingDependency === "leases") throw new Error("leases exploded");
+        return 0;
+      },
+      scheduleTimeout(callback, ms) {
+        const handle = { callback, ms };
+        scheduled.push(handle);
+        return handle;
+      },
+      clearTimeout() {},
+      emitDiagnostic() {},
+      writeAlertMarker() {},
+      flushDiagnostics: async () => {},
+      failStop(code) { failStops.push(code); },
+      processRole: "resolution",
+    });
+
+    await scheduled.find(({ ms }) => ms === 60_000).callback();
+    assert.deepEqual(failStops, [70], throwingDependency);
+  }
+});
 
 test("one lane does not start a second race-resolution job before the first settles", async () => {
   let releaseFirst;

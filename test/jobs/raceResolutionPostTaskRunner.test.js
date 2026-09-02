@@ -43,6 +43,48 @@ test("runner attempts immutable intents in state/snapshot/nudge order and contin
   assert.equal(completed.find((value) => value.id === "i1").state, "accepted");
 });
 
+test("runner recovers durable effect expiry before beginning the at-most-once snapshot", async () => {
+  const calls = [];
+  const command = {
+    raceId: "r",
+    timeZone: "UTC",
+    effectExpiryParticipantSteps: { participant: 4321 },
+  };
+  const runner = buildRaceResolutionPostTaskRunner({
+    RaceResolutionPostTask: {
+      async claimNext() {
+        return {
+          id: "t", raceId: "r", sourceGeneration: 2, leaseToken: "lease",
+          snapshotState: "pending", snapshotCommand: command,
+        };
+      },
+      async listIntents() { return []; },
+      async beginSnapshot() { calls.push("begin:snapshot"); return "attempt"; },
+      async completeSnapshot() { calls.push("complete:snapshot"); },
+      async finish() { calls.push("finish"); return "succeeded"; },
+    },
+    async expireEffects(input) { calls.push(["expire", input]); },
+    async publishSnapshot(snapshotCommand) {
+      calls.push(["publish", snapshotCommand]);
+      return true;
+    },
+    async isSuperseded() { return false; },
+  });
+
+  await runner.tick();
+  assert.deepEqual(calls, [
+    ["expire", {
+      raceId: "r",
+      participantSteps: { participant: 4321 },
+      taskFence: { taskId: "t", leaseToken: "lease" },
+    }],
+    "begin:snapshot",
+    ["publish", { raceId: "r", timeZone: "UTC" }],
+    "complete:snapshot",
+    "finish",
+  ]);
+});
+
 test("whole-runner consolidated brake is exact literal true", () => {
   assert.equal(postTaskWorkerDisabled({ OPS_RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "true" }), true);
   assert.equal(postTaskWorkerDisabled({ OPS_RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "TRUE" }), false);

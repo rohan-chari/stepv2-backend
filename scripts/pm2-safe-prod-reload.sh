@@ -34,9 +34,12 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
   node "$GUARD" --pool-budget-mode=baseline --baseline-file="$BASELINE_FILE"
 
-  pm2 startOrReload "$CONFIG" --only steps-tracker-resolution
+  # Remove every old HTTP targeted-claim path before the candidate dedicated
+  # resolution owner is allowed to start. The cluster reload remains graceful
+  # and preserves both HTTP instances throughout the handoff.
+  pm2 startOrReload "$CONFIG" --only steps-tracker --update-env
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
-  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution --baseline-file="$BASELINE_FILE"
+  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=http --baseline-file="$BASELINE_FILE"
 
   OLD_CRON_PID="$(pm2 pid steps-tracker-cron | tail -n 1 | tr -d "[:space:]")"
   case "$OLD_CRON_PID" in
@@ -59,13 +62,33 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
   sleep 30
   pm2 start "$CONFIG" --only steps-tracker-cron
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
-  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution,cron --baseline-file="$BASELINE_FILE"
+  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=http,cron --baseline-file="$BASELINE_FILE"
 
-  # Refresh inherited runtime values (for example MIN_SUPPORTED_APP_VERSION)
-  # instead of preserving the previously saved PM2 environment across reloads.
-  pm2 startOrReload "$CONFIG" --only steps-tracker --update-env
+  # A resolution process runs both the core queue and the post-task runner.
+  # Never overlap artifacts here: an older runner would accept the additive
+  # snapshot JSON, ignore effectExpiryParticipantSteps, and falsely mark it
+  # complete. Stop and prove the exact old process is gone before starting the
+  # candidate artifact.
+  OLD_RESOLUTION_PID="$(pm2 pid steps-tracker-resolution | tail -n 1 | tr -d "[:space:]")"
+  case "$OLD_RESOLUTION_PID" in
+    ""|0|*[!0-9]*) echo "safe reload requires one live steps-tracker-resolution PID" >&2; exit 1 ;;
+  esac
+  OLD_RESOLUTION_START="$(awk "{print \$22}" "/proc/$OLD_RESOLUTION_PID/stat")"
+  pm2 stop steps-tracker-resolution
+  RESOLUTION_EXIT_DEADLINE="$(( $(date +%s) + 120 ))"
+  while kill -0 "$OLD_RESOLUTION_PID" 2>/dev/null; do
+    CURRENT_RESOLUTION_START="$(awk "{print \$22}" "/proc/$OLD_RESOLUTION_PID/stat" 2>/dev/null || true)"
+    [ "$CURRENT_RESOLUTION_START" != "$OLD_RESOLUTION_START" ] && break
+    [ "$(date +%s)" -ge "$RESOLUTION_EXIT_DEADLINE" ] && {
+      echo "old resolution PID did not exit before safe-reload deadline" >&2
+      exit 1
+    }
+    sleep 1
+  done
+  pm2 start "$CONFIG" --only steps-tracker-resolution
+  node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
+  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=http,cron,resolution --baseline-file="$BASELINE_FILE"
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory --verify-live-config
-  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution,cron,http --baseline-file="$BASELINE_FILE"
   node "$GUARD" --pool-budget-mode=final --baseline-file="$BASELINE_FILE"
   pm2 save
 '

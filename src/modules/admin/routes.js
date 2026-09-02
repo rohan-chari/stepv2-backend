@@ -21,10 +21,14 @@ const {
 } = require("../economy/balanceConfig");
 const {
   listSuggestions: defaultListSuggestions,
+} = require("../feedback/queries/listSuggestions");
+const {
   listFeedbackThreads: defaultListFeedbackThreads,
+} = require("../feedback/queries/listFeedbackThreads");
+const {
   buildSendStaffReply,
   StaffReplyError,
-} = require("../feedback");
+} = require("../feedback/commands/sendStaffReply");
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");

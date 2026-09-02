@@ -292,6 +292,40 @@ model FeedbackEmailAttempt {
   @@map("feedback_email_attempts")
 }
 
+enum OperationalEmailAlertState {
+  PENDING
+  SENDING
+  ACCEPTED
+  UNCERTAIN
+  FAILED
+}
+
+// Internal, privacy-bounded outbox for race-resolution operational alerts.
+// It is intentionally unrelated to FeedbackEmailAttempt: no user or feedback
+// content is persisted here, and frozen clients never observe these rows.
+model OperationalEmailAlert {
+  id            String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dedupeKey     String                     @unique @map("dedupe_key") @db.VarChar(160)
+  alertType     String                     @map("alert_type") @db.VarChar(32)
+  payload       Json
+  state         OperationalEmailAlertState @default(PENDING)
+  attempts      Int                        @default(0)
+  notBeforeAt   DateTime                   @default(now()) @map("not_before_at")
+  leaseToken    String?                    @map("lease_token") @db.Uuid
+  leaseExpiresAt DateTime?                 @map("lease_expires_at")
+  acceptedAt    DateTime?                  @map("accepted_at")
+  lastErrorCode String?                    @map("last_error_code") @db.VarChar(64)
+  terminalAt    DateTime?                  @map("terminal_at")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @default(now()) @updatedAt @map("updated_at")
+
+  @@index([state, notBeforeAt, id])
+  @@index([state, leaseExpiresAt, id])
+  @@index([state, terminalAt, id])
+  @@index([alertType, createdAt(sort: Desc), id])
+  @@map("operational_email_alerts")
+}
+
 // Immutable, recipient-private components of a frozen race score. The effect
 // ID is a stable canonical-artifact key rather than an FK: active-effect rows
 // are lifecycle data and can be pruned after their settled explanation exists.

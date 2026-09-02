@@ -36,9 +36,16 @@ function validatePostTaskPayload({ snapshotCommand, intents }) {
     snapshotCommand && typeof snapshotCommand === "object" && !Array.isArray(snapshotCommand)
       ? Object.keys(snapshotCommand).sort()
       : [];
-  const allowedSnapshotKeys = snapshotCommand?.allowSupersededComplete === true
-    ? ["allowSupersededComplete", "raceId", "timeZone"]
-    : ["raceId", "timeZone"];
+  const allowedSnapshotKeys = [
+    ...(snapshotCommand?.allowSupersededComplete === true
+      ? ["allowSupersededComplete"]
+      : []),
+    ...(snapshotCommand?.effectExpiryParticipantSteps != null
+      ? ["effectExpiryParticipantSteps"]
+      : []),
+    "raceId",
+    "timeZone",
+  ].sort();
   if (
     !snapshotCommand ||
     typeof snapshotCommand !== "object" ||
@@ -51,6 +58,18 @@ function validatePostTaskPayload({ snapshotCommand, intents }) {
     snapshotCommand.timeZone.length === 0
   ) {
     throw new TypeError("invalid snapshot command");
+  }
+  if (snapshotCommand.effectExpiryParticipantSteps != null) {
+    const entries = Object.entries(snapshotCommand.effectExpiryParticipantSteps);
+    if (
+      typeof snapshotCommand.effectExpiryParticipantSteps !== "object" ||
+      Array.isArray(snapshotCommand.effectExpiryParticipantSteps) ||
+      entries.some(([participantId, steps]) =>
+        participantId.length === 0 || !Number.isFinite(Number(steps))
+      )
+    ) {
+      throw new TypeError("invalid effect expiry participant steps");
+    }
   }
   if (!Array.isArray(intents) || intents.length > MAX_INTENTS) {
     throw new RangeError("post-task intent cap exceeded");

@@ -208,6 +208,21 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
     }));
   }
 
+  async function rearmHighMultiplier({
+    participantId,
+    expectedNotifiedAt,
+    client = null,
+  } = {}) {
+    if (!participantId || !expectedNotifiedAt) return { count: 0 };
+    return (client || prisma).raceParticipant.updateMany({
+      where: {
+        id: participantId,
+        highMultiplierNotifiedAt: expectedNotifiedAt,
+      },
+      data: { highMultiplierNotifiedAt: null },
+    });
+  }
+
   async function deliver(intent) {
     const recipientUserId = intent?.recipientUserId;
     if (!recipientUserId) return { accepted: false, disposition: "RECIPIENT_DELETED" };
@@ -238,7 +253,13 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
     return { accepted: false, disposition: explicitFailures > 0 ? "PROVIDER_REJECTED" : "UNREGISTERED" };
   }
 
-  return { claimHighMultiplier, claimStepSync, deliver, deliveryKeyHash };
+  return {
+    claimHighMultiplier,
+    claimStepSync,
+    rearmHighMultiplier,
+    deliver,
+    deliveryKeyHash,
+  };
 }
 
 const raceResolutionDeliveryIntents = buildRaceResolutionDeliveryIntents();

@@ -26,8 +26,9 @@
 //                         both be lost.
 //
 // Both missing ones are wired HERE, into the worker's flow — never back into
-// the endpoint. Everything is best-effort: a failure is logged and swallowed,
-// because none of it may take down a resolution run that already committed.
+// the endpoint. Legacy after-commit execution remains best-effort. Durable
+// preparation runs before the authoritative transaction and fails closed so a
+// required generation-keyed handoff can never silently disappear.
 //
 // ── And the snapshot publish ───────────────────────────────────────────────
 // After the fenced Postgres commit the worker SETs (replaces) the race's Redis
@@ -122,7 +123,9 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     raceId,
     result,
     deferDelivery = false,
+    deferRearm = false,
     sourceGeneration = null,
+    strict = false,
   }) {
     const race = result?.race;
     if (!race || !race.powerupsEnabled) return [];
@@ -160,7 +163,8 @@ function buildRaceProgressPostCommit(dependencies = {}) {
             accepted.map((p) => [p.userId, legacyEvents])
           );
         }
-      } catch {
+      } catch (error) {
+        if (strict) throw error;
         eventsByUserId = new Map(accepted.map((p) => [p.userId, []]));
       }
 
@@ -184,6 +188,7 @@ function buildRaceProgressPostCommit(dependencies = {}) {
             otherParticipants: activeForAlert,
             now,
             deferClaim: true,
+            deferRearm,
             emitAlert: async (alert, participantClaim) => {
               if (deferDelivery) {
                 intentClaims.push({
@@ -200,12 +205,20 @@ function buildRaceProgressPostCommit(dependencies = {}) {
               });
             },
           });
-          void outcome;
+          if (outcome?.rearmClaim?.participantId) {
+            intentClaims.push({
+              kind: "HIGH_MULTIPLIER_REARM",
+              participantId: outcome.rearmClaim.participantId,
+              expectedNotifiedAt: outcome.rearmClaim.expectedNotifiedAt,
+            });
+          }
         } catch (error) {
+          if (strict) throw error;
           logger.error("[C3] high-multiplier alert eval failed:", error);
         }
       }
     } catch (error) {
+      if (strict) throw error;
       logger.error(`[C3] high-multiplier pass failed (race ${raceId}):`, error);
     }
     return intentClaims;
@@ -279,8 +292,10 @@ function buildRaceProgressPostCommit(dependencies = {}) {
   }
 
   /**
-   * The v2 worker's `onCommitted` hook. Runs strictly AFTER the fenced Postgres
-   * commit, holds no lock, and never throws.
+   * The v2 worker's Phase-D hook. Legacy callers run it after commit. The
+   * durable worker also calls it with `prepareOnly` before the fence: that mode
+   * performs reads/decisions only and returns the command/claims that the
+   * caller persists atomically with authoritative success.
    */
   async function onCommitted({
     raceId,
@@ -290,19 +305,26 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     deferEffectExpiry = false,
     deferSnapshot = false,
     deferDelivery = false,
+    prepareOnly = false,
+    recoverEffectExpiry = false,
   } = {}) {
     if (!raceId) return;
-    if (!(await enabled())) return;
+    // Durable preparation is a Postgres recovery contract, not a Redis
+    // optimization. It must always produce its generation-keyed command and
+    // fail closed if a required notification decision cannot be prepared.
+    if (!prepareOnly && !(await enabled())) return;
     // With v2 event materialization enabled, an ordinary score generation must
     // not consume a due source before the durable EFFECT_BOUNDARY claim can
     // calculate and commit its event. The boundary run performs the normal
     // expiry immediately after its atomic C0 write.
-    if (!deferEffectExpiry) await runExpireEffects({ raceId, result });
+    if (!deferEffectExpiry && !prepareOnly) await runExpireEffects({ raceId, result });
     const intentClaims = await runHighMultiplierAlert({
       raceId,
       result,
       deferDelivery,
+      deferRearm: prepareOnly,
       sourceGeneration: job?.processingGeneration ?? null,
+      strict: prepareOnly,
     });
     // A newer generation arrived while this one ran. Its mutation already
     // invalidated the snapshot; do not overwrite that DEL with older committed
@@ -310,6 +332,9 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     const snapshotCommand = {
       raceId,
       timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
+      ...(recoverEffectExpiry
+        ? { effectExpiryParticipantSteps: result?.baseAdjustedByParticipantId || {} }
+        : {}),
       ...(result?.race?.powerupsEnabled !== true &&
         result?.race?.isTeamRace !== true &&
         Number(result?.race?.buyInAmount || 0) === 0 &&
@@ -332,17 +357,19 @@ function buildRaceProgressPostCommit(dependencies = {}) {
   // The durable post-task runner receives only the allowlisted command. It
   // re-reads committed rows and never re-enters scoring/RNG/recipient logic.
   onCommitted.publishSnapshotCommand = async function publishSnapshotCommand(command, task = null) {
+    const { effectExpiryParticipantSteps: _effectExpiryParticipantSteps, ...snapshotCommand } =
+      command || {};
     if (
-      !command ||
-      typeof command.raceId !== "string" ||
-      typeof command.timeZone !== "string" ||
-      (command.allowSupersededComplete != null &&
-        command.allowSupersededComplete !== true)
+      !snapshotCommand ||
+      typeof snapshotCommand.raceId !== "string" ||
+      typeof snapshotCommand.timeZone !== "string" ||
+      (snapshotCommand.allowSupersededComplete != null &&
+        snapshotCommand.allowSupersededComplete !== true)
     ) {
       return false;
     }
     return publishSnapshot({
-      ...command,
+      ...snapshotCommand,
       sourceGeneration: task?.sourceGeneration ?? null,
     });
   };

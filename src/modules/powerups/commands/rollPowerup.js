@@ -1,4 +1,5 @@
 const { Prisma } = require("@prisma/client");
+const crypto = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 
@@ -92,6 +93,7 @@ function buildRollPowerup(dependencies = {}) {
     tx: callerTx = null,
     advisoryLockHeld = false,
     pendingEvents: callerPendingEvents = null,
+    preloadedState = null,
   }) {
     const maxSlots = powerupSlots || DEFAULT_POWERUP_SLOTS;
     const stepsForThreshold = effectiveSteps != null ? effectiveSteps : currentSteps;
@@ -110,13 +112,113 @@ function buildRollPowerup(dependencies = {}) {
       }
 
       // Re-read threshold inside the lock — caller's value is stale under contention.
-      const fresh = await tx.raceParticipant.findUnique({
-        where: { id: participantId },
-        select: { nextBoxAtSteps: true },
-      });
+      const fresh = preloadedState
+        ? { nextBoxAtSteps: preloadedState.nextBoxAtSteps }
+        : await tx.raceParticipant.findUnique({
+            where: { id: participantId },
+            select: { nextBoxAtSteps: true },
+          });
       if (!fresh) return;
 
       let currentThreshold = fresh.nextBoxAtSteps;
+
+      // The race-resolution worker has already locked this participant and
+      // bulk-loaded its complete inventory. Plan every threshold in memory,
+      // then persist one box batch, one feed batch, and one cursor update. The
+      // legacy standalone path below retains its per-threshold re-reads because
+      // it does not own that preload. This keeps the supported 50-threshold
+      // backlog bounded for a 477-member FULL recovery without weakening the
+      // unique threshold or inventory-cap rules.
+      if (preloadedState) {
+        let crossedThisRoll = 0;
+        let forfeitedCount = 0;
+        const boxesToCreate = [];
+        const eventsToCreate = [];
+        while (stepsForThreshold >= currentThreshold && currentThreshold > 0) {
+          if (crossedThisRoll >= MAX_BOXES_PER_ROLL) break;
+          crossedThisRoll += 1;
+          const occupied = preloadedState.inventory.filter((item) =>
+            item.status === "HELD" || item.status === "MYSTERY_BOX"
+          ).length;
+          const queued = occupied >= maxSlots;
+          const queuedCount = queued
+            ? preloadedState.inventory.filter((item) => item.status === "QUEUED").length
+            : 0;
+          const forfeit = queued && queuedCount >= MAX_QUEUED_BOXES;
+
+          if (forfeit) {
+            forfeitedCount += 1;
+            results.push({ forfeited: true, threshold: currentThreshold });
+          } else {
+            const existing = preloadedState.inventory.find(
+              (item) => item.earnedAtSteps === currentThreshold,
+            );
+            if (!existing) {
+              const id = crypto.randomUUID();
+              const status = queued ? "QUEUED" : "MYSTERY_BOX";
+              boxesToCreate.push({
+                id,
+                raceId,
+                participantId,
+                userId,
+                type: null,
+                rarity: null,
+                status,
+                earnedAtSteps: currentThreshold,
+              });
+              eventsToCreate.push({
+                raceId,
+                actorUserId: userId,
+                eventType: "POWERUP_EARNED",
+                powerupType: "MYSTERY_BOX",
+                description: queued
+                  ? `${displayName || "A runner"} earned a mystery box! (queued, inventory full)`
+                  : `${displayName || "A runner"} earned a mystery box!`,
+              });
+              const staged = {
+                id,
+                participantId,
+                status,
+                earnedAtSteps: currentThreshold,
+                createdAt: new Date(),
+              };
+              preloadedState.inventory.push(staged);
+              pendingEvents.push({ raceId, userId, powerupId: id });
+              results.push({
+                mysteryBox: { id },
+                threshold: currentThreshold,
+                queued,
+              });
+            }
+          }
+          currentThreshold += powerupStepInterval;
+        }
+
+        if (forfeitedCount > 0) {
+          const boxWord = forfeitedCount === 1 ? "mystery box" : "mystery boxes";
+          eventsToCreate.push({
+            raceId,
+            actorUserId: userId,
+            eventType: "POWERUP_FORFEITED",
+            powerupType: "MYSTERY_BOX",
+            description: `${displayName || "A runner"} forfeited ${forfeitedCount} ${boxWord}. Open your queued box first!`,
+          });
+        }
+        if (boxesToCreate.length > 0) {
+          await tx.racePowerup.createMany({ data: boxesToCreate });
+        }
+        if (eventsToCreate.length > 0) {
+          await tx.racePowerupEvent.createMany({ data: eventsToCreate });
+        }
+        if (currentThreshold !== fresh.nextBoxAtSteps) {
+          preloadedState.nextBoxAtSteps = currentThreshold;
+          await tx.raceParticipant.update({
+            where: { id: participantId },
+            data: { nextBoxAtSteps: currentThreshold },
+          });
+        }
+        return;
+      }
 
       // Per-sync cap: count thresholds crossed in THIS call. Each loop iteration
       // advances currentThreshold (and thus nextBoxAtSteps) by one interval —
@@ -137,14 +239,20 @@ function buildRollPowerup(dependencies = {}) {
           break;
         }
         crossedThisRoll += 1;
-        const occupied = await tx.racePowerup.count({
-          where: { participantId, status: { in: ["HELD", "MYSTERY_BOX"] } },
-        });
+        const occupied = preloadedState
+          ? preloadedState.inventory.filter((item) =>
+              item.status === "HELD" || item.status === "MYSTERY_BOX"
+            ).length
+          : await tx.racePowerup.count({
+              where: { participantId, status: { in: ["HELD", "MYSTERY_BOX"] } },
+            });
         const queued = occupied >= maxSlots;
         const queuedCount = queued
-          ? await tx.racePowerup.count({
-              where: { participantId, status: "QUEUED" },
-            })
+          ? preloadedState
+            ? preloadedState.inventory.filter((item) => item.status === "QUEUED").length
+            : await tx.racePowerup.count({
+                where: { participantId, status: "QUEUED" },
+              })
           : 0;
         const forfeit = queued && queuedCount >= MAX_QUEUED_BOXES;
 
@@ -166,8 +274,9 @@ function buildRollPowerup(dependencies = {}) {
           // this participant, so this read has no race with a concurrent insert.
           // Skipping here advances past already-claimed thresholds WITHOUT
           // re-granting a box (no double-grant) and without crashing.
-          const existing =
-            typeof tx.racePowerup.findUnique === "function"
+          const existing = preloadedState
+            ? preloadedState.inventory.find((item) => item.earnedAtSteps === currentThreshold)
+            : typeof tx.racePowerup.findUnique === "function"
               ? await tx.racePowerup.findUnique({
                   where: {
                     participantId_earnedAtSteps: {
@@ -180,6 +289,7 @@ function buildRollPowerup(dependencies = {}) {
               : null;
           if (existing) {
             currentThreshold += powerupStepInterval;
+            if (preloadedState) preloadedState.nextBoxAtSteps = currentThreshold;
             await tx.raceParticipant.update({
               where: { id: participantId },
               data: { nextBoxAtSteps: currentThreshold },
@@ -222,6 +332,15 @@ function buildRollPowerup(dependencies = {}) {
 
           // Defer emit until after commit so subscribers see settled DB state.
           pendingEvents.push({ raceId, userId, powerupId: powerup.id });
+          if (preloadedState) {
+            preloadedState.inventory.push({
+              id: powerup.id,
+              participantId,
+              status: queued ? "QUEUED" : "MYSTERY_BOX",
+              earnedAtSteps: currentThreshold,
+              createdAt: powerup.createdAt || new Date(),
+            });
+          }
 
           results.push({
             mysteryBox: { id: powerup.id },
@@ -231,6 +350,7 @@ function buildRollPowerup(dependencies = {}) {
         }
 
         currentThreshold += powerupStepInterval;
+        if (preloadedState) preloadedState.nextBoxAtSteps = currentThreshold;
         await tx.raceParticipant.update({
           where: { id: participantId },
           data: { nextBoxAtSteps: currentThreshold },

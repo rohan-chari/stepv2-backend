@@ -1263,6 +1263,7 @@ function buildResolveRaceState(dependencies = {}) {
     userIds = null,
     timeZone = "UTC",
     scoreParticipantIds = null,
+    includeAllAcceptedBoxUsers = false,
   } = {}) {
     const boxUserIds = new Set(
       (Array.isArray(userIds) ? userIds : []).filter(Boolean)
@@ -1287,6 +1288,18 @@ function buildResolveRaceState(dependencies = {}) {
     async function processRace(race) {
       if (race.status !== "ACTIVE" || !race.startedAt) {
         return null;
+      }
+      if (includeAllAcceptedBoxUsers) {
+        for (const participant of race.participants || []) {
+          if (
+            participant.status === "ACCEPTED" &&
+            !participant.finishedAt &&
+            !participant.forfeitedAt &&
+            participant.userId
+          ) {
+            boxUserIds.add(participant.userId);
+          }
+        }
       }
 
       // T9 defense-in-depth: once a race is past its endsAt it is awaiting the

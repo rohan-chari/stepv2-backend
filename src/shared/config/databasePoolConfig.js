@@ -3,6 +3,7 @@ const ROLE_VARIABLES = Object.freeze({
   resolution: "DATABASE_POOL_MAX_RESOLUTION",
   cron: "DATABASE_POOL_MAX_CRON",
   all: "DATABASE_POOL_MAX_ALL",
+  staging_all: "DATABASE_POOL_MAX_ALL",
 });
 const CONFIG_VARIABLES = Object.freeze([
   ...Object.values(ROLE_VARIABLES),
@@ -47,7 +48,9 @@ function resolveDatabasePoolConfig(env = process.env, dependencies = {}) {
   if (env.NODE_ENV === "production" &&
       (typeof env.STEPS_PROCESS_ROLE !== "string" ||
         !Object.hasOwn(ROLE_VARIABLES, env.STEPS_PROCESS_ROLE))) {
-    throw new Error("STEPS_PROCESS_ROLE must be one of http, resolution, cron, or all in production");
+    throw new Error(
+      "STEPS_PROCESS_ROLE must be one of http, resolution, cron, all, or staging_all in production",
+    );
   }
 
   for (const variable of CONFIG_VARIABLES) {

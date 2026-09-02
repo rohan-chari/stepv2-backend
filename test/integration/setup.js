@@ -26,6 +26,7 @@ const TABLES_IN_ORDER = [
   "feedback_messages",
   "feedback_threads",
   "feedback_email_attempts",
+  "operational_email_alerts",
   "race_join_requests",
   "race_share_links",
   "app_review_prompt_attempts",

@@ -10,6 +10,7 @@ const ROLE_CASES = [
   ["resolution", "DATABASE_POOL_MAX_RESOLUTION", "8"],
   ["cron", "DATABASE_POOL_MAX_CRON", "4"],
   ["all", "DATABASE_POOL_MAX_ALL", "10"],
+  ["staging_all", "DATABASE_POOL_MAX_ALL", "10"],
 ];
 
 test("every known role resolves its exact role-specific value and source", () => {

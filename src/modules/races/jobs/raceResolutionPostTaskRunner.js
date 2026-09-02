@@ -22,6 +22,9 @@ const {
 const {
   recoverReferralQualificationIntents,
 } = require("../../giveaways/jobs/qualificationIntentRecovery");
+const {
+  expireEffects: defaultExpireEffects,
+} = require("../../powerups/commands/expireEffects");
 
 const POLL_INTERVAL_MS = 250;
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
@@ -49,6 +52,7 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
   const publishSnapshot =
     dependencies.publishSnapshot ||
     ((command, task) => raceProgressPostCommit.publishSnapshotCommand(command, task));
+  const expireEffects = dependencies.expireEffects || defaultExpireEffects;
   const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
   const isSuperseded =
     dependencies.isSuperseded ||
@@ -123,6 +127,21 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
 
   async function processSnapshot(task) {
     if (task.snapshotState && task.snapshotState !== "pending") return;
+    const {
+      effectExpiryParticipantSteps = null,
+      ...snapshotCommand
+    } = task.snapshotCommand || {};
+    // Effect convergence is retryable and runs before the snapshot's
+    // at-most-once attempt marker. If the worker dies here, the task lease is
+    // reclaimed with snapshot_state still pending and expiry is retried from
+    // the authoritative generation payload.
+    if (effectExpiryParticipantSteps) {
+      await expireEffects({
+        raceId: task.raceId,
+        participantSteps: effectExpiryParticipantSteps,
+        taskFence: { taskId: task.id, leaseToken: task.leaseToken },
+      });
+    }
     const attemptId = await model.beginSnapshot({
       taskId: task.id,
       leaseToken: task.leaseToken,
@@ -134,7 +153,7 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       return;
     }
     try {
-      const published = await publishSnapshot(task.snapshotCommand, task, { attemptId });
+      const published = await publishSnapshot(snapshotCommand, task, { attemptId });
       await model.completeSnapshot({
         taskId: task.id,
         state: published === false ? "failed_no_retry" : "succeeded",

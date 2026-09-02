@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -178,4 +180,119 @@ test("an idle tick promotes append-only FULL triggers before it claims a race", 
 
   assert.equal(await worker.processOne(), null);
   assert.deepEqual(calls, ["promote", "claim"]);
+});
+
+test("production HTTP and cron roles cannot claim or occupy a resolution lane", async () => {
+  for (const processRole of ["http", "cron", "all", "migration"]) {
+    let claims = 0;
+    let laneRuns = 0;
+    const worker = makeWorker(countingSettings([false]), {
+      nodeEnv: "production",
+      processRole,
+      RaceResolutionJobV2: { async claimNext() { claims += 1; return null; } },
+      raceResolutionWorkBudget: {
+        async run(_lane, operation) { laneRuns += 1; return operation(); },
+        snapshot() { return { active: 0, queuedCore: 0, queuedPost: 0 }; },
+      },
+    });
+    assert.equal(await worker.processOne(), null);
+    assert.equal(await worker.tick(), 0);
+    assert.equal(claims, 0, processRole);
+    assert.equal(laneRuns, 0, processRole);
+  }
+});
+
+test("the explicit combined staging role remains able to claim resolution work", async () => {
+  let claims = 0;
+  let laneRuns = 0;
+  const worker = makeWorker(countingSettings([false]), {
+    nodeEnv: "production",
+    processRole: "staging_all",
+    bootAt: 0,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() { return { promoted: 0, races: 0 }; },
+      async claimNext() { claims += 1; return null; },
+    },
+    raceResolutionWorkBudget: {
+      async run(_lane, operation) { laneRuns += 1; return operation(); },
+      snapshot() { return { active: 0, queuedCore: 0, queuedPost: 0 }; },
+    },
+  });
+
+  assert.equal(await worker.processOne(), null);
+  assert.equal(claims, 1);
+  assert.equal(laneRuns, 1);
+});
+
+test("production HTTP compatibility path polls durable state without executing work", async () => {
+  let claims = 0;
+  let laneRuns = 0;
+  const worker = makeWorker(countingSettings([false]), {
+    nodeEnv: "production",
+    processRole: "http",
+    RaceResolutionJobV2: {
+      async claimNext() { claims += 1; return null; },
+      async findByRaceId() {
+        return { state: "SUCCEEDED", processingGeneration: 7 };
+      },
+    },
+    raceResolutionWorkBudget: {
+      async run(_lane, operation) { laneRuns += 1; return operation(); },
+      snapshot() { return { active: 0, queuedCore: 0, queuedPost: 0 }; },
+    },
+  });
+  const result = await worker.processRace({ raceId: "race", generation: 7 });
+  assert.equal(result.state, "SUCCEEDED");
+  assert.equal(claims, 0);
+  assert.equal(laneRuns, 0);
+});
+
+test("production HTTP compatibility polling uses bounded coarse waits", async () => {
+  let reads = 0;
+  let elapsedMs = 0;
+  const delays = [];
+  const worker = makeWorker(countingSettings([false]), {
+    nodeEnv: "production",
+    processRole: "http",
+    wallClockNow: () => elapsedMs,
+    compatibilityPollIntervalMs: 250,
+    sleep: async (delayMs) => {
+      delays.push(delayMs);
+      elapsedMs += delayMs;
+    },
+    RaceResolutionJobV2: {
+      async findByRaceId() {
+        reads += 1;
+        return reads === 4
+          ? { state: "SUCCEEDED", processingGeneration: 9 }
+          : { state: "RUNNING", processingGeneration: 8 };
+      },
+    },
+    raceResolutionWorkBudget: {
+      async run(_lane, operation) { return operation(); },
+      snapshot() { return { active: 0, queuedCore: 0, queuedPost: 0 }; },
+    },
+  });
+
+  assert.equal((await worker.processRace({ raceId: "race", generation: 9 })).state, "SUCCEEDED");
+  assert.equal(reads, 4);
+  assert.deepEqual(delays, [250, 250, 250]);
+  assert.ok(reads <= 101, "25-second polling performs at most 101 DB reads");
+});
+
+test("powerup compatibility polling cannot regress to a 10ms database loop", () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, "../../src/modules/powerups/commands/expireEffects.js"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /setTimeout\(resolve,\s*10\)/);
+  assert.match(source, /setTimeout\(resolve,\s*Math\.min\(250,\s*remainingMs\)\)/);
+  assert.match(source, /if \(remainingMs <= 0\) break/);
 });

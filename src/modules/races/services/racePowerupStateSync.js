@@ -38,6 +38,7 @@ function buildSyncRacePowerupState(dependencies = {}) {
     tx = null,
     advisoryLockHeld = false,
     pendingEvents = null,
+    preloadedState = null,
   }) {
     // Callers that already have a hydrated race (e.g. recordSteps after
     // resolveRaceState) can pass it in to avoid a duplicate findById round
@@ -65,7 +66,20 @@ function buildSyncRacePowerupState(dependencies = {}) {
     }
 
     let participant = race.participants.find((entry) => entry.userId === userId);
-    if (!participant || participant.status !== "ACCEPTED") {
+    if (participant && preloadedState) {
+      participant = {
+        ...participant,
+        nextBoxAtSteps: preloadedState.nextBoxAtSteps,
+        powerupSlots: preloadedState.powerupSlots,
+        status: preloadedState.status,
+        forfeitedAt: preloadedState.forfeitedAt,
+      };
+    }
+    if (
+      !participant ||
+      participant.status !== "ACCEPTED" ||
+      participant.forfeitedAt != null
+    ) {
       return {
         enabled: true,
         newMysteryBoxes: [],
@@ -162,17 +176,22 @@ function buildSyncRacePowerupState(dependencies = {}) {
         tx,
         advisoryLockHeld,
         pendingEvents,
+        preloadedState,
       });
 
-      const refreshedRace = tx
+      const refreshedRace = preloadedState
+        ? null
+        : tx
         ? await tx.race.findUnique({
             where: { id: raceId },
             include: { participants: true },
           })
         : await raceModel.findById(raceId);
-      participant = refreshedRace?.participants.find(
-        (entry) => entry.userId === userId
-      );
+      if (!preloadedState) {
+        participant = refreshedRace?.participants.find(
+          (entry) => entry.userId === userId
+        );
+      }
       if (!participant) {
         return {
           enabled: true,
@@ -187,13 +206,15 @@ function buildSyncRacePowerupState(dependencies = {}) {
 
     let queuedBoxCount;
     if (tx) {
-      const inventory = await tx.racePowerup.findMany({
+      const inventory = preloadedState
+        ? preloadedState.inventory
+        : await tx.racePowerup.findMany({
         where: {
           participantId: participant.id,
           status: { in: ["HELD", "MYSTERY_BOX", "QUEUED"] },
         },
         orderBy: { createdAt: "asc" },
-      });
+          });
       const occupiedCount = inventory.filter(
         (box) => box.status === "HELD" || box.status === "MYSTERY_BOX"
       ).length;
@@ -205,6 +226,12 @@ function buildSyncRacePowerupState(dependencies = {}) {
           where: { id: { in: toPromote.map((box) => box.id) } },
           data: { status: "MYSTERY_BOX" },
         });
+        if (preloadedState) {
+          const promoted = new Set(toPromote.map((box) => box.id));
+          for (const box of preloadedState.inventory) {
+            if (promoted.has(box.id)) box.status = "MYSTERY_BOX";
+          }
+        }
       }
       queuedBoxCount = queuedBoxes.length - toPromote.length;
     } else if (typeof powerupModel.findInventoryForParticipants === "function") {

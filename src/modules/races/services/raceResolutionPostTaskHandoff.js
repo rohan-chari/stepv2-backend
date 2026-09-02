@@ -38,7 +38,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     }
   }
 
-  return async function handoff({
+  const handoff = async function handoff({
     raceId,
     sourceGeneration,
     snapshotCommand,
@@ -129,6 +129,45 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     }
     return { mode: "queued", taskId: task.id };
   };
+
+  // The resolution worker uses this seam from inside its fenced authoritative
+  // transaction.  The post-task owner and every immutable delivery decision
+  // therefore become visible atomically with recordSuccess; a watchdog exit
+  // after commit can never strand a succeeded generation without its handoff.
+  handoff.supportsAtomicDurableCreate =
+    dependencies.supportsAtomicDurableCreate ?? model === defaultPostTaskModel;
+  handoff.createDurable = async function createDurable(input, tx) {
+    if (!handoff.supportsAtomicDurableCreate || !tx) {
+      throw new Error("atomic durable post-task creation unavailable");
+    }
+    return model.create(input, tx);
+  };
+  handoff.resumeDurable = async function resumeDurable(taskId, {
+    fastHandoff = false,
+    recordPhaseTiming = null,
+  } = {}) {
+    if (!taskId) return { mode: "none", taskId: null };
+    const measure = async (name, operation) => {
+      if (typeof recordPhaseTiming !== "function") return operation();
+      const startedAt = process.hrtime.bigint();
+      try { return await operation(); } finally {
+        try {
+          recordPhaseTiming(
+            name,
+            Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+          );
+        } catch {}
+      }
+    };
+    if (!(await measure("runnerReadiness", () => runner.isReady({
+      positiveCacheMs: fastHandoff ? 1000 : 0,
+    })))) {
+      await measure("inlineClaim", () => runner.processTaskId(taskId));
+      return { mode: "inline_claim", taskId };
+    }
+    return { mode: "queued", taskId };
+  };
+  return handoff;
 }
 
 const raceResolutionPostTaskHandoff = buildRaceResolutionPostTaskHandoff();

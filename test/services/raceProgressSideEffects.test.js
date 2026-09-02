@@ -111,6 +111,79 @@ test("deferred mode finishes stateful decisions and returns only an allowlisted 
   );
 });
 
+test("prepare-only mode carries effect convergence data without executing expiry", async () => {
+  let expiryRuns = 0;
+  const onCommitted = buildRaceProgressPostCommit({
+    redisStandingsEnabled: true,
+    async expireEffects() { expiryRuns += 1; },
+  });
+  const outcome = await onCommitted({
+    raceId: "race-1",
+    job: { processingTimeZone: "UTC" },
+    prepareOnly: true,
+    recoverEffectExpiry: true,
+    deferSnapshot: true,
+    deferDelivery: true,
+    result: {
+      race: { id: "race-1", powerupsEnabled: false, participants: [] },
+      baseAdjustedByParticipantId: { "participant-1": 4321 },
+    },
+  });
+  assert.equal(expiryRuns, 0);
+  assert.deepEqual(outcome.snapshotCommand.effectExpiryParticipantSteps, {
+    "participant-1": 4321,
+  });
+});
+
+test("prepare-only always returns a durable command when Redis is unavailable", async () => {
+  const onCommitted = buildRaceProgressPostCommit({
+    redisStandingsEnabled: false,
+    RaceActiveEffect: { async findActiveForRace() { return []; } },
+    GlobalStepEventEntitlement: {
+      async findEligibleByRace() { return new Map([["u1", []]]); },
+    },
+    evaluateHighMultiplierAlert: async () => ({ emitted: false }),
+  });
+  const prepared = await onCommitted({
+    raceId: "race-1",
+    job: { processingGeneration: 4, processingTimeZone: "UTC" },
+    result: {
+      race: {
+        id: "race-1",
+        powerupsEnabled: true,
+        participants: [{ id: "p1", userId: "u1", status: "ACCEPTED" }],
+      },
+      baseAdjustedByParticipantId: { p1: 123 },
+    },
+    prepareOnly: true,
+    deferSnapshot: true,
+    deferDelivery: true,
+    recoverEffectExpiry: true,
+  });
+  assert.deepEqual(prepared.snapshotCommand.effectExpiryParticipantSteps, { p1: 123 });
+});
+
+test("prepare-only rejects instead of dropping required alert decisions", async () => {
+  const onCommitted = buildRaceProgressPostCommit({
+    redisStandingsEnabled: false,
+    RaceActiveEffect: { async findActiveForRace() { throw new Error("effect read unavailable"); } },
+  });
+  await assert.rejects(onCommitted({
+    raceId: "race-1",
+    job: { processingGeneration: 4, processingTimeZone: "UTC" },
+    result: {
+      race: {
+        id: "race-1",
+        powerupsEnabled: true,
+        participants: [{ id: "p1", userId: "u1", status: "ACCEPTED" }],
+      },
+    },
+    prepareOnly: true,
+    deferSnapshot: true,
+    deferDelivery: true,
+  }), /effect read unavailable/);
+});
+
 test("high-multiplier side effects use each participant's eligible local event set", async () => {
   const multipliers = new Map();
   const onCommitted = buildRaceProgressPostCommit({

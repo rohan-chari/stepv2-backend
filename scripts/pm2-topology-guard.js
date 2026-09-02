@@ -163,8 +163,8 @@ function validateStaticPoolBudget(apps) {
 
   const staging = apps.find(({ name }) => name === "steps-tracker-staging");
   if (!staging || staging.instances !== 1 || staging.autostart !== false ||
-      staging.env?.STEPS_PROCESS_ROLE !== "all") {
-    throw new Error("Stopped staging must remain one all-role process");
+      staging.env?.STEPS_PROCESS_ROLE !== "staging_all") {
+    throw new Error("Stopped staging must remain one explicit staging_all process");
   }
   parsePoolInteger(staging.env?.DATABASE_POOL_MAX_ALL, "DATABASE_POOL_MAX_ALL");
 

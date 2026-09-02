@@ -32,6 +32,7 @@ async function evaluateHighMultiplierAlert({
   events = eventBus,
   emitAlert = null,
   deferClaim = false,
+  deferRearm = false,
   now = () => new Date(),
 }) {
   if (disabled()) return { emitted: false, reason: "disabled" };
@@ -116,6 +117,16 @@ async function evaluateHighMultiplierAlert({
 
   // Dropped back to/below the threshold → clear the flag to re-arm.
   if ((!Number.isFinite(mult) || mult <= T) && alreadyNotified) {
+    if (deferRearm) {
+      return {
+        emitted: false,
+        reason: "re_armed_deferred",
+        rearmClaim: {
+          participantId: participant.id,
+          expectedNotifiedAt: participant.highMultiplierNotifiedAt,
+        },
+      };
+    }
     await prisma.raceParticipant.updateMany({
       where: { id: participant.id },
       data: { highMultiplierNotifiedAt: null },

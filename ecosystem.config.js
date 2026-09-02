@@ -88,7 +88,11 @@ module.exports = {
       DATABASE_POOL_TOTAL_BUDGET: "32",
       PORT: 3010,
       HOST: "127.0.0.1",
-    }, { exec_mode: "fork", node_args: BACKGROUND_NODE_ARGS }),
+    }, {
+      exec_mode: "fork",
+      node_args: BACKGROUND_NODE_ARGS,
+      exp_backoff_restart_delay: 1000,
+    }),
     // Expiry/cron is a single owner. It shares the database fence with the
     // resolution process, so settlement and live work cannot interleave.
     app("steps-tracker-cron", PROD_DIR, 1, {
@@ -106,7 +110,11 @@ module.exports = {
     // which owns its own four-process topology and database. Never scale this
     // stopped shared-host staging process as a substitute.
     app("steps-tracker-staging", STAGING_DIR, 1, {
-      STEPS_PROCESS_ROLE: "all",
+      // Explicit combined staging identity. Production's legacy `all` role is
+      // forbidden from claiming race work, but the intentionally single-process
+      // staging app must serve HTTP and run its background queues when an
+      // operator has explicitly started it.
+      STEPS_PROCESS_ROLE: "staging_all",
       DATABASE_POOL_MAX_ALL: "10",
     }, { autostart: false }),
   ],

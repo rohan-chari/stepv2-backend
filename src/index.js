@@ -79,7 +79,9 @@ const {
   registerRaceListCacheInvalidation,
 } = require("./modules/races");
 const { scheduleGiveawayRetention } = require("./modules/giveaways");
-const { scheduleFeedbackEmailAttemptExpiry } = require("./modules/feedback");
+const {
+  scheduleFeedbackEmailAttemptExpiry,
+} = require("./modules/feedback/jobs/feedbackEmailAttemptExpiry");
 const {
   scheduleDomainEventProjection,
   scheduleDomainEventRetention,
@@ -141,6 +143,8 @@ function startServer({
     scheduleGiveawayRetentionJob = scheduleGiveawayRetention,
   scheduleFeedbackEmailAttemptExpiry:
     scheduleFeedbackEmailAttemptExpiryJob = scheduleFeedbackEmailAttemptExpiry,
+  scheduleOperationalAlertSpoolImporter: scheduleOperationalAlertImporterJob = null,
+  scheduleOperationalEmailAlertDispatcher: scheduleOperationalAlertDispatcherJob = null,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
@@ -272,6 +276,19 @@ function startServer({
       // time-driven writers. The measured Home flow still exercises its real
       // HTTP and dedicated resolution processes.
       if (capacityHomeOpenIsolation) return;
+      if (processRole === "cron") {
+        // Lazy-load here so the dedicated resolution process never loads Gmail,
+        // OAuth, MIME, or operational-email dispatcher code. It only writes
+        // bounded crash-spool markers and exits on a watchdog expiry.
+        const importer = scheduleOperationalAlertImporterJob ||
+          require("./shared/operationalAlerts/operationalAlertSpoolImporter")
+            .scheduleOperationalAlertSpoolImporter;
+        const dispatcher = scheduleOperationalAlertDispatcherJob ||
+          require("./shared/operationalAlerts/operationalEmailAlertDispatcher")
+            .scheduleOperationalEmailAlertDispatcher;
+        retainStopHandle(importer({ processRole }));
+        retainStopHandle(dispatcher({ processRole }));
+      }
       scheduleRaceExpiry();
       scheduleSeededRenewal();
       scheduleTournamentRenewal();

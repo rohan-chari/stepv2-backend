@@ -122,7 +122,12 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
   "src/modules/notifications/dailyMover.js": ["participantModel.update", "raw.race_participants.update"],
   "src/modules/powerups/commands/openMysteryBox.js": ["participantModel.update"],
-  "src/modules/powerups/commands/rollPowerup.js": ["raceParticipant.update", "raceParticipant.update"],
+  "src/modules/powerups/commands/expireEffects.js": ["raceParticipant.updateMany"],
+  "src/modules/powerups/commands/rollPowerup.js": [
+    "raceParticipant.update",
+    "raceParticipant.update",
+    "raceParticipant.update",
+  ],
   "src/modules/races/commands/autoEnrollNewUser.js": [
     "raceParticipant.create",
     "raceParticipant.create",
@@ -154,7 +159,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/services/highMultiplierAlert.js": ["raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/services/legacyBuyInRemediation.js": ["raceParticipant.update", "raceParticipant.updateMany"],
   "src/modules/races/services/racePowerupStateSync.js": ["raceParticipant.update", "raceParticipant.update"],
-  "src/modules/races/services/raceResolutionDeliveryIntents.js": ["raceParticipant.updateMany"],
+  "src/modules/races/services/raceResolutionDeliveryIntents.js": ["raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/services/seededRaceBuckets.js": ["raceParticipant.createMany", "raceParticipant.delete"],
   "src/modules/tournaments/commands/cancelTournament.js": ["tournamentParticipant.update"],
   "src/modules/tournaments/commands/createTournament.js": ["nested.participants.create", "tournamentParticipant.createMany"],
@@ -287,7 +292,7 @@ test("AST inventory detects direct delegates, nested relation writes, and non-ra
   ]);
   assert.deepEqual(
     participantMutations("src/modules/powerups/commands/rollPowerup.js"),
-    ["raceParticipant.update", "raceParticipant.update"],
+    ["raceParticipant.update", "raceParticipant.update", "raceParticipant.update"],
   );
 });
 
@@ -410,6 +415,7 @@ const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/loadTesting/fixtures.js",
   "src/modules/notifications/dailyMover.js",
   "src/modules/powerups/commands/openMysteryBox.js",
+  "src/modules/powerups/commands/expireEffects.js",
   "src/modules/powerups/commands/rollPowerup.js",
   "src/modules/races/commands/cancelRace.js",
   "src/modules/races/commands/markRaceResultsSeen.js",

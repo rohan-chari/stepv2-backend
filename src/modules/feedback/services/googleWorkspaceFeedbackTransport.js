@@ -4,9 +4,12 @@ const { OAuth2Client } = require("google-auth-library");
 const addressparser = require("nodemailer/lib/addressparser");
 const MailComposer = require("nodemailer/lib/mail-composer");
 
-const SUPPORT_ADDRESS = "support@barastep.com";
-const VISIBLE_FROM = "Bara Support <support@barastep.com>";
-const SUBJECT_PREFIX = "USER FEEDBACK";
+const {
+  SUPPORT_ADDRESS,
+  SUBJECT_PREFIX,
+  VISIBLE_FROM,
+  buildFeedbackSubject: buildSubjectValue,
+} = require("./feedbackEmailConstants");
 const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 const GMAIL_SEND_URL =
   "https://gmail.googleapis.com/gmail/v1/users/support%40barastep.com/messages/send";
@@ -15,9 +18,9 @@ const GMAIL_TIMEOUT_MS = 15_000;
 const MAX_OAUTH_FILE_BYTES = 16 * 1024;
 
 function buildFeedbackSubject(messageId) {
-  const match = /^<([0-9a-f]{8})[0-9a-f-]*@barastep\.com>$/i.exec(messageId || "");
-  if (!match) throw new FeedbackTransportError("unavailable", "invalid_message_id");
-  return `${SUBJECT_PREFIX} • ${match[1].toUpperCase()}`;
+  const subject = buildSubjectValue(messageId);
+  if (!subject) throw new FeedbackTransportError("unavailable", "invalid_message_id");
+  return subject;
 }
 
 class FeedbackTransportError extends Error {
@@ -105,7 +108,25 @@ function buildMime(message) {
       throw new FeedbackTransportError("unavailable", "invalid_reply_to");
     }
   }
-  const subject = buildFeedbackSubject(message.messageId);
+  const operationalSubjects = new Set([
+    "[Bara Prod] Race resolution slow (30s)",
+    "[Bara Prod] Race resolution watchdog restarted worker",
+  ]);
+  const subject = message.operationalAlert === true
+    ? message.subject
+    : buildFeedbackSubject(message.messageId);
+  if (message.operationalAlert === true) {
+    const idMatch = /^<operational-(slow|watchdog)-[0-9a-z-]{1,120}@barastep\.com>$/.exec(
+      message.messageId || ""
+    );
+    if (!operationalSubjects.has(subject) || !idMatch || subject !== (
+      idMatch[1] === "slow"
+        ? "[Bara Prod] Race resolution slow (30s)"
+        : "[Bara Prod] Race resolution watchdog restarted worker"
+    )) {
+      throw new FeedbackTransportError("unavailable", "invalid_subject");
+    }
+  }
   const composer = new MailComposer({
     from: VISIBLE_FROM,
     to: SUPPORT_ADDRESS,

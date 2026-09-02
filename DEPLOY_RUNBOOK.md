@@ -135,7 +135,8 @@ local/test-only. The capacity harness keeps its isolated
 Before the reload, verify in the DigitalOcean control plane and record the
 managed-pool mode, pool size, reserve size (if any), and direct database
 maximum. Then run the wrapper, which performs static preflight and transitions
-resolution → cron → both HTTP workers. Before the first reload it captures the
+both HTTP workers → cron → resolution. This order removes legacy HTTP/cron
+claim paths before the new dedicated owner may claim. Before the first reload it captures the
 exact live per-process pool baseline; every untransitioned process must remain
 identical to that snapshot, and every transitioned process must exactly match
 the current ecosystem target. This also applies when reviewed targets change.
@@ -342,13 +343,181 @@ windows; that is expected and must not be reported as complete coverage.
 
 Do not start or reload staging as part of an ordinary production deploy. With
 explicit in-the-moment authorization for a staging/capacity test, start its one
-`all` process (`DATABASE_POOL_MAX_ALL=10`), verify its pooler budget separately,
+`staging_all` process (`DATABASE_POOL_MAX_ALL=10`), verify its pooler budget separately,
 run the authorized work, then stop staging again. Never scale it to two as a
 substitute for the four-process protected capacity harness.
 
 ---
 
 ## Troubleshooting
+
+## Race-resolution stall recovery rollout
+
+This rollout adds the additive `operational_email_alerts` outbox migration and
+changes both the HTTP compatibility polling path and the dedicated worker/cron
+paths. Obtain fresh deploy authorization before running any command in this
+section. The serialized wrapper gracefully reloads the exact static topology:
+two HTTP workers, one dedicated resolution process, and one cron process.
+
+Before the process restart, provision the release-persistent crash spool using
+the account that owns the current resolution PID:
+
+```bash
+RESOLUTION_PID="$(pm2 pid steps-tracker-resolution)"
+BACKEND_SERVICE_USER="$(ps -o user= -p "$RESOLUTION_PID" | tr -d ' ')"
+BACKEND_SERVICE_GROUP="$(id -gn "$BACKEND_SERVICE_USER")"
+install -d -m 0700 -o "$BACKEND_SERVICE_USER" -g "$BACKEND_SERVICE_GROUP" \
+  /var/lib/step-tracker/operational-alert-spool
+test "$(stat -c '%a' /var/lib/step-tracker/operational-alert-spool)" = 700
+test "$(stat -c '%U' /var/lib/step-tracker/operational-alert-spool)" = "$BACKEND_SERVICE_USER"
+```
+
+Verify a non-importable canary can be exclusively created, synced, renamed,
+read, and removed without sending email. The name deliberately does not match
+the importer grammar:
+
+```bash
+sudo -u "$BACKEND_SERVICE_USER" node - <<'NODE'
+const fs = require('node:fs');
+const dir = '/var/lib/step-tracker/operational-alert-spool';
+const tmp = `${dir}/.canary-${process.pid}`;
+const final = `${dir}/canary-no-import.json`;
+const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0), 0o600);
+fs.writeSync(fd, Buffer.from('{"canary":true}\n'));
+fs.fsyncSync(fd);
+fs.closeSync(fd);
+fs.renameSync(tmp, final);
+const dirfd = fs.openSync(dir, fs.constants.O_RDONLY);
+fs.fsyncSync(dirfd);
+fs.closeSync(dirfd);
+fs.readFileSync(final);
+fs.unlinkSync(final);
+NODE
+```
+
+Apply the additive migration explicitly before any new process starts, then use
+the guarded deployment wrapper. The wrapper verifies the static topology and
+replaces the resolution process without overlapping old and new post-task
+runners. The topology must remain two HTTP workers, one resolution process, and
+one cron process; staging stays stopped.
+
+```bash
+npx prisma migrate status
+npx prisma migrate deploy
+./scripts/pm2-safe-prod-reload.sh
+```
+
+After restart, correlate claims, live phases, terminal outcomes, and watchdogs:
+
+```bash
+pm2 logs steps-tracker-resolution --lines 2000 --nostream | \
+  grep -E 'race_resolution_v2_(claim|phase|watchdog|queue_service)|"event":"race_resolution_v2"'
+pm2 describe steps-tracker-resolution
+find /var/lib/step-tracker/operational-alert-spool -maxdepth 1 -type f -printf '%f\n' | head -100
+```
+
+Alarm on expired RUNNING leases with both lanes occupied, claimable work with no
+terminal outcome for more than 60 seconds, or three watchdog exits in 15
+minutes. Monitor `P2028`, PgBouncer errors, queue lag, HTTP health, and mystery
+box creation for a full peak window.
+
+Rollback needs a compatibility drain before restoring the old artifact. A
+pre-change post-task runner accepts additive snapshot JSON but does not execute
+`effectExpiryParticipantSteps`; allowing it to claim a new-format task can
+permanently lose Fanny/Piggy/effect convergence. Run these steps in order. Keep
+the current resolution binary online through step 4.
+
+**ROLLBACK STEP 1 — STOP NEW CORE CLAIMS.** Set the existing deployment-protocol
+control directly, then wait longer than its two-second enabled-answer cache.
+This does not stop the post-task runner.
+
+```bash
+DBU="$(grep -E '^DATABASE_URL' .env | cut -d= -f2- | tr -d '"')"
+psql "$DBU" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO app_settings (key, value, updated_at)
+VALUES ('raceQueueV2ClaimingDisabled', 'true'::jsonb, NOW())
+ON CONFLICT (key) DO UPDATE SET value='true'::jsonb, updated_at=NOW();
+SQL
+sleep 3
+```
+
+**ROLLBACK STEP 2 — QUIESCE EVERY PRE-DISABLE CORE ATTEMPT.** A 30-second DB
+lease expiring does not stop the JavaScript that owns it: that attempt can
+still acquire its commit fence until the 60-second fail-stop watchdog ends the
+process. Therefore an empty active-lease query is not a safe drain boundary.
+After the claim-cache wait above, keep claims disabled and wait longer than the
+entire watchdog plus marker-flush margin before observing post-task zero. Rows
+with expired leases may remain for the rollback target to reclaim later, but
+no process from the current artifact can still be executing them after this
+barrier.
+
+```bash
+ROLLBACK_WATCHDOG_QUIESCENCE_SECONDS="65"
+sleep "$ROLLBACK_WATCHDOG_QUIESCENCE_SECONDS"
+CORE_DRAIN_DEADLINE="$(( $(date +%s) + 300 ))"
+while [ "$(psql "$DBU" -Atqc "SELECT COUNT(*) FROM race_resolution_jobs_v2 WHERE state='running' AND lease_expires_at > NOW()")" != "0" ]; do
+  [ "$(date +%s)" -ge "$CORE_DRAIN_DEADLINE" ] && { echo "abort the rollback: active core work did not drain" >&2; exit 1; }
+  sleep 1
+done
+```
+
+**ROLLBACK STEP 3 — DRAIN NEW-FORMAT POST-TASKS.** Leave the new binary running
+so it executes effect expiry before making each task terminal. Do not let an old
+runner consume these rows.
+
+```bash
+POST_DRAIN_DEADLINE="$(( $(date +%s) + 300 ))"
+while [ "$(psql "$DBU" -Atqc "SELECT COUNT(*) FROM race_resolution_post_tasks WHERE state IN ('queued', 'running') AND snapshot_command ? 'effectExpiryParticipantSteps'")" != "0" ]; do
+  [ "$(date +%s)" -ge "$POST_DRAIN_DEADLINE" ] && { echo "abort the rollback: new-format post-tasks did not drain" >&2; exit 1; }
+  sleep 1
+done
+```
+
+**ROLLBACK STEP 4 — VERIFY BOTH COUNTS ARE ZERO.** Run this final go/no-go
+check immediately before restoring the old artifact. Claims remain disabled,
+and the watchdog barrier above proved expired leases cannot conceal a live
+attempt. Any nonzero output means abort the rollback, keep the current artifact
+running, and keep core claims disabled while investigating.
+
+```bash
+FINAL_ACTIVE_CORE_JOBS="$(psql "$DBU" -v ON_ERROR_STOP=1 -Atqc "
+SELECT COUNT(*) AS active_core_jobs
+FROM race_resolution_jobs_v2
+WHERE state='running' AND lease_expires_at > NOW();")"
+FINAL_NEW_FORMAT_POST_TASKS="$(psql "$DBU" -v ON_ERROR_STOP=1 -Atqc "
+SELECT COUNT(*) AS pending_new_format_post_tasks
+FROM race_resolution_post_tasks
+WHERE state IN ('queued', 'running')
+  AND snapshot_command ? 'effectExpiryParticipantSteps';")"
+echo "active_core_jobs=$FINAL_ACTIVE_CORE_JOBS pending_new_format_post_tasks=$FINAL_NEW_FORMAT_POST_TASKS"
+[ "$FINAL_ACTIVE_CORE_JOBS" = "0" ] || { echo "abort the rollback: active core work reappeared" >&2; exit 1; }
+[ "$FINAL_NEW_FORMAT_POST_TASKS" = "0" ] || { echo "abort the rollback: new-format post-tasks reappeared" >&2; exit 1; }
+```
+
+Both displayed counts must be `0` before continuing.
+
+**ROLLBACK STEP 5 — RESTORE OLD CODE.** Restore the reviewed prior artifact,
+then run the same serialized `./scripts/pm2-safe-prod-reload.sh` wrapper. It
+returns both changed HTTP workers plus the resolution/cron processes to one
+coherent artifact while pinning exactly two HTTP workers. This command runs the
+wrapper from the restored artifact, whose internal reload order may predate the
+current stop/start protocol. Rollback safety therefore comes entirely from the
+claims-disabled watchdog barrier and both final zero checks above; do not rely
+on the restored wrapper to provide version-skew isolation.
+
+**ROLLBACK STEP 6 — RESUME CORE CLAIMS.** Only after the wrapper and final
+topology guard succeed, clear the deployment-protocol control:
+
+```bash
+psql "$DBU" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO app_settings (key, value, updated_at)
+VALUES ('raceQueueV2ClaimingDisabled', 'false'::jsonb, NOW())
+ON CONFLICT (key) DO UPDATE SET value='false'::jsonb, updated_at=NOW();
+SQL
+```
+
+Leave the additive outbox table and spool directory in place, and preserve logs
+and unimported markers; dropping either is destructive and unnecessary.
 
 ### `migrate deploy` fails mid-run (P3018)
 A migration errored; Prisma marks it failed and blocks further deploys until

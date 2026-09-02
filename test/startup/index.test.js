@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
 
@@ -15,6 +16,29 @@ test("HTTP server keeps pooled clients alive without stale-socket resets", () =>
   assert.equal(server.headersTimeout, 66_000);
   assert.equal(server.requestTimeout, 30_000);
   assert.equal(server.maxRequestsPerSocket, 100);
+});
+
+test("production resolution startup does not load Gmail or OAuth transport code", () => {
+  const script = [
+    "require('./src/index')",
+    "const bad=Object.keys(require.cache).filter((p)=>p.includes('googleWorkspaceFeedbackTransport')||p.includes('google-auth-library'))",
+    "process.stdout.write(JSON.stringify(bad))",
+    "process.exit(bad.length?1:0)",
+  ].join(";");
+  const result = spawnSync(process.execPath, ["-e", script], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      STEPS_PROCESS_ROLE: "resolution",
+      DATABASE_URL: "postgresql://rohan@localhost:5432/steps-tracker-integration_test",
+      DATABASE_POOL_MAX_RESOLUTION: "8",
+      DATABASE_POOL_TOTAL_BUDGET: "32",
+    },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /\[\]$/);
 });
 
 test("startServer listens on 0.0.0.0 by default", () => {
@@ -259,6 +283,8 @@ test("home-open capacity keeps the cron process idle", () => {
       scheduleReferralLinkOpenCleanup: track("referralCleanup"),
       scheduleGiveawayRetention: track("giveawayRetention"),
       scheduleFeedbackEmailAttemptExpiry: track("feedbackExpiry"),
+      scheduleOperationalAlertSpoolImporter: track("operationalAlertImport"),
+      scheduleOperationalEmailAlertDispatcher: track("operationalAlertDispatch"),
       scheduleDailyMover: track("dailyMover"),
       scheduleDailyRewardReminder: track("dailyReward"),
       scheduleStepMilestoneReminder: track("milestone"),

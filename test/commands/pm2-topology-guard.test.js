@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const {
   classifyTopology,
@@ -210,6 +211,18 @@ test("production config delegates clustered HTTP memory enforcement to the watch
     "--max-old-space-size=320 --max-semi-space-size=8",
   );
   assert.equal(cron.node_args, resolution.node_args);
+  assert.equal(resolution.exp_backoff_restart_delay, 1000);
+  assert.equal(cron.exp_backoff_restart_delay, undefined);
+  assert.equal(http.exp_backoff_restart_delay, undefined);
+});
+
+test("the stopped single-process staging app uses its explicit combined role", () => {
+  const config = require("../../ecosystem.config");
+  const staging = config.apps.find(({ name }) => name === "steps-tracker-staging");
+
+  assert.equal(staging.instances, 1);
+  assert.equal(staging.autostart, false);
+  assert.equal(staging.env.STEPS_PROCESS_ROLE, "staging_all");
 });
 
 test("deployment B static preflight locks the production 2x10 + 8 + 4 = 32 budget", () => {
@@ -391,9 +404,9 @@ test("the production reload wrapper serializes and reapplies ecosystem config", 
   const cronReload = lines.findIndex((line) => line.endsWith("--only steps-tracker-cron"));
   assert.ok([httpReload, sentinelCheck, resolutionReload, cronReload].every((index) => index >= 0));
   const finalStrict = lines.findIndex((line) => line.includes("--pool-budget-mode=final"));
-  assert.ok(resolutionReload < cronReload);
-  assert.ok(cronReload < httpReload);
-  assert.ok(httpReload < sentinelCheck);
+  assert.ok(httpReload < cronReload);
+  assert.ok(cronReload < resolutionReload);
+  assert.ok(resolutionReload < sentinelCheck);
   assert.ok(sentinelCheck < finalStrict);
 });
 
@@ -402,4 +415,173 @@ test("runbook cannot bypass the serialized production wrapper for HTTP reload/sa
   assert.doesNotMatch(runbook, /^\s*pm2 startOrReload ecosystem\.config\.js --only steps-tracker\s*$/m);
   assert.doesNotMatch(runbook, /^\s*pm2 save(?:\s|$)/m);
   assert.doesNotMatch(runbook, /^\s*pm2 scale steps-tracker(?:\s|$)/m);
+});
+
+test("stall-recovery rollout and rollback reload the changed HTTP workers too", () => {
+  const runbook = fs.readFileSync(path.join(__dirname, "../../DEPLOY_RUNBOOK.md"), "utf8");
+  const section = runbook.slice(runbook.indexOf("Race-resolution stall recovery"));
+  assert.match(section, /pm2-safe-prod-reload\.sh/);
+  assert.doesNotMatch(section, /restart of only\s+`steps-tracker-resolution` and `steps-tracker-cron`/);
+  assert.doesNotMatch(section, /Do not restart the two HTTP\s+workers for this rollback/);
+});
+
+test("stall-recovery deploy applies its additive migration before any process reload", () => {
+  const runbook = fs.readFileSync(path.join(__dirname, "../../DEPLOY_RUNBOOK.md"), "utf8");
+  const section = runbook.slice(runbook.indexOf("Race-resolution stall recovery"));
+  const migrate = section.indexOf("npx prisma migrate deploy");
+  const reload = section.indexOf("./scripts/pm2-safe-prod-reload.sh");
+
+  assert.ok(migrate >= 0, "the outbox migration command must be explicit");
+  assert.ok(reload >= 0, "the serialized reload command must be explicit");
+  assert.ok(migrate < reload, "the outbox table must exist before new processes start");
+});
+
+test("resolution reload never overlaps old and new post-task runners", () => {
+  const wrapper = fs.readFileSync(
+    path.join(__dirname, "../../scripts/pm2-safe-prod-reload.sh"),
+    "utf8",
+  );
+  const lines = wrapper.split("\n").map((line) => line.trim());
+  const oldPid = lines.findIndex((line) => line.startsWith("OLD_RESOLUTION_PID="));
+  const stop = lines.findIndex((line) => line === "pm2 stop steps-tracker-resolution");
+  const gone = lines.findIndex((line) => line.includes("old resolution PID did not exit"));
+  const start = lines.findIndex((line) =>
+    line === 'pm2 start "$CONFIG" --only steps-tracker-resolution'
+  );
+
+  assert.ok([oldPid, stop, gone, start].every((index) => index >= 0));
+  assert.ok(oldPid < stop && stop < gone && gone < start);
+  assert.doesNotMatch(
+    wrapper,
+    /pm2 startOrReload "\$CONFIG" --only steps-tracker-resolution/,
+  );
+});
+
+test("stall-recovery rollout removes old HTTP and cron claimers before new resolution starts", () => {
+  const wrapper = fs.readFileSync(
+    path.join(__dirname, "../../scripts/pm2-safe-prod-reload.sh"),
+    "utf8",
+  );
+  const lines = wrapper.split("\n").map((line) => line.trim());
+  const httpReload = lines.findIndex((line) =>
+    line.endsWith("--only steps-tracker --update-env")
+  );
+  const cronStop = lines.findIndex((line) => line === "pm2 stop steps-tracker-cron");
+  const cronGone = lines.findIndex((line) => line.includes("old cron PID did not exit"));
+  const resolutionStop = lines.findIndex(
+    (line) => line === "pm2 stop steps-tracker-resolution",
+  );
+  const resolutionStart = lines.findIndex((line) =>
+    line === 'pm2 start "$CONFIG" --only steps-tracker-resolution'
+  );
+
+  assert.ok(
+    [httpReload, cronStop, cronGone, resolutionStop, resolutionStart]
+      .every((index) => index >= 0),
+  );
+  assert.ok(httpReload < cronStop);
+  assert.ok(cronStop < cronGone);
+  assert.ok(cronGone < resolutionStop);
+  assert.ok(resolutionStop < resolutionStart);
+});
+
+test("stall-recovery rollback drains new-format work before restoring old code", () => {
+  const runbook = fs.readFileSync(path.join(__dirname, "../../DEPLOY_RUNBOOK.md"), "utf8");
+  const section = runbook.slice(runbook.indexOf("Race-resolution stall recovery"));
+  const rollback = section.slice(section.indexOf("Rollback"));
+  const stopClaims = rollback.indexOf("ROLLBACK STEP 1 — STOP NEW CORE CLAIMS");
+  const coreDrain = rollback.indexOf(
+    "ROLLBACK STEP 2 — QUIESCE EVERY PRE-DISABLE CORE ATTEMPT",
+  );
+  const postTaskDrain = rollback.indexOf("ROLLBACK STEP 3 — DRAIN NEW-FORMAT POST-TASKS");
+  const verifyZero = rollback.indexOf("ROLLBACK STEP 4 — VERIFY BOTH COUNTS ARE ZERO");
+  const restoreOldCode = rollback.indexOf("ROLLBACK STEP 5 — RESTORE OLD CODE");
+  const resumeClaims = rollback.indexOf("ROLLBACK STEP 6 — RESUME CORE CLAIMS");
+
+  assert.ok(
+    [stopClaims, coreDrain, postTaskDrain, verifyZero, restoreOldCode, resumeClaims]
+      .every((index) => index >= 0),
+    "rollback must spell out every compatibility boundary",
+  );
+  assert.ok(stopClaims < coreDrain);
+  assert.ok(coreDrain < postTaskDrain);
+  assert.ok(postTaskDrain < verifyZero);
+  assert.ok(verifyZero < restoreOldCode);
+  assert.ok(restoreOldCode < resumeClaims);
+  assert.match(rollback, /raceQueueV2ClaimingDisabled/);
+  assert.match(rollback, /effectExpiryParticipantSteps/);
+  assert.match(rollback, /snapshot_command\s+\?\s+'effectExpiryParticipantSteps'/);
+  assert.match(rollback, /state\s+IN\s+\('queued',\s*'running'\)/i);
+  assert.match(rollback, /abort the rollback/i);
+});
+
+test("stall-recovery rollback outwaits an expired lease's still-live watchdog attempt", () => {
+  const runbook = fs.readFileSync(path.join(__dirname, "../../DEPLOY_RUNBOOK.md"), "utf8");
+  const section = runbook.slice(runbook.indexOf("Race-resolution stall recovery"));
+  const rollback = section.slice(section.indexOf("Rollback"));
+  const cacheWait = rollback.indexOf("sleep 3");
+  const barrierDeclaration = rollback.match(
+    /ROLLBACK_WATCHDOG_QUIESCENCE_SECONDS="(\d+)"/,
+  );
+  const barrierWait = rollback.indexOf(
+    'sleep "$ROLLBACK_WATCHDOG_QUIESCENCE_SECONDS"',
+  );
+  const postTaskDrain = rollback.indexOf(
+    "ROLLBACK STEP 3 — DRAIN NEW-FORMAT POST-TASKS",
+  );
+  const finalCoreCheck = rollback.lastIndexOf(
+    "state='running' AND lease_expires_at > NOW()",
+  );
+  const restoreOldCode = rollback.indexOf("ROLLBACK STEP 5 — RESTORE OLD CODE");
+
+  assert.ok(barrierDeclaration, "rollback must declare an explicit watchdog barrier");
+  assert.ok(
+    Number(barrierDeclaration[1]) >= 65,
+    "barrier must exceed the 60-second watchdog after the claim-cache wait",
+  );
+  assert.ok(cacheWait < barrierWait);
+  assert.ok(barrierWait < postTaskDrain);
+  assert.ok(postTaskDrain < finalCoreCheck);
+  assert.ok(finalCoreCheck < restoreOldCode);
+
+  // A lease expiring at t=30 does not stop its JavaScript attempt: it can still
+  // commit at t=55. The enforced t>=65 barrier must precede the first post-task
+  // zero observation, otherwise rollback can miss that late durable handoff.
+  const leaseExpirySeconds = 30;
+  const possibleCommitSeconds = 55;
+  const watchdogSeconds = 60;
+  const barrierSeconds = Number(barrierDeclaration[1]);
+  assert.ok(leaseExpirySeconds < possibleCommitSeconds);
+  assert.ok(possibleCommitSeconds < watchdogSeconds);
+  assert.ok(watchdogSeconds < barrierSeconds);
+});
+
+test("stall-recovery rollback final go/no-go shell is executable and runs both checks", () => {
+  const runbook = fs.readFileSync(path.join(__dirname, "../../DEPLOY_RUNBOOK.md"), "utf8");
+  const stepFour = runbook.slice(
+    runbook.indexOf("ROLLBACK STEP 4 — VERIFY BOTH COUNTS ARE ZERO"),
+    runbook.indexOf("**ROLLBACK STEP 5 — RESTORE OLD CODE"),
+  );
+  const shellBlock = stepFour.match(/```bash\n([\s\S]*?)\n```/);
+
+  assert.ok(shellBlock, "step 4 must contain an auditable bash block");
+  assert.equal((shellBlock[1].match(/psql "\$DBU"/g) || []).length, 2);
+  assert.match(shellBlock[1], /active_core_jobs/);
+  assert.match(shellBlock[1], /pending_new_format_post_tasks/);
+  assert.match(shellBlock[1], /FINAL_ACTIVE_CORE_JOBS=/);
+  assert.match(shellBlock[1], /FINAL_NEW_FORMAT_POST_TASKS=/);
+  assert.match(
+    shellBlock[1],
+    /\[ "\$FINAL_ACTIVE_CORE_JOBS" = "0" \] \|\| .*abort the rollback/,
+  );
+  assert.match(
+    shellBlock[1],
+    /\[ "\$FINAL_NEW_FORMAT_POST_TASKS" = "0" \] \|\| .*abort the rollback/,
+  );
+
+  const syntax = spawnSync("sh", ["-n"], {
+    input: shellBlock[1],
+    encoding: "utf8",
+  });
+  assert.equal(syntax.status, 0, syntax.stderr);
 });

@@ -1550,6 +1550,8 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                OR (state='running' AND lease_expires_at IS NOT NULL
                    AND lease_expires_at <= $1)), 0)::float8 AS "oldestClaimableAgeMs",
            COUNT(*) FILTER (WHERE state='running')::int AS "runningCount",
+           COUNT(*) FILTER (WHERE state='running' AND lease_expires_at IS NOT NULL
+             AND lease_expires_at <= $1)::int AS "expiredRunningCount",
            COUNT(*) FILTER (WHERE queue_priority='SETTLEMENT')::int AS "settlementCount",
            COUNT(*) FILTER (WHERE queue_priority='RECOVERY')::int AS "recoveryCount",
            COUNT(*) FILTER (WHERE queue_priority='LIVE')::int AS "liveCount",
@@ -1568,6 +1570,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         claimableCount: Math.max(0, Number(row.claimableCount || 0)),
         oldestClaimableAgeMs: safeMs(row.oldestClaimableAgeMs),
         runningCount: Math.max(0, Number(row.runningCount || 0)),
+        expiredRunningCount: Math.max(0, Number(row.expiredRunningCount || 0)),
         settlementCount: Math.max(0, Number(row.settlementCount || 0)),
         recoveryCount: Math.max(0, Number(row.recoveryCount || 0)),
         liveCount: Math.max(0, Number(row.liveCount || 0)),

@@ -15,7 +15,10 @@ const {
 const {
   buildResolveRaceState,
 } = require("../services/raceStateResolution");
-const { createWriteCapture } = require("../services/computeRaceState");
+const {
+  createWriteCapture,
+  computeRaceState: defaultComputeRaceState,
+} = require("../services/computeRaceState");
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
@@ -85,10 +88,17 @@ const {
 const {
   persistCapturedSummaryImpactsForRace,
 } = require("../../steps/services/globalEventSummaryCapture");
+const {
+  createOperationalAlertSpool,
+} = require("../../../shared/operationalAlerts/operationalAlertSpool");
 
 const POLL_INTERVAL_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
 const QUEUE_LAG_ALARM_MS = 30 * 1000;
+const RACE_RESOLUTION_SLOW_PHASE_MS = 10_000;
+const RACE_RESOLUTION_SLOW_ATTEMPT_MS = 30_000;
+const RACE_RESOLUTION_WATCHDOG_MS = 60_000;
+const RACE_RESOLUTION_DIAGNOSTIC_FLUSH_MS = 200;
 // Best-effort reservation cleanup cadence (never affects correctness). Carried
 // over from the v1 scheduler, which src/index.js no longer starts.
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -100,6 +110,8 @@ const POST_COMMIT_SLACK_MS = 30_000;
 const FENCE_DUE_EXPIRY_VETO_TYPES = Object.freeze(
   new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
 );
+const PROCESS_BOOT_ID = crypto.randomUUID();
+const PROCESS_BOOT_TIMESTAMP = new Date().toISOString();
 
 function containsSourceInputWork(reasons) {
   return Array.isArray(reasons) && reasons.includes("STEP_INPUT_CHANGED");
@@ -391,17 +403,104 @@ function addPhaseCount(totals, name, count) {
   if (Number.isFinite(numeric)) totals[name] += Math.max(0, Math.trunc(numeric));
 }
 
-function createRaceResolutionPhaseTimer(monotonicNow = process.hrtime.bigint) {
+function createRaceResolutionPhaseTimer(
+  monotonicNow = process.hrtime.bigint,
+  options = {}
+) {
   const totals = emptyPhaseTotals(RACE_RESOLUTION_PHASES);
+  let attemptStartedAt = monotonicNow();
+  const stack = [];
+  let lastCompletedPhase = null;
+  let nextInstanceId = 0;
+  const emit = typeof options.emit === "function" ? options.emit : null;
+  let attemptContext = options.attemptContext || null;
+  const scheduleTimeout = options.scheduleTimeout || setTimeout;
+  const cancelTimeout = options.clearTimeout || clearTimeout;
+
+  const elapsedMs = (startedAt) =>
+    Math.max(0, Number(monotonicNow() - startedAt) / 1e6);
+
+  function liveState() {
+    const active = stack.at(-1) || null;
+    return {
+      activePhase: active?.name || null,
+      parentPhase: stack.length > 1 ? stack.at(-2).name : null,
+      phaseStack: stack.map((entry) => entry.name).slice(-12),
+      activePhaseElapsedMs: active ? elapsedMs(active.startedAt) : 0,
+      attemptElapsedMs: elapsedMs(attemptStartedAt),
+      lastCompletedPhase,
+    };
+  }
+
+  function emitPhase(checkpoint, instance) {
+    if (!emit || !attemptContext) return;
+    const state = liveState();
+    emit({
+      event: "race_resolution_v2_phase",
+      schemaVersion: 3,
+      observedAt: new Date().toISOString(),
+      checkpoint,
+      attemptId: attemptContext.attemptId,
+      activePhase: state.activePhase,
+      parentPhase: state.parentPhase,
+      phaseStack: state.phaseStack,
+      phaseElapsedMs: state.activePhaseElapsedMs,
+      attemptElapsedMs: state.attemptElapsedMs,
+      queuePriority: attemptContext.queuePriority || "LIVE",
+      resolutionPlan: typeof attemptContext.resolutionPlan === "function"
+        ? attemptContext.resolutionPlan()
+        : attemptContext.resolutionPlan || null,
+      workerPid: process.pid,
+      monotonicPhaseElapsedMs: state.activePhaseElapsedMs,
+      monotonicAttemptElapsedMs: state.attemptElapsedMs,
+      phaseInstance: instance.instanceId,
+    });
+  }
+
+  function emitSlowIfOverdue(instance) {
+    if (
+      !instance ||
+      instance.slowEmitted ||
+      stack.at(-1) !== instance ||
+      elapsedMs(instance.startedAt) < RACE_RESOLUTION_SLOW_PHASE_MS
+    ) return;
+    instance.slowEmitted = true;
+    emitPhase("slow", instance);
+  }
 
   function start(name) {
     if (!Object.hasOwn(totals, name)) throw new Error(`unknown race resolution phase: ${name}`);
-    const startedAt = monotonicNow();
+    const instance = {
+      name,
+      startedAt: monotonicNow(),
+      instanceId: ++nextInstanceId,
+      slowEmitted: false,
+      slowHandle: null,
+    };
+    stack.push(instance);
+    emitPhase("enter", instance);
+    if (emit && attemptContext) {
+      instance.slowHandle = scheduleTimeout(() => {
+        emitSlowIfOverdue(instance);
+      }, RACE_RESOLUTION_SLOW_PHASE_MS);
+      instance.slowHandle?.unref?.();
+    }
     let stopped = false;
     return () => {
       if (stopped) return;
+      if (stack.at(-1) !== instance) {
+        throw new Error(
+          `non-LIFO race resolution phase stop: expected ${stack.at(-1)?.name || "none"}, received ${name}`
+        );
+      }
       stopped = true;
-      totals[name] += Math.max(0, Number(monotonicNow() - startedAt) / 1e6);
+      if (instance.slowHandle) cancelTimeout(instance.slowHandle);
+      stack.pop();
+      totals[name] += elapsedMs(instance.startedAt);
+      lastCompletedPhase = name;
+      // A parent's own 10-second callback may have fired while a nested child
+      // was innermost. Surface it as soon as it becomes the active phase again.
+      emitSlowIfOverdue(stack.at(-1));
     };
   }
 
@@ -417,6 +516,129 @@ function createRaceResolutionPhaseTimer(monotonicNow = process.hrtime.bigint) {
     },
     snapshot() {
       return { ...totals };
+    },
+    liveState,
+    setAttemptContext(context) {
+      attemptContext = context || null;
+      attemptStartedAt = monotonicNow();
+    },
+  };
+}
+
+function createRaceResolutionAttemptWatchdog(dependencies = {}) {
+  const processRole = dependencies.processRole || process.env.STEPS_PROCESS_ROLE || "all";
+  if (processRole !== "resolution") return { cancel() {} };
+
+  const attempt = dependencies.attempt || {};
+  const phaseTimer = dependencies.phaseTimer;
+  const workBudget = dependencies.workBudget;
+  const scheduleTimeout = dependencies.scheduleTimeout || setTimeout;
+  const cancelTimeout = dependencies.clearTimeout || clearTimeout;
+  const emitDiagnostic = dependencies.emitDiagnostic || ((event) => {
+    process.stderr.write(`${JSON.stringify(event)}\n`);
+  });
+  const writeAlertMarker = dependencies.writeAlertMarker || (() => {});
+  const flushDiagnostics = dependencies.flushDiagnostics || (() => Promise.all(
+    [process.stdout, process.stderr].map((stream) => new Promise((resolve) => {
+      try { stream.write("", resolve); } catch (_) { resolve(); }
+    }))
+  ));
+  const failStop = dependencies.failStop || ((code) => {
+    process.exitCode = code;
+    process.exit(code);
+  });
+  const getSiblingAttempts = dependencies.getSiblingAttempts || (() => []);
+  const expiredLeaseCount = dependencies.expiredLeaseCount || (() => null);
+  let cancelled = false;
+  let expired = false;
+
+  const snapshot = (alertType) => {
+    const state = phaseTimer?.liveState?.() || {};
+    return {
+      schemaVersion: 1,
+      alertType,
+      environment: process.env.NODE_ENV || "development",
+      observedAt: new Date().toISOString(),
+      attemptId: attempt.attemptId,
+      jobId: attempt.jobId,
+      raceId: attempt.raceId,
+      leaseExpiresAt: attempt.leaseExpiresAt instanceof Date
+        ? attempt.leaseExpiresAt.toISOString()
+        : attempt.leaseExpiresAt || null,
+      activePhase: state.activePhase || null,
+      parentPhase: state.parentPhase || null,
+      phaseStack: Array.isArray(state.phaseStack) ? state.phaseStack.slice(-12) : [],
+      phaseElapsedMs: Math.round(state.activePhaseElapsedMs || 0),
+      attemptElapsedMs: Math.round(state.attemptElapsedMs || 0),
+      queueLagMs: Math.round(attempt.queueLagMs || 0),
+      workBudget: workBudget?.snapshot?.() || null,
+      expiredLeaseCount: expiredLeaseCount(),
+      workerPid: process.pid,
+      lastCompletedPhase: state.lastCompletedPhase || null,
+      authoritativeCommitCompleted: attempt.authoritativeCommitCompleted === true,
+    };
+  };
+
+  const slowHandle = scheduleTimeout(() => {
+    if (cancelled || expired) return;
+    try {
+      writeAlertMarker(snapshot("slow"));
+    } catch (error) {
+      emitDiagnostic({
+        event: "race_resolution_v2_alert_spool_error",
+        schemaVersion: 1,
+        alertType: "slow",
+        attemptId: attempt.attemptId,
+        errorCode: error?.code || "SPOOL_WRITE_FAILED",
+      });
+    }
+  }, RACE_RESOLUTION_SLOW_ATTEMPT_MS);
+  slowHandle?.unref?.();
+
+  const watchdogHandle = scheduleTimeout(async () => {
+    if (cancelled || expired) return;
+    expired = true;
+    try {
+      // The fail-stop boundary deliberately starts before every diagnostic
+      // getter. Diagnostics are valuable, but a broken snapshot seam must
+      // never turn a watchdog expiry into a process that keeps serving work.
+      const diagnostic = {
+        event: "race_resolution_v2_watchdog",
+        outcome: "expired",
+        ...snapshot("watchdog"),
+        siblingActiveAttempts: getSiblingAttempts()
+          .filter((entry) => entry?.attemptId !== attempt.attemptId),
+      };
+      emitDiagnostic(diagnostic);
+      writeAlertMarker(diagnostic);
+      await Promise.race([
+        Promise.resolve(flushDiagnostics(RACE_RESOLUTION_DIAGNOSTIC_FLUSH_MS)),
+        new Promise((resolve) => {
+          scheduleTimeout(resolve, RACE_RESOLUTION_DIAGNOSTIC_FLUSH_MS);
+        }),
+      ]);
+    } catch (error) {
+      try {
+        emitDiagnostic({
+          event: "race_resolution_v2_alert_spool_error",
+          schemaVersion: 1,
+          alertType: "watchdog",
+          attemptId: attempt.attemptId,
+          errorCode: error?.code || "WATCHDOG_DIAGNOSTIC_FAILED",
+        });
+      } catch (_) {}
+    } finally {
+      failStop(70);
+    }
+  }, RACE_RESOLUTION_WATCHDOG_MS);
+  watchdogHandle?.unref?.();
+
+  return {
+    cancel() {
+      if (cancelled) return;
+      cancelled = true;
+      cancelTimeout(slowHandle);
+      cancelTimeout(watchdogHandle);
     },
   };
 }
@@ -781,6 +1003,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     dependencies.raceResolutionPostTaskHandoff || defaultPostTaskHandoff;
   const displayArtifactStore =
     dependencies.raceResolutionDisplayArtifact || defaultDisplayArtifactStore;
+  const computeFullBoxState =
+    dependencies.computeRaceState || defaultComputeRaceState;
   const buildInputFingerprint =
     dependencies.buildRaceResolutionInputFingerprint || defaultBuildInputFingerprint;
   const balanceConfig = dependencies.balanceConfig || defaultBalanceConfig;
@@ -802,13 +1026,51 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     dependencies.wouldTrailMineEscalate || defaultWouldTrailMineEscalate;
   const now = dependencies.now || (() => new Date());
   const leaseMs = dependencies.leaseMs ?? LEASE_MS;
-  // Phase D hangs the Redis snapshot publish off this hook. It runs strictly
-  // AFTER the Postgres commit — commit first, publish second (spec §5a item 5).
-  // It also carries the two side effects Phase D step 8 takes off the
-  // `/progress` request path and that nothing else covered: `expireEffects` and
-  // the high-multiplier alert re-arm (see raceProgressSideEffects.js). The hook
-  // is a no-op while `redisStandingsEnabled` is off, so the flag still gates
-  // every behavior change on both sides of the split.
+  const processRole = dependencies.processRole || process.env.STEPS_PROCESS_ROLE || "all";
+  const nodeEnv = dependencies.nodeEnv || process.env.NODE_ENV || "development";
+  const productionExecutionRole =
+    nodeEnv !== "production" ||
+    processRole === "resolution" ||
+    processRole === "staging_all";
+  const monotonicNow = dependencies.monotonicNow || process.hrtime.bigint;
+  const wallClockNow = dependencies.wallClockNow || Date.now;
+  const sleep = dependencies.sleep || ((delayMs) =>
+    new Promise((resolve) => setTimeout(resolve, delayMs)));
+  const compatibilityPollIntervalMs = Math.max(
+    150,
+    Math.min(250, Number(dependencies.compatibilityPollIntervalMs) || 250),
+  );
+  const scheduleTimeout = dependencies.scheduleTimeout || setTimeout;
+  const cancelTimeout = dependencies.clearTimeout || clearTimeout;
+  const bootId = dependencies.bootId || PROCESS_BOOT_ID;
+  const spool = dependencies.operationalAlertSpool || createOperationalAlertSpool();
+  const writeAlertMarker = dependencies.writeAlertMarker || ((marker) => {
+    spool.writeIncident(marker);
+  });
+  const emitLiveDiagnostic = dependencies.emitLiveDiagnostic || ((event) => {
+    const method = event?.event === "race_resolution_v2_watchdog" ? "error" : "log";
+    (logger[method] || logger.log).call(logger, JSON.stringify(event));
+  });
+  const activeAttempts = new Map();
+  let lastTerminalMonotonicAt = null;
+  let lastExpiredRunningCount = null;
+  let eventLoopDelayMs = 0;
+  const processBootMonotonicAt = monotonicNow();
+  let eventLoopProbeAt = processBootMonotonicAt;
+  const eventLoopProbe = scheduleTimeout(function probeEventLoop() {
+    const observed = monotonicNow();
+    eventLoopDelayMs = Math.max(0, Number(observed - eventLoopProbeAt) / 1e6 - 1_000);
+    eventLoopProbeAt = observed;
+    const next = scheduleTimeout(probeEventLoop, 1_000);
+    next?.unref?.();
+  }, 1_000);
+  eventLoopProbe?.unref?.();
+  // Phase D owns snapshot/expiry/notification decisions. With durable post
+  // tasks enabled it runs in read-only preparation mode before the fence, then
+  // its immutable decisions are committed with recordSuccess and executed by
+  // the post-task runner. The legacy flag-off path still invokes it only after
+  // commit. Durable preparation is independent of Redis availability; only
+  // the legacy process-local publish path is gated by Redis standings.
   const onCommitted =
     dependencies.onCommitted ||
     require("../services/raceProgressSideEffects").raceProgressPostCommit;
@@ -922,7 +1184,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   // job-row lock before its first participant write. The held job-row lock also
   // serializes this against raceExpiry, which acquires the same row.
   async function processOneUnbudgeted({ raceId = null } = {}) {
-    const phaseTimer = createRaceResolutionPhaseTimer();
+    if (!productionExecutionRole) return null;
+    const phaseTimer = createRaceResolutionPhaseTimer(monotonicNow, {
+      emit: emitLiveDiagnostic,
+      scheduleTimeout,
+      clearTimeout: cancelTimeout,
+    });
     const currentTime = now();
     if (raceId) {
       // Targeted compatibility work is still C0 claiming. It may bypass the
@@ -961,13 +1228,57 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         leaseToken: newLeaseToken(),
         raceId,
         force: raceId != null,
-      }));
+    }));
     if (!job) return null;
     const startMs = Date.now();
+    const attemptUuid = crypto.randomUUID();
+    const attemptId = `${bootId}:${attemptUuid}`;
+    let resolutionPlan = "FULL";
+    const attempt = {
+      attemptId,
+      bootId,
+      attemptUuid,
+      jobId: job.id,
+      raceId: job.raceId,
+      leaseExpiresAt: job.leaseExpiresAt || null,
+      queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
+      authoritativeCommitCompleted: false,
+    };
+    phaseTimer.setAttemptContext({
+      attemptId,
+      queuePriority: job.processingQueuePriority || "LIVE",
+      resolutionPlan: () => resolutionPlan,
+    });
+    activeAttempts.set(attemptId, { attempt, phaseTimer });
+    const watchdog = createRaceResolutionAttemptWatchdog({
+      attempt,
+      phaseTimer,
+      workBudget,
+      processRole,
+      scheduleTimeout,
+      clearTimeout: cancelTimeout,
+      emitDiagnostic: emitLiveDiagnostic,
+      writeAlertMarker,
+      flushDiagnostics: dependencies.flushDiagnostics,
+      failStop: dependencies.failStop,
+      expiredLeaseCount: dependencies.expiredLeaseCount || (() => lastExpiredRunningCount),
+      getSiblingAttempts: () => [...activeAttempts.values()].map(({ attempt: sibling, phaseTimer: timer }) => ({
+        attemptId: sibling.attemptId,
+        jobId: sibling.jobId,
+        raceId: sibling.raceId,
+        authoritativeCommitCompleted: sibling.authoritativeCommitCompleted === true,
+        ...timer.liveState(),
+      })),
+    });
     logger.log(JSON.stringify({
       event: "race_resolution_v2_claim",
-      schemaVersion: 2,
+      schemaVersion: 3,
       observedAt: new Date(startMs).toISOString(),
+      attemptId,
+      jobId: job.id,
+      raceId: job.raceId,
+      leaseExpiresAt: job.leaseExpiresAt || null,
+      workerPid: process.pid,
       queuePriority: job.processingQueuePriority || "LIVE",
       queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
     }));
@@ -975,6 +1286,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // CLAIMING_FLAG_TTL_MS). Only idle ticks are allowed to reuse it.
     invalidateClaimingFlagCache();
 
+    try {
     // Mixed-worker safety: old intake advances the scoring generation and
     // enqueues STEP_SYNC without the new ownership stamp. Promote that already
     // queued claim in memory before any committed-scope admission; intake alone
@@ -1091,8 +1403,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     const stepSyncScopePhaseMs = { activeEffects: 0, raceHydration: 0 };
     let stepSyncScopeOutcome = "not_attempted";
     let stepSyncScopeActiveEffectCount = 0;
-    let resolutionPlan = "FULL";
-
     try {
       // ── Step 2: computation, outside every transaction. ──────────────────
       const reasonAwareEnabled = await phaseTimer.measure(
@@ -1111,6 +1421,15 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       const burstCoalescingEnabled = await phaseTimer.measure(
         "planSettings",
         () => isStrictFlagEnabled(settings, "raceResolutionBurstCoalescingV1Enabled")
+      );
+      const postTasksEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(settings, "raceResolutionPostTasksV1Enabled")
+      );
+      const atomicPostTaskHandoff = Boolean(
+        postTasksEnabled &&
+        postTaskHandoff?.supportsAtomicDurableCreate === true &&
+        typeof postTaskHandoff.createDurable === "function"
       );
       let superseded = false;
       let placementHandoffGeneration = null;
@@ -1143,6 +1462,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       };
       let committedBoxSyncResults = [];
       let committedPowerupEvents = [];
+      let committedPostTaskId = null;
 
       for (;;) {
         let artifactPayload = null;
@@ -1241,6 +1561,38 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             }
           }
         });
+
+        if (artifactPayload && baseResolutionPlan === "FULL") {
+          const boxUsers = artifactPayload.result?.boxEffectiveStepsByUser || {};
+          const missingFullBoxTotal = (artifactPayload.result?.race?.participants || [])
+            .some((participant) =>
+              participant.status === "ACCEPTED" &&
+              !participant.finishedAt &&
+              !participant.forfeitedAt &&
+              !Object.hasOwn(boxUsers, participant.userId)
+            );
+          if (missingFullBoxTotal) {
+            // Existing display artifacts intentionally carry box progress only
+            // for their viewer. Preserve their canonical score/write reuse,
+            // but supplement the FULL recovery envelope with one canonical
+            // all-eligible box computation so a non-viewer cannot be stranded.
+            const supplemental = await computeFullBoxState({
+              raceId: job.raceId,
+              timeZone: job.processingTimeZone || "UTC",
+              userIds: [],
+              includeAllAcceptedBoxUsers: true,
+            });
+            if (!supplemental?.result?.boxEffectiveStepsByUser) {
+              artifactPayload = null;
+              artifactFallbackReason = "full_box_scope_missing";
+            } else {
+              artifactPayload.result.boxEffectiveStepsByUser = {
+                ...boxUsers,
+                ...supplemental.result.boxEffectiveStepsByUser,
+              };
+            }
+          }
+        }
 
         if (artifactPayload) {
           resolutionPlan = "ARTIFACT_REUSE";
@@ -1353,7 +1705,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 ...(useClosure
                   ? { scoreParticipantIds:
                     closurePlan.scoringParticipantIds || closurePlan.participantIds }
-                  : {}),
+                  : { includeAllAcceptedBoxUsers: true }),
               })
             );
             if (computePhaseQueryCount) {
@@ -1370,6 +1722,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         }
 
         const stopPrepareWrites = phaseTimer.start("prepareWrites");
+        let sideWrites = [];
+        try {
         const userIdByParticipant = new Map();
         for (const participant of result?.race?.participants || []) {
           userIdByParticipant.set(participant.id, participant.userId);
@@ -1406,10 +1760,90 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           ),
           result?.race?.isTeamRace === true
         ).sort((left, right) => sortKey(left).localeCompare(sortKey(right)));
-        const sideWrites = capture.writes.filter(
+        sideWrites = capture.writes.filter(
           (write) => write.kind === "effectUpdate" || write.kind === "eventCreate"
         );
-        stopPrepareWrites();
+        } finally {
+          stopPrepareWrites();
+        }
+
+        // Decide every stateful post-commit action before entering the write
+        // transaction.  The decision functions only read the computed result;
+        // cooldown claims and immutable outbox rows are resolved below inside
+        // the same fenced transaction as recordSuccess.
+        let preparedSnapshotCommand = null;
+        const preparedIntentClaims = [];
+        if (atomicPostTaskHandoff) {
+          const stopPostCommitPrepare = phaseTimer.start("postCommitHook");
+          try {
+            const prepared = await onCommitted({
+              raceId: job.raceId,
+              job,
+              result,
+              superseded: false,
+              deferEffectExpiry: true,
+              deferSnapshot: true,
+              deferDelivery: true,
+              prepareOnly: true,
+              recoverEffectExpiry: resolveTimedActiveImpacts,
+            });
+            preparedSnapshotCommand = prepared?.snapshotCommand || null;
+            if (Array.isArray(prepared?.intentClaims)) {
+              preparedIntentClaims.push(...prepared.intentClaims);
+            }
+          } catch (error) {
+            logger.error("[RACE_RESOLUTION_V2] post-commit preparation error:", error);
+            throw error;
+          } finally {
+            stopPostCommitPrepare();
+          }
+
+          if (result && preparedSnapshotCommand) {
+            const nudgeBatchEnabled = await phaseTimer.measure(
+              "postSettings",
+              () => isStrictFlagEnabled(settings, "raceResolutionNudgeBatchV1Enabled")
+            );
+            const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
+            const nudgeTriggerGroups = nudgeBatchEnabled
+              ? [orderedTriggeringUserIds]
+              : orderedTriggeringUserIds.map((id) => [id]);
+            try {
+              for (const nudgeTriggerIds of nudgeTriggerGroups) {
+                await nudge({
+                  raceResults: [result],
+                  userId: nudgeTriggerIds[0] || null,
+                  ...(nudgeBatchEnabled ? {
+                    userIds: nudgeTriggerIds,
+                    participantWrites,
+                    preferHydratedRoster: true,
+                  } : {}),
+                  participantModel,
+                  recordPhaseTiming: (name, durationMs) =>
+                    addPhaseTiming(nudgePhaseMs, name, durationMs),
+                  requestStepSyncForUsers: async (recipientIds) => {
+                    preparedIntentClaims.push({
+                      kind: "STEP_SYNC",
+                      recipientIds: [...new Set(recipientIds || [])],
+                      raceId: job.raceId,
+                      sourceGeneration: job.processingGeneration,
+                      deliveryKind: "NUDGE",
+                    });
+                  },
+                });
+              }
+            } catch (error) {
+              logger.error("[RACE_RESOLUTION_V2] overtake nudge preparation error:", error);
+              throw error;
+            } finally {
+              stopOvertakeNudges();
+            }
+          }
+          if (result && !preparedSnapshotCommand) {
+            const preparationError = new Error("durable post-task command was not prepared");
+            preparationError.code = "POST_TASK_PREPARE_FAILED";
+            throw preparationError;
+          }
+        }
 
         // Concurrency-test seam: lets an integration synchronize a real late
         // HTTP step upload after generation capture but before the C0 fence.
@@ -1427,6 +1861,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const writeStartedAt = Date.now();
         const attemptedBoxSyncResults = [];
         const attemptedPowerupEvents = [];
+        let attemptedPostTaskId = null;
         await phaseTimer.measure("transaction", () => prisma.$transaction(async (tx) => {
         // (i) fence
         const fenced = await phaseTimer.measure(
@@ -1614,24 +2049,116 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // user-id/participant-id order used by standalone rollPowerup, before
         // the first participant-row write. This removes the worker/standalone
         // lock inversion and makes box consequences part of the race fence.
-        const triggeringParticipants = orderedTriggeringUserIds.length > 0
+        const boxByUser = result?.boxEffectiveStepsByUser || {};
+        const fullBoxScope =
+          resolutionPlan === "FULL" || resolutionPlan === "ARTIFACT_REUSE";
+        const boxScopeUserIds = fullBoxScope
+          ? Object.keys(boxByUser).sort()
+          : orderedTriggeringUserIds;
+        const boxCandidates = boxScopeUserIds.length > 0
           ? await tx.raceParticipant.findMany({
               where: {
                 raceId: job.raceId,
-                userId: { in: orderedTriggeringUserIds },
+                userId: { in: boxScopeUserIds },
                 status: "ACCEPTED",
                 race: { status: "ACTIVE" },
               },
-              select: { id: true, userId: true },
+              select: {
+                id: true,
+                userId: true,
+                nextBoxAtSteps: true,
+                powerupSlots: true,
+              },
               orderBy: [{ userId: "asc" }, { id: "asc" }],
             })
           : [];
-        for (const participant of triggeringParticipants) {
+        // FULL recovery can preselect against the bulk cursor read because the
+        // canonical roll path only advances nextBoxAtSteps: a not-yet-due row
+        // cannot become due concurrently. Keep incremental scope behavior
+        // unchanged, then recheck every selected FULL cursor after row locks.
+        const initiallySelectedBoxCandidates = boxCandidates.filter((participant) =>
+          !fullBoxScope || (
+            participant.nextBoxAtSteps > 0 &&
+            Number(boxByUser[participant.userId]) >= participant.nextBoxAtSteps
+          )
+        );
+        // Ordinary rolls use this advisory key. Acquire it only for preselected
+        // box candidates and in the same stable user/id order as their bulk
+        // read; a zero-due 477-person FULL run therefore takes zero advisory
+        // round trips.
+        for (const participant of initiallySelectedBoxCandidates) {
           await tx.$executeRawUnsafe(
             "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
             participant.id
           );
         }
+        // Fanny/usePowerup and forfeiture serialize on participant rows. Lock
+        // the union of box candidates and score writes once in database
+        // user/id order before either write path runs. This prevents a narrow
+        // job from taking later box row P2 and subsequently waiting on earlier
+        // score row P1 while a request holds P1 and waits on P2.
+        const participantRowLockIds = [...new Set([
+          ...initiallySelectedBoxCandidates.map((participant) => participant.id),
+          ...participantWrites.map((write) => write.participantId),
+        ])];
+        const lockedParticipantRows = participantRowLockIds.length > 0
+          ? await tx.$queryRawUnsafe(
+              `SELECT id,
+                      user_id AS "userId",
+                      next_box_at_steps AS "nextBoxAtSteps",
+                      powerup_slots AS "powerupSlots",
+                      status,
+                      forfeited_at AS "forfeitedAt"
+                 FROM race_participants
+                WHERE id = ANY($1::text[])
+                ORDER BY user_id, id
+                FOR UPDATE`,
+              participantRowLockIds,
+            )
+          : [];
+        const lockedParticipantById = new Map(
+          lockedParticipantRows.map((participant) => [participant.id, participant]),
+        );
+        const selectedBoxCandidates = initiallySelectedBoxCandidates
+          .map((participant) => lockedParticipantById.get(participant.id))
+          .filter((participant) => participant &&
+          String(participant.status || "").toUpperCase() === "ACCEPTED" &&
+          participant.forfeitedAt == null &&
+          (!fullBoxScope || (
+            participant.nextBoxAtSteps > 0 &&
+            Number(boxByUser[participant.userId]) >= participant.nextBoxAtSteps
+          ))
+        );
+        const boxInventoryRows = selectedBoxCandidates.length > 0
+          ? await tx.racePowerup.findMany({
+              where: { participantId: { in: selectedBoxCandidates.map((row) => row.id) } },
+              select: {
+                id: true,
+                participantId: true,
+                status: true,
+                earnedAtSteps: true,
+                createdAt: true,
+              },
+              orderBy: [{ participantId: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+            })
+          : [];
+        const inventoryByParticipant = new Map();
+        for (const box of boxInventoryRows) {
+          if (!inventoryByParticipant.has(box.participantId)) {
+            inventoryByParticipant.set(box.participantId, []);
+          }
+          inventoryByParticipant.get(box.participantId).push(box);
+        }
+        const preloadedBoxState = new Map(selectedBoxCandidates.map((participant) => [
+          participant.id,
+          {
+            nextBoxAtSteps: participant.nextBoxAtSteps,
+            powerupSlots: participant.powerupSlots,
+            status: String(participant.status || "").toUpperCase(),
+            forfeitedAt: participant.forfeitedAt,
+            inventory: inventoryByParticipant.get(participant.id) || [],
+          },
+        ]));
 
         // (ii) participant rows, ascending userId
         await phaseTimer.measure("participantWrites", async () => {
@@ -1739,8 +2266,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // effect writes, box rows, thresholds, feed rows, and recordSuccess.
         await phaseTimer.measure("boxConsequences", async () => {
           if (result) {
-            const boxByUser = result.boxEffectiveStepsByUser || {};
-            for (const participant of triggeringParticipants) {
+            for (const participant of selectedBoxCandidates) {
               const syncResult = await syncRacePowerupState({
                 raceId: result.raceId,
                 userId: participant.userId,
@@ -1749,6 +2275,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 tx,
                 advisoryLockHeld: true,
                 pendingEvents: attemptedPowerupEvents,
+                preloadedState: preloadedBoxState.get(participant.id),
               });
               attemptedBoxSyncResults.push({
                 userId: participant.userId,
@@ -1809,6 +2336,53 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             },
           }, tx);
         }
+        if (atomicPostTaskHandoff && preparedSnapshotCommand) {
+          const resolveIntents = async (client) => {
+            const resolved = [];
+            for (const claim of preparedIntentClaims) {
+              if (claim?.kind === "HIGH_MULTIPLIER") {
+                resolved.push(...await deliveryIntents.claimHighMultiplier(claim.data, {
+                  sourceGeneration: claim.sourceGeneration,
+                  client,
+                  participantClaim: claim.participantClaim,
+                }));
+              } else if (claim?.kind === "HIGH_MULTIPLIER_REARM") {
+                await deliveryIntents.rearmHighMultiplier({
+                  participantId: claim.participantId,
+                  expectedNotifiedAt: claim.expectedNotifiedAt,
+                  client,
+                });
+              } else if (claim?.kind === "STEP_SYNC") {
+                resolved.push(...await deliveryIntents.claimStepSync(claim.recipientIds, {
+                  raceId: claim.raceId,
+                  sourceGeneration: claim.sourceGeneration,
+                  kind: claim.deliveryKind,
+                  client,
+                }));
+              }
+            }
+            return resolved;
+          };
+          const durableTask = await phaseTimer.measure(
+            "postTaskHandoff",
+            () => postTaskHandoff.createDurable({
+              raceId: job.raceId,
+              sourceGeneration: job.processingGeneration,
+              snapshotCommand: preparedSnapshotCommand,
+              intents: [],
+              resolveIntents,
+              fastHandoff: false,
+              recordPhaseTiming: (name, durationMs) =>
+                addPhaseTiming(postHandoffPhaseMs, name, durationMs),
+            }, tx),
+          );
+          if (!durableTask?.id) {
+            const handoffError = new Error("durable post-task handoff was not persisted");
+            handoffError.code = "POST_TASK_HANDOFF_FAILED";
+            throw handoffError;
+          }
+          attemptedPostTaskId = durableTask.id;
+        }
         superseded = outcome.superseded;
         committedBoxSyncResults = attemptedBoxSyncResults;
         committedPowerupEvents = attemptedPowerupEvents;
@@ -1819,6 +2393,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // mid-write by a transaction timeout.
         { timeout: 15_000, maxWait: 10_000 }));
         writeMs += Math.max(0, Date.now() - writeStartedAt);
+        if (
+          !discarded &&
+          !artifactRejectedAtFence &&
+          !stepSyncRejectedAtFence &&
+          !closureRejectedAtFence &&
+          !sourceInputRejectedAtFence
+        ) {
+          attempt.authoritativeCommitCompleted = true;
+          committedPostTaskId = attemptedPostTaskId;
+          if (typeof dependencies.afterAuthoritativeCommit === "function") {
+            await dependencies.afterAuthoritativeCommit({ job, result });
+          }
+        }
 
         if (artifactRejectedAtFence) {
           artifactFallbackReason = "fence_mismatch";
@@ -1893,6 +2480,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           event: "race_resolution_v2",
           schemaVersion: 2,
           observedAt: new Date().toISOString(),
+          attemptId,
           outcome: "superseded_discard",
           queuePriority: job.processingQueuePriority || "LIVE",
           reasonClasses: job.processingDirtyReasons || ["FULL"],
@@ -1919,10 +2507,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
       // ── Post-commit. Everything below is best-effort and holds no lock. ──
       const postStartedAt = Date.now();
-      const postTasksEnabled = await phaseTimer.measure(
-        "postSettings",
-        () => isStrictFlagEnabled(settings, "raceResolutionPostTasksV1Enabled")
-      );
       let deferredSnapshotCommand = null;
       const deferredIntents = [];
       // These are decisions waiting to be claimed.  They must not touch a
@@ -1947,11 +2531,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       //     re-reads the committed rows. No second full score recompute happens
       //     on any plan, so no closure-specific approximation exists to make.
       if (
-        resolutionPlan === "FULL" ||
-        resolutionPlan === "ARTIFACT_REUSE" ||
-        resolutionPlan === "STEP_SYNC_COMMITTED" ||
-        resolutionPlan === "STEP_SYNC_INCREMENTAL" ||
-        resolutionPlan === "DEPENDENCY_CLOSURE"
+        !atomicPostTaskHandoff &&
+        [
+          "FULL",
+          "ARTIFACT_REUSE",
+          "STEP_SYNC_COMMITTED",
+          "STEP_SYNC_INCREMENTAL",
+          "DEPENDENCY_CLOSURE",
+        ].includes(resolutionPlan)
       ) {
         const stopPostCommitHook = phaseTimer.start("postCommitHook");
         try {
@@ -1965,7 +2552,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             deferDelivery: postTasksEnabled,
           });
           deferredSnapshotCommand = outcome?.snapshotCommand || null;
-          if (Array.isArray(outcome?.intents)) deferredIntentClaims.push(...outcome.intents);
+          if (Array.isArray(outcome?.intentClaims)) {
+            deferredIntentClaims.push(...outcome.intentClaims);
+          }
         } catch (error) {
           logger.error("[RACE_RESOLUTION_V2] post-commit hook error:", error);
         } finally {
@@ -1977,89 +2566,115 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // projections remain here; they can never determine whether a box exists.
       if (result) {
         const stopPowerupStateSync = phaseTimer.start("powerupStateSync");
-        for (const { userId: triggerUserId, syncResult } of committedBoxSyncResults) {
-          try {
-            await recentBoxMints.record({
-              userId: triggerUserId,
-              raceId: result.raceId,
-              syncResult,
-            });
-          } catch (error) {
-            logger.error(JSON.stringify({
-              event: "race_resolution_v2_post_error",
-              operation: "powerup_state_sync",
-              errorCode: error?.code || "POST_WORK_ERROR",
-            }));
+        try {
+          for (const { userId: triggerUserId, syncResult } of committedBoxSyncResults) {
+            try {
+              await recentBoxMints.record({
+                userId: triggerUserId,
+                raceId: result.raceId,
+                syncResult,
+              });
+            } catch (error) {
+              logger.error(JSON.stringify({
+                event: "race_resolution_v2_post_error",
+                operation: "powerup_state_sync",
+                errorCode: error?.code || "POST_WORK_ERROR",
+              }));
+            }
           }
-        }
-        for (const payload of committedPowerupEvents) {
-          try {
-            events.emit("POWERUP_EARNED", payload);
-          } catch (error) {
-            logger.error(JSON.stringify({
-              event: "race_resolution_v2_post_error",
-              operation: "powerup_event_publish",
-              errorCode: error?.code || "POST_WORK_ERROR",
-            }));
+          for (const payload of committedPowerupEvents) {
+            try {
+              events.emit("POWERUP_EARNED", payload);
+            } catch (error) {
+              logger.error(JSON.stringify({
+                event: "race_resolution_v2_post_error",
+                operation: "powerup_event_publish",
+                errorCode: error?.code || "POST_WORK_ERROR",
+              }));
+            }
           }
+        } finally {
+          stopPowerupStateSync();
         }
-        stopPowerupStateSync();
 
-        const nudgeBatchEnabled = await phaseTimer.measure(
-          "postSettings",
-          () => isStrictFlagEnabled(settings, "raceResolutionNudgeBatchV1Enabled")
-        );
-        const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
-        const nudgeTriggerGroups = nudgeBatchEnabled
-          ? [orderedTriggeringUserIds]
-          : orderedTriggeringUserIds.map((id) => [id]);
-        for (const nudgeTriggerIds of nudgeTriggerGroups) {
+        if (!atomicPostTaskHandoff) {
+          const nudgeBatchEnabled = await phaseTimer.measure(
+            "postSettings",
+            () => isStrictFlagEnabled(settings, "raceResolutionNudgeBatchV1Enabled")
+          );
+          const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
+          const nudgeTriggerGroups = nudgeBatchEnabled
+            ? [orderedTriggeringUserIds]
+            : orderedTriggeringUserIds.map((id) => [id]);
           try {
-            await nudge({
-              raceResults: [result],
-              userId: nudgeTriggerIds[0] || null,
-              ...(nudgeBatchEnabled ? {
-                userIds: nudgeTriggerIds,
-                participantWrites,
-                preferHydratedRoster: true,
-              } : {}),
-              participantModel,
-              recordPhaseTiming: (name, durationMs) =>
-                addPhaseTiming(nudgePhaseMs, name, durationMs),
-              requestStepSyncForUsers: postTasksEnabled
-                ? async (recipientIds) => {
-                  try {
-                    deferredIntentClaims.push({
-                      kind: "STEP_SYNC",
-                      recipientIds: [...new Set(recipientIds || [])],
-                      raceId: job.raceId,
-                      sourceGeneration: job.processingGeneration,
-                      deliveryKind: "NUDGE",
-                    });
-                  } catch (error) {
-                    // Preserve the current delivery immediately when an
-                    // immutable cooldown reservation cannot be made.
-                    logger.error(JSON.stringify({
-                      event: "race_resolution_v2_post_error",
-                      operation: "nudge_intent_claim",
-                      errorCode: error?.code || "INTENT_CLAIM_ERROR",
-                    }));
-                    await requestStepSyncForUsers(recipientIds);
+            for (const nudgeTriggerIds of nudgeTriggerGroups) {
+              try {
+                await nudge({
+                raceResults: [result],
+                userId: nudgeTriggerIds[0] || null,
+                ...(nudgeBatchEnabled ? {
+                  userIds: nudgeTriggerIds,
+                  participantWrites,
+                  preferHydratedRoster: true,
+                } : {}),
+                participantModel,
+                recordPhaseTiming: (name, durationMs) =>
+                  addPhaseTiming(nudgePhaseMs, name, durationMs),
+                requestStepSyncForUsers: postTasksEnabled
+                  ? async (recipientIds) => {
+                    try {
+                      deferredIntentClaims.push({
+                        kind: "STEP_SYNC",
+                        recipientIds: [...new Set(recipientIds || [])],
+                        raceId: job.raceId,
+                        sourceGeneration: job.processingGeneration,
+                        deliveryKind: "NUDGE",
+                      });
+                    } catch (error) {
+                      // Preserve the current delivery immediately when an
+                      // immutable cooldown reservation cannot be made.
+                      logger.error(JSON.stringify({
+                        event: "race_resolution_v2_post_error",
+                        operation: "nudge_intent_claim",
+                        errorCode: error?.code || "INTENT_CLAIM_ERROR",
+                      }));
+                      await requestStepSyncForUsers(recipientIds);
+                    }
                   }
-                }
-                : requestStepSyncForUsers,
-            });
-          } catch (error) {
-            logger.error("[RACE_RESOLUTION_V2] overtake nudge error:", error);
+                  : requestStepSyncForUsers,
+                });
+              } catch (error) {
+                logger.error("[RACE_RESOLUTION_V2] overtake nudge error:", error);
+              }
+            }
+          } finally {
+            stopOvertakeNudges();
           }
         }
-        stopOvertakeNudges();
       }
 
       // Creation happens only after every stateful/RNG/recipient decision above
       // has finished. The payload contains only already-claimed immutable
       // transport intents plus the generation-level publication command.
-      if (postTasksEnabled && deferredSnapshotCommand) {
+      if (atomicPostTaskHandoff && committedPostTaskId) {
+        const stopPostTaskHandoff = phaseTimer.start("postTaskHandoff");
+        try {
+          await postTaskHandoff.resumeDurable(committedPostTaskId, {
+            fastHandoff: false,
+            recordPhaseTiming: (name, durationMs) =>
+              addPhaseTiming(postHandoffPhaseMs, name, durationMs),
+          });
+        } catch (error) {
+          // The task is already committed and independently reclaimable.
+          logger.error(JSON.stringify({
+            event: "race_resolution_v2_post_error",
+            operation: "post_task_resume",
+            errorCode: error?.code || "POST_HANDOFF_RESUME_ERROR",
+          }));
+        } finally {
+          stopPostTaskHandoff();
+        }
+      } else if (postTasksEnabled && deferredSnapshotCommand) {
         const stopPostTaskHandoff = phaseTimer.start("postTaskHandoff");
         try {
           const resolveIntents = async (client) => {
@@ -2109,6 +2724,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         event: "race_resolution_v2",
         schemaVersion: 2,
         observedAt: new Date().toISOString(),
+        attemptId,
         outcome: superseded ? "superseded_commit" : "commit",
         queuePriority: job.processingQueuePriority || "LIVE",
         reasonClasses: job.processingDirtyReasons?.length
@@ -2169,6 +2785,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           event: "race_resolution_v2",
           schemaVersion: 2,
           observedAt: new Date().toISOString(),
+          attemptId,
           outcome: "fence_lost",
           queuePriority: job.processingQueuePriority || "LIVE",
           resolutionPlan,
@@ -2191,6 +2808,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         event: "race_resolution_v2",
         schemaVersion: 2,
         observedAt: new Date().toISOString(),
+        attemptId,
         outcome: "failed",
         queuePriority: job.processingQueuePriority || "LIVE",
         resolutionPlan,
@@ -2233,9 +2851,42 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       }
       return job;
     }
+    } catch (error) {
+      logger.error(JSON.stringify({
+        event: "race_resolution_v2",
+        schemaVersion: 2,
+        observedAt: new Date().toISOString(),
+        attemptId,
+        outcome: "failed",
+        queuePriority: job.processingQueuePriority || "LIVE",
+        resolutionPlan,
+        coreMs: Math.max(0, Date.now() - startMs),
+        queueLagMs: attempt.queueLagMs,
+        reasonClasses: job.processingDirtyReasons || ["FULL"],
+        errorCode: error?.code || "WORKER_PREPARE_ERROR",
+        phaseMs: phaseTimer.snapshot(),
+      }));
+      try {
+        await jobModel.recordFailure({
+          id: job.id,
+          leaseToken: job.leaseToken,
+          attempts: job.attempts,
+          errorCode: error?.code || "WORKER_PREPARE_ERROR",
+          now: now(),
+        });
+      } catch (failureError) {
+        logger.error("[RACE_RESOLUTION_V2] prepare recordFailure failed:", failureError);
+      }
+      return job;
+    } finally {
+      watchdog.cancel();
+      activeAttempts.delete(attemptId);
+      lastTerminalMonotonicAt = monotonicNow();
+    }
   }
 
   async function processOne() {
+    if (!productionExecutionRole) return null;
     return workBudget.run("core", () => processOneUnbudgeted());
   }
 
@@ -2250,13 +2901,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     const requestedGeneration = Number.isInteger(Number(generation))
       ? Number(generation)
       : null;
-    const deadline = Date.now() + leaseMs + 5_000;
-    while (Date.now() <= deadline) {
-      const processed = await workBudget.run("core", () =>
-        processOneUnbudgeted({ raceId })
-      );
-      if (processed === TARGETED_CLAIM_DISABLED) return null;
-      if (processed) return processed;
+    const deadline = wallClockNow() + (
+      nodeEnv === "production" && processRole !== "resolution"
+        ? 25_000
+        : leaseMs + 5_000
+    );
+    while (wallClockNow() <= deadline) {
+      if (productionExecutionRole) {
+        const processed = await workBudget.run("core", () =>
+          processOneUnbudgeted({ raceId })
+        );
+        if (processed === TARGETED_CLAIM_DISABLED) return null;
+        if (processed) return processed;
+      }
 
       if (typeof jobModel.findByRaceId !== "function") return null;
       const current = await jobModel.findByRaceId(raceId);
@@ -2274,13 +2931,16 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // On the first miss another worker normally owns the lease. Poll without
       // holding a database connection; once it commits or its lease expires,
       // the next targeted claim either observes completion or safely reclaims.
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      const remainingMs = deadline - wallClockNow();
+      if (remainingMs <= 0) break;
+      await sleep(Math.min(compatibilityPollIntervalMs, remainingMs));
     }
     logger.error(`[RACE_RESOLUTION_V2] timed out waiting for race ${raceId}`);
     return null;
   }
 
   async function tick({ concurrencyOverride = null } = {}) {
+    if (!productionExecutionRole) return 0;
     if (raceResolutionWorkerDisabled()) return 0;
     const concurrency = concurrencyOverride == null
       ? effectiveResolutionConcurrency()
@@ -2306,9 +2966,25 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       const lanes = typeof workBudget.snapshot === "function"
         ? workBudget.snapshot()
         : { active: null, queuedCore: null, queuedPost: null };
+      lastExpiredRunningCount = service.expiredRunningCount ?? null;
       const lagMs = service.oldestRequestAgeMs;
       const claimableLagMs = service.oldestClaimableAgeMs;
-      const level = claimableLagMs > QUEUE_LAG_ALARM_MS ? "warn" : "log";
+      const lastTerminalAgeMs = lastTerminalMonotonicAt == null
+        ? null
+        : Math.max(0, Number(monotonicNow() - lastTerminalMonotonicAt) / 1e6);
+      const noTerminalProgressAgeMs = lastTerminalAgeMs == null
+        ? Math.max(0, Number(monotonicNow() - processBootMonotonicAt) / 1e6)
+        : lastTerminalAgeMs;
+      const oldestClaimWithoutTerminalMs = [...activeAttempts.values()].reduce(
+        (oldest, entry) => Math.max(oldest, entry.phaseTimer.liveState().attemptElapsedMs),
+        0
+      );
+      const alarm =
+        claimableLagMs > QUEUE_LAG_ALARM_MS ||
+        (service.expiredRunningCount > 0 && lanes.active >= 2) ||
+        (service.claimableCount > 0 &&
+          noTerminalProgressAgeMs > RACE_RESOLUTION_WATCHDOG_MS);
+      const level = alarm ? "warn" : "log";
       (logger[level] || logger.log).call(
         logger,
         JSON.stringify({
@@ -2317,6 +2993,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           claimableCount: service.claimableCount,
           oldestClaimableAgeMs: claimableLagMs,
           runningCount: service.runningCount,
+          expiredRunningCount: service.expiredRunningCount,
           settlementCount: service.settlementCount,
           recoveryCount: service.recoveryCount,
           liveCount: service.liveCount,
@@ -2324,7 +3001,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           workLaneActive: lanes.active,
           workLaneQueuedCore: lanes.queuedCore,
           workLaneQueuedPost: lanes.queuedPost,
-          alarm: claimableLagMs > QUEUE_LAG_ALARM_MS,
+          lastTerminalAgeMs,
+          oldestClaimWithoutTerminalMs,
+          eventLoopDelayMs: Math.round(eventLoopDelayMs),
+          processBootId: bootId,
+          processBootedAt: PROCESS_BOOT_TIMESTAMP,
+          alarm,
         })
       );
       capacity.setCounts({
@@ -2332,6 +3014,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         claimableCount: service.claimableCount,
         claimableLagMs,
         runningCount: service.runningCount,
+        expiredRunningCount: service.expiredRunningCount,
         settlementCount: service.settlementCount,
         recoveryCount: service.recoveryCount,
         liveCount: service.liveCount,
@@ -2339,8 +3022,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         workLaneActive: lanes.active,
         workLaneQueuedCore: lanes.queuedCore,
         workLaneQueuedPost: lanes.queuedPost,
+        lastTerminalAgeMs,
+        oldestClaimWithoutTerminalMs,
+        eventLoopDelayMs,
       });
-      capacity.setDimensions({ alarm: claimableLagMs > QUEUE_LAG_ALARM_MS });
+      capacity.setDimensions({ alarm });
       outcome = "success";
       return lagMs;
     } catch (error) {
@@ -2380,6 +3066,28 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
 function scheduleRaceResolutionWorkerV2(dependencies = {}) {
   const logger = dependencies.logger || console;
+  const processRole = dependencies.processRole || process.env.STEPS_PROCESS_ROLE || "all";
+  const nodeEnv = dependencies.nodeEnv || process.env.NODE_ENV || "development";
+  if (nodeEnv === "production" && processRole === "resolution") {
+    try {
+      const bootSpool = dependencies.operationalAlertSpool || createOperationalAlertSpool();
+      bootSpool.ensureDirectory();
+      bootSpool.writeBoot({
+        bootId: dependencies.bootId || PROCESS_BOOT_ID,
+        pid: process.pid,
+        bootedAt: PROCESS_BOOT_TIMESTAMP,
+      });
+    } catch (error) {
+      try {
+        process.stderr.write(`${JSON.stringify({
+          event: "race_resolution_v2_alert_spool_error",
+          schemaVersion: 1,
+          alertType: "boot",
+          errorCode: error?.code || "BOOT_MARKER_WRITE_FAILED",
+        })}\n`);
+      } catch (_) {}
+    }
+  }
   const worker = buildRaceResolutionWorkerV2(dependencies);
   const settings = dependencies.appSettings || defaultAppSettings;
   const yieldToEventLoop = dependencies.yieldToEventLoop ||
@@ -2478,6 +3186,11 @@ module.exports = {
   buildRaceResolutionWorkerV2,
   scheduleRaceResolutionWorkerV2,
   FenceLostError,
+  createRaceResolutionPhaseTimer,
+  createRaceResolutionAttemptWatchdog,
+  RACE_RESOLUTION_SLOW_PHASE_MS,
+  RACE_RESOLUTION_SLOW_ATTEMPT_MS,
+  RACE_RESOLUTION_WATCHDOG_MS,
   createWriteCapture,
   runBoundedRaceResolutionJobs,
   quietPeriodMs,

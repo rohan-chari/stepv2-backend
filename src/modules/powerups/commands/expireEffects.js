@@ -3,7 +3,14 @@ const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RacePowerup } = require("../models/racePowerup");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Race } = require("../../races/models/race");
-const { StepSample } = require("../../steps/models/stepSample");
+const {
+  StepSample,
+  prorateSamplesIntoWindow,
+} = require("../../steps/models/stepSample");
+const {
+  prisma: defaultPrisma,
+  runInPrismaTransaction: defaultRunInPrismaTransaction,
+} = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
@@ -13,6 +20,29 @@ const {
 
 let immediateRaceResolutionWorker = null;
 async function defaultResolveRaceResolution(input) {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.STEPS_PROCESS_ROLE !== "resolution"
+  ) {
+    // Frozen clients still get a bounded chance to observe the committed
+    // generation, but HTTP/cron never instantiate or invoke the resolution
+    // worker. They only poll the durable job written immediately above.
+    const { RaceResolutionJobV2 } = require("../../races/models/raceResolutionJobV2");
+    const requestedGeneration = Number(input?.generation);
+    const deadline = Date.now() + 25_000;
+    while (Date.now() <= deadline) {
+      const current = await RaceResolutionJobV2.findByRaceId(input?.raceId);
+      if (!current) return null;
+      if (
+        Number(current.processingGeneration) >= requestedGeneration &&
+        (current.state === "SUCCEEDED" || current.state === "FAILED")
+      ) return current;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, remainingMs)));
+    }
+    return null;
+  }
   // Lazy require avoids introducing a module-initialization cycle: the C0
   // worker's post-commit hook itself loads expireEffects. One process-local
   // worker is enough; ownership is still the durable race job lease/fence.
@@ -69,8 +99,166 @@ function buildExpireEffects(dependencies = {}) {
       ? async () => null
       : defaultResolveRaceResolution;
   const nowFn = dependencies.now || (() => new Date());
+  // Production's default command and explicit integration-test clients use
+  // the restart-safe transactional path. Small dependency-injected unit tests
+  // retain the model adapter path so their pure fakes need no Prisma surface.
+  const transactionalPrisma = dependencies.prisma ||
+    (Object.keys(dependencies).length === 0 ? defaultPrisma : null);
+  const runInPrismaTransaction = dependencies.runInPrismaTransaction ||
+    (transactionalPrisma === defaultPrisma
+      ? defaultRunInPrismaTransaction
+      : (operation, options) => transactionalPrisma.$transaction(operation, options));
+  const afterEffectConsequenceWrite =
+    dependencies.afterEffectConsequenceWrite || (async () => {});
+  const afterFannyParticipantLock =
+    dependencies.afterFannyParticipantLock || (async () => {});
 
-  return async function expireEffects({ raceId, participantSteps } = {}) {
+  function postTaskFenceLost() {
+    const error = new Error("race resolution post-task lease fence lost");
+    error.code = "POST_TASK_FENCE_LOST";
+    return error;
+  }
+
+  async function sumStepsInWindowWithTransaction(tx, userId, start, end) {
+    if (dependencies.StepSample) {
+      return stepSampleModel.sumStepsInWindow(userId, start, end);
+    }
+    const rows = await tx.$queryRawUnsafe(
+      `SELECT period_start AS "start", period_end AS "end", steps
+       FROM step_samples
+       WHERE user_id = $1
+         AND period_end > $2::timestamp
+         AND period_start < $3::timestamp`,
+      userId,
+      start.toISOString(),
+      end.toISOString(),
+    );
+    return prorateSamplesIntoWindow(rows, start.getTime(), end.getTime());
+  }
+
+  async function expireOneTransaction(effect, currentTime, participantSteps, taskFence) {
+    let committedEvent = null;
+    let committedEffect = null;
+    await runInPrismaTransaction(async (tx) => {
+      if (taskFence && (!taskFence.taskId || !taskFence.leaseToken)) {
+        throw postTaskFenceLost();
+      }
+      if (taskFence) {
+        const fencedTask = await tx.$queryRawUnsafe(
+          `SELECT id
+           FROM race_resolution_post_tasks
+           WHERE id=$1 AND state='running' AND lease_token=$2
+             AND lease_expires_at > NOW()
+           FOR UPDATE`,
+          taskFence.taskId,
+          taskFence.leaseToken,
+        );
+        if (fencedTask.length !== 1) throw postTaskFenceLost();
+      }
+
+      // Direct power-up commands lock the race, then participant rows, before
+      // touching active effects. Fanny expiry also mutates its target
+      // participant and writes a race-scoped feed event, so take that complete
+      // order here too. Participant-first alone still deadlocks with legacy
+      // Pocket Watch: expiry holds participant then needs the race for the feed
+      // FK while Pocket Watch holds race then waits for participant.
+      if (effect.type === "FANNY_PACK" && effect.targetParticipantId) {
+        await tx.$queryRawUnsafe(
+          `SELECT id
+           FROM races
+           WHERE id=$1
+           FOR UPDATE`,
+          effect.raceId,
+        );
+        await tx.$queryRawUnsafe(
+          `SELECT id
+           FROM race_participants
+           WHERE id=$1
+           ORDER BY user_id ASC, id ASC
+           FOR UPDATE`,
+          effect.targetParticipantId,
+        );
+        await afterFannyParticipantLock({ effect, tx });
+      }
+
+      const locked = await tx.$queryRawUnsafe(
+        `SELECT id
+         FROM race_active_effects
+         WHERE id=$1 AND status='active_effect' AND expires_at IS NOT NULL
+           AND expires_at <= $2::timestamp
+         FOR UPDATE`,
+        effect.id,
+        currentTime.toISOString(),
+      );
+      if (locked.length !== 1) return;
+      const currentEffect = await tx.raceActiveEffect.findUnique({
+        where: { id: effect.id },
+      });
+      if (!currentEffect || currentEffect.status !== "ACTIVE") return;
+
+      const metadata = { ...(currentEffect.metadata || {}) };
+      if (SNAPSHOT_AT_EXPIRY_TYPES.includes(currentEffect.type)) {
+        const currentStepsForTarget = participantSteps?.[currentEffect.targetParticipantId];
+        if (currentStepsForTarget !== undefined) metadata.stepsAtExpiry = currentStepsForTarget;
+      }
+
+      if (currentEffect.type === "FANNY_PACK") {
+        await tx.raceParticipant.updateMany({
+          where: { id: currentEffect.targetParticipantId, powerupSlots: { gt: 3 } },
+          data: { powerupSlots: { decrement: 1 } },
+        });
+      }
+      if (currentEffect.type === "PIGGY_BANK") {
+        await mintPiggyBank({
+          effect: currentEffect,
+          stepSampleModel: {
+            sumStepsInWindow: (userId, start, end) =>
+              sumStepsInWindowWithTransaction(tx, userId, start, end),
+          },
+          awardCoins,
+          endCap: currentEffect.expiresAt,
+          tx,
+        });
+      }
+
+      await afterEffectConsequenceWrite({ effect: currentEffect, tx });
+      const transitioned = await tx.raceActiveEffect.updateMany({
+        where: { id: currentEffect.id, status: "ACTIVE" },
+        data: { status: "EXPIRED", metadata },
+      });
+      if (transitioned.count !== 1) throw postTaskFenceLost();
+      committedEvent = await tx.racePowerupEvent.create({
+        data: {
+          raceId: currentEffect.raceId,
+          actorUserId: currentEffect.targetUserId,
+          eventType: "EFFECT_EXPIRED",
+          powerupType: currentEffect.type,
+          description: `${POWERUP_NAMES[currentEffect.type]} wore off.`,
+        },
+      });
+      committedEffect = currentEffect;
+    }, { timeout: 15_000, maxWait: 10_000 });
+
+    if (!committedEffect) return null;
+    try {
+      await eventModel.invalidateCreated?.(committedEvent);
+    } catch (error) {
+      console.error("Failed to invalidate expired-effect feed cache:", error);
+    }
+    try {
+      events.emit("EFFECT_EXPIRED", {
+        raceId: committedEffect.raceId,
+        effectId: committedEffect.id,
+        type: committedEffect.type,
+        targetUserId: committedEffect.targetUserId,
+      });
+    } catch (error) {
+      console.error("Failed to publish expired-effect process event:", error);
+    }
+    return committedEffect;
+  }
+
+  return async function expireEffects({ raceId, participantSteps, taskFence = null } = {}) {
     const currentTime = nowFn();
     const activeImpactEnabled = true;
     const expired =
@@ -128,6 +316,17 @@ function buildExpireEffects(dependencies = {}) {
         ACTIVE_IMPACT_EXPIRY_TYPES.includes(effect.type)
       ) continue;
 
+      if (transactionalPrisma) {
+        const transitioned = await expireOneTransaction(
+          effect,
+          currentTime,
+          participantSteps,
+          taskFence,
+        );
+        if (transitioned) results.push(transitioned);
+        continue;
+      }
+
       const metadata = effect.metadata || {};
       // Store current steps at expiry for snapshot-based timed modifiers.
       if (SNAPSHOT_AT_EXPIRY_TYPES.includes(effect.type)) {
@@ -139,24 +338,16 @@ function buildExpireEffects(dependencies = {}) {
 
       // Revert Fanny Pack slot expansion (items stay — extra slot just won't refill)
       if (effect.type === "FANNY_PACK") {
-        try {
-          const participant = await participantModel.findById(effect.targetParticipantId);
-          if (participant && participant.powerupSlots > 3) {
-            await participantModel.updatePowerupSlots(participant.id, participant.powerupSlots - 1);
-          }
-        } catch (e) {
-          console.error("Failed to revert Fanny Pack slots:", e);
+        const participant = await participantModel.findById(effect.targetParticipantId);
+        if (participant && participant.powerupSlots > 3) {
+          await participantModel.updatePowerupSlots(participant.id, participant.powerupSlots - 1);
         }
       }
 
       // ── PIGGY_BANK (§3.10): mint coins for the window at expiry (idempotent via
       // awardCoins refId = effect.id; the settlement path uses the same refId).
       if (effect.type === "PIGGY_BANK") {
-        try {
-          await mintPiggyBank({ effect, raceModel, stepSampleModel, awardCoins, endCap: effect.expiresAt });
-        } catch (e) {
-          console.error("Piggy Bank mint failed:", e);
-        }
+        await mintPiggyBank({ effect, raceModel, stepSampleModel, awardCoins, endCap: effect.expiresAt });
       }
 
       await effectModel.update(effect.id, {
@@ -193,7 +384,11 @@ function buildExpireEffects(dependencies = {}) {
         invalidateRaceProgress,
       } = require("../../races/services/raceProgressSnapshot");
       for (const id of touchedRaceIds) {
-        await invalidateRaceProgress(id);
+        try {
+          await invalidateRaceProgress(id);
+        } catch (error) {
+          console.error("Failed to invalidate expired-effect race snapshot:", error);
+        }
       }
     }
 
@@ -267,7 +462,7 @@ async function evaluateDrillSergeant({ effect, raceModel, participantModel, step
 
 // Piggy Bank mint (shared by expiry + settlement). Window is [startsAt,
 // min(expiresAt, endCap)]. Idempotent via awardCoins refId = effect.id.
-async function mintPiggyBank({ effect, stepSampleModel, awardCoins, endCap }) {
+async function mintPiggyBank({ effect, stepSampleModel, awardCoins, endCap, tx = null }) {
   const meta = effect.metadata || {};
   const stepsPerCoin = Number(meta.stepsPerCoin) || 300;
   const coinCap = Number.isFinite(Number(meta.coinCap)) ? Number(meta.coinCap) : 80;
@@ -286,7 +481,13 @@ async function mintPiggyBank({ effect, stepSampleModel, awardCoins, endCap }) {
     // the same refId only if coins > 0; a zero mint intentionally does nothing.
     return;
   }
-  await awardCoins({ userId: effect.targetUserId, amount: coins, reason: "piggy_bank", refId: effect.id });
+  await awardCoins({
+    userId: effect.targetUserId,
+    amount: coins,
+    reason: "piggy_bank",
+    refId: effect.id,
+    tx,
+  });
 }
 
 const expireEffects = buildExpireEffects();

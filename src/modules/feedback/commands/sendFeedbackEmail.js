@@ -7,11 +7,10 @@ const {
   buildFeedbackEmailAttemptModel,
 } = require("../models/feedbackEmailAttempt");
 const {
-  googleWorkspaceFeedbackTransport: defaultTransport,
   SUPPORT_ADDRESS,
   VISIBLE_FROM,
   buildFeedbackSubject,
-} = require("../services/googleWorkspaceFeedbackTransport");
+} = require("../services/feedbackEmailConstants");
 
 const MAX_TEXT_LENGTH = 2000;
 const MAX_CATEGORY_LENGTH = 64;
@@ -137,12 +136,18 @@ function buildSendFeedbackEmail(dependencies = {}) {
     (dependencies.prisma
       ? buildFeedbackEmailAttemptModel({ prisma: dependencies.prisma })
       : defaultAttemptModel);
-  const transport = dependencies.feedbackTransport || defaultTransport;
+  // Keep Gmail/OAuth code out of the dedicated resolution process. The HTTP
+  // feedback route constructs this command there, but the provider transport
+  // is loaded only if an actual feedback request invokes delivery.
+  const configuredTransport = dependencies.feedbackTransport || null;
   const now = dependencies.now || (() => new Date());
   const uuid = dependencies.randomUUID || randomUUID;
   const logger = dependencies.logger || console;
 
   return async function sendFeedbackEmail(input) {
+    const transport = configuredTransport ||
+      require("../services/googleWorkspaceFeedbackTransport")
+        .googleWorkspaceFeedbackTransport;
     const text = validateText(input.text);
     const category = validateCategory(input.category);
     const replyTo = selectReplyTo(input.replyToEmail, input.storedEmail);

@@ -6,6 +6,9 @@ const {
   buildRaceResolutionWorkerV2,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const { appSettings } = require("../../src/shared/config/appSettings");
+const {
+  buildExpireEffects,
+} = require("../../src/modules/powerups/commands/expireEffects");
 
 let server;
 let nextAppleId = 0;
@@ -479,6 +482,138 @@ describe("powerups5 wave — integration", () => {
   });
 
   // ── 8. Rally Flag ───────────────────────────────────────────────────────
+  describe("restart-atomic effect expiry", () => {
+    it("serializes Fanny expiry before a real Pocket Watch command without an ABBA deadlock", async () => {
+      const a = await createUser("Lock Order Packer");
+      const b = await createUser("Lock Order Observer");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      const target = await participant(raceId, a.userId);
+      await prisma.raceParticipant.update({
+        where: { id: target.id },
+        data: { powerupSlots: 4 },
+      });
+      const originalExpiry = new Date(Date.now() + HOUR_MS);
+      const effect = await giveEffect(raceId, a.userId, a.userId, "FANNY_PACK", {
+        expiresAt: originalExpiry,
+      });
+      const watch = await giveHeld(raceId, a.userId, "POCKET_WATCH");
+
+      let announceParticipantLock;
+      const participantLocked = new Promise((resolve) => {
+        announceParticipantLock = resolve;
+      });
+      let releaseParticipantLock;
+      const holdParticipantLock = new Promise((resolve) => {
+        releaseParticipantLock = resolve;
+      });
+      const expireAtBoundary = buildExpireEffects({
+        prisma,
+        now: () => new Date(originalExpiry.getTime() + 1),
+        eventBus: { emit() {} },
+        afterFannyParticipantLock: async () => {
+          announceParticipantLock();
+          await holdParticipantLock;
+        },
+      });
+
+      const expiryPromise = expireAtBoundary({ raceId });
+      await Promise.race([
+        participantLocked,
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error("Fanny expiry never acquired the participant-first lock")),
+          2_000,
+        )),
+      ]);
+      const watchPromise = usePU(a.token, raceId, watch.id);
+      releaseParticipantLock();
+
+      await expiryPromise;
+      const watchResponse = await watchPromise;
+      assert.equal(watchResponse.status, 400);
+      assert.match((await watchResponse.json()).error, /active timed buff/i);
+      assert.equal((await participant(raceId, a.userId)).powerupSlots, 3);
+      assert.equal(
+        (await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status,
+        "EXPIRED",
+      );
+      assert.equal(
+        (await prisma.racePowerup.findUnique({ where: { id: watch.id } })).status,
+        "HELD",
+      );
+    });
+
+    it("rolls back a killed Fanny Pack expiry and decrements/feed-writes once on retry", async () => {
+      const a = await createUser("Atomic Packer");
+      const b = await createUser("Atomic Observer");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      const target = await participant(raceId, a.userId);
+      await prisma.raceParticipant.update({
+        where: { id: target.id },
+        data: { powerupSlots: 4 },
+      });
+      const effect = await giveEffect(raceId, a.userId, a.userId, "FANNY_PACK", {
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      const task = await prisma.raceResolutionPostTask.create({
+        data: {
+          raceId,
+          sourceGeneration: 999,
+          dedupeKey: `atomic-expiry:${raceId}`,
+          state: "running",
+          requestedAt: new Date(),
+          notBeforeAt: new Date(),
+          snapshotCommand: { raceId, timeZone: "UTC" },
+          payloadBytes: 32,
+          intentCount: 0,
+          leaseToken: "stale-expiry-lease",
+          leaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      const killed = buildExpireEffects({
+        prisma,
+        eventBus: { emit() {} },
+        afterEffectConsequenceWrite: async () => {
+          throw Object.assign(new Error("simulated process death"), { code: "KILL_POINT" });
+        },
+      });
+
+      await assert.rejects(() => killed({
+        raceId,
+        taskFence: { taskId: task.id, leaseToken: "stale-expiry-lease" },
+      }), { code: "KILL_POINT" });
+      assert.equal((await participant(raceId, a.userId)).powerupSlots, 4);
+      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "ACTIVE");
+      assert.equal(await prisma.racePowerupEvent.count({
+        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "FANNY_PACK" },
+      }), 0);
+
+      await prisma.raceResolutionPostTask.update({
+        where: { id: task.id },
+        data: { leaseToken: "fresh-expiry-lease", leaseExpiresAt: new Date(Date.now() + 60_000) },
+      });
+      const retry = buildExpireEffects({ prisma, eventBus: { emit() {} } });
+      await assert.rejects(() => retry({
+        raceId,
+        taskFence: { taskId: task.id, leaseToken: "stale-expiry-lease" },
+      }), { code: "POST_TASK_FENCE_LOST" });
+      await retry({
+        raceId,
+        taskFence: { taskId: task.id, leaseToken: "fresh-expiry-lease" },
+      });
+      await retry({
+        raceId,
+        taskFence: { taskId: task.id, leaseToken: "fresh-expiry-lease" },
+      });
+      assert.equal((await participant(raceId, a.userId)).powerupSlots, 3);
+      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "EXPIRED");
+      assert.equal(await prisma.racePowerupEvent.count({
+        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "FANNY_PACK" },
+      }), 1);
+    });
+  });
+
   describe("rally flag", () => {
     it("rejected 400 outside a team race", async () => {
       await seedCatalog();
@@ -534,6 +669,91 @@ describe("powerups5 wave — integration", () => {
 
   // ── 11. Piggy Bank ──────────────────────────────────────────────────────
   describe("piggy bank", () => {
+    it("defers the real auth cache invalidation until the atomic expiry commits", async () => {
+      const a = await createUser("Deferred Cache Saver");
+      const b = await createUser("Deferred Cache Witness");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      const startsAt = new Date(Math.floor((Date.now() - 6 * HOUR_MS) / HOUR_MS) * HOUR_MS);
+      const expiresAt = new Date(Math.floor((Date.now() - 2 * HOUR_MS) / HOUR_MS) * HOUR_MS);
+      await giveHourlySamples(a.userId, 6, 4, 1500);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt,
+        expiresAt,
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+
+      const authMeCache = require("../../src/modules/users/services/authMeCache");
+      const originalInvalidate = authMeCache.invalidateSafe;
+      const invalidated = [];
+      authMeCache.invalidateSafe = async (userId) => { invalidated.push(userId); };
+      let consequenceReached = false;
+      try {
+        const expire = buildExpireEffects({
+          prisma,
+          eventBus: { emit() {} },
+          afterEffectConsequenceWrite: async () => {
+            consequenceReached = true;
+            assert.deepEqual(
+              invalidated,
+              [],
+              "external cache I/O must not begin while expiry locks are held",
+            );
+          },
+        });
+        await expire({ raceId });
+      } finally {
+        authMeCache.invalidateSafe = originalInvalidate;
+      }
+
+      assert.equal(consequenceReached, true);
+      assert.deepEqual(invalidated, [a.userId]);
+    });
+
+    it("rolls back a killed expiry and retries coin/feed consequences exactly once", async () => {
+      const a = await createUser("Atomic Saver");
+      const b = await createUser("Atomic Witness");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      const startsAt = new Date(Math.floor((Date.now() - 6 * HOUR_MS) / HOUR_MS) * HOUR_MS);
+      const expiresAt = new Date(Math.floor((Date.now() - 2 * HOUR_MS) / HOUR_MS) * HOUR_MS);
+      await giveHourlySamples(a.userId, 6, 4, 1500);
+      const effect = await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt,
+        expiresAt,
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+      const coinsBefore = (await prisma.user.findUnique({ where: { id: a.userId } })).coins;
+      const killed = buildExpireEffects({
+        prisma,
+        eventBus: { emit() {} },
+        afterEffectConsequenceWrite: async () => {
+          throw Object.assign(new Error("simulated process death"), { code: "KILL_POINT" });
+        },
+      });
+
+      await assert.rejects(() => killed({ raceId }), { code: "KILL_POINT" });
+      assert.equal((await prisma.user.findUnique({ where: { id: a.userId } })).coins, coinsBefore);
+      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "ACTIVE");
+      assert.equal(await prisma.coinTransaction.count({
+        where: { userId: a.userId, reason: "piggy_bank", refId: effect.id },
+      }), 0);
+      assert.equal(await prisma.racePowerupEvent.count({
+        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "PIGGY_BANK" },
+      }), 0);
+
+      const retry = buildExpireEffects({ prisma, eventBus: { emit() {} } });
+      await retry({ raceId });
+      await retry({ raceId });
+      assert.equal((await prisma.user.findUnique({ where: { id: a.userId } })).coins, coinsBefore + 20);
+      assert.equal(await prisma.coinTransaction.count({
+        where: { userId: a.userId, reason: "piggy_bank", refId: effect.id },
+      }), 1);
+      assert.equal(await prisma.racePowerupEvent.count({
+        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "PIGGY_BANK" },
+      }), 1);
+    });
+
     it("mints coins at expiry (rate/cap), exactly once", async () => {
       const a = await createUser("Saver");
       const b = await createUser("Z");
