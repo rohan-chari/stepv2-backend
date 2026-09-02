@@ -27,6 +27,7 @@ const {
   acquireRaceWriteFence,
 } = require("../../src/modules/races/services/raceWriteFence");
 const {
+  lockEligibleSummaryCaptureDependencies,
   persistCapturedSummaryImpactsForRace,
 } = require("../../src/modules/steps/services/globalEventSummaryCapture");
 
@@ -108,6 +109,100 @@ describe("global event summary expiry v2 HTTP contract", () => {
       ["apiImpactSummariesEnabled", true],
       ["redisCacheHomeImpactSummaryEnabled", false],
     ]);
+  });
+
+  it("selects summary capture eligibility and event definitions in one real SQL query", async () => {
+    const cutoff = new Date("2026-09-02T12:00:00.000Z");
+    const later = new Date("2026-09-03T12:00:00.000Z");
+    const activeStatuses = ["QUEUED", "PROCESSING", "WAITING_RACES"];
+
+    for (const status of activeStatuses) {
+      const user = await createTestUser();
+      const event = await createEvent({
+        startsAt: new Date("2026-09-01T10:00:00.000Z"),
+        endsAt: new Date("2026-09-02T10:00:00.000Z"),
+      });
+      const active = await prisma.globalEventSummaryWork.create({
+        data: { eventId: event.id, userId: user.user.id, status, expiresAt: later },
+      });
+      const dependencies = await prisma.$transaction((tx) =>
+        lockEligibleSummaryCaptureDependencies(tx, { userId: user.user.id, at: cutoff }));
+      assert.equal(dependencies.activeWork.id, active.id);
+      assert.equal(dependencies.activeWork.status, status);
+      assert.deepEqual(dependencies.works, []);
+    }
+
+    const user = await createTestUser();
+    const earlyEvent = await createEvent({
+      startsAt: new Date("2026-09-01T08:00:00.000Z"),
+      endsAt: new Date("2026-09-02T09:00:00.000Z"),
+    });
+    const lateEvent = await createEvent({
+      startsAt: new Date("2026-09-01T09:00:00.000Z"),
+      endsAt: cutoff,
+    });
+    const v1Event = await prisma.globalStepEvent.create({
+      data: {
+        startsAt: new Date("2026-09-01T07:00:00.000Z"),
+        endsAt: new Date("2026-09-02T08:00:00.000Z"),
+        multiplier: 3,
+        summaryAttributionVersion: 1,
+      },
+    });
+    const early = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: earlyEvent.id,
+        userId: user.user.id,
+        status: "WAITING_SYNC",
+        expiresAt: new Date("2026-09-03T10:00:00.000Z"),
+      },
+    });
+    const late = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: lateEvent.id,
+        userId: user.user.id,
+        status: "WAITING_SYNC",
+        expiresAt: later,
+      },
+    });
+    await prisma.globalEventSummaryWork.createMany({
+      data: [
+        {
+          eventId: v1Event.id,
+          userId: user.user.id,
+          status: "WAITING_SYNC",
+          expiresAt: later,
+        },
+        {
+          eventId: (await createEvent({ endsAt: cutoff })).id,
+          userId: user.user.id,
+          status: "WAITING_SYNC",
+          expiresAt: cutoff,
+        },
+        {
+          eventId: (await createEvent({ endsAt: new Date(cutoff.getTime() + 1) })).id,
+          userId: user.user.id,
+          status: "WAITING_SYNC",
+          expiresAt: later,
+        },
+      ],
+    });
+
+    const dependencies = await prisma.$transaction((tx) =>
+      lockEligibleSummaryCaptureDependencies(tx, { userId: user.user.id, at: cutoff }));
+    assert.equal(dependencies.activeWork, null);
+    assert.deepEqual(dependencies.works.map((work) => work.id), [early.id, late.id]);
+    assert.deepEqual(dependencies.works.map((work) => work.event.id), [earlyEvent.id, lateEvent.id]);
+    assert.deepEqual(dependencies.works.map((work) => work.event.startsAt), [
+      earlyEvent.startsAt,
+      lateEvent.startsAt,
+    ]);
+    assert.deepEqual(dependencies.works.map((work) => work.event.endsAt), [
+      earlyEvent.endsAt,
+      lateEvent.endsAt,
+    ]);
+    assert.deepEqual(dependencies.works.map((work) => work.event.multiplier), [2, 2]);
+    assert.deepEqual(dependencies.works.map((work) => work.event.summaryAttributionVersion), [2, 2]);
   });
 
   it("gates v2 summaries on both capabilities and returns exact expiry metadata", async () => {

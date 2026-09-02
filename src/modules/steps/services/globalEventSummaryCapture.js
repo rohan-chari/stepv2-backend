@@ -392,37 +392,76 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
   at = new Date(),
 }) {
   if (!tx?.globalEventSummaryWork || !tx?.userScoringInputVersion) return [];
-  const activeWork = await tx.globalEventSummaryWork.findFirst({
-    where: {
-      userId,
-      status: { in: ["QUEUED", "PROCESSING", "WAITING_RACES"] },
-      expiresAt: { gt: new Date(at) },
-      event: { summaryAttributionVersion: 2 },
+  // Keep the two eligibility branches separate so PostgreSQL can use the
+  // user/status/expiry index for each, but send them as one round trip. The
+  // waiting branch also carries the immutable event definition consumed by
+  // claimEligibleSummaryWork, avoiding a second event lookup during capture.
+  const eligibleRows = await tx.$queryRawUnsafe(
+    `(SELECT 'active' AS kind,
+             0 AS "kindOrder",
+             work.id,
+             work.event_id AS "eventId",
+             work.user_id AS "userId",
+             work.status::text AS status,
+             work.expires_at AS "expiresAt",
+             NULL::timestamp AS "eventStartsAt",
+             NULL::timestamp AS "eventEndsAt",
+             NULL::double precision AS "eventMultiplier",
+             NULL::text AS "eventScheduleMode",
+             NULL::integer AS "eventSummaryAttributionVersion"
+        FROM global_event_summary_work work
+        JOIN global_step_events event ON event.id = work.event_id
+       WHERE work.user_id = $1
+         AND work.status IN ('QUEUED', 'PROCESSING', 'WAITING_RACES')
+         AND work.expires_at > $2::timestamp
+         AND event.summary_attribution_version = 2
+       ORDER BY work.expires_at ASC, work.id ASC
+       LIMIT 1)
+     UNION ALL
+     (SELECT 'waiting' AS kind,
+             1 AS "kindOrder",
+             work.id,
+             work.event_id AS "eventId",
+             work.user_id AS "userId",
+             work.status::text AS status,
+             work.expires_at AS "expiresAt",
+             event.starts_at AS "eventStartsAt",
+             event.ends_at AS "eventEndsAt",
+             event.multiplier::double precision AS "eventMultiplier",
+             event.schedule_mode::text AS "eventScheduleMode",
+             event.summary_attribution_version AS "eventSummaryAttributionVersion"
+        FROM global_event_summary_work work
+        JOIN global_step_events event ON event.id = work.event_id
+       WHERE work.user_id = $1
+         AND work.status = 'WAITING_SYNC'
+         AND work.expires_at > $2::timestamp
+         AND event.summary_attribution_version = 2
+         AND event.ends_at <= $2::timestamp
+       ORDER BY work.expires_at ASC, work.id ASC)
+     ORDER BY "kindOrder" ASC, "expiresAt" ASC, id ASC`,
+    userId,
+    new Date(at),
+  );
+  const activeRow = eligibleRows.find((row) => row.kind === "active");
+  const activeWork = activeRow ? {
+    id: activeRow.id,
+    status: activeRow.status,
+    expiresAt: activeRow.expiresAt,
+  } : null;
+  const works = eligibleRows.filter((row) => row.kind === "waiting").map((row) => ({
+    id: row.id,
+    eventId: row.eventId,
+    userId: row.userId,
+    expiresAt: row.expiresAt,
+    event: {
+      id: row.eventId,
+      startsAt: row.eventStartsAt,
+      endsAt: row.eventEndsAt,
+      multiplier: row.eventMultiplier,
+      scheduleMode: row.eventScheduleMode,
+      summaryAttributionVersion: row.eventSummaryAttributionVersion,
     },
-    select: { id: true, status: true, expiresAt: true },
-    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
-  });
-  const works = await tx.globalEventSummaryWork.findMany({
-    where: {
-      userId,
-      status: "WAITING_SYNC",
-      expiresAt: { gt: new Date(at) },
-      event: { summaryAttributionVersion: 2, endsAt: { lte: new Date(at) } },
-    },
-    select: {
-      id: true,
-      eventId: true,
-      userId: true,
-      expiresAt: true,
-      event: {
-        select: {
-          id: true, startsAt: true, endsAt: true, multiplier: true,
-          scheduleMode: true, summaryAttributionVersion: true,
-        },
-      },
-    },
-    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
-  });
+  }));
   if (works.length === 0) return { activeWork, works: [], impacts: [], entitlements: [] };
   const impactWhere = {
     eventId: { in: works.map((work) => work.eventId) },
