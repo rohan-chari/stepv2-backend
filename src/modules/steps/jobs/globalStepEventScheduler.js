@@ -125,6 +125,11 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
       }
     }
 
+    const firstDay = firstSafeLocalEventDay(current);
+    const targetDays = [firstDay, addCivilDays(firstDay, 1)];
+    const existingDays = new Set((existingParents || []).map((event) => event.eventDay));
+    if (targetDays.every((eventDay) => existingDays.has(eventDay))) return true;
+
     let operationalSnapshot = null;
     try {
       operationalSnapshot = await captureOperationalSnapshot({ now: current });
@@ -162,8 +167,7 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
       logger.error("[CRON] Local global event creation rejected: cron owners are not all local-aware");
       return false;
     }
-    const firstDay = firstSafeLocalEventDay(current);
-    for (const eventDay of [firstDay, addCivilDays(firstDay, 1)]) {
+    for (const eventDay of targetDays) {
       const parent = await globalStepEventModel.createLocalParentIfAbsent({ eventDay });
       if (parent?.event) await drainParent(parent.event);
       if (parent?.created) {

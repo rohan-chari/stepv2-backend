@@ -63,6 +63,56 @@ test("local scheduler materializes exactly two future logical days and their act
   assert.deepEqual(materialized, createdDays.map((day) => `event-${day}`));
 });
 
+test("existing predetermined event days skip the expensive creation audit", async () => {
+  let audits = 0;
+  let creations = 0;
+  const existing = [
+    { id: "event-2026-08-21", eventDay: "2026-08-21", scheduleMode: "LOCAL_ENTITLEMENTS" },
+    { id: "event-2026-08-22", eventDay: "2026-08-22", scheduleMode: "LOCAL_ENTITLEMENTS" },
+  ];
+  const run = buildLocalGlobalStepEventTick({
+    now: () => new Date("2026-08-19T00:00:00Z"),
+    GlobalStepEvent: {
+      async findLocalParentsForMaintenance() { return existing; },
+      async createLocalParentIfAbsent() { creations += 1; },
+    },
+    materializeEntitlementsForActiveRacers: async () => 0,
+    processDueEntitlementBoundaries: async () => {},
+    captureOperationalSnapshot: async () => { audits += 1; return { healthy: true }; },
+    cleanupExpiredEntitlements: async () => ({ healthy: true }),
+    cronOwnerGuard: async () => true,
+    logger: { log() {}, error() {} },
+  });
+
+  assert.equal(await run(), true);
+  assert.equal(audits, 0);
+  assert.equal(creations, 0);
+});
+
+test("a missing predetermined day still audits before unhealthy retention blocks creation", async () => {
+  let audits = 0;
+  let creations = 0;
+  const run = buildLocalGlobalStepEventTick({
+    now: () => new Date("2026-08-19T00:00:00Z"),
+    GlobalStepEvent: {
+      async findLocalParentsForMaintenance() {
+        return [{ id: "event-2026-08-21", eventDay: "2026-08-21" }];
+      },
+      async createLocalParentIfAbsent() { creations += 1; },
+    },
+    materializeEntitlementsForActiveRacers: async () => 0,
+    processDueEntitlementBoundaries: async () => {},
+    captureOperationalSnapshot: async () => { audits += 1; return { healthy: true }; },
+    cleanupExpiredEntitlements: async () => ({ healthy: false, blockedEntitlements: 1 }),
+    cronOwnerGuard: async () => true,
+    logger: { log() {}, error() {} },
+  });
+
+  assert.equal(await run(), false);
+  assert.equal(audits, 1);
+  assert.equal(creations, 0);
+});
+
 test("retired creation switches never stop maintenance or permanent creation", async () => {
   const calls = [];
   const existing = { id: "existing", scheduleMode: "LOCAL_ENTITLEMENTS" };
