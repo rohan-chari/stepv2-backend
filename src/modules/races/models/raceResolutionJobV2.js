@@ -1021,12 +1021,23 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       raceId = null,
       force = false,
     } = {}) {
+      // A targeted HTTP-assisted claim already owns an exact race key. Give
+      // PostgreSQL a distinct statement shape so it can use the unique race
+      // index instead of planning both queue-wide eligibility branches.
+      const candidatePredicate = raceId ? "race_id = $4" : "$4::text IS NULL";
+      const candidateOrder = raceId ? "" : `ORDER BY CASE queue_priority
+              WHEN 'SETTLEMENT' THEN 0
+              WHEN 'RECOVERY' THEN 1
+              WHEN 'LIVE' THEN 2
+              ELSE 3 END,
+              requested_at ASC,
+              race_id ASC`;
       const rows = await prisma.$queryRawUnsafe(
         `
         WITH candidate AS (
           SELECT id
           FROM race_resolution_jobs_v2
-          WHERE ($4::text IS NULL OR race_id = $4)
+          WHERE ${candidatePredicate}
             AND (
               (
                 state = 'queued'
@@ -1039,13 +1050,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                 AND lease_expires_at <= $1
               )
             )
-            ORDER BY CASE queue_priority
-              WHEN 'SETTLEMENT' THEN 0
-              WHEN 'RECOVERY' THEN 1
-              WHEN 'LIVE' THEN 2
-              ELSE 3 END,
-              requested_at ASC,
-              race_id ASC
+            ${candidateOrder}
           LIMIT 1
           FOR UPDATE SKIP LOCKED
         )

@@ -2226,6 +2226,54 @@ describe("5d — explicit debounce", () => {
     );
   });
 
+  it("targeted and global claims preserve identical scoped generation metadata", async () => {
+    const alice = await createUser("Targeted Alice");
+    const bob = await createUser("Targeted Bob");
+    const globalRaceId = await createActiveRace(alice, [bob], "Global claim control");
+    const targetedRaceId = await createActiveRace(alice, [bob], "Targeted claim");
+    await drain(makeWorker());
+    const participants = await prisma.raceParticipant.findMany({
+      where: { raceId: { in: [globalRaceId, targetedRaceId] }, userId: alice.userId },
+      select: { id: true, raceId: true },
+    });
+    const participantByRace = new Map(participants.map((row) => [row.raceId, row.id]));
+    for (const raceId of [globalRaceId, targetedRaceId]) {
+      await RaceResolutionJobV2.enqueue({
+        raceId,
+        userId: alice.userId,
+        bypassDebounce: true,
+        dirtyEnvelope: {
+          reason: "STEP_SYNC",
+          dirtyUserIds: [alice.userId],
+          dirtyParticipantIds: [participantByRace.get(raceId)],
+          powerupTypes: [],
+          priority: "COALESCE",
+        },
+      });
+    }
+
+    const targeted = await RaceResolutionJobV2.claimNext({
+      raceId: targetedRaceId,
+      now: new Date(),
+    });
+    const global = await RaceResolutionJobV2.claimNext({ now: new Date() });
+
+    assert.equal(targeted.raceId, targetedRaceId);
+    assert.equal(global.raceId, globalRaceId);
+    const metadata = (job) => ({
+      processingGeneration: job.processingGeneration,
+      processingTriggeredByUserIds: job.processingTriggeredByUserIds,
+      processingDirtyReasons: job.processingDirtyReasons,
+      processingDirtyParticipantCount: job.processingDirtyParticipantIds.length,
+      processingDirtyPowerupTypes: job.processingDirtyPowerupTypes,
+      processingDirtyPriority: job.processingDirtyPriority,
+      processingQueuePriority: job.processingQueuePriority,
+    });
+    assert.deepEqual(metadata(targeted), metadata(global));
+    assert.equal(targeted.processingDirtyParticipantIds[0], participantByRace.get(targetedRaceId));
+    assert.equal(global.processingDirtyParticipantIds[0], participantByRace.get(globalRaceId));
+  });
+
   it("a crashed run's triggering users are UNIONed back in on re-claim, never dropped", async () => {
     const alice = await createUser("Alice");
     const bob = await createUser("Bob");
