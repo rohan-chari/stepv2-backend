@@ -13,7 +13,7 @@ const {
   runHomeOpenSession,
 } = require("../../../src/modules/loadTesting/runner");
 const { capacityResourcePlan, ensureVmResources } = require("../../../scripts/lima-capacity");
-const { aggregateHomeOpenLadder, executionBundleHash, normalizeInfrastructure,
+const { HOME_OPEN_EXECUTION_FILES, aggregateHomeOpenLadder, executionBundleHash, normalizeInfrastructure,
   createInFlightTracker, progressFromMetricsRows, resolutionEvidenceFromLog, waitFor,
   resetCapacityDbPoolMeasurements, waitForResolutionQueueQuiescence,
   waitForResolutionWorkerReady } = require("../../../scripts/k6-home-open");
@@ -80,7 +80,7 @@ test("home-open locks the versioned coherent-session contract without changing h
   assert.equal(PROFILES.home.version, "1.0.0");
   const profile = PROFILES["home-open"];
   assert.equal(profile.schema, "load-profile-v1");
-  assert.equal(profile.version, "2.1.0");
+  assert.equal(profile.version, "2.2.0");
   assert.deepEqual(profile.defaults, {
     users: 5000,
     duration: "600s",
@@ -101,6 +101,8 @@ test("home-open locks the versioned coherent-session contract without changing h
   assert.equal(profile.homeOpen.arrivalBucketMs, 1000);
   assert.equal(profile.homeOpen.allSettledDeadlineMs, 15000);
   assert.deepEqual(profile.homeOpen.resolutionPollWaitMs, [750, 1500, 3000, 5000]);
+  assert.deepEqual(profile.homeOpen.globalSummaryPollWaitMs, [750, 1500, 3000, 5000]);
+  assert.equal(profile.homeOpen.suggestedRaces404Policy, "contract-failure-no-legacy-fanout");
   assert.deepEqual(profile.homeOpen.criticalEndpoints, [
     "POST /steps/sync-v2", "POST /steps", "GET /home/race-card",
     "GET /races", "GET /shop/catalog", "GET /friends", "GET /auth/me",
@@ -111,8 +113,70 @@ test("home-open locks the versioned coherent-session contract without changing h
     "GET /home/race-card", "GET /races", "GET /home/suggested-races",
     "GET /shop/catalog", "GET /friends", "GET /auth/me",
     "GET /assets/manifest", "GET /steps/race-resolution/:jobId",
+    "GET /home/global-event-summary-work/:workId",
   ]);
   assert.equal(profile.entries[0].headers["X-Step-Sync-Intent"], undefined);
+});
+
+test("optional global summary receipt polls independently and refetches only Home card when created", async () => {
+  const calls = [];
+  let summaryPolls = 0;
+  const response = (status, body = {}) => ({ status, body, timeout: false,
+    unexpectedStatus: false, latencyMs: 1 });
+  const result = await runHomeOpenSession({
+    context: { today: "2026-09-01", runId: "home-summary-test", userIndex: 1 },
+    sequence: 2, wait: async () => {},
+    requestOne: async ({ entry }) => {
+      calls.push(`${entry.method} ${entry.path}`);
+      if (entry.path === "/steps/sync-v2") return response(202, {
+        uploaderReconciliation: { state: "CURRENT" },
+        globalEventSummaryWork: { id: "work-1", state: "QUEUED",
+          expiresAt: "2026-09-01T12:00:00.000Z" },
+      });
+      if (entry.path === "/home/global-event-summary-work/:workId") {
+        summaryPolls += 1;
+        return response(200, { state: summaryPolls === 2 ? "CREATED" : "PROCESSING",
+          expiresAt: "2026-09-01T12:00:00.000Z" });
+      }
+      if (entry.path === "/home/race-card") return response(200, {
+        contract: "home-shell-v1", resolved: { presentation: true, friends: true },
+        presentation: { equipped: {}, coins: 1, cape: null },
+        friends: { friends: [], pending: { incoming: [], outgoing: [] } },
+      });
+      if (entry.path === "/auth/me") return response(200, { user: { id: "user-1" } });
+      if (entry.path === "/races") return response(200, { active: [], pending: [], completed: [] });
+      return response(200, {});
+    },
+  });
+  assert.equal(result.criticalComplete, true, "summary work never blocks visible Home completion");
+  assert.equal(result.allSettled, true);
+  assert.equal(result.decisions.globalSummaryPolls, 2);
+  assert.equal(result.decisions.globalSummaryCreatedRefetches, 1);
+  assert.equal(calls.filter((row) => row === "GET /home/race-card").length, 2);
+  assert.equal(calls.filter((row) => row === "GET /races").length, 1);
+  assert.equal(calls.filter((row) => row === "GET /auth/me").length, 1);
+});
+
+test("k6 Home contract includes bounded summary polling and no suggested-races legacy 404 fanout", () => {
+  const source = fs.readFileSync(path.join(root, "scripts/k6/home-open.js"), "utf8");
+  assert.match(source, /home\/global-event-summary-work/);
+  assert.match(source, /globalSummaryPolls/);
+  assert.match(source, /globalSummaryCreatedRefetches/);
+  assert.doesNotMatch(source, /races\/featured|races\/public|tournaments\/public/);
+  assert.match(source, /deadlineRemainingMs\(\)/,
+    "optional background receipt polling must remain bounded by the session deadline");
+  assert.match(source, /K6_HOME_TRAFFIC_EPOCH_HASH/,
+    "each k6 invocation must contribute a unique traffic epoch to idempotency keys");
+  assert.match(source, /K6_HOME_CACHE_ONLY/,
+    "initial prewarm must use a GET-only path that cannot enqueue step-sync work");
+});
+
+test("capacity collector bounds HTTP, Docker, and database sampling", () => {
+  const source = fs.readFileSync(path.join(root, "scripts/capacity-metrics.js"), "utf8");
+  assert.match(source, /redirect:\s*"manual"/);
+  assert.match(source, /AbortSignal\.timeout/);
+  assert.match(source, /timeout:\s*\d/);
+  assert.match(source, /statement_timeout|query_timeout/);
 });
 
 test("home-open response classifiers fail closed on malformed and cooldown responses", () => {
@@ -235,10 +299,11 @@ test("k6 assigns exactly one fail-closed Home session failure reason", () => {
   const end = source.indexOf("function userHeaders");
   const classify = vm.runInNewContext(`${source.slice(start, end)}\nhomeOpenFailureReason`);
   const passing = { critical: true, manifestsOk: true, suggestedOk: true,
-    resolutionSettled: true, withinDeadline: true };
+    resolutionSettled: true, globalSummarySettled: true, withinDeadline: true };
   assert.equal(classify(passing), null);
   for (const [field, reason] of [["critical", "critical"], ["manifestsOk", "manifest"],
     ["suggestedOk", "suggested"], ["resolutionSettled", "resolution_not_settled"],
+    ["globalSummarySettled", "global_summary_not_settled"],
     ["withinDeadline", "deadline"]]) {
     assert.equal(classify({ ...passing, [field]: false }), reason);
   }
@@ -391,6 +456,7 @@ test("home-open resets and confirms one DB-pool measurement epoch on all four pr
         eventLoop: { maxMs: 1 } } }];
     })),
     resolutionQueueLagMs: 0,
+    resolutionQueueDepth: 0,
   });
   const normalized = normalizeInfrastructure({ schema: "capacity-metrics-v2",
     runId: "smoke-g", profile: "home-open",
@@ -706,7 +772,8 @@ test("infrastructure normalization fails closed and requires stable exact census
           measurementId: "pool-window", measurementGeneration: 2,
           measurementStartedAtMs: at.getTime() - 1000,
           max: role === "http" ? 10 : role === "resolution" ? 8 : 4 },
-        eventLoop: { maxMs: 1 } } }]; })), resolutionQueueLagMs: 0 });
+        eventLoop: { maxMs: 1 } } }]; })), resolutionQueueLagMs: 0,
+    resolutionQueueDepth: 0 });
   const metrics = { schema: "capacity-metrics-v2", runId: "unit", profile: "home-open",
     samples: Array.from({ length: 8 }, (_, index) => sample(index)) };
   const poolMeasurementReset = { schema: "capacity-db-pool-measurement-census-v1",
@@ -721,6 +788,11 @@ test("infrastructure normalization fails closed and requires stable exact census
   const missing = structuredClone(metrics); delete missing.samples[2].health["cron:0"].capacity.dbPool.waitMsP99;
   assert.throws(() => normalizeInfrastructure(missing, { runId: "unit", startedAt: at,
     endedAt: new Date(at.getTime() + 7000), expectedContainers: ["unit-backend", "unit-postgres", "unit-redis"] }), /missing|finite/);
+  const missingQueueDepth = structuredClone(metrics);
+  delete missingQueueDepth.samples[2].resolutionQueueDepth;
+  assert.throws(() => normalizeInfrastructure(missingQueueDepth, { runId: "unit", startedAt: at,
+    poolMeasurementReset, endedAt: new Date(at.getTime() + 7000),
+    expectedContainers: ["unit-backend", "unit-postgres", "unit-redis"] }), /queue.*depth/i);
   assert.throws(() => normalizeInfrastructure({ ...metrics, repeat: 2 }, { runId: "unit", repeat: 1,
     startedAt: at, endedAt: new Date(at.getTime() + 7000) }), /provenance/);
   const stalePoolWindow = structuredClone(metrics);
@@ -730,6 +802,7 @@ test("infrastructure normalization fails closed and requires stable exact census
 });
 
 test("execution provenance binds untracked executed files by content", () => {
+  assert.ok(HOME_OPEN_EXECUTION_FILES.includes("scripts/capacity-metrics.js"));
   const first = executionBundleHash(root, ["scripts/k6/home-open.js", "scripts/k6-home-open.js"]);
   assert.match(first, /^[a-f0-9]{64}$/);
   assert.notEqual(first, executionBundleHash(root, ["scripts/k6/home-open.js"]));

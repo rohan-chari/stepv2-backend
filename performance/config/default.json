@@ -1,0 +1,115 @@
+{
+  "schema": "bara-perf-config-v1",
+  "provider": {
+    "name": "lima",
+    "target": "capacity-vm",
+    "legacyConfigPath": "docs/capacity-load.config.json"
+  },
+  "workload": {
+    "name": "authenticated-home-reveal-v1",
+    "profileVersion": "2.2.0",
+    "cohortWeight": 1
+  },
+  "topology": {
+    "httpWorkers": 2,
+    "resolutionWorkers": 1,
+    "cronWorkersNormal": 1,
+    "resolutionConcurrency": 2
+  },
+  "cache": {
+    "mode": "warm",
+    "ownedPrefix": "capacity:",
+    "initialPrewarmSeconds": 30,
+    "initialPrewarmRate": 10,
+    "initialPrewarmMaxUsers": 300
+  },
+  "background": { "mode": "normal" },
+  "runtime": {
+    "preparedStartupTargetSeconds": 60,
+    "perLevelCeremonyTargetSeconds": 15,
+    "settleTimeoutSeconds": 10,
+    "metricsCollectionTimeoutSeconds": 5
+  },
+  "smoke": { "rate": 5, "warmupSeconds": 30, "measurementSeconds": 120 },
+  "scan": {
+    "rates": [5, 10, 15, 20, 25, 30],
+    "warmupSeconds": 15,
+    "maxNormalWarmupSeconds": 30,
+    "measurementSeconds": 60,
+    "confirmBoundaryFailure": true,
+    "maxAttemptsAtBoundaryRate": 3,
+    "classificationPolicy": "majority",
+    "narrowingResolutionPerSecond": 1,
+    "preparedRuntimeTargetSeconds": 900,
+    "runtimeWarningSeconds": 1200
+  },
+  "certify": { "warmupSeconds": 60, "measurementSeconds": 600, "repeats": 3 },
+  "safeCapacity": {
+    "headroomFactor": 0.8,
+    "rounding": "ceiling",
+    "fallbackStepPerSecond": 1,
+    "requireMeasuredPass": true
+  },
+  "reset": {
+    "selectors": [
+      { "table": "race_effect_impacts", "column": "user_id", "scope": "user" },
+      { "table": "race_effect_impacts", "column": "race_id", "scope": "race" },
+      { "table": "race_impact_events", "column": "recipient_user_id", "scope": "user" },
+      { "table": "race_impact_events", "column": "race_id", "scope": "race" },
+      { "table": "race_umbrella_interceptions", "column": "recipient_user_id", "scope": "user" },
+      { "table": "race_umbrella_interceptions", "column": "race_id", "scope": "race" },
+      { "table": "active_race_impact_work", "column": "recipient_user_id", "scope": "user" },
+      { "table": "active_race_impact_work", "column": "race_id", "scope": "race" },
+      { "table": "active_race_effect_impacts", "column": "user_id", "scope": "user" },
+      { "table": "active_race_effect_impacts", "column": "race_id", "scope": "race" },
+      { "table": "global_event_race_impacts", "column": "user_id", "scope": "user" },
+      { "table": "global_event_race_impacts", "column": "race_id", "scope": "race" },
+      { "table": "global_event_user_summaries", "column": "user_id", "scope": "user" },
+      { "table": "global_event_summary_work", "column": "user_id", "scope": "user" },
+      { "table": "global_event_capture_artifacts", "column": "user_id", "scope": "user" },
+      { "table": "global_event_capture_artifacts", "column": "race_id", "scope": "race" },
+      { "table": "app_review_prompt_attempts", "column": "user_id", "scope": "user" },
+      { "table": "app_review_prompt_attempts", "column": "race_id", "scope": "race" },
+      { "table": "inbox_alerts", "column": "user_id", "scope": "user" },
+      { "table": "inbox_delivery_device_attempts", "column": "recipient_user_id", "scope": "user" },
+      { "table": "notification_schedules", "column": "recipient_user_id", "scope": "user" },
+      { "table": "notification_schedule_receipts", "column": "recipient_user_id", "scope": "user" },
+      { "table": "notifications", "column": "user_id", "scope": "user" },
+      { "table": "notifications", "column": "race_id", "scope": "race" },
+      { "table": "user_activity_days", "column": "user_id", "scope": "user" },
+      { "table": "step_sync_requests", "column": "user_id", "scope": "user" },
+      { "table": "race_resolution_jobs", "column": "user_id", "scope": "user" },
+      { "table": "race_resolution_jobs_v2", "column": "race_id", "scope": "race" },
+      { "table": "race_placement_transition_jobs", "column": "race_id", "scope": "race" },
+      { "table": "race_resolution_full_triggers", "column": "user_id", "scope": "user" },
+      { "table": "race_resolution_full_triggers", "column": "race_id", "scope": "race" },
+      { "table": "user_scoring_input_versions", "column": "user_id", "scope": "user" },
+      { "table": "race_resolution_post_tasks", "column": "race_id", "scope": "race" },
+      { "table": "race_resolution_delivery_intents", "column": "recipient_user_id", "scope": "user" },
+      { "table": "race_resolution_post_task_receipts", "column": "race_id", "scope": "race" },
+      { "table": "race_resolution_delivery_intent_receipts", "column": "race_id", "scope": "race" },
+      { "table": "domain_event_notification_projections", "column": "recipient_user_id", "scope": "user" },
+      { "table": "domain_event_outbox", "column": "aggregate_id", "scope": "race" },
+      { "table": "domain_event_outbox", "column": "aggregate_id", "scope": "user" },
+      { "table": "domain_event_receipts", "column": "aggregate_id", "scope": "race" }
+      ,{ "table": "domain_event_receipts", "column": "aggregate_id", "scope": "user" }
+    ]
+  },
+  "thresholds": {
+    "homeP95Ms": 1000,
+    "homeP99Ms": 2000,
+    "httpErrorRate": 0.001,
+    "networkErrors": 0,
+    "incompleteHomeTransactions": 0,
+    "droppedArrivals": 0,
+    "workerRestarts": 0,
+    "databaseConnectionsExhausted": 0,
+    "queueGrowth": "baseline-required",
+    "resourceSafety": "baseline-required"
+  },
+  "result": {
+    "summarySchema": "bara-perf-summary-v2",
+    "failureReasonSchema": "bara-perf-failure-reason-v1",
+    "bottleneckSchema": "bara-perf-bottleneck-v1"
+  }
+}

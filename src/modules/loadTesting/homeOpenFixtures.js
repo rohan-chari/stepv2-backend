@@ -1,5 +1,5 @@
 const crypto = require("node:crypto");
-const { signSessionToken } = require("../users/services/sessionToken");
+const jwt = require("jsonwebtoken");
 const {
   assertFixtureDatabase,
   assertNoSyntheticRows,
@@ -9,6 +9,8 @@ const {
 const { resetGlobalEventDerivedState } = require("./globalEventReliabilityFixtures");
 
 const CHUNK_SIZE = 1000;
+const SESSION_TOKEN_ISSUER = "steps-tracker-api";
+const SESSION_TOKEN_EXPIRY = "90d";
 const CURRENT_FEATURES = [
   "characters", "ads", "ad_coin_random", "jammer", "spinpowerups", "team_races",
   "tournaments", "race_leave", "powerups2", "powerups3", "powerups4", "powerups5",
@@ -22,6 +24,19 @@ const CURRENT_FEATURES = [
   "referral_contest_v1", "referral_contest_global_v1", "admin_metrics_v2",
   "race_payout_flat_50",
 ];
+
+function signHomeOpenFixtureToken({ userId, appleId, env = {} } = {}) {
+  const secret = env.SESSION_TOKEN_SECRET;
+  if (!String(secret || "")) {
+    throw new Error("home-open fixture requires its isolated SESSION_TOKEN_SECRET");
+  }
+  return jwt.sign({ appleId }, secret, {
+    subject: userId,
+    issuer: SESSION_TOKEN_ISSUER,
+    expiresIn: SESSION_TOKEN_EXPIRY,
+    algorithm: "HS256",
+  });
+}
 
 async function createMany(model, rows) {
   for (let index = 0; index < rows.length; index += CHUNK_SIZE) {
@@ -264,7 +279,7 @@ async function createHomeOpenFixtures({
     return {
       manifest: { schema: "synthetic-load-manifest-v1", runId, baseline: before, ids },
       users: userRows.map((user) => ({ ...user,
-        token: signSessionToken({ userId: user.id, appleId: user.appleId }) })),
+        token: signHomeOpenFixtureToken({ userId: user.id, appleId: user.appleId, env }) })),
       races, topology,
     };
   } catch (error) {
@@ -305,4 +320,4 @@ async function readHomeOpenGlobalIsolationCensus(prisma) {
 
 module.exports = { aggregateSnapshotTopology, cleanupHomeOpenFixtures,
   createHomeOpenFixtures, homeStepPayload, readHomeOpenGlobalIsolationCensus,
-  scaleHomeTopology };
+  scaleHomeTopology, signHomeOpenFixtureToken };

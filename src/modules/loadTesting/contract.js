@@ -146,6 +146,10 @@ function buildProfiles() {
       query: "generation={{generation}}", fixturePrerequisites: ["synthetic-user", "queue-job"],
       allowedStatuses: [200, 400, 404], queue: true,
     }),
+    entry("GET", "/home/global-event-summary-work/:workId", {
+      fixturePrerequisites: ["synthetic-user", "global-summary-work"],
+      allowedStatuses: [200], queue: true,
+    }),
   ];
   return {
     smoke: profile("smoke", [health, authMe, home[0], races[1]], { maxUsers: 2, maxDurationSeconds: 60, maxArrivalRatePerSecond: 10 }),
@@ -196,7 +200,7 @@ function buildProfiles() {
         maxArrivalRatePerSecond: 500,
         queue: { workerServiceRatePerSecond: 500, lagThresholdMs: 30_000 },
       }),
-      version: "2.1.0",
+      version: "2.2.0",
       ladder: Object.freeze({
         smoke: Object.freeze({ rate: 1, seconds: 120 }),
         warmupSeconds: 120,
@@ -224,6 +228,8 @@ function buildProfiles() {
         arrivalBucketMs: 1000,
         allSettledDeadlineMs: 15_000,
         resolutionPollWaitMs: Object.freeze([750, 1500, 3000, 5000]),
+        globalSummaryPollWaitMs: Object.freeze([750, 1500, 3000, 5000]),
+        suggestedRaces404Policy: "contract-failure-no-legacy-fanout",
         criticalEndpoints: Object.freeze([
           "POST /steps/sync-v2", "POST /steps", "GET /home/race-card",
           "GET /races", "GET /shop/catalog", "GET /friends", "GET /auth/me",
@@ -326,7 +332,7 @@ function validateProfileRegistry(registry = PROFILES) {
   const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "home-open", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
   for (const name of names) {
     const profile = registry[name];
-    const expectedVersion = name === "home-open" ? "2.1.0" : "1.0.0";
+    const expectedVersion = name === "home-open" ? "2.2.0" : "1.0.0";
     if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== expectedVersion || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);
     for (const item of profile.entries) {
       if (!/^(GET|POST|PUT|PATCH|DELETE)$/.test(item.method) || !item.path.startsWith("/")) throw new Error(`invalid load profile path: ${name}`);

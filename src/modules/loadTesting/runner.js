@@ -145,7 +145,7 @@ function assertGlobalEventArtifactSet({ outputDir, runId, profile } = {}) {
     return evidence;
   });
 }
-function replaceTemplate(value, context) { return value.replace(/:raceId/g, context.raceId || "missing-race").replace(/:jobId/g, context.jobId || "missing-job").replace(/:userId/g, context.userId || "missing-user").replace(/\{\{today\}\}/g, context.today).replace(/\{\{generation\}\}/g, String(context.generation || 1)); }
+function replaceTemplate(value, context) { return value.replace(/:raceId/g, context.raceId || "missing-race").replace(/:jobId/g, context.jobId || "missing-job").replace(/:workId/g, context.workId || "missing-work").replace(/:userId/g, context.userId || "missing-user").replace(/\{\{today\}\}/g, context.today).replace(/\{\{generation\}\}/g, String(context.generation || 1)); }
 function weightedChoice(entries, random) { const eligible = entries.filter((item) => item.weight > 0); const total = eligible.reduce((sum, item) => sum + item.weight, 0); let needle = random() * total; for (const item of eligible) { needle -= item.weight; if (needle <= 0) return item; } return eligible[eligible.length - 1]; }
 
 function eventOpenSessionEntries(profile = PROFILES["event-open-surge"], random = Math.random) {
@@ -206,8 +206,15 @@ function classifyHomeSyncV2(sample = {}) {
       typeof receipt.jobId === "string" && receipt.jobId.length > 0 &&
       Number.isInteger(receipt.generation)
       ? { id: receipt.jobId, generation: receipt.generation } : null;
+    const summary = body.globalEventSummaryWork;
+    const summaryWork = isJsonMap(summary) && typeof summary.id === "string" && summary.id.length > 0 &&
+      ["WAITING_SYNC", "QUEUED", "PROCESSING", "WAITING_RACES", "CREATED", "ALL_ZERO",
+        "UNSCORABLE", "EXPIRED_UNDELIVERED"].includes(summary.state) &&
+      typeof summary.expiresAt === "string" && !Number.isNaN(Date.parse(summary.expiresAt))
+      ? { id: summary.id, state: summary.state, expiresAt: summary.expiresAt } : null;
     return { persisted: true, usePersistedHome: Boolean(current), retry: false,
-      legacy: false, job, decision: current ? "current" : "deferred" };
+      legacy: false, job, ...(summaryWork ? { summaryWork } : {}),
+      decision: current ? "current" : "deferred" };
   }
   if (status === 409) {
     return { persisted: true, usePersistedHome: false, retry: false, legacy: false,
@@ -278,6 +285,7 @@ async function runHomeOpenSession({
     syncRetry: 0, syncLegacyFallback: 0, legacyStepRetry: 0,
     raceCardPresentationFallback: 0, raceCardFriendsFallback: 0,
     resolutionPolls: 0, resolutionFanouts: 0,
+    globalSummaryPolls: 0, globalSummaryCreatedRefetches: 0,
   };
   const request = async (entry, extra = {}) => {
     const clientEntry = { ...entry, headers: { "X-App-Version": "2.3.11",
@@ -357,6 +365,33 @@ async function runHomeOpenSession({
     presentationOk && friendsOk && meOk;
   const criticalHomeMs = Math.max(0, clock() - startedAtMs);
 
+  const summaryWorkPromise = sync.summaryWork ? (async () => {
+    if (sync.summaryWork.state === "CREATED") {
+      decisions.globalSummaryCreatedRefetches += 1;
+      await request(byPath("/home/race-card"));
+      return true;
+    }
+    const terminal = new Set(["ALL_ZERO", "UNSCORABLE", "EXPIRED_UNDELIVERED"]);
+    if (terminal.has(sync.summaryWork.state)) return true;
+    for (const delay of profile.homeOpen.globalSummaryPollWaitMs) {
+      await wait(delay);
+      decisions.globalSummaryPolls += 1;
+      const previousWorkId = context.workId;
+      context.workId = sync.summaryWork.id;
+      const poll = await request(byPath("/home/global-event-summary-work/:workId"));
+      context.workId = previousWorkId;
+      if (!homeSampleSucceeded(poll, [200]) || !isJsonMap(poll.body)) return true;
+      const state = String(poll.body.state || "").toUpperCase();
+      if (state === "CREATED") {
+        decisions.globalSummaryCreatedRefetches += 1;
+        await request(byPath("/home/race-card"));
+        return true;
+      }
+      if (terminal.has(state)) return true;
+    }
+    return false;
+  })() : Promise.resolve(true);
+
   const resolutionPromise = sync.job ? (async () => {
     let terminalSuccess = false;
     for (const delay of profile.homeOpen.resolutionPollWaitMs) {
@@ -396,8 +431,12 @@ async function runHomeOpenSession({
   const deadline = new Promise((resolve) => {
     deadlineTimer = setTimeout(() => resolve("deadline"), profile.homeOpen.allSettledDeadlineMs);
   });
-  const settled = Promise.all([suggestedPromise, resolutionPromise])
-    .then(async () => { await Promise.all(manifestPromises); return "settled"; });
+  const settled = Promise.all([suggestedPromise, resolutionPromise, summaryWorkPromise])
+    .then(async ([suggested, resolutionSettled, summarySettled]) => {
+      await Promise.all(manifestPromises);
+      return homeSampleSucceeded(suggested, [200]) && resolutionSettled && summarySettled
+        ? "settled" : "diagnostic-failure";
+    });
   const allState = await Promise.race([settled, deadline]);
   clearTimeout(deadlineTimer);
   const allSettled = allState === "settled";

@@ -45,6 +45,7 @@
     "perf:clone-weekly": "node scripts/perf/clone-weekly-settlement-fixture.js",
     "perf:benchmark": "node scripts/perf/benchmark.js",
     "capacity": "node scripts/capacity.js",
+    "capacity:home": "node scripts/home-capacity-workflow.js",
     "capacity:db": "node scripts/capacity-db.js",
     "load-test": "node scripts/load-test.js",
     "load-test:k6:event-open": "node scripts/k6-event-open.js",

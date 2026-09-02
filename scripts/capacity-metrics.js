@@ -34,7 +34,7 @@ function roleUrls(config) {
 async function dockerStats(config) {
   try {
     const { stdout: raw } = await execFileAsync("limactl", ["shell", config.lima_instance, "--", "bash", "-lc", "docker stats --no-stream --format '{{json .}}'"], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3_000,
     });
     return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
   } catch {
@@ -46,7 +46,8 @@ async function fetchHealth(url) {
   try {
     // A fresh connection lets the HTTP health census observe both cluster
     // workers instead of remaining pinned to one keep-alive socket.
-    const response = await fetch(url, { headers: { Connection: "close" } });
+    const response = await fetch(url, { headers: { Connection: "close" }, redirect: "manual",
+      signal: AbortSignal.timeout(1_000) });
     return response.ok ? await response.json() : { status: response.status };
   } catch (error) {
     return { error: error.message };
@@ -92,27 +93,32 @@ function createCollector({
 } = {}) {
   const urls = roleUrls(config);
   const samples = [];
-  const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 1 }) : null;
+  const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 1,
+    connectionTimeoutMillis: 2_000, statement_timeout: 3_000, query_timeout: 3_000 }) : null;
   let timer = null;
   let stopping = false;
   const inFlight = new Set();
 
   async function databaseSample() {
-    if (!pool) return { lockWaitMs: [], resolutionQueueLagMs: Number.NaN };
+    if (!pool) return { lockWaitMs: [], resolutionQueueLagMs: Number.NaN,
+      resolutionQueueDepth: Number.NaN };
     try {
       const [locks, queue] = await Promise.all([
         pool.query(`SELECT extract(epoch FROM (clock_timestamp()-query_start))*1000 AS ms
           FROM pg_stat_activity
           WHERE datname=current_database() AND wait_event_type='Lock'`),
-        pool.query(`SELECT coalesce(max(extract(epoch FROM (clock_timestamp()-updated_at))*1000),0) AS ms
+        pool.query(`SELECT coalesce(max(extract(epoch FROM (clock_timestamp()-updated_at))*1000),0) AS ms,
+          count(*)::int AS depth
           FROM race_resolution_jobs_v2 WHERE state IN ('queued','running')`),
       ]);
       return {
         lockWaitMs: locks.rows.map((row) => Number(row.ms)).filter(Number.isFinite),
         resolutionQueueLagMs: Number(queue.rows[0]?.ms || 0),
+        resolutionQueueDepth: Number(queue.rows[0]?.depth || 0),
       };
     } catch (error) {
-      return { lockWaitMs: [], resolutionQueueLagMs: Number.NaN, databaseError: error.message };
+      return { lockWaitMs: [], resolutionQueueLagMs: Number.NaN,
+        resolutionQueueDepth: Number.NaN, databaseError: error.message };
     }
   }
 

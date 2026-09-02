@@ -155,7 +155,12 @@ async function restore(input) {
 }
 
 async function scrubAndAttest(input) {
-  const snapshot = path.resolve(required(input.snapshot, "snapshot"));
+  const snapshot = input.snapshot ? path.resolve(input.snapshot) : null;
+  const suppliedSnapshotHash = String(input.snapshot_hash || "");
+  if (!snapshot && !/^[a-f0-9]{64}$/.test(suppliedSnapshotHash)) {
+    throw new Error("--snapshot or --snapshot-hash is required");
+  }
+  const snapshotHash = snapshot ? sha256File(snapshot) : suppliedSnapshotHash;
   const attestationPath = path.resolve(required(input.attestation, "attestation"));
   const secret = required(process.env.CAPACITY_SCRUB_ATTESTATION_SECRET, "CAPACITY_SCRUB_ATTESTATION_SECRET");
   const identity = capacityIdentity(process.env);
@@ -165,14 +170,14 @@ async function scrubAndAttest(input) {
     return { verification };
   });
   const attestation = createScrubAttestation({
-    snapshotHash: sha256File(snapshot),
+    snapshotHash,
     scrubScriptHash: sha256File(SCRIPT_PATH),
     baseline: { verification: result.verification },
     expiresAt: input.expires_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   }, secret);
   fs.mkdirSync(path.dirname(attestationPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(attestationPath, `${JSON.stringify(attestation, null, 2)}\n`, { mode: 0o600 });
-  return { scrubbed: true, attestationPath, snapshotSha256: sha256File(snapshot), scrubScriptHash: attestation.scrubScriptHash, verification: result.verification };
+  return { scrubbed: true, attestationPath, snapshotSha256: snapshotHash, scrubScriptHash: attestation.scrubScriptHash, verification: result.verification };
 }
 
 function packageSnapshot(input) {

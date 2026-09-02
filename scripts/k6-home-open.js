@@ -11,12 +11,14 @@ const { execFileSync, spawn, spawnSync } = require("node:child_process");
 const { classifyTarget, PROFILES } = require("../src/modules/loadTesting/contract");
 const { cleanupHomeOpenFixtures, createHomeOpenFixtures } = require("../src/modules/loadTesting/homeOpenFixtures");
 const { assertCapacityRunProfile, assertStartedRun } = require("../src/modules/loadTesting/lifecycle");
-const { assertHomeOpenGates } = require("../src/modules/loadTesting/runner");
 const { assertCapacityDatabase } = require("../src/localCapacitySafety");
 const { capacityResourcePlan, inspectVmResources } = require("./lima-capacity");
 
 const HOME_OPEN_EXECUTION_FILES = Object.freeze([
   "scripts/k6/home-open.js", "scripts/k6-home-open.js", "scripts/lima-capacity.js",
+  "scripts/home-capacity-workflow.js", "scripts/capacity-metrics.js",
+  "package.json", "package-lock.json",
+  "src/modules/loadTesting/homeCapacityEnvironment.js",
   "scripts/capacity-process.js", "src/app.js", "src/db.js", "src/index.js",
   "src/modules/races/jobs/raceResolutionQueueV2.js",
   "src/modules/races/models/raceResolutionJobV2.js",
@@ -25,6 +27,9 @@ const HOME_OPEN_EXECUTION_FILES = Object.freeze([
   "src/modules/loadTesting/fixtures.js", "src/modules/loadTesting/homeOpenFixtures.js",
   "docs/home-open-capacity-baseline-requirements.md",
   "docs/home-open-resolution-throughput-requirements.md",
+  "docs/home-open-capacity-workflow-simplification-requirements.md",
+  "docs/capacity-load-runbook.md",
+  "test/modules/loadTesting/homeCapacityWorkflow.test.js",
 ]);
 
 function argsFrom(argv) {
@@ -76,8 +81,9 @@ function applyGuardedCapacityEnvironment(config, runId, environment = process.en
 function validateCapacity(config, args, environment = process.env) {
   const runId = required(args.run_id || config.run_id, "run id");
   const directory = path.resolve(required(args.capacity_state_dir || config.directory, "capacity state directory"));
-  const state = assertStartedRun({ runId, directory, env: environment });
-  assertCapacityRunProfile(state, "home-open");
+  const workflow = workflowLevelAuthorization({ args, config, runId });
+  const state = workflow ? workflow.state : assertStartedRun({ runId, directory, env: environment });
+  if (!workflow) assertCapacityRunProfile(state, "home-open");
   classifyTarget({ target: config.target || "capacity-vm", baseUrl: config.base_url,
     databaseUrl: environment.DATABASE_URL });
   if ((config.database_pool_profile || "role-budget") !== "role-budget") {
@@ -89,7 +95,7 @@ function validateCapacity(config, args, environment = process.env) {
     databaseCpu: 1, databaseMemoryGb: 2, redisCpu: 1, redisMemoryMb: 256,
     overheadCpu: 1, overheadMemoryMb: 1792,
   })) throw new Error("home-open requires the approved 7-vCPU/12-GiB containing resource plan");
-  return { runId, directory, state, resources };
+  return { runId, directory, state, resources, workflow };
 }
 
 function immutableJson(file, value) {
@@ -99,6 +105,100 @@ function immutableJson(file, value) {
 
 function hash(value) {
   return crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest("hex");
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonical(item === undefined ? null : item)).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).filter((key) => value[key] !== undefined).sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function canonicalHash(value) {
+  return crypto.createHash("sha256").update(canonical(value)).digest("hex");
+}
+
+function workflowLevelAuthorization({ args, config, runId }) {
+  if (!args.workflow_manifest && !args.workflow_child_event) return null;
+  if (!args.workflow_manifest || !args.workflow_child_event) {
+    throw new Error("workflow Home level requires both manifest and selected-child event");
+  }
+  const manifestPath = path.resolve(args.workflow_manifest);
+  const eventPath = path.resolve(args.workflow_child_event);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const event = JSON.parse(fs.readFileSync(eventPath, "utf8"));
+  const { hash: manifestHash, ...manifestUnsigned } = manifest;
+  const { hash: eventHash, ...eventUnsigned } = event;
+  if (manifest.schema !== "home-capacity-workflow-manifest-v1" ||
+      canonicalHash(manifestUnsigned) !== manifestHash) {
+    throw new Error("workflow manifest hash is invalid");
+  }
+  if (event.schema !== "home-capacity-workflow-event-v1" || event.type !== "child-selected" ||
+      canonicalHash(eventUnsigned) !== eventHash || event.manifestHash !== manifest.hash ||
+      event.workflowId !== manifest.workflowId || event.payload?.childId !== runId ||
+      !String(runId).startsWith(`${manifest.workflowId}-`)) {
+    throw new Error("workflow selected-child authorization is invalid");
+  }
+  const kind = String(event.payload.kind);
+  const expectedMode = kind === "smoke" ? "smoke" : kind === "boundary" ? "boundary" : "level";
+  const rate = Number(args.rate || (kind === "smoke" ? 1 : config.arrival_rate));
+  const repeat = Number(args.repeat || 1);
+  const warmupSeconds = Number(args.warmup_seconds ?? 0);
+  const measurementSeconds = Number(args.measurement_seconds);
+  const timings = event.payload.timings || {};
+  if (String(args.mode || "smoke") !== expectedMode || Number(event.payload.rate) !== rate ||
+      Number(timings.warmupSeconds) !== warmupSeconds ||
+      Number(timings.measurementSeconds) !== measurementSeconds ||
+      Number(event.payload.repeat || 1) !== repeat ||
+      kind !== "boundary" && repeat !== 1 || rate > manifest.policy.maxRate && rate !== 1) {
+    throw new Error("workflow child mode/rate/timing is outside confirmed policy");
+  }
+  if (kind === "smoke" && (rate !== 1 || warmupSeconds !== 0 || measurementSeconds !== 60) ||
+      kind === "discovery" && (warmupSeconds !== 30 || measurementSeconds !== 120) ||
+      kind === "boundary" && (warmupSeconds !== 120 || measurementSeconds !== 600) ||
+      kind === "level" && ![[30, 120], [120, 600]].some(([warmup, measurement]) =>
+        warmupSeconds === warmup && measurementSeconds === measurement)) {
+    throw new Error("workflow child timing does not match its confirmed mode");
+  }
+  const resetEvidencePath = path.resolve(required(config.workflow_reset_evidence,
+    "workflow reset evidence"));
+  const reset = JSON.parse(fs.readFileSync(resetEvidencePath, "utf8"));
+  if (reset.schema !== "home-capacity-child-reset-v1" || reset.workflowId !== manifest.workflowId ||
+      reset.childId !== runId || reset.redisKeysBeforeBackend !== 0 ||
+      reset.snapshotHash !== manifest.snapshotHash || reset.migrationHash !== manifest.migrationHash ||
+      !/^[a-f0-9]{64}$/.test(reset.appliedMigrationHash || "") ||
+      !/^[a-f0-9]{64}$/.test(reset.migrationChecksumDriftHash || "") ||
+      !/^[a-f0-9]{64}$/.test(reset.historicalRollbackHash || "") ||
+      !/^[a-f0-9]{64}$/.test(reset.schemaFingerprint || "") ||
+      !/^[a-f0-9]{64}$/.test(reset.childEffectiveEnvironmentHash || "") ||
+      !/^[a-f0-9]{64}$/.test(reset.normalizedEffectiveEnvironmentHash || "")) {
+    throw new Error("workflow reset evidence is not bound to the selected child");
+  }
+  if (canonicalHash(JSON.parse(fs.readFileSync(path.resolve(config.workflow_reset_evidence), "utf8"))) !==
+      canonicalHash(reset) || crypto.createHash("sha256").update(fs.readFileSync(path.resolve(args.config))).digest("hex") !==
+      reset.childConfigHash) {
+    throw new Error("workflow child config/reset evidence changed after reset");
+  }
+  const { verifyJournal } = require("./home-capacity-workflow");
+  const journal = verifyJournal({ directory: path.dirname(manifestPath), manifest });
+  const selectedIndex = journal.events.findIndex((row) => row.hash === event.hash);
+  if (selectedIndex < 0 || journal.events[selectedIndex + 1]?.type !== "child-started" ||
+      journal.events[selectedIndex + 1]?.payload?.childId !== runId ||
+      journal.events[selectedIndex + 1]?.payload?.childConfigHash !== reset.childConfigHash ||
+      journal.events[selectedIndex + 1]?.payload?.resetEvidenceHash !== canonicalHash(reset)) {
+    throw new Error("workflow child event is not an authorized started journal transition");
+  }
+  const approvedManifest = JSON.parse(fs.readFileSync(path.resolve(config.live_manifest), "utf8"));
+  if (canonicalHash(approvedManifest) !== manifest.resourceManifestHash) {
+    throw new Error("workflow live resource manifest changed after confirmation");
+  }
+  return { manifest, event, reset, state: {
+    runId, profile: "home-open", state: "started", snapshotHash: manifest.snapshotHash,
+    scrubAttestationHash: manifest.scrubAttestationHash,
+    approvedManifest, liveManifestPath: path.resolve(config.live_manifest),
+    backendCommit: manifest.commit, sourceBundleHash: manifest.sourceBundleHash,
+    workflowManifestHash: manifest.hash, workflowResetEvidence: reset,
+  } };
 }
 
 function executionBundleHash(root, files) {
@@ -201,7 +301,7 @@ function captureCapacityBackendLog(config, since, outputPath, evidencePath, bind
     throw new Error("home-open resolution diagnostic artifact already exists");
   }
   const instance = config.lima_instance || `step-capacity-${config.run_id}`;
-  const container = `${instance}-backend`;
+  const container = config.backend_container || `${instance}-backend`;
   const result = spawnSync("limactl", ["shell", instance, "docker", "logs", "--timestamps", "--since",
     new Date(since).toISOString(), container], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const log = `${result.stdout || ""}${result.stderr || ""}`;
@@ -267,6 +367,9 @@ function normalizeInfrastructure(metrics, { runId, repeat, startedAt, endedAt,
     if (!Number.isFinite(Number(sample.resolutionQueueLagMs))) {
       throw new Error("home-open infrastructure evidence missing finite queue lag");
     }
+    if (!Number.isFinite(Number(sample.resolutionQueueDepth))) {
+      throw new Error("home-open infrastructure evidence missing finite queue depth");
+    }
     if (sample.databaseError || !Array.isArray(sample.containers) || sample.containers.length !== 3) {
       throw new Error("home-open infrastructure evidence missing exact container census");
     }
@@ -313,9 +416,12 @@ function normalizeInfrastructure(metrics, { runId, repeat, startedAt, endedAt,
   const processMemoryWithinLimits = health.length > 0 && health.every((row) =>
     Number(row.memory?.rss) < (rssCeilings[row.process?.role] || 0));
   const containerPeaks = {};
+  const containerCpuPeaks = {};
   for (const sample of samples) for (const row of sample.containers || []) {
     const name = row.Name || row.Container || "unknown";
     containerPeaks[name] = Math.max(containerPeaks[name] || 0, containerMemoryBytes(row) || 0);
+    containerCpuPeaks[name] = Math.max(containerCpuPeaks[name] || 0,
+      Number(String(row.CPUPerc ?? row.CPUPercent).replace("%", "")) || 0);
   }
   return {
     telemetryComplete, processCensusStable, processMemoryWithinLimits,
@@ -323,6 +429,7 @@ function normalizeInfrastructure(metrics, { runId, repeat, startedAt, endedAt,
     poolCheckoutFailures: Math.max(...health.map((row) => Number(row.dbPool.connectionFailures))),
     maxEventLoopDelayMs: Math.max(...health.map((row) => Number(row.eventLoop.maxMs))),
     containerPeakMemoryBytes: containerPeaks,
+    containerPeakCpuPercent: containerCpuPeaks,
     recoveredAfterLoad: samples.length >= 5 && samples.slice(-5).every((sample) =>
       Object.values(sample.health).every((row) => Number(row.capacity.dbPool.waiting) === 0 &&
         Number(row.capacity.eventLoop.maxMs) < 1000) &&
@@ -332,7 +439,8 @@ function normalizeInfrastructure(metrics, { runId, repeat, startedAt, endedAt,
 
 function generatorSample(pid) {
   try {
-    const raw = execFileSync("ps", ["-o", "%cpu=,rss=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    const raw = execFileSync("ps", ["-o", "%cpu=,rss=", "-p", String(pid)], {
+      encoding: "utf8", timeout: 10_000, killSignal: "SIGKILL" }).trim();
     const [cpu, rssKb] = raw.split(/\s+/).map(Number);
     return { at: new Date().toISOString(), cpuPercent: cpu, rssBytes: rssKb * 1024 };
   } catch (error) {
@@ -621,6 +729,7 @@ function buildVerification({ summary, metrics, generatorSamples, rate, measureme
     "GET /shop/catalog": "shop-catalog", "GET /friends": "friends-summary",
     "GET /auth/me": "auth-me", "GET /assets/manifest": "assets-manifest",
     "GET /steps/race-resolution/:jobId": "race-resolution",
+    "GET /home/global-event-summary-work/:workId": "global-summary-work",
   };
   const endpoints = Object.fromEntries(Object.entries(endpointSpecs).map(([label, endpoint]) => {
     const requests = metric(summary, `http_reqs{endpoint:${endpoint},${phase}}`, "count", 0);
@@ -659,7 +768,7 @@ function buildVerification({ summary, metrics, generatorSamples, rate, measureme
       freshnessFailed: metric(summary,
         `home_open_sessions_freshness_failed_count{${phase}}`, "count"),
       failureReasons: Object.fromEntries(["critical", "manifest", "suggested",
-        "resolution_not_settled", "deadline"].map((reason) => [reason,
+        "resolution_not_settled", "global_summary_not_settled", "deadline"].map((reason) => [reason,
         metric(summary, `home_open_session_failure_reason{${phase},reason:${reason}}`, "count", 0)])),
       criticalHomeMs: trend(`home_open_critical_ms{${phase}}`),
       allHomeMs: trend(`home_open_all_ms{${phase}}`),
@@ -676,6 +785,9 @@ function buildVerification({ summary, metrics, generatorSamples, rate, measureme
       presentationFallbacks: metric(summary, "home_open_presentation_fallbacks", "count"),
       friendsFallbacks: metric(summary, "home_open_friends_fallbacks", "count"),
       resolutionPolls: metric(summary, "home_open_resolution_polls", "count"),
+      globalSummaryPolls: metric(summary, "home_open_global_summary_polls", "count"),
+      globalSummaryCreatedRefetches: metric(summary,
+        "home_open_global_summary_created_refetches", "count"),
     },
     generator: {
       iterations: metric(summary, `iterations{${phase}}`, "count"),
@@ -692,7 +804,8 @@ function buildVerification({ summary, metrics, generatorSamples, rate, measureme
     summary: { errorRate: metric(summary, `http_req_failed{${phase},telemetry:sut}`, "rate",
       Number.NaN) },
     endpoints,
-    queue: { ...queue, p95LagMs: percentile(metrics.samples.map((row) =>
+    queue: { ...queue, peakDepth: Math.max(...metrics.samples.map((row) =>
+      Number(row.resolutionQueueDepth))), p95LagMs: percentile(metrics.samples.map((row) =>
       Number(row.resolutionQueueLagMs)), 0.95) },
     infrastructure,
   };
@@ -706,7 +819,10 @@ function buildVerification({ summary, metrics, generatorSamples, rate, measureme
         result.sessions.freshnessFailed) {
       throw new Error("home-open capacity gate failed: failure reason accounting");
     }
-    assertHomeOpenGates(result);
+    // Keep the full application runner out of provider bootstrap. The reusable
+    // environment does not have a database URL until after it has been safely
+    // prepared; importing the runner earlier initializes DB-bound models.
+    require("../src/modules/loadTesting/runner").assertHomeOpenGates(result);
     result.gates = { passed: true, safeOperatingCeilingEligible: true, failures: [] };
   } catch (error) {
     result.gates = { passed: false, safeOperatingCeilingEligible: false,
@@ -715,11 +831,17 @@ function buildVerification({ summary, metrics, generatorSamples, rate, measureme
   return result;
 }
 
-function aggregateHomeOpenLadder(reports = []) {
+function aggregateHomeOpenLadder(reports = [], { failureBound = null, maxRate = 500,
+  failureReport = null } = {}) {
   if (!Array.isArray(reports) || !reports.length || reports.some((row) =>
     row?.schema !== "home-open-capacity-result-v1" ||
     !Number.isFinite(Number(row.parameters?.arrivalRatePerSecond)))) {
     throw new Error("home-open ladder aggregation requires valid result artifacts");
+  }
+  const hasWorkflowProvenance = reports.some((row) => row.provenance?.workflowManifestHash != null);
+  if (hasWorkflowProvenance && (reports.length !== 3 || reports.map((row) =>
+    Number(row.provenance?.repeat)).sort().join(",") !== "1,2,3")) {
+    throw new Error("home-open workflow certification requires exactly three reports, one each for repeats 1, 2, and 3");
   }
   const runIds = reports.map((row) => row.provenance?.runId);
   if (runIds.some((runId) => typeof runId !== "string" || !runId) ||
@@ -734,13 +856,35 @@ function aggregateHomeOpenLadder(reports = []) {
     liveManifestHash: row.provenance?.liveManifestHash, resources: row.provenance?.resources,
     actualVmResources: row.provenance?.actualVmResources });
   const expectedBinding = binding(reports[0]);
+  const baseBindingComplete = (row) => [row.provenance?.backendCommit, row.provenance?.profileVersion,
+    row.provenance?.scrubAttestationHash, row.provenance?.sourceTreeHash,
+    row.provenance?.snapshotHash, row.provenance?.manifestHash]
+    .every((value) => typeof value === "string" && value) &&
+    Boolean(row.provenance?.resources && row.provenance?.actualVmResources);
   if (reports.some((row) => binding(row) !== expectedBinding ||
-      [row.provenance?.backendCommit, row.provenance?.profileVersion,
-        row.provenance?.scrubAttestationHash, row.provenance?.sourceTreeHash,
-        row.provenance?.snapshotHash, row.provenance?.manifestHash]
-        .some((value) => typeof value !== "string" || !value) ||
-      !row.provenance?.resources || !row.provenance?.actualVmResources)) {
+      !baseBindingComplete(row))) {
     throw new Error("home-open ladder aggregation provenance/resource mismatch");
+  }
+  const workflowBinding = (row) => JSON.stringify(Object.fromEntries([
+    "workflowManifestHash", "sourceBundleHash", "reportVersion", "parityHash",
+    "resourceManifestHash", "topologyHash", "effectiveEnvironmentHash", "migrationHash",
+    "appliedMigrationHash", "migrationChecksumDriftHash", "historicalRollbackHash", "schemaFingerprint",
+    "normalizedEffectiveEnvironmentHash",
+  ].map((name) => [name, row.provenance?.[name]])));
+  let expectedWorkflowBinding = null;
+  const workflowReports = reports.filter((row) => row.provenance?.workflowManifestHash != null);
+  if (workflowReports.length) {
+    if (workflowReports.length !== reports.length) {
+      throw new Error("home-open certification cannot mix workflow and standalone provenance");
+    }
+    expectedWorkflowBinding = workflowBinding(reports[0]);
+    if (reports.some((row) => workflowBinding(row) !== expectedWorkflowBinding ||
+        Object.values(JSON.parse(workflowBinding(row))).some((value) =>
+          typeof value !== "string" || !value) || row.provenance?.mode !== "boundary" ||
+        Number(row.parameters?.warmupSeconds) !== 120 ||
+        Number(row.parameters?.measurementSeconds) !== 600)) {
+      throw new Error("home-open certification workflow provenance/timing mismatch");
+    }
   }
   const boundaryPasses = reports.filter((row) => row.provenance?.mode === "boundary" &&
     row.gates?.passed === true);
@@ -758,17 +902,60 @@ function aggregateHomeOpenLadder(reports = []) {
   }
   const supported = confirmed[0][0];
   const supporting = confirmed[0][1];
-  const hardCapPassed = supported === 500;
+  const confirmedMaxRate = Number(maxRate);
+  if (!Number.isInteger(confirmedMaxRate) || confirmedMaxRate < 2 || confirmedMaxRate > 500) {
+    throw new Error("home-open aggregation max rate is invalid");
+  }
+  const derivedFailure = reports.filter((row) => row.gates?.passed === false)
+    .map((row) => Number(row.parameters?.arrivalRatePerSecond)).filter((rate) => rate > supported)
+    .sort((left, right) => left - right)[0] ?? null;
+  const observedFailure = failureBound == null ? derivedFailure : Number(failureBound);
+  if (observedFailure != null && (!Number.isInteger(observedFailure) || observedFailure <= supported ||
+      observedFailure > confirmedMaxRate)) throw new Error("home-open aggregation failure bound is invalid");
+  if (failureReport) {
+    if (failureReport.schema !== "home-open-capacity-result-v1" ||
+        failureReport.gates?.passed !== false) {
+      throw new Error("home-open failure report must be a verified failed report");
+    }
+    if (observedFailure == null ||
+        Number(failureReport.parameters?.arrivalRatePerSecond) !== observedFailure) {
+      throw new Error("home-open failure report must match the measured failure bound");
+    }
+    if (!baseBindingComplete(failureReport) || binding(failureReport) !== expectedBinding ||
+        expectedWorkflowBinding != null && workflowBinding(failureReport) !== expectedWorkflowBinding) {
+      throw new Error("home-open failure report certification binding mismatch");
+    }
+  }
+  const lowerBoundOnly = observedFailure == null && supported === confirmedMaxRate;
   const maximum = (selector) => Math.max(...supporting.map(selector).map(Number).filter(Number.isFinite));
+  const cpuPeak = (rows, suffix) => Math.max(0, ...rows.flatMap((row) =>
+    Object.entries(row.infrastructure?.containerPeakCpuPercent || {})
+      .filter(([name]) => name.endsWith(suffix)).map(([, value]) => Number(value) || 0)));
+  const evidence = (rows, failed = false) => ({
+    runIds: rows.map((row) => row.provenance?.runId || null),
+    failedGates: [...new Set(rows.flatMap((row) => row.gates?.failures || []))],
+    infrastructure: { backendCpuPeakPercent: cpuPeak(rows, "-backend"),
+      databaseCpuPeakPercent: cpuPeak(rows, "-postgres"), redisCpuPeakPercent: cpuPeak(rows, "-redis"),
+      dbPoolWaitP99Ms: Math.max(0, ...rows.map((row) => Number(row.infrastructure?.dbPoolWaitP99Ms) || 0)),
+      eventLoopDelayMs: Math.max(0, ...rows.map((row) => Number(row.infrastructure?.maxEventLoopDelayMs) || 0)) },
+    queue: { peakDepth: Math.max(0, ...rows.map((row) => Number(row.queue?.peakDepth) || 0)),
+      p95LagMs: Math.max(0, ...rows.map((row) => Number(row.queue?.p95LagMs) || 0)),
+      drainSeconds: Math.max(0, ...rows.map((row) => Number(row.queue?.drainSeconds) || 0)) },
+    classification: failed ? "failing-boundary" : "passing-boundary",
+  });
   const endpoints = supporting.flatMap((row) => Object.entries(row.endpoints || {}).map(([name, value]) =>
     ({ name, p95: Number(value.latencyMs?.p95), requests: Number(value.requests || 0) })))
     .filter((row) => Number.isFinite(row.p95) && row.requests > 0)
     .sort((left, right) => right.p95 - left.p95);
   return {
     schema: "home-open-capacity-final-v1",
-    provedAtLeastHardCap: hardCapPassed,
+    provedAtLeastHardCap: lowerBoundOnly && confirmedMaxRate === 500,
+    highestCertifiedTestedRate: supported,
+    measuredFailureBound: observedFailure,
+    unresolvedBracket: observedFailure == null ? null : [supported, observedFailure],
+    lowerBound: lowerBoundOnly ? supported : null,
     repeatableSupportedMaximumHomeOpensPerSecond: supported,
-    safeOperatingCeilingHomeOpensPerSecond: hardCapPassed ? null : Math.floor(supported * 0.7),
+    safeOperatingCeilingHomeOpensPerSecond: observedFailure == null ? null : Math.floor(supported * 0.7),
     supportedHomeOpensPerMinute: supported * 60,
     boundaryRepeats: supporting.map((row) => ({ runId: row.provenance.runId || null,
       repeat: Number(row.provenance.repeat), rate: Number(row.parameters.arrivalRatePerSecond) })),
@@ -781,6 +968,8 @@ function aggregateHomeOpenLadder(reports = []) {
       dbPoolWaitP99MsWorst: maximum((row) => row.infrastructure.dbPoolWaitP99Ms),
       eventLoopDelayMsWorst: maximum((row) => row.infrastructure.maxEventLoopDelayMs),
     },
+    passingEvidence: evidence(supporting),
+    failureEvidence: failureReport ? evidence([failureReport], true) : null,
     limitations: [
       "Home-only capacity is not whole-app concurrent-user capacity.",
       "Home opens per minute cannot be converted to DAU without an observed session-frequency model.",
@@ -802,6 +991,18 @@ function textReport(result) {
   ].join("\n") + "\n";
 }
 
+async function executeHomeOpenLevel(input, dependencies = {}) {
+  if (!input || typeof dependencies.execute !== "function") {
+    throw new Error("single Home-open level requires an explicit guarded executor");
+  }
+  const report = await dependencies.execute(input);
+  if (report?.schema !== "home-open-capacity-result-v1" ||
+      report.provenance?.runId !== input.runId || typeof report.gates?.passed !== "boolean") {
+    throw new Error("single Home-open executor did not return a verified per-level report");
+  }
+  return report;
+}
+
 async function main() {
   const args = argsFrom(process.argv.slice(2));
   if (String(args.mode || "") === "aggregate") {
@@ -816,7 +1017,7 @@ async function main() {
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
   const runId = required(args.run_id || config.run_id, "run id");
   applyGuardedCapacityEnvironment(config, runId);
-  const { state, resources } = validateCapacity(config, args);
+  const { state, resources, workflow } = validateCapacity(config, args);
   const actualVmResources = inspectVmResources(config.lima_instance || `step-capacity-${runId}`);
   if (actualVmResources.cpu !== resources.vmCpu || actualVmResources.memoryGb !== resources.vmMemoryGb ||
       actualVmResources.diskGb !== Number(config.vps_specs.disk_gb)) {
@@ -831,18 +1032,20 @@ async function main() {
   const warmupRate = positiveInt(args.warmup_rate ?? Math.max(1, Math.floor(rate / 2)), "warmup rate", 500);
   const repeat = positiveInt(args.repeat ?? 1, "repeat", 3);
   const approvedRates = new Set(PROFILES["home-open"].ladder.rates);
-  if (mode !== "smoke" && !approvedRates.has(rate) && mode !== "boundary") {
+  if (!workflow && mode !== "smoke" && !approvedRates.has(rate) && mode !== "boundary") {
     throw new Error("level rate must be an approved Home-open ladder rate");
   }
   if (mode === "boundary" && (repeat < 1 || repeat > 3)) {
     throw new Error("boundary repeat must be 1, 2, or 3");
   }
   if (mode !== "boundary" && repeat !== 1) throw new Error("repeat applies only to boundary runs");
-  if (mode !== "smoke" && warmupRate >= rate) throw new Error("warmup rate must be lower than measured rate");
-  if (mode === "smoke" && (rate !== 1 || warmupSeconds !== 0 || measurementSeconds !== 120)) {
+  if (mode !== "smoke" && warmupRate >= rate && !(workflow && rate === 1 && warmupRate === 1)) {
+    throw new Error("warmup rate must be lower than measured rate");
+  }
+  if (!workflow && mode === "smoke" && (rate !== 1 || warmupSeconds !== 0 || measurementSeconds !== 120)) {
     throw new Error("smoke is fixed at 1 Home open/second for 120 seconds without warmup");
   }
-  if (mode !== "smoke" && (warmupSeconds !== 120 || measurementSeconds !== 600)) {
+  if (!workflow && mode !== "smoke" && (warmupSeconds !== 120 || measurementSeconds !== 600)) {
     throw new Error("ladder candidates require 120-second warmup and 600-second measurement");
   }
   const outputDir = path.resolve(args.output_dir ||
@@ -862,7 +1065,12 @@ async function main() {
     backendLogPath, resolutionEvidencePath, cleanupPath]) {
     if (fs.existsSync(file)) throw new Error(`home-open artifact already exists: ${file}`);
   }
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), `home-open-${runId}-`));
+  const suppliedTemporary = process.env.HOME_OPEN_CREDENTIAL_TEMP_DIR;
+  const temporary = suppliedTemporary ? path.resolve(suppliedTemporary) :
+    fs.mkdtempSync(path.join(os.tmpdir(), `home-open-${runId}-`));
+  if (!temporary.startsWith(`${os.tmpdir()}${path.sep}home-open-`) || !fs.existsSync(temporary)) {
+    throw new Error("unsafe or missing Home credential temporary directory");
+  }
   const fixturePath = path.join(temporary, "fixture.json");
   const prisma = require("../src/db").prisma;
   const sourceTreeHash = executionBundleHash(path.resolve(__dirname, ".."),
@@ -1005,8 +1213,25 @@ async function main() {
       schema: "home-open-capacity-binding-v1", runId, profile: "home-open",
       mode, repeat,
       profileVersion: PROFILES["home-open"].version,
-      backendCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: path.resolve(__dirname, ".."), encoding: "utf8" }).trim(),
-      sourceTreeHash,
+      backendCommit: state.backendCommit || execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: path.resolve(__dirname, ".."), encoding: "utf8", timeout: 10_000,
+        killSignal: "SIGKILL" }).trim(),
+      sourceTreeHash: state.sourceBundleHash || sourceTreeHash,
+      sourceBundleHash: state.sourceBundleHash || null,
+      workflowManifestHash: state.workflowManifestHash || null,
+      workflowResetEvidence: state.workflowResetEvidence || null,
+      reportVersion: workflow?.manifest?.reportVersion || null,
+      parityHash: workflow?.manifest?.parityHash || null,
+      resourceManifestHash: workflow?.manifest?.resourceManifestHash || null,
+      topologyHash: workflow?.manifest?.topologyHash || null,
+      effectiveEnvironmentHash: workflow?.manifest?.effectiveEnvironmentHash || null,
+      migrationHash: workflow?.reset?.migrationHash || null,
+      appliedMigrationHash: workflow?.reset?.appliedMigrationHash || null,
+      migrationChecksumDriftHash: workflow?.reset?.migrationChecksumDriftHash || null,
+      historicalRollbackHash: workflow?.reset?.historicalRollbackHash || null,
+      schemaFingerprint: workflow?.reset?.schemaFingerprint || null,
+      childEffectiveEnvironmentHash: workflow?.reset?.childEffectiveEnvironmentHash || null,
+      normalizedEffectiveEnvironmentHash: workflow?.reset?.normalizedEffectiveEnvironmentHash || null,
       resolutionEvidenceHash: hash(fs.readFileSync(resolutionEvidencePath)),
       manifestHash: hash(state.approvedManifest), liveManifestHash: hash(fs.readFileSync(state.liveManifestPath)),
       snapshotHash: state.snapshotHash, scrubAttestationHash: state.scrubAttestationHash,
@@ -1041,12 +1266,14 @@ async function main() {
     try {
       if (fixture?.manifest) {
         const earlyCleanup = await cleanupHomeOpenFixtures({ prisma, manifest: fixture.manifest });
-        immutableJson(cleanupPath, { schema: "home-open-early-cleanup-v1", runId,
-          interruptedSignal, cleanup: earlyCleanup });
+        if (!fs.existsSync(cleanupPath)) immutableJson(cleanupPath, { schema: "home-open-host-cleanup-v1", runId,
+          interruptedSignal, cleanup: earlyCleanup, temporaryPaths: [temporary], credentialsRetained: false });
       }
     } finally {
       await prisma.$disconnect().catch(() => {});
       fs.rmSync(temporary, { recursive: true, force: true });
+      if (!fs.existsSync(cleanupPath)) immutableJson(cleanupPath, { schema: "home-open-host-cleanup-v1", runId,
+        interruptedSignal, cleanup: null, temporaryPaths: [temporary], credentialsRetained: false });
     }
   }
 }
@@ -1056,7 +1283,8 @@ if (require.main === module) main().catch((error) => {
   process.exitCode = 1;
 });
 
-module.exports = { aggregateHomeOpenLadder, applyGuardedCapacityEnvironment, buildVerification,
+module.exports = { HOME_OPEN_EXECUTION_FILES, aggregateHomeOpenLadder, applyGuardedCapacityEnvironment, buildVerification,
   captureCapacityBackendLog, createInFlightTracker, executionBundleHash, normalizeInfrastructure,
   progressFromMetricsRows, resetCapacityDbPoolMeasurements, validateCapacity, waitFor,
-  resolutionEvidenceFromLog, waitForResolutionQueueQuiescence, waitForResolutionWorkerReady };
+  executeHomeOpenLevel, resolutionEvidenceFromLog, waitForResolutionQueueQuiescence,
+  waitForResolutionWorkerReady, workflowLevelAuthorization };

@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+
+require("./performance/lib/main").main(process.argv.slice(2))
+  .then((result) => { process.exitCode = result.exitCode; })
+  .catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exitCode = 2;
+  });

@@ -32,6 +32,10 @@ results/eocandidate/
 # results root, but place every new run under this ignored hierarchy.
 results/capacity/
 
+# Bara performance harness runtime state, credentials, and generated reports.
+performance/.state/
+performance/results/
+
 # EXCEPTION: the built marketing site IS committed. The documented rollback
 # procedure (DEPLOYMENT.md) is `git checkout <tag> && npm install && pm2
 # restart` with NO build step, so a build-artifact-only dist would leave

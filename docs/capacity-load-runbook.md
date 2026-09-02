@@ -112,6 +112,47 @@ then reproduces the shipped Home dependency graph and parallelism, including
 response-dependent presentation and friends fallbacks, Me-triggered and
 presentation-triggered asset manifests, and bounded resolution polling.
 
+### Primary one-command workflow
+
+The normal operator path from a clean local `main` checkout is:
+
+```sh
+./perf smoke
+./perf scan
+./perf scan --rates=5,10,15,20,25 --cache=warm --background=normal
+./perf reset
+```
+
+`./perf` loads the guarded local capacity inputs itself and accepts no arbitrary
+URL or database override. It prepares the disposable Lima services and
+sanitized baseline only when their persisted binding requires it. A scan keeps
+the same Postgres, Redis, backend, and fixtures across every rate; per-level
+work is limited to settle/liveness checks, an audited run-owned reset, bounded
+cache handling, metric reset, and measured traffic.
+
+Warm scans perform one bounded GET-only cohort cache prewarm. It never calls
+step sync and therefore cannot flood the resolution queues before discovery.
+Each k6 invocation has a unique traffic epoch, while a retry inside one Home
+session deliberately reuses the same idempotency key.
+
+Results are written under `performance/results/<run-id>/` as `manifest.json`,
+`summary.json`, and `report.md`, plus useful per-level evidence. Scan uses
+60-second discovery levels, confirms the first failure, narrows the boundary,
+and reports safe operating capacity only after the configured queue/resource
+safe gates exist and the selected headroom candidate has actually passed.
+
+`certify`, `compare`, `refresh-data`, and `background=off` currently fail
+closed instead of silently using a weaker workflow. The legacy commands below
+remain available only as a troubleshooting appendix for profiles not yet
+migrated to `./perf`.
+
+### Low-level troubleshooting appendix
+
+The manual commands below remain backward-compatible for diagnosing the
+lifecycle or per-level harness. Do not use them for the normal scan or
+certification workflow; they require the operator to provide unique run IDs and
+coordinate every reset and repeat correctly.
+
 The containing Lima VM is 7 vCPU/12 GiB. Inside it, cgroups retain the measured
 production-shaped allocations: backend 4 vCPU/8 GiB, Postgres 1 vCPU/2 GiB,
 Redis 1 vCPU/256 MiB, and 1 vCPU/~1.75 GiB reserved for the guest, container
