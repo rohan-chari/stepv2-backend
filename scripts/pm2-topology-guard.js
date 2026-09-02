@@ -258,8 +258,8 @@ function validateBaseline(baseline) {
 
 function validateTransitionOrder(transitionedRoles) {
   const joined = transitionedRoles.join(",");
-  if (!["resolution", "resolution,cron", "resolution,cron,http"].includes(joined)) {
-    throw new Error("Transitioned roles must follow resolution, then cron, then http");
+  if (!["http", "http,cron", "http,cron,resolution"].includes(joined)) {
+    throw new Error("Transitioned roles must follow http, then cron, then resolution");
   }
 }
 

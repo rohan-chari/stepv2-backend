@@ -294,24 +294,24 @@ test("static and live guards derive reviewed values from environment source of t
   assert.equal(validateLivePoolBudget(live, { mode: "final", apps: config }).aggregate, 28);
 });
 
-test("role-scoped pool validation accepts only documented legacy-20 transitions", () => {
+test("role-scoped pool validation accepts only the safe HTTP then cron then resolution transitions", () => {
   const initial = livePools({ http0: null, http1: null, resolution: null, cron: null });
   const baseline = captureLivePoolBaseline(initial);
-  assert.equal(validateLivePoolBudget(livePools({ http0: null, http1: null, cron: null }), {
+  assert.equal(validateLivePoolBudget(livePools({ resolution: null, cron: null }), {
     mode: "transition",
-    transitionedRoles: ["resolution"],
+    transitionedRoles: ["http"],
     baseline,
     apps: candidateApps(),
-  }).aggregate, 68);
-  assert.equal(validateLivePoolBudget(livePools({ http0: null, http1: null }), {
+  }).aggregate, 60);
+  assert.equal(validateLivePoolBudget(livePools({ resolution: null }), {
     mode: "transition",
-    transitionedRoles: ["resolution", "cron"],
+    transitionedRoles: ["http", "cron"],
     baseline,
     apps: candidateApps(),
-  }).aggregate, 52);
+  }).aggregate, 44);
   assert.equal(validateLivePoolBudget(livePools(), {
     mode: "transition",
-    transitionedRoles: ["resolution", "cron", "http"],
+    transitionedRoles: ["http", "cron", "resolution"],
     baseline,
     apps: candidateApps(),
   }).aggregate, 32);
@@ -322,29 +322,29 @@ test("role-scoped validation rejects missing values and unexpected mixed states"
     http0: null, http1: null, resolution: null, cron: null,
   }));
   assert.throws(() => validateLivePoolBudget(livePools({
-    http0: null, http1: null, resolution: 7, cron: null,
+    http0: 9, http1: 10, resolution: null, cron: null,
   }), {
     mode: "transition",
-    transitionedRoles: ["resolution"],
+    transitionedRoles: ["http"],
     baseline,
     apps: candidateApps(),
-  }), /resolution.*8/);
+  }), /http.*10/);
   const missing = livePools({ resolution: 20 });
   delete missing[0].environment.DATABASE_POOL_MAX_HTTP;
   assert.throws(() => validateLivePoolBudget(missing, {
     mode: "transition",
-    transitionedRoles: ["resolution", "cron", "http"],
+    transitionedRoles: ["http", "cron", "resolution"],
     baseline,
     apps: candidateApps(),
   }), /DATABASE_POOL_MAX_HTTP/);
   assert.throws(() => validateLivePoolBudget(livePools({
-    http0: 10, http1: null, resolution: 8, cron: null,
+    http0: 10, http1: null, resolution: null, cron: null,
   }), {
     mode: "transition",
-    transitionedRoles: ["resolution"],
+    transitionedRoles: ["http"],
     baseline,
     apps: candidateApps(),
-  }), /http:0.*baseline/);
+  }), /http PID 202.*10/);
 });
 
 test("final strict pool validation requires every PID and exact aggregate 32", () => {
