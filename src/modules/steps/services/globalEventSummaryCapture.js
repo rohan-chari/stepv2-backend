@@ -784,7 +784,10 @@ async function persistCapturedSummaryImpactsForRace(tx, {
     return { finalized: 0, terminalized: 0 };
   }
   const artifacts = await tx.globalEventCaptureArtifact.findMany({
-    where: { raceId },
+    where: {
+      raceId,
+      work: { status: { in: [...ACTIVE_WORK_STATES] } },
+    },
     include: {
       work: {
         select: {
