@@ -485,6 +485,62 @@ function assertNonTrivial(state) {
 // ── 1. parity matrix ───────────────────────────────────────────────────────
 
 describe("dependency closure — byte parity with the full resolver", () => {
+  it("records the identical actor-target participant set at selection and at the fenced recheck", async () => {
+    const { users, raceId } = await seedRace("DependencyIdentity", 3);
+    const [alice, bob, unrelated] = users;
+    await postSamples(bob, [sampleAt(5, 3100)]);
+    await postSamples(unrelated, [sampleAt(5, 2400)]);
+    await drain();
+    await plantEffect({
+      raceId,
+      type: "LEECH",
+      targetUser: alice,
+      sourceUser: bob,
+    });
+    await armClosureFixture();
+    assert.equal((await postSamples(alice, [sampleAt(3, 4300)])).status, 200);
+
+    const participantRows = await prisma.raceParticipant.findMany({
+      where: { raceId },
+      select: { id: true, userId: true },
+    });
+    const idByUser = new Map(participantRows.map((row) => [row.userId, row.id]));
+    const expectedIds = [idByUser.get(alice.userId), idByUser.get(bob.userId)].sort();
+    const traces = [];
+    const { worker } = makeCapturingWorker({
+      recordDependencySelectionTrace(trace) {
+        traces.push(trace);
+      },
+    });
+
+    assert.ok(await worker.processOne());
+    assert.deepEqual(
+      traces.map(({ stage, participantIds, participantCount, plan, fallbackReason }) => ({
+        stage,
+        participantIds,
+        participantCount,
+        plan,
+        fallbackReason,
+      })),
+      [
+        {
+          stage: "initial_selection",
+          participantIds: expectedIds,
+          participantCount: 2,
+          plan: "DEPENDENCY_CLOSURE",
+          fallbackReason: null,
+        },
+        {
+          stage: "fenced_recheck",
+          participantIds: expectedIds,
+          participantCount: 2,
+          plan: "DEPENDENCY_CLOSURE",
+          fallbackReason: null,
+        },
+      ],
+    );
+  });
+
   it("unrelated SELF effect: only the uploader is scored and written", async () => {
     const runs = await runParityScenario({
       name: "SelfEffect",

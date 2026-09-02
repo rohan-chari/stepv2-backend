@@ -3,8 +3,8 @@ const {
 } = require("../services/notificationDelivery");
 const redisCache = require("../../../shared/cache/redisCache");
 
-const FALLBACK_INTERVAL_MS = 5_000;
-const MIN_DUE_RETRY_MS = 1_000;
+const FALLBACK_INTERVAL_MS = 60_000;
+const RECOVERY_INTERVAL_MS = 60_000;
 const MAX_DUE_TIMER_MS = 60_000;
 
 function buildNotificationScheduleRelease(dependencies = {}) {
@@ -46,40 +46,55 @@ function scheduleNotificationScheduleRelease(dependencies = {}) {
   const subscribeWakeup = dependencies.subscribeNotificationWakeup ||
     redisCache.subscribeNotificationWakeup;
   const logger = dependencies.logger || console;
+  const nowMs = dependencies.nowMs || Date.now;
+  const setDueTimer = dependencies.setDueTimer || setTimeout;
+  const clearDueTimer = dependencies.clearDueTimer || clearTimeout;
   let stopped = false;
   let running = null;
+  let rerun = false;
   let dueTimer = null;
   let unsubscribe = null;
   const armDueTimer = async () => {
     if (stopped || typeof nextDueAt !== "function") return;
     const dueAt = await nextDueAt();
-    if (dueTimer) clearTimeout(dueTimer);
+    if (dueTimer) clearDueTimer(dueTimer);
     dueTimer = null;
     if (!dueAt) return;
-    const untilDue = new Date(dueAt).getTime() - Date.now();
-    const delay = Math.max(
-      dependencies.minDueRetryMs || MIN_DUE_RETRY_MS,
-      Math.min(MAX_DUE_TIMER_MS, untilDue),
-    );
-    dueTimer = setTimeout(tick, delay);
+    const untilDue = new Date(dueAt).getTime() - nowMs();
+    // This is an eligibility timer, not polling. Work that is already due is
+    // drained on the next event-loop turn; future work sleeps until its exact
+    // boundary (bounded by the 60s recovery interval).
+    const delay = Math.max(0, Math.min(MAX_DUE_TIMER_MS, untilDue));
+    dueTimer = setDueTimer(tick, delay);
     dueTimer.unref?.();
   };
   const tick = () => {
-    if (stopped || running) return running;
-    running = Promise.resolve()
-      .then(run)
-      .then(async (result) => {
+    if (stopped) return running;
+    if (running) { rerun = true; return running; }
+    running = (async () => {
+      let result;
+      do {
+        rerun = false;
+        result = await run();
         await armDueTimer();
-        return result;
+      } while (rerun && !stopped);
+      return result;
+    })()
+      .catch((error) => {
+        logger.error?.("[NOTIFICATION] schedule release failed", {
+          errorCode: error?.code || "SCHEDULE_RELEASE_FAILED",
+        });
+        if (!stopped) {
+          if (dueTimer) clearDueTimer(dueTimer);
+          dueTimer = setDueTimer(tick, 1_000);
+          dueTimer.unref?.();
+        }
       })
-      .catch((error) => logger.error?.("[NOTIFICATION] schedule release failed", {
-        errorCode: error?.code || "SCHEDULE_RELEASE_FAILED",
-      }))
       .finally(() => { running = null; });
     return running;
   };
   tick();
-  const interval = setInterval(tick, dependencies.intervalMs || FALLBACK_INTERVAL_MS);
+  const interval = setInterval(tick, dependencies.intervalMs || RECOVERY_INTERVAL_MS);
   interval.unref?.();
   Promise.resolve(subscribeWakeup(() => tick()))
     .then((stop) => { unsubscribe = stop; })
@@ -92,7 +107,7 @@ function scheduleNotificationScheduleRelease(dependencies = {}) {
       if (stopped) return;
       stopped = true;
       clearInterval(interval);
-      if (dueTimer) clearTimeout(dueTimer);
+      if (dueTimer) clearDueTimer(dueTimer);
       await unsubscribe?.();
       await running;
     },
@@ -101,6 +116,7 @@ function scheduleNotificationScheduleRelease(dependencies = {}) {
 
 module.exports = {
   FALLBACK_INTERVAL_MS,
+  RECOVERY_INTERVAL_MS,
   buildNotificationScheduleRelease,
   scheduleNotificationScheduleRelease,
 };

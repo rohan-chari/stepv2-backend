@@ -1,4 +1,7 @@
 const crypto = require("node:crypto");
+const {
+  coordinatedOptimizationMetrics,
+} = require("../../../shared/observability/coordinatedOptimizationMetrics");
 const { prorateSamplesIntoWindow } = require("../models/stepSample");
 const {
   calculateBaseAdjusted,
@@ -19,6 +22,7 @@ const {
 
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_WORK_BYTES = 16 * 1024 * 1024;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const CAPTURE_EFFECT_TYPES = [...new Set([
   ...SETTLEMENT_EFFECT_TYPES,
   // Hitchhike is loaded race-wide by the canonical scorer rather than through
@@ -170,36 +174,110 @@ async function scoreCaptureArtifact(payload) {
   return Math.round(withEvent - withoutEvent);
 }
 
-async function buildArtifact(tx, { impact, work, entitlement, provenance }) {
-  const race = await tx.race.findUnique({
-    where: { id: impact.raceId },
+const artifactRaceSelect = {
+  id: true,
+  startedAt: true,
+  endsAt: true,
+  timezone: true,
+  powerupsEnabled: true,
+  participants: {
+    where: { status: "ACCEPTED" },
     select: {
       id: true,
-      startedAt: true,
-      endsAt: true,
-      timezone: true,
-      powerupsEnabled: true,
-      participants: {
-        where: { status: "ACCEPTED" },
-        select: {
-          id: true,
-          userId: true,
-          finishedAt: true,
-          forfeitedAt: true,
-          joinedAt: true,
-          bonusSteps: true,
-        },
-        orderBy: { userId: "asc" },
-      },
+      userId: true,
+      finishedAt: true,
+      forfeitedAt: true,
+      joinedAt: true,
+      bonusSteps: true,
     },
-  });
-  const participant = race?.participants?.find((row) => row.userId === work.userId);
-  if (!race || !participant) return { error: "PARTICIPANT_STATE_UNREPLAYABLE" };
-  const cutoffCandidates = [entitlement.endsAt, race.endsAt,
+    orderBy: { userId: "asc" },
+  },
+};
+
+function artifactCutoffAt(race, participant, entitlement) {
+  const candidates = [entitlement.endsAt, race.endsAt,
     participant.finishedAt, participant.forfeitedAt]
     .filter(Boolean)
     .map((value) => new Date(value));
-  const cutoffAt = new Date(Math.min(...cutoffCandidates.map((value) => value.getTime())));
+  return new Date(Math.min(...candidates.map((value) => value.getTime())));
+}
+
+async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) {
+  const raceIds = [...new Set(impacts.map((impact) => impact.raceId))].sort();
+  if (raceIds.length === 0) return {
+    racesById: new Map(), samples: [], dailySteps: [], effects: [], inputVersions: [],
+  };
+  const races = await tx.race.findMany({
+    where: { id: { in: raceIds } },
+    select: artifactRaceSelect,
+    orderBy: { id: "asc" },
+  });
+  const racesById = new Map(races.map((race) => [race.id, race]));
+  const workByEventId = new Map(works.map((work) => [work.eventId, work]));
+  const dependencyUserIds = [...new Set(races.flatMap((race) =>
+    race.participants.map((participant) => participant.userId)))].sort();
+  let earliest = null;
+  let latest = null;
+  for (const impact of impacts) {
+    const race = racesById.get(impact.raceId);
+    const work = workByEventId.get(impact.eventId);
+    const entitlement = entitlementsByEventId.get(impact.eventId);
+    const participant = race?.participants.find((row) => row.userId === work?.userId);
+    if (!race || !participant || !entitlement) continue;
+    const cutoffAt = artifactCutoffAt(race, participant, entitlement);
+    const rangeStart = new Date(new Date(race.startedAt).getTime() - DAY_MS);
+    const rangeEnd = new Date(cutoffAt.getTime() + DAY_MS);
+    if (!earliest || rangeStart < earliest) earliest = rangeStart;
+    if (!latest || rangeEnd > latest) latest = rangeEnd;
+  }
+  const [samples, dailySteps, effects, inputVersions] = dependencyUserIds.length && earliest && latest
+    ? await Promise.all([
+        tx.stepSample.findMany({
+          where: {
+            userId: { in: dependencyUserIds },
+            periodEnd: { gt: earliest },
+            periodStart: { lt: latest },
+          },
+          select: { userId: true, periodStart: true, periodEnd: true, steps: true },
+          orderBy: [{ userId: "asc" }, { periodStart: "asc" }, { id: "asc" }],
+        }),
+        tx.step.findMany({
+          where: { userId: { in: dependencyUserIds }, date: { gte: earliest, lte: latest } },
+          select: { userId: true, date: true, steps: true },
+          orderBy: [{ userId: "asc" }, { date: "asc" }],
+        }),
+        tx.raceActiveEffect.findMany({
+          where: {
+            raceId: { in: raceIds },
+            type: { in: CAPTURE_EFFECT_TYPES },
+            status: { in: ["ACTIVE", "EXPIRED"] },
+          },
+          select: {
+            id: true, raceId: true, type: true, status: true, startsAt: true,
+            expiresAt: true, targetParticipantId: true, targetUserId: true,
+            sourceUserId: true, metadata: true,
+          },
+          orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+        }),
+        tx.userScoringInputVersion.findMany({
+          where: { userId: { in: dependencyUserIds } },
+          select: { userId: true, generation: true },
+          orderBy: { userId: "asc" },
+        }),
+      ])
+    : [[], [], [], []];
+  return { racesById, samples, dailySteps, effects, inputVersions };
+}
+
+async function buildArtifact(tx, {
+  impact, work, entitlement, provenance, artifactFacts = null,
+}) {
+  const race = artifactFacts?.racesById.get(impact.raceId) || await tx.race.findUnique({
+    where: { id: impact.raceId }, select: artifactRaceSelect,
+  });
+  const participant = race?.participants?.find((row) => row.userId === work.userId);
+  if (!race || !participant) return { error: "PARTICIPANT_STATE_UNREPLAYABLE" };
+  const cutoffAt = artifactCutoffAt(race, participant, entitlement);
   if (!Number.isFinite(cutoffAt.getTime())) return { error: "INPUTS_NOT_RETAINED" };
 
   const participantRows = race.participants.map((row) => {
@@ -211,7 +289,18 @@ async function buildArtifact(tx, { impact, work, entitlement, provenance }) {
   const dependencyUserIds = participantRows.map((row) => row.userId).sort();
   const earliestDate = new Date(new Date(race.startedAt).getTime() - 24 * 60 * 60 * 1000);
   const latestDate = new Date(cutoffAt.getTime() + 24 * 60 * 60 * 1000);
-  const [samples, dailySteps, effects, inputVersions] = await Promise.all([
+  const loaded = artifactFacts || {};
+  const [samples, dailySteps, effects, inputVersions] = artifactFacts ? [
+    loaded.samples.filter((row) => dependencyUserIds.includes(row.userId) &&
+      new Date(row.periodEnd) > new Date(race.startedAt) && new Date(row.periodStart) < cutoffAt),
+    loaded.dailySteps.filter((row) => dependencyUserIds.includes(row.userId) &&
+      new Date(row.date) >= earliestDate && new Date(row.date) <= latestDate),
+    race.powerupsEnabled
+      ? loaded.effects.filter((row) => row.raceId === race.id)
+          .map(({ raceId: _raceId, ...row }) => row)
+      : [],
+    loaded.inputVersions.filter((row) => dependencyUserIds.includes(row.userId)),
+  ] : await Promise.all([
     tx.stepSample.findMany({
       where: {
         userId: { in: dependencyUserIds },
@@ -303,6 +392,16 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
   at = new Date(),
 }) {
   if (!tx?.globalEventSummaryWork || !tx?.userScoringInputVersion) return [];
+  const activeWork = await tx.globalEventSummaryWork.findFirst({
+    where: {
+      userId,
+      status: { in: ["QUEUED", "PROCESSING", "WAITING_RACES"] },
+      expiresAt: { gt: new Date(at) },
+      event: { summaryAttributionVersion: 2 },
+    },
+    select: { id: true, status: true, expiresAt: true },
+    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+  });
   const works = await tx.globalEventSummaryWork.findMany({
     where: {
       userId,
@@ -310,10 +409,21 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
       expiresAt: { gt: new Date(at) },
       event: { summaryAttributionVersion: 2, endsAt: { lte: new Date(at) } },
     },
-    select: { id: true, eventId: true },
+    select: {
+      id: true,
+      eventId: true,
+      userId: true,
+      expiresAt: true,
+      event: {
+        select: {
+          id: true, startsAt: true, endsAt: true, multiplier: true,
+          scheduleMode: true, summaryAttributionVersion: true,
+        },
+      },
+    },
     orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
   });
-  if (works.length === 0) return [];
+  if (works.length === 0) return { activeWork, works: [], impacts: [], entitlements: [] };
   const impactWhere = {
     eventId: { in: works.map((work) => work.eventId) },
     userId,
@@ -435,11 +545,24 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
     },
     data: { attributionVersion: 2 },
   });
-  return workIds;
+  const entitlements = await tx.globalStepEventEntitlement.findMany({
+    where: { eventId: { in: works.map((work) => work.eventId) }, userId },
+    orderBy: [{ eventId: "asc" }, { id: "asc" }],
+  });
+  return {
+    activeWork,
+    works,
+    impacts: verifiedVector.map((impact) =>
+      impact.status === "PENDING" && impact.attributionVersion === 1
+        ? { ...impact, attributionVersion: 2 }
+        : impact),
+    entitlements,
+  };
 }
 
 async function claimEligibleSummaryWork(tx, {
   userId,
+  captureDependencies = null,
   eligibleWorkIds = [],
   captureSyncRequestId,
   captureCompletedAt,
@@ -447,19 +570,21 @@ async function claimEligibleSummaryWork(tx, {
   sourceScoringInputGeneration,
 }) {
   if (!captureCoverageThrough || !sourceScoringInputGeneration) return null;
-  const existingActive = await tx.globalEventSummaryWork.findFirst({
-    where: {
-      userId,
-      status: { in: ["QUEUED", "PROCESSING", "WAITING_RACES"] },
-      expiresAt: { gt: captureCompletedAt },
-      event: { summaryAttributionVersion: 2 },
-    },
-    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
-  });
+  const existingActive = captureDependencies?.activeWork ||
+    await tx.globalEventSummaryWork.findFirst({
+      where: {
+        userId,
+        status: { in: ["QUEUED", "PROCESSING", "WAITING_RACES"] },
+        expiresAt: { gt: captureCompletedAt },
+        event: { summaryAttributionVersion: 2 },
+      },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+    });
   let receipt = existingActive
     ? { id: existingActive.id, state: existingActive.status, expiresAt: existingActive.expiresAt }
     : null;
-  const candidates = await tx.globalEventSummaryWork.findMany({
+  const dependencyWorks = captureDependencies?.works;
+  const candidates = dependencyWorks || await tx.globalEventSummaryWork.findMany({
     where: {
       id: { in: eligibleWorkIds },
       userId,
@@ -480,15 +605,39 @@ async function claimEligibleSummaryWork(tx, {
     },
     orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
   });
+  const carriedImpacts = captureDependencies?.impacts || null;
+  const entitlementRows = captureDependencies?.entitlements || [];
+  const entitlementsByEventId = new Map(
+    entitlementRows.map((entitlement) => [entitlement.eventId, entitlement]),
+  );
+  for (const work of candidates) {
+    if (!entitlementsByEventId.has(work.eventId)) {
+      const legacy = legacyGlobalSummaryEntitlement({ event: work.event, userId });
+      if (legacy) entitlementsByEventId.set(work.eventId, legacy);
+    }
+  }
+  const allPendingImpacts = carriedImpacts
+    ? carriedImpacts.filter((impact) => impact.status === "PENDING")
+    : [];
+  const artifactFacts = carriedImpacts
+    ? await loadArtifactFacts(tx, {
+        works: candidates,
+        impacts: allPendingImpacts,
+        entitlementsByEventId,
+      })
+    : null;
   for (const work of candidates) {
     if (work.event.summaryAttributionVersion !== 2) continue;
-    const entitlement = await tx.globalStepEventEntitlement.findUnique({
-      where: { eventId_userId: { eventId: work.eventId, userId } },
-    }) || legacyGlobalSummaryEntitlement({ event: work.event, userId });
+    const entitlement = entitlementsByEventId.get(work.eventId) ||
+      await tx.globalStepEventEntitlement.findUnique({
+        where: { eventId_userId: { eventId: work.eventId, userId } },
+      }) || legacyGlobalSummaryEntitlement({ event: work.event, userId });
     if (!entitlement) continue;
     if (new Date(captureCompletedAt) < new Date(entitlement.endsAt) ||
         new Date(captureCoverageThrough) < new Date(entitlement.endsAt)) continue;
-    const impacts = await tx.globalEventRaceImpact.findMany({
+    const impacts = carriedImpacts ? carriedImpacts.filter((impact) =>
+      impact.eventId === work.eventId && impact.userId === userId && impact.status === "PENDING") :
+      await tx.globalEventRaceImpact.findMany({
       where: {
         eventId: work.eventId,
         userId,
@@ -496,7 +645,10 @@ async function claimEligibleSummaryWork(tx, {
       },
       orderBy: { raceId: "asc" },
     });
-    const incompatibleCount = await tx.globalEventRaceImpact.count({
+    const incompatibleCount = carriedImpacts ? carriedImpacts.filter((impact) =>
+      impact.eventId === work.eventId && impact.userId === userId &&
+      (impact.attributionVersion !== 2 || impact.status !== "PENDING")).length :
+      await tx.globalEventRaceImpact.count({
       where: {
         eventId: work.eventId,
         userId,
@@ -518,7 +670,9 @@ async function claimEligibleSummaryWork(tx, {
       ? "DEPENDENCY_INPUT_UNREPLAYABLE"
       : null;
     for (const impact of impacts) {
-      const artifact = await buildArtifact(tx, { impact, work, entitlement, provenance });
+      const artifact = await buildArtifact(tx, {
+        impact, work, entitlement, provenance, artifactFacts,
+      });
       if (artifact.error) {
         terminalReason = artifact.error;
         break;
@@ -579,6 +733,43 @@ const ACTIVE_WORK_STATES = new Set([
   "PROCESSING",
   "WAITING_RACES",
 ]);
+
+async function refreshSummaryReadinessForRace(tx, { raceId, now = new Date() }) {
+  if (typeof tx?.$executeRawUnsafe !== "function") return 0;
+  const updated = await tx.$executeRawUnsafe(
+    `WITH touched AS MATERIALIZED (
+       SELECT DISTINCT event_id,user_id
+         FROM global_event_race_impacts
+        WHERE race_id=$1
+     ), counts AS MATERIALIZED (
+       SELECT impact.event_id,impact.user_id,
+              COUNT(*) FILTER (WHERE impact.status='FINAL')::int AS final_count,
+              COUNT(*) FILTER (WHERE impact.status IN
+                ('FINAL','UNSCORABLE','EXPIRED_UNDELIVERED'))::int AS terminal_count
+         FROM global_event_race_impacts impact
+         JOIN touched USING (event_id,user_id)
+        GROUP BY impact.event_id,impact.user_id
+     )
+     UPDATE global_event_summary_work work
+        SET final_race_count=counts.final_count,
+            ready_at=CASE WHEN counts.terminal_count>=work.required_race_count
+                          THEN COALESCE(work.ready_at,$2) ELSE NULL END,
+            available_at=CASE WHEN counts.terminal_count>=work.required_race_count
+                              THEN LEAST(work.available_at,$2) ELSE work.available_at END,
+            next_recovery_at=$2+interval '60 seconds'
+       FROM counts
+      WHERE work.event_id=counts.event_id AND work.user_id=counts.user_id
+        AND work.status='WAITING_RACES'`,
+    raceId,
+    new Date(now),
+  );
+  if (updated > 0) {
+    coordinatedOptimizationMetrics.increment(
+      "global_summary_waiting_races_ready_total", {}, updated,
+    );
+  }
+  return updated;
+}
 
 async function persistCapturedSummaryImpactsForRace(tx, {
   raceId,
@@ -728,6 +919,7 @@ async function persistCapturedSummaryImpactsForRace(tx, {
     });
     terminalized += updated.count;
   }
+  await refreshSummaryReadinessForRace(tx, { raceId, now });
   return { finalized, terminalized };
 }
 
@@ -740,4 +932,5 @@ module.exports = {
   lockEligibleSummaryCaptureDependencies,
   claimEligibleSummaryWork,
   persistCapturedSummaryImpactsForRace,
+  refreshSummaryReadinessForRace,
 };

@@ -18,6 +18,9 @@ const {
   calculateCurrentTotal,
   determineFinishSnapshot,
 } = require("../services/raceStateResolution");
+const {
+  prefetchRaceScoringModels,
+} = require("../services/raceScoringPrefetch");
 const { raceTimeZone } = require("../raceTimeZone");
 const { applyLeechTransfers } = require("../../powerups/leechTransfers");
 const {
@@ -38,6 +41,10 @@ const {
 } = require("../services/wholeRaceAttributionScoring");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
+const redisCache = require("../../../shared/cache/redisCache");
+const {
+  refreshSummaryReadinessForRace,
+} = require("../../steps/services/globalEventSummaryCapture");
 
 // Settlement acquires the race through the SAME fence-first ownership protocol
 // the resolution worker uses (spec §5a item 6): the write transaction BEGINS by
@@ -143,7 +150,7 @@ async function loadSettlementAttributionEffects({ raceId, participants, raceActi
 
 async function computeSettlementEffectAttribution({
   race, acceptedParticipants, preLeech, settlementTime, attributionEffects,
-  globalEvents, eventsByUserId,
+  globalEvents, eventsByUserId, stepSampleModel = StepSample,
 }) {
   const settledEvents = chronologicalEffects(globalEvents || []);
   const effects = chronologicalEffects([
@@ -167,11 +174,13 @@ async function computeSettlementEffectAttribution({
       participants: acceptedParticipants,
       entries: preLeech.filter((entry) => selectedIds.has(entry.participant.id)),
       raceActiveEffectModel: effectModel,
-      stepSampleModel: StepSample,
+      stepSampleModel,
       globalEvents: scoringGlobalEvents,
       eventsByUserId: scoringEventsByUserId,
       now: settlementTime,
       frozenTotals,
+      prepareSampleUsers: stepSampleModel.prepareUsers,
+      releaseSampleUsers: stepSampleModel.releaseUsers,
     });
   };
 
@@ -323,6 +332,7 @@ async function resolveExpiredRaces() {
   console.log(`[CRON] Found ${expiredRaces.length} expired race(s)`);
 
   for (const race of expiredRaces) {
+    let settlementSampleModel = null;
     try {
       const settlementStartedAt = Date.now();
       const trace = (phase, startedAt = settlementStartedAt, extra = {}) => {
@@ -380,6 +390,27 @@ async function resolveExpiredRaces() {
       const standings = [];
       trace("scoring-begin", phaseStartedAt, { participants: acceptedParticipants.length });
 
+      // Settlement uses the same bounded, fail-closed source adapter as the
+      // resolution worker. A failed batch leaves the race ACTIVE for retry;
+      // it must never degrade into participant-linear SQL at race end.
+      const settlementScoring = await prefetchRaceScoringModels({
+        races: [{ ...race, participants: acceptedParticipants }],
+        now: settlementTime,
+        stepsModel: Steps,
+        stepSampleModel: StepSample,
+        raceActiveEffectModel: RaceActiveEffect,
+        powerupEventModel: RacePowerupEvent,
+        strictWorkerMode: true,
+        deferredSampleLoading: true,
+      });
+      if (!settlementScoring) {
+        throw new Error("bounded settlement scoring input was unavailable");
+      }
+      const settlementStepsModel = settlementScoring.stepsModel;
+      settlementSampleModel = settlementScoring.stepSampleModel;
+      const settlementEffectModel = settlementScoring.raceActiveEffectModel;
+      const settlementEventModel = settlementScoring.powerupEventModel;
+
       // Phase A: per-participant PRE-LEECH totals + the leeches targeting each.
       // Leech is a cross-participant zero-sum transfer, resolved race-wide in
       // phase B so settled totals match what getRaceProgress showed live. Frozen
@@ -413,21 +444,23 @@ async function resolveExpiredRaces() {
           continue;
         }
 
-        const { baseAdjusted, hasSampleData, effectiveStart } =
-          await calculateBaseAdjusted({
+        await settlementSampleModel.prepareUsers?.([participant.userId]);
+        try {
+          const { baseAdjusted, hasSampleData, effectiveStart } =
+            await calculateBaseAdjusted({
             participant,
             raceStartedAt: race.startedAt,
             // Seeded races settle in their canonical tz so settled totals match
             // what getRaceProgress showed live; user races keep UTC (legacy).
             timeZone: settlementTz,
-            stepsModel: Steps,
-            stepSampleModel: StepSample,
+            stepsModel: settlementStepsModel,
+            stepSampleModel: settlementSampleModel,
             now: settlementTime,
             raceEndsAt: race.endsAt,
             globalEvents: eventsForUser(eventsByUserId, participant.userId),
           });
 
-        const {
+          const {
           total,
           leechTransfers,
           legCramps,
@@ -440,19 +473,19 @@ async function resolveExpiredRaces() {
           coinFlipWins,
           coinFlipLoses,
           ghostPeppers,
-        } = await calculateCurrentTotal({
+          } = await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
             participant,
             baseAdjusted,
             hasSampleData,
-            raceActiveEffectModel: RaceActiveEffect,
-            stepSampleModel: StepSample,
+            raceActiveEffectModel: settlementEffectModel,
+            stepSampleModel: settlementSampleModel,
             globalEvents: eventsForUser(eventsByUserId, participant.userId),
             now: settlementTime,
           });
 
-        preLeech.push({
+          preLeech.push({
           participant,
           baseAdjusted,
           hasSampleData,
@@ -472,7 +505,10 @@ async function resolveExpiredRaces() {
             coinFlipLoses,
             ghostPeppers,
           },
-        });
+          });
+        } finally {
+          settlementSampleModel.releaseUsers?.([participant.userId]);
+        }
         if ((participantIndex + 1) % 25 === 0 || participantIndex + 1 === acceptedParticipants.length) {
           trace("scoring-progress", phaseStartedAt, {
             phase: "pre-leech",
@@ -494,12 +530,14 @@ async function resolveExpiredRaces() {
             raceId: race.id,
             raceEndsAt: settlementTime,
             participants: race.participants,
-            raceActiveEffectModel: RaceActiveEffect,
-            stepSampleModel: StepSample,
+            raceActiveEffectModel: settlementEffectModel,
+            stepSampleModel: settlementSampleModel,
             now: settlementTime,
             raceTimezone: race.timezone || "UTC",
             globalEvents,
             eventsByUserId,
+            prepareSampleUsers: settlementSampleModel.prepareUsers,
+            releaseSampleUsers: settlementSampleModel.releaseUsers,
           })
         : [];
 
@@ -521,27 +559,27 @@ async function resolveExpiredRaces() {
       // is an expensive read (samples + the full powerup event log), and holding
       // the settlement fence across it would pin the race's job row for the whole
       // replay. Writes are batched into the fenced transaction below.
-      const settlementPowerupEvents = await RacePowerupEvent.findByRaceAsc(race.id);
-      const settlementPowerupEventModel = {
-        async findByRaceAsc() {
-          return settlementPowerupEvents;
-        },
-      };
       const finalTotals = [];
       for (let finalIndex = 0; finalIndex < preLeech.length; finalIndex++) {
         const e = preLeech[finalIndex];
         const total = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
-        const reachedSnapshot = await determineFinishSnapshot({
-          participant: e.participant,
-          currentTotal: total,
-          targetSteps: total,
-          effectiveStart: e.effectiveStart,
-          effectGroups: e.effectGroups,
-          stepSampleModel: StepSample,
-          powerupEventModel: settlementPowerupEventModel,
-          raceId: race.id,
-          now: settlementTime,
-        });
+        await settlementSampleModel.prepareUsers?.([e.participant.userId]);
+        let reachedSnapshot;
+        try {
+          reachedSnapshot = await determineFinishSnapshot({
+            participant: e.participant,
+            currentTotal: total,
+            targetSteps: total,
+            effectiveStart: e.effectiveStart,
+            effectGroups: e.effectGroups,
+            stepSampleModel: settlementSampleModel,
+            powerupEventModel: settlementEventModel,
+            raceId: race.id,
+            now: settlementTime,
+          });
+        } finally {
+          settlementSampleModel.releaseUsers?.([e.participant.userId]);
+        }
 
         finalTotals.push({
           participant: e.participant,
@@ -695,6 +733,7 @@ async function resolveExpiredRaces() {
           attributionEffects,
           globalEvents,
           eventsByUserId,
+          stepSampleModel: settlementSampleModel,
         });
         // Global-event impacts are lifecycle data for every enrolled runner,
         // including DNP/non-prize runners. Keep that vector complete while the
@@ -707,6 +746,7 @@ async function resolveExpiredRaces() {
           attributionEffects: { effectsByParticipant: new Map(), hitchhikes: [] },
           globalEvents,
           eventsByUserId,
+          stepSampleModel: settlementSampleModel,
         });
         if (effectAttribution) effectAttribution.globalImpacts = globalAttribution?.globalImpacts || [];
         else effectAttribution = globalAttribution;
@@ -775,7 +815,12 @@ async function resolveExpiredRaces() {
               });
             }
           }
+          await refreshSummaryReadinessForRace(tx, {
+            raceId: race.id,
+            now: settlementTime,
+          });
         });
+        await redisCache.publishDurableQueueWakeup("summary");
       }
 
       // Fenced write #2 — final placements. Same protocol: fence first, then the
@@ -841,6 +886,12 @@ async function resolveExpiredRaces() {
       );
     } catch (error) {
       console.error(`[CRON] Failed to resolve expired race ${race.id}:`, error);
+    } finally {
+      // Exceptional-user spools deliberately survive intermediate phase
+      // releaseUsers calls so pre-leech, Hitchhike, finish crossing, and
+      // attribution share one database cursor. This is the generation teardown
+      // for every success, retry, and early-continue path.
+      settlementSampleModel?.releaseAll?.();
     }
   }
 

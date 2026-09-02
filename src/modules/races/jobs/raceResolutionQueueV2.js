@@ -91,8 +91,10 @@ const {
 const {
   createOperationalAlertSpool,
 } = require("../../../shared/operationalAlerts/operationalAlertSpool");
+const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
+const redisCache = require("../../../shared/cache/redisCache");
 
-const POLL_INTERVAL_MS = 250;
+const POLL_INTERVAL_MS = 5_000;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
 const QUEUE_LAG_ALARM_MS = 30 * 1000;
 const RACE_RESOLUTION_SLOW_PHASE_MS = 10_000;
@@ -998,6 +1000,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   const nudge = dependencies.nudgeOvertakenRivals || nudgeOvertakenRivals;
   const settings = dependencies.appSettings || defaultAppSettings;
   const logger = dependencies.logger || console;
+  const publishDurableQueueWakeup = dependencies.publishDurableQueueWakeup ||
+    redisCache.publishDurableQueueWakeup;
   const workBudget = dependencies.raceResolutionWorkBudget || defaultWorkBudget;
   const postTaskHandoff =
     dependencies.raceResolutionPostTaskHandoff || defaultPostTaskHandoff;
@@ -1024,6 +1028,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   const dependencyClosureEnabled = dependencies.dependencyClosureEnabled ?? true;
   const wouldTrailMineEscalateProbe =
     dependencies.wouldTrailMineEscalate || defaultWouldTrailMineEscalate;
+  // Test-only correctness trace. Production deliberately has no default sink:
+  // participant identifiers must never be emitted to logs or metrics. The
+  // immutable snapshot is captured at the two dependency-selection boundaries
+  // so loader/query optimizations cannot silently broaden or narrow scope.
+  const recordDependencySelectionTrace =
+    typeof dependencies.recordDependencySelectionTrace === "function"
+      ? dependencies.recordDependencySelectionTrace
+      : null;
   const now = dependencies.now || (() => new Date());
   const leaseMs = dependencies.leaseMs ?? LEASE_MS;
   const processRole = dependencies.processRole || process.env.STEPS_PROCESS_ROLE || "all";
@@ -1300,6 +1312,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // DEPENDENCY_CLOSURE and the Trail-Mine escalation cleared. It is
     // the single gate every closure behavior below reads.
     let closurePlan = null;
+    let closureSelectionInvariant = null;
     // bool when a closure plan was evaluated, null when the envelope is not
     // candidate-shaped or the planner said FULL.
     let closureEscalatedOnMine = null;
@@ -1370,7 +1383,25 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 }
               }
               closureEscalatedOnMine = escalate;
-              if (!escalate) closurePlan = shadowResult;
+              if (!escalate) {
+                closurePlan = shadowResult;
+                closureSelectionInvariant = Object.freeze({
+                  participantIds: Object.freeze([...(
+                    shadowResult.scoringParticipantIds ||
+                    shadowResult.participantIds || []
+                  )].sort()),
+                  participantCount: (
+                    shadowResult.scoringParticipantIds ||
+                    shadowResult.participantIds || []
+                  ).length,
+                  plan: shadowResult.plan,
+                  fallbackReason: shadowResult.fallbackReason ?? null,
+                });
+                recordDependencySelectionTrace?.({
+                  stage: "initial_selection",
+                  ...closureSelectionInvariant,
+                });
+              }
             }
         } catch (error) {
             // The duration is still honest and still useful (a timeout is the
@@ -1682,6 +1713,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RacePowerupEvent: capture.events,
               now,
               activeImpactEnabled: resolveTimedActiveImpacts,
+              strictScoringPrefetch: true,
               ...(dependencies.prefetchRaceScoringModels
                 ? { prefetchRaceScoringModels: dependencies.prefetchRaceScoringModels }
                 : {}),
@@ -1990,6 +2022,28 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         //   * durable global-boundary delivery is current. A missing cursor or
         //     any due-but-undelivered start/end edge forces FULL.
         if (closureCommitting) {
+          const fencedSelection = {
+            participantIds: [...(
+              closurePlan.scoringParticipantIds ||
+              closurePlan.participantIds || []
+            )].sort(),
+            participantCount: (
+              closurePlan.scoringParticipantIds ||
+              closurePlan.participantIds || []
+            ).length,
+            plan: closurePlan.plan,
+            fallbackReason: closurePlan.fallbackReason ?? null,
+          };
+          if (
+            !closureSelectionInvariant ||
+            JSON.stringify(fencedSelection) !== JSON.stringify(closureSelectionInvariant)
+          ) {
+            const error = new Error(
+              "dependency participant selection changed between initial and fenced resolution",
+            );
+            error.code = "DEPENDENCY_SELECTION_INVARIANT_VIOLATION";
+            throw error;
+          }
           const dbClock = sourceFenceNow ? null : await tx.$queryRawUnsafe(
             `SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8
                AS "dbNowMs"`
@@ -2039,6 +2093,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             closureRejectedAtFence = true;
             return;
           }
+          recordDependencySelectionTrace?.({
+            stage: "fenced_recheck",
+            ...fencedSelection,
+          });
         }
 
         } finally {
@@ -2052,6 +2110,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const boxByUser = result?.boxEffectiveStepsByUser || {};
         const fullBoxScope =
           resolutionPlan === "FULL" || resolutionPlan === "ARTIFACT_REUSE";
+        const triggeringBoxRepairUsers = new Set(orderedTriggeringUserIds);
+        const boxInterval = Number(result?.race?.powerupStepInterval || 0);
+        const isTriggeredGateRepair = (participant) =>
+          triggeringBoxRepairUsers.has(participant.userId) &&
+          boxInterval > 0 &&
+          (!(participant.nextBoxAtSteps > 0) ||
+            participant.nextBoxAtSteps % boxInterval !== 0);
         const boxScopeUserIds = fullBoxScope
           ? Object.keys(boxByUser).sort()
           : orderedTriggeringUserIds;
@@ -2077,7 +2142,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // cannot become due concurrently. Keep incremental scope behavior
         // unchanged, then recheck every selected FULL cursor after row locks.
         const initiallySelectedBoxCandidates = boxCandidates.filter((participant) =>
-          !fullBoxScope || (
+          !fullBoxScope || isTriggeredGateRepair(participant) || (
             participant.nextBoxAtSteps > 0 &&
             Number(boxByUser[participant.userId]) >= participant.nextBoxAtSteps
           )
@@ -2124,7 +2189,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           .filter((participant) => participant &&
           String(participant.status || "").toUpperCase() === "ACCEPTED" &&
           participant.forfeitedAt == null &&
-          (!fullBoxScope || (
+          (!fullBoxScope || isTriggeredGateRepair(participant) || (
             participant.nextBoxAtSteps > 0 &&
             Number(boxByUser[participant.userId]) >= participant.nextBoxAtSteps
           ))
@@ -2376,7 +2441,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 addPhaseTiming(postHandoffPhaseMs, name, durationMs),
             }, tx),
           );
-          if (!durableTask?.id) {
+          if (!durableTask?.id && durableTask?.receiptOnly !== true) {
             const handoffError = new Error("durable post-task handoff was not persisted");
             handoffError.code = "POST_TASK_HANDOFF_FAILED";
             throw handoffError;
@@ -2402,6 +2467,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         ) {
           attempt.authoritativeCommitCompleted = true;
           committedPostTaskId = attemptedPostTaskId;
+          if (placementHandoffGeneration != null) {
+            await publishDurableQueueWakeup("placement");
+          }
+          await publishDurableQueueWakeup("summary");
+          if (committedPostTaskId) {
+            await publishDurableQueueWakeup("post-task");
+          }
           if (typeof dependencies.afterAuthoritativeCommit === "function") {
             await dependencies.afterAuthoritativeCommit({ job, result });
           }
@@ -3088,7 +3160,7 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
       } catch (_) {}
     }
   }
-  const worker = buildRaceResolutionWorkerV2(dependencies);
+  const worker = dependencies.worker || buildRaceResolutionWorkerV2(dependencies);
   const settings = dependencies.appSettings || defaultAppSettings;
   const yieldToEventLoop = dependencies.yieldToEventLoop ||
     (() => new Promise((resolve) => setImmediate(resolve)));
@@ -3149,17 +3221,27 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
       if (adaptive) {
         backoffUntilMs = Date.now() + errorBackoffMs;
         logger.error("[RACE_RESOLUTION_V2] adaptive tick error:", error);
+        error.retryAfterMs = Math.max(Number(error.retryAfterMs) || 0, errorBackoffMs);
       } else {
         logger.error("[RACE_RESOLUTION_V2] tick error:", error);
       }
+      throw error;
     } finally {
       running = false;
     }
   }
-  const interval = setInterval(async () => {
-    await runScheduledWork();
-  }, POLL_INTERVAL_MS);
-  if (interval.unref) interval.unref();
+  const coordinator = createPostgresWakeCoordinator({
+    queue: "resolution",
+    fallbackIntervalMs: dependencies.pollIntervalMs || 5_000,
+    drain: runScheduledWork,
+    nextDueAt: () => (dependencies.RaceResolutionJobV2 || defaultJobModel).nextDueAt?.(),
+    subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
+    logger,
+  });
+  coordinator.start({ drainOnStart: dependencies.drainOnStart !== false }).catch((error) => logger.error(
+    "[RACE_RESOLUTION_V2] wake coordinator failed", error,
+  ));
+  const interval = null;
 
   // Backpressure metric, once a minute (Phase A0 step (c) — shipped so before/
   // after lag is comparable across the C0 cutover).
@@ -3170,16 +3252,30 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
 
   const stepSyncRequestModel =
     dependencies.StepSyncRequest || defaultStepSyncRequestModel;
-  const cleanup = setInterval(() => {
-    stepSyncRequestModel.cleanupExpired(new Date()).catch(() => {});
+  const resolutionJobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
+  const cleanup = setInterval(async () => {
+    const current = new Date();
+    await stepSyncRequestModel.cleanupExpired(current).catch(() => {});
+    const orphanCleanup = resolutionJobModel.cleanupOrphanFullScopeTriggers?.({
+      before: new Date(current.getTime() - 24 * 60 * 60 * 1000),
+      limit: 500,
+    });
+    await orphanCleanup?.catch(() => {});
   }, CLEANUP_INTERVAL_MS);
   if (cleanup.unref) cleanup.unref();
 
   logger.log(
-    "[CRON] Race-keyed (v2) resolution worker scheduled (poll 250ms, " +
+    "[CRON] Race-keyed (v2) resolution worker scheduled (wake-first, 5s recovery, " +
       `${quietPeriodMs() / 1000}s startup quiet period)`
   );
-  return { interval, lagInterval, cleanup, worker };
+  return {
+    interval, lagInterval, cleanup, worker, coordinator,
+    async stop() {
+      clearInterval(lagInterval);
+      clearInterval(cleanup);
+      await coordinator.stop();
+    },
+  };
 }
 
 module.exports = {

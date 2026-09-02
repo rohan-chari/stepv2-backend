@@ -231,7 +231,7 @@ function startServer({
         if (reportCapacityResolutionWorker) {
           reportCapacityResolutionWorker(handle?.worker);
         }
-        return handle;
+        return retainStopHandle(handle);
       };
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup
@@ -239,19 +239,19 @@ function startServer({
       if (processRole === "http") return;
       if (processRole === "resolution") {
         scheduleTrackedResolutionWorker();
-        schedulePlacementTransitions();
+        retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
         if (!raceResolutionPostTaskWorkerDisabled()) {
-          scheduleResolutionPostTasks();
+          retainStopHandle(scheduleResolutionPostTasks());
         }
         return;
       }
       if (capacityHttpResolutionOnly) {
         scheduleTrackedResolutionWorker();
-        schedulePlacementTransitions();
+        retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
-        scheduleResolutionPostTasks();
+        retainStopHandle(scheduleResolutionPostTasks());
         return;
       }
       if (capacityGlobalEventOnly) {
@@ -322,7 +322,7 @@ function startServer({
         }));
         retainStopHandle(scheduleDeviceTokenCleanupJob());
       }
-      scheduleDomainEventRetentionJob();
+      retainStopHandle(scheduleDomainEventRetentionJob());
       if (!destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED")) {
         scheduleActivationCleanup();
       }
@@ -380,7 +380,7 @@ function startServer({
       // injected startup logger.
       if (processRole !== "cron") {
         scheduleTrackedResolutionWorker();
-        schedulePlacementTransitions();
+        retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
       }
@@ -388,7 +388,7 @@ function startServer({
       // creation flag. The whole-runner emergency switch is checked here and
       // again on each scheduler tick; disabling it leaves every row untouched.
       if (processRole !== "cron" && !raceResolutionPostTaskWorkerDisabled()) {
-        scheduleResolutionPostTasks();
+        retainStopHandle(scheduleResolutionPostTasks());
       }
       if (adValueEnabled("payoutReconcile")) {
         schedulePayoutDoubleReconcile();

@@ -432,6 +432,96 @@ async function determineFinishSnapshot({
     now
   );
 
+  if (samples && typeof samples[Symbol.asyncIterator] === "function") {
+    const iterator = samples[Symbol.asyncIterator]();
+    const fixedBoundaries = [...new Set([
+      effectiveStart.getTime(),
+      now.getTime(),
+      ...bonusTimeline.map((bonus) => bonus.time.getTime()),
+      ...multiplierBoundaries(
+        effectiveStart.getTime(),
+        now.getTime(),
+        effectGroups,
+      ),
+    ])].sort((a, b) => a - b);
+    const bonusesByTime = new Map();
+    for (const bonus of bonusTimeline) {
+      const time = bonus.time.getTime();
+      bonusesByTime.set(time, (bonusesByTime.get(time) || 0) + bonus.delta);
+    }
+    let pending = await iterator.next();
+    let sawSample = false;
+    const normalizePending = async () => {
+      while (!pending.done) {
+        const row = pending.value;
+        const start = Math.max(effectiveStart.getTime(), new Date(row.periodStart).getTime());
+        const end = Math.min(now.getTime(), new Date(row.periodEnd).getTime());
+        if (end > start) return {
+          start,
+          end,
+          rate: (Number(row.steps) || 0) /
+            (new Date(row.periodEnd).getTime() - new Date(row.periodStart).getTime()),
+        };
+        pending = await iterator.next();
+      }
+      return null;
+    };
+    let nextSample = await normalizePending();
+    if (!nextSample && bonusTimeline.length === 0) {
+      return { finishedAt: now, finishTotalSteps: currentTotal };
+    }
+    let current = effectiveStart.getTime();
+    let score = 0;
+    let fixedIndex = 0;
+    const active = [];
+    while (current <= now.getTime()) {
+      while (fixedIndex < fixedBoundaries.length && fixedBoundaries[fixedIndex] <= current) {
+        fixedIndex += 1;
+      }
+      for (let index = active.length - 1; index >= 0; index -= 1) {
+        if (active[index].end <= current) active.splice(index, 1);
+      }
+      while (nextSample && nextSample.start <= current) {
+        sawSample = true;
+        active.push(nextSample);
+        pending = await iterator.next();
+        nextSample = await normalizePending();
+      }
+      const bonus = bonusesByTime.get(current) || 0;
+      if (bonus !== 0) {
+        score += bonus;
+        if (score >= targetSteps) {
+          return { finishedAt: new Date(current), finishTotalSteps: score };
+        }
+      }
+      const candidates = [
+        fixedBoundaries[fixedIndex] > current ? fixedBoundaries[fixedIndex] : null,
+        nextSample?.start > current ? nextSample.start : null,
+        ...active.map((sample) => sample.end > current ? sample.end : null),
+      ].filter((value) => value != null);
+      if (candidates.length === 0) break;
+      const next = Math.min(...candidates);
+      if (next <= current) break;
+      const stepRate = active.reduce((sum, sample) => sum + sample.rate, 0);
+      if (stepRate > 0) {
+        const scoreRate = stepRate * multiplierForTime(current, effectGroups);
+        const segmentGain = scoreRate * (next - current);
+        if (scoreRate > 0 && score < targetSteps && score + segmentGain >= targetSteps) {
+          return {
+            finishedAt: new Date(current + ((targetSteps - score) / scoreRate)),
+            finishTotalSteps: targetSteps,
+          };
+        }
+        score += segmentGain;
+      }
+      current = next;
+    }
+    if (!sawSample && bonusTimeline.length === 0) {
+      return { finishedAt: now, finishTotalSteps: currentTotal };
+    }
+    return { finishedAt: now, finishTotalSteps: currentTotal };
+  }
+
   if (samples.length === 0 && bonusTimeline.length === 0) {
     return { finishedAt: now, finishTotalSteps: currentTotal };
   }
@@ -1018,6 +1108,8 @@ async function computeActiveTimedImpactCapture({
   stepSampleModel,
   eventsByUserId = null,
   selectedEffects = [],
+  prepareSampleUsers = null,
+  releaseSampleUsers = null,
 }) {
   if (selectedEffects.length === 0) return { resolved: [], all: [], scorerCalls: 0 };
   const participantById = new Map(participants.map((row) => [row.id, row]));
@@ -1087,29 +1179,36 @@ async function computeActiveTimedImpactCapture({
     }
   }
   const hitchhikes = effects.filter((effect) => effect.type === "HITCHHIKE");
-  const vector = await computeSelectedPrefixAttributionVector({
-    participants: captureParticipants,
-    effects,
-    selectedEffectIds: selectedIds,
-    // This is the canonical scorer's raw-term instrumentation seam. It accepts
-    // the complete chronological prefix once, evaluates the already-prefetched
-    // closure, and returns unrounded marginals. The attribution allocator then
-    // runs exactly once over the complete vector; callers never subtract
-    // independently rounded totals.
-    scoreRawPrefixTerms: async ({ orderedEffects }) => {
-      return captureIncrementalRacePrefixTerms({
-        race,
-        participants: captureParticipants,
-        preLeech: preLeech.filter((entry) => recipientIds.has(entry.participant.id)),
-        currentTime,
-        effectsByParticipant,
-        hitchhikes,
-        orderedEffects,
-        stepSampleModel,
-        eventsByUserId,
-      });
-    },
-  });
+  const captureUserIds = captureParticipants.map((participant) => participant.userId);
+  if (prepareSampleUsers) await prepareSampleUsers(captureUserIds);
+  let vector;
+  try {
+    vector = await computeSelectedPrefixAttributionVector({
+      participants: captureParticipants,
+      effects,
+      selectedEffectIds: selectedIds,
+      // This is the canonical scorer's raw-term instrumentation seam. It accepts
+      // the complete chronological prefix once, evaluates the already-prefetched
+      // closure, and returns unrounded marginals. The attribution allocator then
+      // runs exactly once over the complete vector; callers never subtract
+      // independently rounded totals.
+      scoreRawPrefixTerms: async ({ orderedEffects }) => {
+        return captureIncrementalRacePrefixTerms({
+          race,
+          participants: captureParticipants,
+          preLeech: preLeech.filter((entry) => recipientIds.has(entry.participant.id)),
+          currentTime,
+          effectsByParticipant,
+          hitchhikes,
+          orderedEffects,
+          stepSampleModel,
+          eventsByUserId,
+        });
+      },
+    });
+  } finally {
+    if (releaseSampleUsers) releaseSampleUsers(captureUserIds);
+  }
   const effectById = new Map(effects.map((effect) => [effect.id, effect]));
   const all = vector.effectImpacts
     .filter((impact) => {
@@ -1185,6 +1284,7 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.GlobalStepEvent || GlobalStepEvent;
   const prefetchRaceScoringModels =
     dependencies.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
+  const strictScoringPrefetch = dependencies.strictScoringPrefetch === true;
   const logger = dependencies.logger || console;
   const recordPhaseTiming =
     typeof dependencies.recordPhaseTiming === "function"
@@ -1286,6 +1386,8 @@ function buildResolveRaceState(dependencies = {}) {
     }
 
     async function processRace(race) {
+      let generationSampleModel = null;
+      try {
       if (race.status !== "ACTIVE" || !race.startedAt) {
         return null;
       }
@@ -1354,12 +1456,16 @@ function buildResolveRaceState(dependencies = {}) {
             stepsModel,
             stepSampleModel,
             raceActiveEffectModel,
+            powerupEventModel,
+            strictWorkerMode: strictScoringPrefetch,
+            deferredSampleLoading: strictScoringPrefetch,
             ...(scoreScope
               ? { scoringParticipantIds: [...scoreScope] }
               : {}),
           })
         );
       } catch (error) {
+        if (strictScoringPrefetch) throw error;
         // A bulk-read failure must not make resolution unavailable. Fall back
         // to the canonical per-participant model calls for this run.
         logger.error(
@@ -1370,6 +1476,7 @@ function buildResolveRaceState(dependencies = {}) {
       const scoringStepsModel = prefetched?.stepsModel || stepsModel;
       const scoringStepSampleModel =
         prefetched?.stepSampleModel || stepSampleModel;
+      generationSampleModel = scoringStepSampleModel;
       const prefetchedEffectModel =
         prefetched?.raceActiveEffectModel || raceActiveEffectModel;
       // Bound Phase A2's copy work to links whose CASTER is in the closure.
@@ -1480,8 +1587,15 @@ function buildResolveRaceState(dependencies = {}) {
       // settlement, and this path agree. `preLeech[index]` holds either a frozen
       // total or {preLeechTotal, leechTransfers}. Writes are deferred to phase B.
       const preLeech = new Array(scoredParticipants.length);
-      await measureResolutionPhase("participantScoring", () => Promise.all(
-        scoredParticipants.map(async (participant, index) => {
+      await measureResolutionPhase("participantScoring", async () => {
+        const participantChunkSize = 25;
+        for (let offset = 0; offset < scoredParticipants.length; offset += participantChunkSize) {
+          const chunk = scoredParticipants.slice(offset, offset + participantChunkSize);
+          await scoringStepSampleModel.prepareUsers?.(
+            chunk.map((participant) => participant.userId),
+          );
+          await Promise.all(chunk.map(async (participant, chunkIndex) => {
+          const index = offset + chunkIndex;
           // TR-601: forfeited team-race members are FROZEN at the total the
           // forfeit command snapshotted — never recomputed here (their timed
           // effects expire naturally but the frozen number stands).
@@ -1585,8 +1699,12 @@ function buildResolveRaceState(dependencies = {}) {
           // `targetSteps` survives as a DISPLAY goal (legacy client UI, seeded
           // Daily 10K / Weekly 50K) and completes nothing. Legacy rows that
           // already carry finishedAt keep their frozen totals (handled above).
-        })
-      ));
+          }));
+          scoringStepSampleModel.releaseUsers?.(
+            chunk.map((participant) => participant.userId),
+          );
+        }
+      });
 
       // Phase A2 — HITCHHIKE (§7.3). Identical to the display path's insertion in
       // getRaceProgress: ONE bulk query for every link in the race, folded into
@@ -1608,6 +1726,8 @@ function buildResolveRaceState(dependencies = {}) {
               raceTimezone: race.timezone || "UTC",
               globalEvents,
               eventsByUserId,
+              prepareSampleUsers: scoringStepSampleModel.prepareUsers,
+              releaseSampleUsers: scoringStepSampleModel.releaseUsers,
             })
           )
         : [];
@@ -1704,6 +1824,8 @@ function buildResolveRaceState(dependencies = {}) {
                   ...selectedDueImpactEffects,
                   ...selectedFreezeImpactEffects,
                 ],
+                prepareSampleUsers: scoringStepSampleModel.prepareUsers,
+                releaseSampleUsers: scoringStepSampleModel.releaseUsers,
               }),
             ),
             { captureQueries: false },
@@ -1871,6 +1993,13 @@ function buildResolveRaceState(dependencies = {}) {
         // Retained (always 0) so existing callers reading this keep working.
         newFinishers: 0,
       };
+      } finally {
+        // The bounded worker adapter owns generation-local scratch input.
+        // Exceptional histories may be disk-spooled across several scoring
+        // phases, so teardown must run on successful handoff, every scoring
+        // exception, and every early return after adapter creation.
+        generationSampleModel?.releaseAll?.();
+      }
     }
 
     // Process races sequentially in stable sorted (by id) order, each under its

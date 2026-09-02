@@ -263,6 +263,7 @@ test("FULL trigger promotion extends the large-race debounce from the newest upl
   assert.match(promotion[0], /BOOL_AND\(user_id IS NOT NULL AND participant_id IS NOT NULL\)/i);
   assert.match(promotion[0], /full_trigger_seed_only/);
   assert.match(promotion[0], /STEP_INPUT_CHANGED/);
+  assert.match(promotion[0], /JOIN races race ON race\.id=trigger\.race_id[\s\S]*race\.status='active'/);
   assert.match(
     promotion[0],
     /queue_priority=CASE[\s\S]*job\.state='queued'[\s\S]*job\.queue_priority='LIVE'[\s\S]*THEN 'LIVE'[\s\S]*ELSE 'MAINTENANCE' END/,
@@ -272,6 +273,23 @@ test("FULL trigger promotion extends the large-race debounce from the newest upl
     "2026-08-31T16:00:05.000Z",
     "each newly observed upload pushes the claim floor five seconds forward",
   );
+});
+
+test("orphan full-trigger cleanup is bounded and never deletes work for an active race", async () => {
+  let captured;
+  const model = buildRaceResolutionJobV2Model({
+    async $queryRawUnsafe(...args) {
+      captured = args;
+      return [{ deleted: 7 }];
+    },
+  });
+  const before = new Date("2026-08-31T15:00:00.000Z");
+  assert.equal(await model.cleanupOrphanFullScopeTriggers({ before, limit: 20 }), 7);
+  assert.match(captured[0], /race\.id IS NULL/);
+  assert.match(captured[0], /race\.status <> 'active'/);
+  assert.match(captured[0], /job\.id IS NULL OR job\.state NOT IN \('queued','running'\)/);
+  assert.match(captured[0], /LIMIT \$2/);
+  assert.deepEqual(captured.slice(1), [before, 20]);
 });
 
 test("ordinary coalesced enqueue extends a queued race's debounce floor", async () => {

@@ -13,8 +13,10 @@ const {
   bulkAppendDomainEvents: defaultBulkAppendDomainEvents,
   normalizeDomainEvent,
 } = require("../../domainEvents");
+const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
+const redisCache = require("../../../shared/cache/redisCache");
 
-const POLL_INTERVAL_MS = 250;
+const POLL_INTERVAL_MS = 10_000;
 
 async function claimTeamTransition(tx, claim) {
   if (!claim) return true;
@@ -234,24 +236,25 @@ function buildRacePlacementTransitionWorker(dependencies = {}) {
 function scheduleRacePlacementTransitionWorker(dependencies = {}) {
   const worker = buildRacePlacementTransitionWorker(dependencies);
   const logger = dependencies.logger || console;
-  let running = false;
-  const interval = setInterval(async () => {
-    if (running) return;
-    running = true;
-    try {
-      await worker.tick();
-    } catch (error) {
-      logger.error("[RACE_PLACEMENT_TRANSITION] tick failed", error);
-    } finally {
-      running = false;
-    }
-  }, POLL_INTERVAL_MS);
-  if (interval.unref) interval.unref();
-  logger.log("[CRON] Race placement transition worker scheduled (poll 250ms)");
+  const jobModel = dependencies.RacePlacementTransitionJob || defaultJobModel;
+  const coordinator = createPostgresWakeCoordinator({
+    queue: "placement",
+    fallbackIntervalMs: dependencies.pollIntervalMs || 10_000,
+    drain: async () => worker.tick({ maxJobs: 16 }),
+    nextDueAt: () => jobModel.nextDueAt?.(),
+    subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
+    logger,
+  });
+  coordinator.start().catch((error) => logger.error(
+    "[RACE_PLACEMENT_TRANSITION] wake coordinator failed", error,
+  ));
+  const interval = null;
+  logger.log("[CRON] Race placement transition worker scheduled (wake-first, 10s recovery)");
   return {
     interval,
     worker,
-    stop() { clearInterval(interval); },
+    coordinator,
+    stop() { return coordinator.stop(); },
   };
 }
 

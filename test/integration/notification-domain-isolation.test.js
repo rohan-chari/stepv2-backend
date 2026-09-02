@@ -1224,6 +1224,34 @@ describe("notification domain isolation", () => {
     const retrying = await prisma.domainEventOutbox.findUniqueOrThrow({ where: { id: event.id } });
     assert.equal(retrying.availableAt.toISOString(), originalAvailableAt.toISOString());
     assert.equal(retrying.leaseUntil.toISOString(), retryAt.toISOString());
+    assert.equal(
+      (await domainEventRepository.claimEvents({
+        prisma,
+        now: new Date(retryAt.getTime() - 1),
+        batchSize: 25,
+      })).length,
+      0,
+      "RETRY work remains ineligible until its mutable retry deadline",
+    );
+    assert.equal(
+      (await domainEventRepository.nextDueAt(prisma)).toISOString(),
+      retryAt.toISOString(),
+      "the exact due timer follows RETRY.lease_until, not immutable available_at",
+    );
+    const [dueRetry] = await domainEventRepository.claimEvents({
+      prisma,
+      now: retryAt,
+      batchSize: 25,
+    });
+    assert.equal(dueRetry.id, event.id);
+    await prisma.domainEventOutbox.update({
+      where: { id: event.id },
+      data: {
+        status: "RETRY",
+        leaseToken: null,
+        leaseUntil: retryAt,
+      },
+    });
 
     const child = await prisma.domainEventNotificationProjection.create({
       data: {

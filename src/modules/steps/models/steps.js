@@ -81,6 +81,7 @@ const Steps = {
         userId: { in: userIds },
         date: { gte: new Date(startDate), lte: new Date(endDate) },
       },
+      select: { userId: true, date: true, steps: true },
       orderBy: { date: "asc" },
     });
   },

@@ -348,9 +348,12 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                     MIN(trigger.requested_at) AS requested_at,
                     MAX(trigger.resolution_time_zone) AS resolution_time_zone
                FROM (
-                 SELECT race_id,requested_at,resolution_time_zone
-                   FROM race_resolution_full_triggers
-                  ORDER BY requested_at,id
+                 SELECT trigger.race_id,trigger.requested_at,
+                        trigger.resolution_time_zone
+                   FROM race_resolution_full_triggers trigger
+                   JOIN races race ON race.id=trigger.race_id
+                  WHERE race.status='active'
+                  ORDER BY trigger.requested_at,trigger.id
                   LIMIT $1
                ) trigger
               GROUP BY trigger.race_id
@@ -378,9 +381,14 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                     trigger.resolution_time_zone,trigger.requested_at
                FROM race_resolution_full_triggers trigger
                JOIN race_resolution_jobs_v2 job ON job.race_id=trigger.race_id
+               JOIN races race ON race.id=trigger.race_id
               WHERE job.full_trigger_seed_only
-                 OR NOT (job.dirty_reasons ? 'STEP_INPUT_CHANGED')
-                 OR jsonb_array_length(job.dirty_participant_ids) < 500
+                AND race.status='active'
+                AND (
+                  job.full_trigger_seed_only
+                  OR NOT (job.dirty_reasons ? 'STEP_INPUT_CHANGED')
+                  OR jsonb_array_length(job.dirty_participant_ids) < 500
+                )
                ORDER BY trigger.requested_at,trigger.id
               LIMIT $1
               FOR UPDATE SKIP LOCKED
@@ -525,6 +533,40 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           races: Number(rows[0]?.races || 0),
         };
       }, { timeout: 15_000, maxWait: 10_000 });
+    },
+
+    async cleanupOrphanFullScopeTriggers({
+      before = new Date(Date.now() - 24 * 60 * 60 * 1000),
+      limit = 500,
+    } = {}) {
+      const safeLimit = Math.min(500, Math.max(1, Number(limit) || 500));
+      const [result = {}] = await prisma.$queryRawUnsafe(
+        `WITH candidates AS MATERIALIZED (
+           SELECT trigger.id
+             FROM race_resolution_full_triggers trigger
+             LEFT JOIN races race ON race.id=trigger.race_id
+             LEFT JOIN race_resolution_jobs_v2 job ON job.race_id=trigger.race_id
+            WHERE trigger.created_at < $1
+              AND (
+                race.id IS NULL
+                OR (
+                  race.status <> 'active'
+                  AND (job.id IS NULL OR job.state NOT IN ('queued','running'))
+                )
+              )
+            ORDER BY trigger.created_at,trigger.id
+            LIMIT $2
+            FOR UPDATE OF trigger SKIP LOCKED
+         ), deleted AS (
+           DELETE FROM race_resolution_full_triggers trigger
+            USING candidates
+            WHERE trigger.id=candidates.id
+           RETURNING trigger.id
+         ) SELECT COUNT(*)::int AS deleted FROM deleted`,
+        before,
+        safeLimit,
+      );
+      return Number(result.deleted || 0);
     },
 
     // Convenience for the multi-race enqueue sites (sync-v2 Transaction B).
@@ -1528,6 +1570,19 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       );
       const lag = Number(rows[0]?.lag ?? 0);
       return Number.isFinite(lag) ? Math.max(0, Math.round(lag)) : 0;
+    },
+
+    async nextDueAt() {
+      const [row = {}] = await prisma.$queryRawUnsafe(
+        `SELECT LEAST(
+           (SELECT MIN(GREATEST(COALESCE(not_before_at,clock_timestamp()),
+                                COALESCE(retry_at,clock_timestamp())))
+              FROM race_resolution_jobs_v2 WHERE state='queued'),
+           (SELECT MIN(lease_expires_at)
+              FROM race_resolution_jobs_v2 WHERE state='running')
+         ) AS "dueAt"`,
+      );
+      return row.dueAt || null;
     },
 
     // One once-per-minute aggregate probe using the exact claimNext predicate.

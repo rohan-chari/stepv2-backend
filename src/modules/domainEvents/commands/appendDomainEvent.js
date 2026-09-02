@@ -1,4 +1,6 @@
 const { TextEncoder } = require("node:util");
+const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
+const redisCache = require("../../../shared/cache/redisCache");
 
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 
@@ -123,11 +125,55 @@ function sameAudience(stored = [], expected = []) {
 
 function buildAppendDomainEvent(dependencies = {}) {
   const repository = dependencies.repository || require("../models/domainEventOutbox");
+  const receiptModel = dependencies.receiptModel ||
+    (dependencies.repository ? null : require("../models/domainEventReceipt").DomainEventReceipt);
   const logger = dependencies.logger || console;
+  const publishWake = dependencies.publishWake ||
+    (() => redisCache.publishDurableQueueWakeup("domain-event"));
+  const publishAfterCommit = () => isInPrismaTransactionScope()
+    ? deferUntilAfterCommit(publishWake)
+    : publishWake();
 
   return async function appendDomainEvent(tx, input) {
     if (!tx || typeof tx !== "object") throw new TypeError("transaction client is required");
     const event = normalizeDomainEvent(input);
+    const replaySourceType = input.replaySourceType || event.aggregateType;
+    const replaySourceId = input.replaySourceId || event.aggregateId;
+    const receiptsAvailable = Boolean(receiptModel && tx.domainEventReceipt);
+    if (receiptsAvailable) {
+      const receipt = await receiptModel.findByEventKey(event.eventKey, tx);
+      if (receipt?.receiptState === "FINAL") {
+        receiptModel.assertEnvelope(receipt, event);
+        receiptModel.assertIdentity?.(receipt, {
+          domainEventId: receipt.domainEventId,
+          replaySourceType,
+          replaySourceId,
+        });
+        const stored = await repository.findByEventKey(tx, event.eventKey);
+        if (stored) {
+          receiptModel.assertIdentity?.(receipt, {
+            domainEventId: stored.id,
+            replaySourceType,
+            replaySourceId,
+          });
+          if (!sameImmutableEvent(stored, event) ||
+              !sameAudience(stored.audience || [], event.audience)) {
+            throw new DomainEventInvariantError(
+              `eventKey ${event.eventKey} was reused with different immutable facts`,
+            );
+          }
+          return { ...stored, terminalStatus: receipt.terminalStatus, receiptOnly: false };
+        }
+        return {
+          id: receipt.domainEventId,
+          eventKey: receipt.eventKey,
+          eventType: receipt.eventType,
+          status: receipt.terminalStatus,
+          terminalStatus: receipt.terminalStatus,
+          receiptOnly: true,
+        };
+      }
+    }
     if (typeof repository.insertEventIfAbsent === "function" &&
         typeof tx.$queryRawUnsafe === "function") {
       const result = await repository.insertEventIfAbsent(tx, event);
@@ -140,10 +186,19 @@ function buildAppendDomainEvent(dependencies = {}) {
       if (!result.inserted) logger.log?.("[DOMAIN_EVENT] idempotent append replay", {
         eventId: result.event.id, eventType: result.event.eventType,
       });
+      if (receiptsAvailable) await receiptModel.finalize({
+        envelope: event,
+        domainEventId: result.event.id,
+        replaySourceType,
+        replaySourceId,
+      }, tx);
+      if (result.inserted) await publishAfterCommit();
       return result.event;
     }
     try {
-      return await repository.createEvent(tx, event);
+      const created = await repository.createEvent(tx, event);
+      await publishAfterCommit();
+      return created;
     } catch (error) {
       if (error?.code !== "P2002" && error?.code !== "23505") throw error;
       const stored = await repository.findByEventKey(tx, event.eventKey);
@@ -162,13 +217,28 @@ function buildAppendDomainEvent(dependencies = {}) {
 
 function buildBulkAppendDomainEvents(dependencies = {}) {
   const repository = dependencies.repository || require("../models/domainEventOutbox");
+  const receiptModel = dependencies.receiptModel ||
+    (dependencies.repository ? null : require("../models/domainEventReceipt").DomainEventReceipt);
+  const publishWake = dependencies.publishWake ||
+    (() => redisCache.publishDurableQueueWakeup("domain-event"));
+  const publishAfterCommit = () => isInPrismaTransactionScope()
+    ? deferUntilAfterCommit(publishWake)
+    : publishWake();
   return async function bulkAppendDomainEvents(tx, inputs) {
     if (!tx || typeof tx !== "object") throw new TypeError("transaction client is required");
     if (!Array.isArray(inputs)) throw new TypeError("events must be an array");
     // All envelopes are normalized before the first SQL write. A malformed
     // event can therefore never leave an earlier event/baseline committed.
     const events = inputs.map(normalizeDomainEvent);
+    const replaySourceByEventKey = new Map(inputs.map((input, index) => [
+      events[index].eventKey,
+      {
+        replaySourceType: input.replaySourceType || events[index].aggregateType,
+        replaySourceId: input.replaySourceId || events[index].aggregateId,
+      },
+    ]));
     const keys = new Set();
+    const receiptFinalizations = [];
     for (const event of events) {
       if (keys.has(event.eventKey)) {
         throw new DomainEventInvariantError(`duplicate eventKey ${event.eventKey} in bulk append`);
@@ -178,9 +248,35 @@ function buildBulkAppendDomainEvents(dependencies = {}) {
     if (events.length === 0) {
       return { inserted: 0, replayed: 0, statementCount: 0 };
     }
-    const result = await repository.insertEventsIfAbsent(tx, events);
+    const receiptOnlyKeys = new Set();
+    const receiptByKey = new Map();
+    const receiptsAvailable = Boolean(receiptModel && tx.domainEventReceipt);
+    if (receiptsAvailable) {
+      const receipts = await tx.domainEventReceipt.findMany({
+        where: { eventKey: { in: events.map((event) => event.eventKey) } },
+      });
+      const liveKeys = new Set((await tx.domainEventOutbox.findMany({
+        where: { eventKey: { in: receipts.map((receipt) => receipt.eventKey) } },
+        select: { eventKey: true },
+      })).map((row) => row.eventKey));
+      const eventByKey = new Map(events.map((event) => [event.eventKey, event]));
+      for (const receipt of receipts) {
+        receiptByKey.set(receipt.eventKey, receipt);
+        if (receipt.receiptState !== "FINAL") continue;
+        receiptModel.assertEnvelope(receipt, eventByKey.get(receipt.eventKey));
+        const expected = eventByKey.get(receipt.eventKey);
+        receiptModel.assertIdentity?.(receipt, {
+          domainEventId: receipt.domainEventId,
+          ...replaySourceByEventKey.get(expected.eventKey),
+        });
+        if (!liveKeys.has(receipt.eventKey)) receiptOnlyKeys.add(receipt.eventKey);
+      }
+    }
+    const insertable = events.filter((event) => !receiptOnlyKeys.has(event.eventKey));
+    const result = await repository.insertEventsIfAbsent(tx, insertable);
     const storedByKey = new Map(result.rows.map((row) => [row.eventKey, row]));
     for (const event of events) {
+      if (receiptOnlyKeys.has(event.eventKey)) continue;
       const stored = storedByKey.get(event.eventKey);
       if (!sameImmutableEvent(stored, event) ||
           !sameAudience(stored?.audience || [], event.audience)) {
@@ -188,11 +284,39 @@ function buildBulkAppendDomainEvents(dependencies = {}) {
           `eventKey ${event.eventKey} was reused with different immutable facts`,
         );
       }
+      if (receiptsAvailable) receiptFinalizations.push({
+        envelope: event,
+        domainEventId: stored.id,
+        ...replaySourceByEventKey.get(event.eventKey),
+      });
     }
+    if (receiptFinalizations.length) {
+      if (typeof receiptModel.finalizeMany === "function") {
+        await receiptModel.finalizeMany({ items: receiptFinalizations }, tx);
+      } else {
+        for (const item of receiptFinalizations) await receiptModel.finalize(item, tx);
+      }
+    }
+    if (result.insertedEventKeys.size > 0) await publishAfterCommit();
+    const dispositions = events.map((event, ordinal) => {
+      const receipt = receiptByKey.get(event.eventKey);
+      const stored = storedByKey.get(event.eventKey);
+      return {
+        ordinal,
+        eventKey: event.eventKey,
+        domainEventId: receipt?.domainEventId || stored?.id || null,
+        disposition: receiptOnlyKeys.has(event.eventKey)
+          ? "RECEIPT_ONLY"
+          : result.insertedEventKeys.has(event.eventKey) ? "INSERTED" : "REPLAYED",
+        terminalStatus: receipt?.terminalStatus || null,
+      };
+    });
     return {
       inserted: result.insertedEventKeys.size,
       replayed: events.length - result.insertedEventKeys.size,
+      receiptOnly: receiptOnlyKeys.size,
       statementCount: result.statementCount || 0,
+      dispositions,
     };
   };
 }

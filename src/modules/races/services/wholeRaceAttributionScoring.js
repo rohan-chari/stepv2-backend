@@ -39,23 +39,31 @@ async function scoreWholeRaceTotals({
   now,
   isFrozen = (participant) => Boolean(participant.finishedAt || participant.forfeitedAt),
   frozenTotals = new Map(),
+  prepareSampleUsers = null,
+  releaseSampleUsers = null,
 }) {
   const evaluated = [];
   for (const entry of entries) {
     const participant = entry.participant;
-    const current = await calculateCurrentTotal({
-      raceId,
-      racePowerupsEnabled,
-      participant,
-      baseAdjusted: entry.baseAdjusted,
-      hasSampleData: entry.hasSampleData,
-      raceActiveEffectModel,
-      stepSampleModel,
-      globalEvents: eventsByUserId
-        ? eventsForUser(eventsByUserId, participant.userId)
-        : globalEvents,
-      now: entry.now || now,
-    });
+    if (prepareSampleUsers) await prepareSampleUsers([participant.userId]);
+    let current;
+    try {
+      current = await calculateCurrentTotal({
+        raceId,
+        racePowerupsEnabled,
+        participant,
+        baseAdjusted: entry.baseAdjusted,
+        hasSampleData: entry.hasSampleData,
+        raceActiveEffectModel,
+        stepSampleModel,
+        globalEvents: eventsByUserId
+          ? eventsForUser(eventsByUserId, participant.userId)
+          : globalEvents,
+        now: entry.now || now,
+      });
+    } finally {
+      if (releaseSampleUsers) releaseSampleUsers([participant.userId]);
+    }
     evaluated.push({
       participant,
       participantId: participant.id,
@@ -77,6 +85,8 @@ async function scoreWholeRaceTotals({
         raceTimezone,
         globalEvents,
         eventsByUserId,
+        prepareSampleUsers,
+        releaseSampleUsers,
       })
     : [];
   const active = evaluated.filter((entry) => !entry.frozen);

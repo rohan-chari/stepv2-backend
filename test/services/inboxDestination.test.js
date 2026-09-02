@@ -39,6 +39,40 @@ async function createWithDestination(destination, tx) {
 }
 
 describe("Inbox shell destination creation", () => {
+  it("publishes delivery wake only after its owned transaction commits", async () => {
+    const recorder = createTransactionRecorder();
+    const events = [];
+    const prisma = {
+      async $transaction(work) {
+        const result = await work(recorder.tx);
+        events.push("commit");
+        return result;
+      },
+    };
+    await createInboxAlert({
+      userId: "user-1", type: "SYSTEM", title: "Wake", body: "Wake after commit",
+      destination: { route: "home" }, sourceKey: "wake-after-commit",
+      prisma,
+      invalidateUnread: async () => { events.push("invalidate"); },
+      publishWakeup: async () => { events.push("wake"); },
+    });
+    assert.deepEqual(events, ["commit", "invalidate", "wake"]);
+  });
+
+  it("does not publish delivery wake when its owned transaction rolls back", async () => {
+    let wakes = 0;
+    const prisma = {
+      async $transaction() { throw new Error("rolled back"); },
+    };
+    await assert.rejects(createInboxAlert({
+      userId: "user-1", type: "SYSTEM", title: "Wake", body: "No wake",
+      destination: { route: "home" }, sourceKey: "no-wake-on-rollback",
+      prisma,
+      publishWakeup: async () => { wakes += 1; },
+    }), /rolled back/);
+    assert.equal(wakes, 0);
+  });
+
   const allowed = [
     { route: "home" },
     { route: "dailyReward" },

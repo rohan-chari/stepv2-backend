@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "sourceCommit": "bc343dbd77441b3bd9352196a96f92fac63899f7",
+    "closureSourceBlob": "2e52159e2e345bcbb80821de9869fad2eb537993",
+    "workerSourceBlob": "c2c2a38c9667269044bf562c09354ff2959b90de",
+    "generatedBeforeOptimization": true
+  },
+  "reasons": {
+    "BOX_OPEN": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "DAILY_MOVER": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "DISPLAY_REFRESH": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "EFFECT_BOUNDARY": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "FORFEIT_TEAM": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "GLOBAL_EVENT_BOUNDARY": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "JOIN_LEAVE_KICK": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "POWERUP_MUTATION": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "RACE_START": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "RECOVERY": {
+      "plan": "FULL",
+      "fallbackReason": "NOT_STEP_SYNC_REASON_SET",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "STEP_INPUT_CHANGED": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1",
+        "p2"
+      ],
+      "participantCount": 2
+    },
+    "STEP_SYNC": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1",
+        "p2"
+      ],
+      "participantCount": 2
+    }
+  },
+  "powerups": {
+    "BOUNTY": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "CAMPFIRE_REST": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "CLEANSE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "COIN_FLIP": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "COMPRESSION_SOCKS": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "DECOY": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "DEFENSE_SCAN": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "DETOUR_SIGN": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "DRILL_SERGEANT": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "FANNY_PACK": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "GHOST_PEPPER": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "HITCHHIKE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1",
+        "p2"
+      ],
+      "participantCount": 2
+    },
+    "IMPOSTER": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "LEECH": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1",
+        "p2"
+      ],
+      "participantCount": 2
+    },
+    "LEG_CRAMP": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "LUCKY_HORSESHOE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "MIRROR": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "MYSTERY_POTION": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "PIGGY_BANK": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "PINECONE_TOSS": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "POCKET_WATCH": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "POWER_OUTAGE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "PROTEIN_SHAKE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "QUICK_RINSE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "QUICKSAND": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "RAINSTORM": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "RALLY_FLAG": {
+      "plan": "FULL",
+      "fallbackReason": "RACE_WIDE_EFFECT_ACTIVE",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "RED_CARD": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "RUNNERS_HIGH": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "SECOND_WIND": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "SHORTCUT": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "SIGNAL_JAMMER": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "SNEAKY_SWAP": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "STEALTH_MODE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "TRAIL_MAGNET": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "TRAIL_MINE": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "TRAIL_MIX": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "UMBRELLA": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    },
+    "UPRISING": {
+      "plan": "FULL",
+      "fallbackReason": "RACE_WIDE_EFFECT_ACTIVE",
+      "participantIds": [],
+      "participantCount": 0
+    },
+    "WRONG_TURN": {
+      "plan": "DEPENDENCY_CLOSURE",
+      "fallbackReason": null,
+      "participantIds": [
+        "p1"
+      ],
+      "participantCount": 1
+    }
+  }
+}

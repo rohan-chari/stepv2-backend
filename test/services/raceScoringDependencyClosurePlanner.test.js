@@ -21,10 +21,24 @@ const {
   MAX_CLOSURE_VALIDITY_MS,
   TRAIL_MINE_ESCALATION_UNKNOWN,
 } = require("../../src/modules/races/services/raceScoringDependencyClosure");
+const {
+  DIRTY_REASONS,
+  POWERUP_SCOPE_BY_TYPE,
+} = require("../../src/modules/races/services/raceResolutionReasonRegistry");
+const dependencySetBaseline = require("../fixtures/race-scoring-dependency-set-baseline.json");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 const CLAIM_STARTED_AT = new Date("2026-08-14T12:00:05.000Z");
 const RACE_ENDS_AT = new Date("2026-08-14T23:00:00.000Z");
+
+test("dependency-set baseline provenance is pinned to the independent pre-optimization source", () => {
+  assert.deepEqual(dependencySetBaseline.provenance, {
+    sourceCommit: "bc343dbd77441b3bd9352196a96f92fac63899f7",
+    closureSourceBlob: "2e52159e2e345bcbb80821de9869fad2eb537993",
+    workerSourceBlob: "c2c2a38c9667269044bf562c09354ff2959b90de",
+    generatedBeforeOptimization: true,
+  });
+});
 
 test("the closure ceiling admits one complete scoped launch-wave envelope", () => {
   assert.equal(MAX_DEPENDENCY_CLOSURE_PARTICIPANTS, 1000);
@@ -248,6 +262,62 @@ async function assertMatchesOracle(options) {
   );
   return plan;
 }
+
+test("checked-in dependency-set baseline covers every dirty reason and power-up registry key", () => {
+  assert.deepEqual(
+    Object.keys(dependencySetBaseline.reasons).sort(),
+    [...DIRTY_REASONS].sort(),
+  );
+  assert.deepEqual(
+    Object.keys(dependencySetBaseline.powerups).sort(),
+    Object.keys(POWERUP_SCOPE_BY_TYPE).sort(),
+  );
+});
+
+test("every dirty reason preserves its exact selected participant IDs and count", async () => {
+  const participants = [participant("p1"), participant("p2"), participant("p9")];
+  const effects = [leech("reason-edge", "p2", "u-p1")];
+  for (const reason of [...DIRTY_REASONS].sort()) {
+    const plan = await buildRaceScoringDependencyClosure(world({
+      participants,
+      effects,
+      reasons: [reason],
+      dirty: ["p1"],
+    }));
+    const expected = dependencySetBaseline.reasons[reason];
+    assert.equal(plan.plan, expected.plan, `${reason}: plan`);
+    assert.equal(plan.fallbackReason, expected.fallbackReason, `${reason}: fallback`);
+    assert.deepEqual(plan.participantIds, expected.participantIds, `${reason}: participant IDs`);
+    assert.equal(plan.participantIds.length, expected.participantCount, `${reason}: count`);
+  }
+});
+
+test("every power-up preserves its exact selected participant IDs and count", async () => {
+  const participants = [participant("p1"), participant("p2"), participant("p9")];
+  for (const type of Object.keys(POWERUP_SCOPE_BY_TYPE).sort()) {
+    const row = type === "LEECH"
+      ? leech(`effect-${type}`, "p2", "u-p1")
+      : type === "HITCHHIKE"
+        ? hitchhike(`effect-${type}`, "p2", "u-p1", 2)
+        : effect(`effect-${type}`, type, "p2", {
+            sourceUserId: "u-p1",
+            ...(type === "TRAIL_MINE"
+              ? { metadata: { aheadParticipantIds: ["p2"] } }
+              : {}),
+          });
+    const plan = await buildRaceScoringDependencyClosure(world({
+      participants,
+      effects: [row],
+      reasons: ["STEP_SYNC"],
+      dirty: ["p1"],
+    }));
+    const expected = dependencySetBaseline.powerups[type];
+    assert.equal(plan.plan, expected.plan, `${type}: plan`);
+    assert.equal(plan.fallbackReason, expected.fallbackReason, `${type}: fallback`);
+    assert.deepEqual(plan.participantIds, expected.participantIds, `${type}: participant IDs`);
+    assert.equal(plan.participantIds.length, expected.participantCount, `${type}: count`);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Closure membership vs the oracle

@@ -137,6 +137,34 @@ describe("durable race placement transition worker", () => {
     assert.equal(advanced.observedAt.toISOString(), later.toISOString());
   });
 
+  it("does not arm an exact due timer for placement work blocked by its resolution fence", async () => {
+    const { race } = await createActiveRace(2);
+    const due = new Date(Date.now() - 5_000);
+    await RacePlacementTransitionJob.enqueueCurrentGeneration({
+      raceId: race.id,
+      generation: 1,
+      observedAt: due,
+      now: due,
+    });
+    await prisma.raceResolutionJobV2.update({
+      where: { raceId: race.id },
+      data: { state: "RUNNING" },
+    });
+
+    assert.equal(await RacePlacementTransitionJob.claimOne({ now: new Date() }), null);
+    assert.equal(
+      await RacePlacementTransitionJob.nextDueAt(),
+      null,
+      "a due placement row that cannot pass the resolution fence must not zero-delay spin",
+    );
+
+    await prisma.raceResolutionJobV2.update({
+      where: { raceId: race.id },
+      data: { state: "SUCCEEDED" },
+    });
+    assert.ok(await RacePlacementTransitionJob.nextDueAt());
+  });
+
   it("repairs missing handoffs, pages catch-up, and promotes generation zero through real resolution", async () => {
     const first = await createActiveRace(2);
     const second = await createActiveRace(1);

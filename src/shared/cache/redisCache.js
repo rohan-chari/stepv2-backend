@@ -23,6 +23,7 @@
 
 const CHANNEL_SUFFIX = "cache:invalidate";
 const NOTIFICATION_WAKE_CHANNEL_SUFFIX = "notification:wake";
+const DURABLE_QUEUE_WAKE_CHANNEL_SUFFIX = "durable-queue:wake";
 const ERROR_LOG_INTERVAL_MS = 60_000;
 const TELEMETRY_HISTORY_HASH_CAP_BYTES = 128 * 1024;
 const TELEMETRY_HISTORY_BATCH_CAP_BYTES = 24 * 1024 * 1024;
@@ -102,6 +103,10 @@ function channelName() {
 
 function notificationWakeChannelName() {
   return `${keyPrefix()}${NOTIFICATION_WAKE_CHANNEL_SUFFIX}`;
+}
+
+function durableQueueWakeChannelName() {
+  return `${keyPrefix()}${DURABLE_QUEUE_WAKE_CHANNEL_SUFFIX}`;
 }
 
 function buildClient(role) {
@@ -463,10 +468,24 @@ function getSubscriber() {
     s.subscriber = buildClient("subscriber");
     s.subscriberHandlers = new Set();
     s.notificationWakeHandlers = new Set();
+    s.durableQueueWakeHandlers = new Set();
     s.reconnectHandlers = new Set();
     s.subscriberReady = attachReadyGate(s.subscriber);
 
     s.subscriber.on("message", (channel, raw) => {
+      if (channel === durableQueueWakeChannelName()) {
+        let message;
+        try { message = JSON.parse(raw); } catch (error) {
+          logOnce("durable-queue-wake-parse", error);
+          return;
+        }
+        if (!message || typeof message.queue !== "string") return;
+        for (const handler of s.durableQueueWakeHandlers) {
+          try { handler({ queue: message.queue }); }
+          catch (error) { logOnce("durable-queue-wake-handler", error); }
+        }
+        return;
+      }
       if (channel === notificationWakeChannelName()) {
         let message;
         try { message = JSON.parse(raw); } catch (error) {
@@ -517,6 +536,9 @@ function getSubscriber() {
       });
       s.subscriber.subscribe(notificationWakeChannelName()).catch((error) => {
         logOnce("notification-wake-subscribe", error);
+      });
+      s.subscriber.subscribe(durableQueueWakeChannelName()).catch((error) => {
+        logOnce("durable-queue-wake-subscribe", error);
       });
       for (const onReconnect of s.reconnectHandlers) {
         try {
@@ -592,6 +614,47 @@ async function subscribeNotificationWakeup(handler) {
   }
   return async () => {
     if (typeof handler === "function") s.notificationWakeHandlers.delete(handler);
+  };
+}
+
+async function publishDurableQueueWakeup(queue) {
+  try {
+    if (typeof queue !== "string" || !/^[a-z0-9_-]{1,64}$/.test(queue)) return false;
+    const client = await readyClient();
+    if (!client) {
+      require("../observability/coordinatedOptimizationMetrics")
+        .coordinatedOptimizationMetrics.increment(
+          "durable_queue_wake_publish_failure_total", { queue },
+        );
+      return false;
+    }
+    await client.publish(durableQueueWakeChannelName(), JSON.stringify({ queue }));
+    return true;
+  } catch (error) {
+    if (typeof queue === "string" && /^[a-z0-9_-]{1,64}$/.test(queue)) {
+      require("../observability/coordinatedOptimizationMetrics")
+        .coordinatedOptimizationMetrics.increment(
+          "durable_queue_wake_publish_failure_total", { queue },
+        );
+    }
+    logOnce("publishDurableQueueWakeup", error);
+    return false;
+  }
+}
+
+async function subscribeDurableQueueWakeup(handler) {
+  const s = ensureState();
+  if (!s.config.enabled) return async () => {};
+  const subscriber = getSubscriber();
+  if (typeof handler === "function") s.durableQueueWakeHandlers.add(handler);
+  try {
+    await s.subscriberReady;
+    await subscriber.subscribe(durableQueueWakeChannelName());
+  } catch (error) {
+    logOnce("durable-queue-wake-subscribe", error);
+  }
+  return async () => {
+    if (typeof handler === "function") s.durableQueueWakeHandlers.delete(handler);
   };
 }
 
@@ -980,6 +1043,8 @@ module.exports = {
   publishNotificationWakeup,
   subscribe,
   subscribeNotificationWakeup,
+  publishDurableQueueWakeup,
+  subscribeDurableQueueWakeup,
   healthStatus,
   diagnostics,
   close,

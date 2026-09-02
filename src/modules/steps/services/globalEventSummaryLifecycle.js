@@ -9,6 +9,8 @@ const {
   FALLBACK_EVENT_TIMEZONE,
   LEGACY_GLOBAL,
 } = require("../globalStepEvent");
+const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
+const redisCache = require("../../../shared/cache/redisCache");
 
 const TERMINAL_WORK_STATES = new Set([
   "CREATED",
@@ -125,6 +127,9 @@ async function createSummaryWorkForEntitlement(tx, entitlement, now = new Date()
     // Terminal work is the durable handoff. The summary scheduler reconciles
     // its pending races in a later C0-only phase and stamps raceReconciledAt;
     // work-row transactions never acquire race C0 after the work lock.
+  }
+  if (isInPrismaTransactionScope()) {
+    await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("summary"));
   }
   return work;
 }

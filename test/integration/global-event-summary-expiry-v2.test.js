@@ -15,6 +15,7 @@ const {
 } = require("../../src/modules/steps/services/globalStepEventEntitlement");
 const {
   buildGlobalEventSummaryTick,
+  nextSummaryDueAt,
 } = require("../../src/modules/steps/jobs/globalEventSummary");
 const {
   buildRaceResolutionWorkerV2,
@@ -270,6 +271,28 @@ describe("global event summary expiry v2 HTTP contract", () => {
     assert.equal(await prisma.jobRun.count({
       where: { jobName: `global_event_summary:${event.id}:${owner.user.id}:v2` },
     }), 1);
+  });
+
+  it("exact-due lookup respects a live WAITING_RACES lease after a budget skip", async () => {
+    const owner = await createTestUser();
+    const event = await createEvent();
+    const now = new Date();
+    const leaseUntil = new Date(now.getTime() + 15_000);
+    await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: event.id,
+        userId: owner.user.id,
+        status: "WAITING_RACES",
+        availableAt: new Date(now.getTime() - 60_000),
+        readyAt: new Date(now.getTime() - 60_000),
+        expiresAt: new Date(now.getTime() + 60_000),
+        leaseToken: randomUUID(),
+        leaseUntil,
+      },
+    });
+    const dueAt = await nextSummaryDueAt(prisma);
+    assert.equal(dueAt.toISOString(), leaseUntil.toISOString());
+    assert.ok(dueAt > now);
   });
 
   it("promotes pending old-worker rows but fails a final v1 row closed for a v2 event", async () => {

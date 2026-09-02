@@ -8,6 +8,7 @@ const {
 
 test("due Umbrella scheduler enqueues only indexed boundary races with an immediate domain envelope", async () => {
   const enqueues = [];
+  let wakes = 0;
   const scheduler = buildResolvedImpactBoundaryScheduler({
     prisma: {
       async $queryRawUnsafe() {
@@ -21,9 +22,11 @@ test("due Umbrella scheduler enqueues only indexed boundary races with an immedi
       },
     },
     now: () => new Date("2026-08-19T18:00:00.000Z"),
+    publishResolutionWake: async () => { wakes += 1; },
   });
 
   assert.equal(await scheduler.tick(), 2);
+  assert.equal(wakes, 1);
   assert.deepEqual(enqueues[0].raceIds, ["race-a", "race-b"]);
   assert.equal(enqueues[0].bypassDebounce, true);
   for (const raceId of enqueues[0].raceIds) {

@@ -1,4 +1,7 @@
 const crypto = require("node:crypto");
+const {
+  NotificationScheduleReceipt,
+} = require("../models/notificationScheduleReceipt");
 
 const ADMISSION_CLASS_GLOBAL_EVENT_STARTED = "visible:GLOBAL_EVENT_STARTED";
 // Capacity candidate: 100 final provider-attempt admissions/second. At the
@@ -15,6 +18,7 @@ const ADMISSION_RETRY = "ADMISSION_RETRY";
 const ADMISSION_LEASED = "ADMISSION_LEASED";
 const ADMISSION_PENDING = "ADMISSION_PENDING";
 const ADMISSION_LEASE_MS = 30_000;
+const ADMISSION_RECOVERY_DEFER_MS = 60_000;
 
 function tokenSpacingMicros(attemptsPerMinute) {
   const rate = Number(attemptsPerMinute);
@@ -63,6 +67,7 @@ async function releaseEventNotificationPage({
   maximumRows = PROVIDER_ADMISSION_PAGE_SIZE,
   telemetry = null,
   invalidateUnreadBatch = null,
+  scheduleReceipt = NotificationScheduleReceipt,
 } = {}) {
   if (!prisma?.$transaction) throw new TypeError("prisma transaction client is required");
   const current = new Date(now);
@@ -103,24 +108,32 @@ async function releaseEventNotificationPage({
     const dormant = [];
     const canceled = [];
     const eligible = [];
+    const deferred = [];
     for (const row of rows) {
       if (row.expiresAt && new Date(row.expiresAt) <= current) expired.push(row);
       else if (row.startOutcome === "NO_ACTIVE_RACES") dormant.push(row);
       else if (!row.sourceRef || !row.eventId || new Date(row.entitlementEndsAt) <= current ||
           row.startOutcome === "SKIPPED_STALE") canceled.push(row);
       else if (new Date(row.entitlementStartsAt) <= current && row.startProcessedAt && row.hasImpact) eligible.push(row);
+      else deferred.push(row);
     }
     if (expired.length) {
       await tx.notificationSchedule.updateMany({
         where: { id: { in: expired.map((row) => row.id) }, status: ADMISSION_PENDING },
         data: { status: "EXPIRED", canceledAt: current, cancellationReason: "EXPIRED" },
       });
+      await scheduleReceipt.markTerminalMany({
+        rows: expired, terminalStatus: "EXPIRED", completedAt: current,
+      }, tx);
     }
     if (canceled.length) {
       await tx.notificationSchedule.updateMany({
         where: { id: { in: canceled.map((row) => row.id) }, status: ADMISSION_PENDING },
         data: { status: "CANCELLED", canceledAt: current, cancellationReason: "INELIGIBLE_AT_BOUNDARY" },
       });
+      await scheduleReceipt.markTerminalMany({
+        rows: canceled, terminalStatus: "CANCELLED", completedAt: current,
+      }, tx);
     }
     if (dormant.length) {
       await tx.notificationSchedule.updateMany({
@@ -130,6 +143,33 @@ async function releaseEventNotificationPage({
           cancellationReason: "NO_ACTIVE_RACES",
         },
       });
+      await scheduleReceipt.markTerminalMany({
+        rows: dormant, terminalStatus: "CANCELLED_NO_ACTIVE_RACE", completedAt: current,
+      }, tx);
+    }
+    if (deferred.length) {
+      const deferrals = deferred.map((row) => {
+        const startsAt = new Date(row.entitlementStartsAt);
+        const expiresAt = row.expiresAt ? new Date(row.expiresAt) : null;
+        const recoveryAt = startsAt > current
+          ? startsAt
+          : new Date(current.getTime() + ADMISSION_RECOVERY_DEFER_MS);
+        return {
+          id: row.id,
+          availableAt: new Date(Math.min(
+            recoveryAt.getTime(),
+            expiresAt?.getTime() ?? Number.POSITIVE_INFINITY,
+          )).toISOString(),
+        };
+      });
+      await tx.$executeRawUnsafe(
+        `UPDATE notification_schedules schedule
+            SET available_at=input."availableAt",updated_at=$2
+           FROM jsonb_to_recordset($1::jsonb)
+             AS input(id text,"availableAt" timestamptz)
+          WHERE schedule.id=input.id AND schedule.status='ADMISSION_PENDING'`,
+        JSON.stringify(deferrals), current,
+      );
     }
     if (eligible.length) {
       const inboxExpiry = new Date(current.getTime() + 30 * 24 * 60 * 60_000);
@@ -210,6 +250,9 @@ async function releaseEventNotificationPage({
            FROM input WHERE schedule.id=input.id AND schedule.status='ADMISSION_PENDING'`,
         JSON.stringify(input), current, inboxExpiry, admissionClass,
       );
+      await scheduleReceipt.markTerminalMany({
+        rows: eligible, terminalStatus: "MATERIALIZED", completedAt: current,
+      }, tx);
     }
     const next = await tx.notificationSchedule.findFirst({
       where: { admissionClass, status: ADMISSION_PENDING },
@@ -221,6 +264,7 @@ async function releaseEventNotificationPage({
         examined: rows.length,
         materialized: eligible.length,
         expired: expired.length,
+        deferred: deferred.length,
         nextScheduleAt: next?.availableAt || null,
       },
       canceled: canceled.length + dormant.length,
@@ -372,13 +416,28 @@ async function claimProviderAttemptPage({
           admissionClass, current, maximumCandidates,
         )
         : await tx.$queryRawUnsafe(
-          `SELECT id FROM inbox_delivery_outbox
-            WHERE admission_class=$1
-              AND ((status='ADMISSION_RETRY' AND available_at <= $2)
-                OR (status='ADMISSION_LEASED' AND lease_until <= $2))
-              AND admission_expires_at > $2
-            ORDER BY available_at,admission_sequence,id
-            LIMIT $3 FOR UPDATE SKIP LOCKED`,
+          `WITH retry_candidates AS MATERIALIZED (
+             SELECT id,available_at AS "dueAt",admission_sequence AS "admissionSequence"
+               FROM inbox_delivery_outbox
+              WHERE admission_class=$1 AND status='ADMISSION_RETRY'
+                AND available_at <= $2 AND admission_expires_at > $2
+              ORDER BY available_at,admission_sequence,id
+              LIMIT $3 FOR UPDATE SKIP LOCKED
+           ), lease_candidates AS MATERIALIZED (
+             SELECT id,lease_until AS "dueAt",admission_sequence AS "admissionSequence"
+               FROM inbox_delivery_outbox
+              WHERE admission_class=$1 AND status='ADMISSION_LEASED'
+                AND lease_until <= $2 AND admission_expires_at > $2
+              ORDER BY lease_until,admission_sequence,id
+              LIMIT $3 FOR UPDATE SKIP LOCKED
+           )
+           SELECT id FROM (
+             SELECT * FROM retry_candidates
+             UNION ALL
+             SELECT * FROM lease_candidates
+           ) bounded
+           ORDER BY "dueAt","admissionSequence",id
+           LIMIT $3`,
           admissionClass, current, maximumCandidates,
         );
       if (!candidates.length) return [];
@@ -479,23 +538,55 @@ async function claimProviderAttemptPage({
   // timer loop when the lane token is stale but every pending row is scheduled
   // for the future. Read the first actual availability boundary instead. This
   // is still two bounded index reads, and lets Redis wakeups remain immediate.
-  const [nextOutbox, nextSchedule] = await Promise.all([
+  const [nextFirst, nextRetry, nextLeased, nextOutboxExpiry,
+    nextSchedule, nextScheduleExpiry] = await Promise.all([
     prisma.inboxDeliveryOutbox.findFirst({
       where: {
         admissionClass,
-        status: { in: [ADMISSION_FIRST, ADMISSION_RETRY, ADMISSION_LEASED] },
+        status: ADMISSION_FIRST,
         admissionExpiresAt: { gt: current },
       },
       select: { availableAt: true },
       orderBy: [{ availableAt: "asc" }, { id: "asc" }],
+    }),
+    prisma.inboxDeliveryOutbox.findFirst({
+      where: { admissionClass, status: ADMISSION_RETRY, admissionExpiresAt: { gt: current } },
+      select: { availableAt: true },
+      orderBy: [{ availableAt: "asc" }, { id: "asc" }],
+    }),
+    prisma.inboxDeliveryOutbox.findFirst({
+      where: { admissionClass, status: ADMISSION_LEASED, leaseUntil: { not: null } },
+      select: { leaseUntil: true },
+      orderBy: [{ leaseUntil: "asc" }, { id: "asc" }],
+    }),
+    prisma.inboxDeliveryOutbox.findFirst({
+      where: {
+        admissionClass,
+        status: { in: [ADMISSION_FIRST, ADMISSION_RETRY, ADMISSION_LEASED] },
+        admissionExpiresAt: { not: null },
+      },
+      select: { admissionExpiresAt: true },
+      orderBy: [{ admissionExpiresAt: "asc" }, { id: "asc" }],
     }),
     prisma.notificationSchedule.findFirst({
       where: { admissionClass, status: ADMISSION_PENDING, expiresAt: { gt: current } },
       select: { availableAt: true },
       orderBy: [{ availableAt: "asc" }, { id: "asc" }],
     }),
+    prisma.notificationSchedule.findFirst({
+      where: { admissionClass, status: ADMISSION_PENDING, expiresAt: { not: null } },
+      select: { expiresAt: true },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+    }),
   ]);
-  const available = [nextOutbox?.availableAt, nextSchedule?.availableAt]
+  const available = [
+    nextFirst?.availableAt,
+    nextRetry?.availableAt,
+    nextLeased?.leaseUntil,
+    nextOutboxExpiry?.admissionExpiresAt,
+    nextSchedule?.availableAt,
+    nextScheduleExpiry?.expiresAt,
+  ]
     .filter(Boolean)
     .map((value) => new Date(value))
     .sort((left, right) => left - right)[0] || null;

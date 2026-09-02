@@ -183,7 +183,7 @@ function buildNotificationProjector(dependencies = {}) {
   async function projectHighMultiplier({ event, audience, projection }) {
     const p = event.payload || {};
     const recipientUserId = audience.recipientId;
-    return repo.withHighMultiplierRecipientLock(prisma, recipientUserId, async (tx) => {
+    const result = await repo.withHighMultiplierRecipientLock(prisma, recipientUserId, async (tx) => {
       const recent = await repo.findRecentHighMultiplierNotification(
         tx,
         recipientUserId,
@@ -224,6 +224,11 @@ function buildNotificationProjector(dependencies = {}) {
       });
       return { status: "COMPLETED" };
     });
+    // submit() above shares the recipient-lock transaction. Wake only after
+    // that owning transaction commits so a schedule-release worker can never
+    // observe the hint before its durable row.
+    await notificationService.wake?.({ kind: "HIGH_MULTIPLIER_PROJECTION" });
+    return result;
   }
 
   async function processOne(claim) {
@@ -380,6 +385,9 @@ function buildNotificationProjector(dependencies = {}) {
       // Pace it at 200 durable projections/s (well inside the two-minute SLO)
       // and leave the rest of this tick's DB budget to launch traffic. Generic
       // placement/silent work resumes automatically as soon as a page is short.
+      if (stats.scheduledEventsProjected > 0) {
+        await notificationService.wake?.({ kind: "SCHEDULED_EVENT_BATCH" });
+      }
       if (scheduledBacklogFull) return stats;
     }
     if (expandPureSilentPlacementEventsBatch) {

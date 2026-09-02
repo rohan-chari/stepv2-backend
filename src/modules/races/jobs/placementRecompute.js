@@ -40,6 +40,7 @@ const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
 const { userFanoutDisabled } = require("../../../shared/config/operationalControls");
+const redisCache = require("../../../shared/cache/redisCache");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -162,6 +163,10 @@ function buildRecomputePlacements(dependencies = {}) {
       async findMissingHandoffRaceIds() { return []; },
       async recoverSucceededGenerations() { return { placementJobs: 0, resolutionJobs: 0 }; },
     } : defaultRacePlacementTransitionJob);
+  const publishResolutionWake = dependencies.publishResolutionWake ||
+    (() => redisCache.publishDurableQueueWakeup("resolution"));
+  const publishPlacementWake = dependencies.publishPlacementWake ||
+    (() => redisCache.publishDurableQueueWakeup("placement"));
   const effectModel = dependencies.RaceActiveEffect || defaultRaceActiveEffect;
   // Production owns reminder/placement claims in the domain-event projector.
   // Keep the established injected-command seam on the legacy durable audit
@@ -687,10 +692,12 @@ function buildRecomputePlacements(dependencies = {}) {
           raceIds: races.map((race) => race.id),
           limit: RECOVERY_RACE_LIMIT,
         });
-        await placementJobModel.recoverSucceededGenerations({
+        const recovered = await placementJobModel.recoverSucceededGenerations({
           raceIds: missing,
           now: currentTime,
         });
+        if (Number(recovered?.placementJobs) > 0) await publishPlacementWake();
+        if (Number(recovered?.resolutionJobs) > 0) await publishResolutionWake();
       } catch (error) {
         logger.error(
           "[CRON] placementRecompute: failed to repair placement handoffs:",

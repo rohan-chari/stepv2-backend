@@ -277,6 +277,45 @@ test("production path batches accepted-participant reads across active races", a
   assert.deepEqual(batchCalls, [["r1", "r2"]]);
 });
 
+test("missing-handoff recovery wakes every queue whose durable rows were created", async () => {
+  const wakes = [];
+  const run = buildRecomputePlacements({
+    now: () => FIXED_NOW,
+    logger: { log() {}, warn() {}, error() {} },
+    eventBus: { emit() {} },
+    requestStepSyncForUsers: async () => {},
+    publishPlacementWake: async () => { wakes.push("placement"); },
+    publishResolutionWake: async () => { wakes.push("resolution"); },
+    getPerformanceFlags: () => ({
+      placementDistributedClaimEnabled: false,
+      placementLeanBaselineWritesEnabled: false,
+      placementInertPushSuppressionEnabled: false,
+    }),
+    Race: {
+      async findActiveInProgress() { return [{ id: "r1", name: "R1" }]; },
+    },
+    RaceResolutionJobV2: {
+      async findRecoveryRaceIds() { return []; },
+    },
+    RaceActiveEffect: {
+      async findDueRaceIds() { return []; },
+    },
+    RacePlacementTransitionJob: {
+      async findMissingHandoffRaceIds() { return ["r1"]; },
+      async recoverSucceededGenerations() {
+        return { placementJobs: 1, resolutionJobs: 1 };
+      },
+    },
+    RaceParticipant: {
+      async findAcceptedByRaces() { return []; },
+      async update() {},
+    },
+  });
+
+  await run();
+  assert.deepEqual(wakes.sort(), ["placement", "resolution"]);
+});
+
 test("production path batches notification audit reads", async () => {
   const auditCalls = [];
   const emitted = [];

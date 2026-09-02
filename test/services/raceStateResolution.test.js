@@ -171,6 +171,40 @@ test("a scoped resolution loads global-event eligibility only for scored partici
   assert.deepEqual(ctx.globalEventUserIdCalls, [["user-2"]]);
 });
 
+test("resolution tears down generation scoring input when authoritative capture fails", async () => {
+  const participant = makeParticipant("rp-1", "user-1", "Alice");
+  const ctx = makeContext({ participants: [participant] });
+  let releaseAllCalls = 0;
+  ctx.deps.prefetchRaceScoringModels = async () => ({
+    stepsModel: {
+      async findByUserIdAndDate() { return null; },
+      async findByUserIdAndDateRange() { return []; },
+    },
+    stepSampleModel: {
+      async prepareUsers() {},
+      releaseUsers() {},
+      releaseAll() { releaseAllCalls += 1; },
+      async sumStepsInWindow() { return 100; },
+      async sumStepsInWindows(_userId, windows) { return windows.map(() => 100); },
+      async sumClosedStepsInWindows(_userId, windows) { return windows.map(() => 100); },
+      async hasAnyInWindow() { return true; },
+    },
+    raceActiveEffectModel: ctx.deps.RaceActiveEffect,
+    powerupEventModel: ctx.deps.RacePowerupEvent,
+  });
+  ctx.deps.RaceParticipant.updateStepTotals = async () => {
+    throw new Error("captured participant write failed");
+  };
+
+  const resolveRaceState = buildResolveRaceState(ctx.deps);
+  await assert.rejects(
+    resolveRaceState({ raceId: "race-1" }),
+    /captured participant write failed/,
+  );
+  assert.equal(releaseAllCalls, 1,
+    "generation scratch input must be torn down on the failure path");
+});
+
 test("resolveRaceState freezes finished participant totals on later syncs", async () => {
   const alice = makeParticipant("rp-1", "user-1", "Alice", {
     totalSteps: 10000,
@@ -487,6 +521,42 @@ test("determineFinishSnapshot interpolates the crossing time from step samples",
 
   assert.equal(snapshot.finishTotalSteps, 10000);
   assert.equal(snapshot.finishedAt.toISOString(), "2026-04-07T10:50:00.000Z");
+});
+
+test("paged finish interpolation is exactly identical to the retained timeline", async () => {
+  const participant = makeParticipant("rp-1", "user-1", "Alice");
+  const samples = [
+    { periodStart: "2026-04-07T10:00:00Z", periodEnd: "2026-04-07T11:00:00Z", steps: 6000 },
+    { periodStart: "2026-04-07T10:30:00Z", periodEnd: "2026-04-07T11:30:00Z", steps: 6000 },
+    { periodStart: "2026-04-07T11:30:00Z", periodEnd: "2026-04-07T12:00:00Z", steps: 3000 },
+  ];
+  const base = {
+    participant,
+    currentTotal: 15000,
+    targetSteps: 10000,
+    effectiveStart: new Date("2026-04-07T10:00:00Z"),
+    effectGroups: { legCramps: [], runnersHighs: [], wrongTurns: [], campfires: [], rainstorms: [] },
+    powerupEventModel: { async findByRaceAsc() { return []; } },
+    raceId: "race-1",
+    now: new Date("2026-04-07T12:00:00Z"),
+  };
+  const retained = await determineFinishSnapshot({
+    ...base,
+    stepSampleModel: { async findByUserIdAndTimeRange() { return samples; } },
+  });
+  const paged = await determineFinishSnapshot({
+    ...base,
+    stepSampleModel: {
+      async findByUserIdAndTimeRange() {
+        return {
+          async *[Symbol.asyncIterator]() {
+            for (const sample of samples) yield sample;
+          },
+        };
+      },
+    },
+  });
+  assert.deepEqual(paged, retained);
 });
 
 test("determineFinishSnapshot uses a powerup bonus event's time for an instant crossing", async () => {

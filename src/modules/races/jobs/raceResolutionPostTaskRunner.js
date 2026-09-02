@@ -25,8 +25,16 @@ const {
 const {
   expireEffects: defaultExpireEffects,
 } = require("../../powerups/commands/expireEffects");
+const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
+const {
+  isReceiptCleanupCutoffAccepted: defaultIsReceiptCleanupCutoffAccepted,
+} = require("../../../shared/queues/receiptCleanupCutoff");
+const redisCache = require("../../../shared/cache/redisCache");
+const { prisma: defaultPrisma } = require("../../../db");
+const { createReceiptCleanupBudget } = require("../../../shared/queues/receiptCleanupBudget");
 
-const POLL_INTERVAL_MS = 250;
+const POLL_INTERVAL_MS = 30_000;
+const RECOVERY_INTERVAL_MS = 30_000;
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 const CLEANUP_BATCH_SIZE = 500;
 const CLEANUP_MAX_BATCHES = 2;
@@ -75,9 +83,18 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     1,
     Math.min(CLEANUP_MAX_BATCHES, Number(dependencies.cleanupMaxBatches) || CLEANUP_MAX_BATCHES),
   );
+  const cleanupBudgetFactory = dependencies.cleanupBudgetFactory || (() =>
+    dependencies.cleanupBudget || (dependencies.RaceResolutionPostTask
+      ? { async runPage(operation) { return { rows: await operation(), allowedContinue: true }; } }
+      : createReceiptCleanupBudget({ prisma: dependencies.prisma || defaultPrisma })));
   const yieldToEventLoop = dependencies.yieldToEventLoop ||
     (() => new Promise((resolve) => setImmediate(resolve)));
   const workBudget = dependencies.raceResolutionWorkBudget || defaultWorkBudget;
+  const isReceiptCleanupCutoffAccepted =
+    dependencies.isReceiptCleanupCutoffAccepted ||
+    (dependencies.RaceResolutionPostTask
+      ? async () => false
+      : defaultIsReceiptCleanupCutoffAccepted);
   const recoverQualificationIntents =
     dependencies.recoverReferralQualificationIntents ||
     (dependencies.RaceResolutionPostTask
@@ -199,7 +216,6 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       if (postTaskWorkerDisabled(env)) return null;
       try {
         return await workBudget.run("post", async () => {
-          await recoverQualificationIntents();
           const task = await model.claimNext({ now: now() });
           lastSuccessfulClaimProbeAt = now();
           return processClaimedTask(task);
@@ -247,15 +263,21 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     },
     async cleanup() {
       if (postTaskCleanupDisabled(env)) return 0;
-      const before = new Date(now().getTime() - 7 * 24 * 60 * 60 * 1000);
+      // WAL, latency, replica-lag, and stop state are per maintenance run.
+      // A stopped page must resume on the next tick rather than latching until
+      // the Node process restarts.
+      const cleanupBudget = cleanupBudgetFactory();
+      const cutoffAccepted = await isReceiptCleanupCutoffAccepted();
+      const retentionMs = (cutoffAccepted ? 1 : 7) * 24 * 60 * 60 * 1000;
+      const before = new Date(now().getTime() - retentionMs);
       let deleted = 0;
       for (let batch = 0; batch < cleanupMaxBatches; batch += 1) {
-        const pageDeleted = await model.cleanupTerminal({
-          before,
-          limit: cleanupBatchSize,
-        });
+        const pageResult = await cleanupBudget.runPage(() => model.cleanupTerminal({
+          before, limit: cleanupBatchSize,
+        }));
+        const pageDeleted = pageResult.rows;
         deleted += pageDeleted;
-        if (pageDeleted < cleanupBatchSize) break;
+        if (!pageResult.allowedContinue || pageDeleted < cleanupBatchSize) break;
         if (batch + 1 < cleanupMaxBatches) await yieldToEventLoop();
       }
       return deleted;
@@ -333,20 +355,30 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
           "[RACE_RESOLUTION_POST_TASK] adaptive tick failed:",
           error
         );
+        error.retryAfterMs = Math.max(Number(error.retryAfterMs) || 0, errorBackoffMs);
       } else {
         (dependencies.logger || console).error(
           "[RACE_RESOLUTION_POST_TASK] tick failed:",
           error
         );
       }
+      throw error;
     } finally {
       running = false;
     }
   }
-  const interval = setInterval(async () => {
-    await runScheduledWork();
-  }, dependencies.pollIntervalMs || POLL_INTERVAL_MS);
-  interval.unref?.();
+  const coordinator = createPostgresWakeCoordinator({
+    queue: "post-task",
+    fallbackIntervalMs: dependencies.pollIntervalMs || RECOVERY_INTERVAL_MS,
+    drain: runScheduledWork,
+    nextDueAt: () => runner.isDisabled() ? null : modelNextDueAt(runner, dependencies),
+    subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
+    logger: dependencies.logger || console,
+  });
+  coordinator.start({ drainOnStart: dependencies.drainOnStart !== false }).catch((error) => (dependencies.logger || console).error(
+    "[RACE_RESOLUTION_POST_TASK] wake coordinator failed", error,
+  ));
+  const interval = null;
   const runCleanup = () => {
     if (cleanupRunning) return cleanupRunning;
     cleanupRunning = runner.cleanup().catch((error) => {
@@ -359,11 +391,30 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   };
   const cleanup = setInterval(runCleanup, dependencies.cleanupIntervalMs || CLEANUP_INTERVAL_MS);
   cleanup.unref?.();
-  return { interval, cleanup, runner, runCleanup };
+  const qualificationRecovery = setInterval(() => {
+    recoverQualificationIntents().catch((error) => (dependencies.logger || console).error(
+      "[RACE_RESOLUTION_POST_TASK] qualification recovery failed", error,
+    ));
+  }, dependencies.qualificationRecoveryIntervalMs || 60_000);
+  qualificationRecovery.unref?.();
+  return {
+    interval, cleanup, qualificationRecovery, runner, runCleanup, coordinator,
+    async stop() {
+      clearInterval(cleanup);
+      clearInterval(qualificationRecovery);
+      await coordinator.stop();
+    },
+  };
+}
+
+async function modelNextDueAt(runner, dependencies) {
+  const model = dependencies.RaceResolutionPostTask || defaultPostTaskModel;
+  return typeof model.nextDueAt === "function" ? model.nextDueAt() : null;
 }
 
 module.exports = {
   POLL_INTERVAL_MS,
+  RECOVERY_INTERVAL_MS,
   CLEANUP_INTERVAL_MS,
   CLEANUP_BATCH_SIZE,
   CLEANUP_MAX_BATCHES,

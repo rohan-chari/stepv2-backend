@@ -1,6 +1,7 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { hashShareToken } = require("../models/raceShareLink");
 const { createInboxAlert } = require("../../inbox/services/inbox");
+const redisCache = require("../../../shared/cache/redisCache");
 const {
   RaceJoinRequestError,
   assertRaceInviteRelationshipAllowed,
@@ -12,6 +13,8 @@ const DECLINE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 function buildCreateRaceJoinRequest(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const createAlert = dependencies.createInboxAlert || createInboxAlert;
+  const publishInboxWake = dependencies.publishInboxWake ||
+    (() => redisCache.publishNotificationWakeup({ kind: "INBOX_DELIVERY" }));
 
   return async function createRaceJoinRequest({
     rawToken,
@@ -143,6 +146,7 @@ function buildCreateRaceJoinRequest(dependencies = {}) {
       });
       return { row, created: true };
     });
+    if (outcome.created) await publishInboxWake().catch(() => {});
     return { joinRequest: serializeJoinRequest(outcome.row), created: outcome.created };
   };
 }

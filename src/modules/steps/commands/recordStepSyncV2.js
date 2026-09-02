@@ -19,6 +19,10 @@ const {
 const {
   lastStepSyncWriteBatch,
 } = require("../services/lastStepSyncWriteBatch");
+const redisCache = require("../../../shared/cache/redisCache");
+const {
+  coordinatedOptimizationMetrics,
+} = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
 const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
@@ -88,6 +92,10 @@ function buildResponse({ record, sampleCount, jobs, requestedAt, globalEventSumm
 }
 
 function buildRecordStepSyncV2(dependencies = {}) {
+  const publishSummaryWake = dependencies.publishSummaryWake ||
+    (() => redisCache.publishDurableQueueWakeup("summary"));
+  const publishResolutionWake = dependencies.publishResolutionWake ||
+    (() => redisCache.publishDurableQueueWakeup("resolution"));
   const prisma = dependencies.prisma || defaultPrisma;
   const stepSyncRequestModel = dependencies.StepSyncRequest || defaultStepSyncRequestModel;
   const stepInputIntake = dependencies.stepInputIntake || defaultStepInputIntake;
@@ -177,7 +185,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     options,
   }) {
     const requestedAt = now();
-    const eligibleSummaryWorkIds = await measureStepTelemetryPhase(
+    const summaryCaptureDependencies = await measureStepTelemetryPhase(
       "summary_finalization",
       () => require("../services/globalEventSummaryCapture")
         .lockEligibleSummaryCaptureDependencies(tx, {
@@ -185,6 +193,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
           at: requestedAt,
         }),
     );
+    coordinatedOptimizationMetrics.increment("global_summary_capture_lookup_total");
+    coordinatedOptimizationMetrics.observe("global_summary_capture_lookup_per_sync", 1);
     const intake = await stepInputIntake({
       userId,
       daily: { date: canonical.date, steps: canonical.steps },
@@ -200,7 +210,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
       () => require("../services/globalEventSummaryCapture")
         .claimEligibleSummaryWork(tx, {
           userId,
-          eligibleWorkIds: eligibleSummaryWorkIds,
+          captureDependencies: summaryCaptureDependencies,
           captureSyncRequestId: reservation.id,
           captureCompletedAt: completedAt,
           captureCoverageThrough: intake.canonicalCoverageThrough,
@@ -239,6 +249,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
 
   async function afterCommit(result, { userId, canonical }) {
     await measureStepTelemetryPhase("post_commit", async () => {
+      if (result.response?.raceResolution?.jobId) await publishResolutionWake();
+      if (result.response?.globalEventSummaryWork) await publishSummaryWake();
       await stampAfterCommit({
         userId,
         date: canonical.date,

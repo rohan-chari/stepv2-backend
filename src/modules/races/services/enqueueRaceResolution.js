@@ -8,6 +8,7 @@ const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
 const redisCache = require("../../../shared/cache/redisCache");
+const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
 
 const DISPLAY_REFRESH_ADMISSION_MS = 1000;
 const CLAIM_DISPLAY_REFRESH_LUA = `
@@ -193,6 +194,9 @@ async function enqueueRaceResolution(
       )
     );
     capacityOutcome = "success";
+    if (result && isInPrismaTransactionScope()) {
+      await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("resolution"));
+    }
     return result;
   }
   try {
@@ -207,6 +211,7 @@ async function enqueueRaceResolution(
       })
     );
     capacityOutcome = "success";
+    if (result) await redisCache.publishDurableQueueWakeup("resolution");
     return result;
   } catch (error) {
     console.error(`[RACE_RESOLUTION_V2] enqueue failed (race ${raceId}):`, error);
@@ -295,6 +300,9 @@ async function enqueueRaceResolutionForUser(
       )
     );
     capacityOutcome = "success";
+    if (result.length && isInPrismaTransactionScope()) {
+      await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("resolution"));
+    }
     return result;
   }
   try {
@@ -312,6 +320,7 @@ async function enqueueRaceResolutionForUser(
       })
     );
     capacityOutcome = "success";
+    if (result.length) await redisCache.publishDurableQueueWakeup("resolution");
     return result;
   } catch (error) {
     console.error(`[RACE_RESOLUTION_V2] enqueue failed (user ${userId}):`, error);

@@ -389,6 +389,8 @@ async function collectRaceHitchhikeCopies({
   eventsByUserId = null,
   raceTimezone = "UTC",
   attributionCaptureModel = HitchhikeAttributionCapture,
+  prepareSampleUsers = null,
+  releaseSampleUsers = null,
 }) {
   if (
     !raceActiveEffectModel ||
@@ -416,25 +418,31 @@ async function collectRaceHitchhikeCopies({
       byParticipantId.get(effect.targetParticipantId) ||
       byUserId.get(effect.targetUserId) ||
       null;
-    const copiedSteps = await computeHitchhikeCopiedSteps(
-      effect,
-      stepSampleModel,
-      now,
-      {
-        raceEndsAt,
-        targetFinishedAt: target ? target.finishedAt : null,
-        targetForfeitedAt: target ? target.forfeitedAt : null,
-        targetParticipantId: target ? target.id : effect.targetParticipantId,
-        raceId,
-        raceActiveEffectModel,
-        globalEvents,
-        raceTimezone,
-        attributionCaptureModel,
-        ...(eventsByUserId
-          ? { globalEvents: eventsForUser(eventsByUserId, effect.targetUserId) }
-          : {}),
-      }
-    );
+    if (prepareSampleUsers) await prepareSampleUsers([effect.targetUserId]);
+    let copiedSteps;
+    try {
+      copiedSteps = await computeHitchhikeCopiedSteps(
+        effect,
+        stepSampleModel,
+        now,
+        {
+          raceEndsAt,
+          targetFinishedAt: target ? target.finishedAt : null,
+          targetForfeitedAt: target ? target.forfeitedAt : null,
+          targetParticipantId: target ? target.id : effect.targetParticipantId,
+          raceId,
+          raceActiveEffectModel,
+          globalEvents,
+          raceTimezone,
+          attributionCaptureModel,
+          ...(eventsByUserId
+            ? { globalEvents: eventsForUser(eventsByUserId, effect.targetUserId) }
+            : {}),
+        }
+      );
+    } finally {
+      if (releaseSampleUsers) releaseSampleUsers([effect.targetUserId]);
+    }
     // v2 contributions may be negative (Wrong Turn). Legacy computation above
     // remains non-negative; retain either sign and drop only exact zero.
     if (copiedSteps === 0) continue;

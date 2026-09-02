@@ -449,6 +449,59 @@ const StepSample = {
     );
   },
 
+  // Resolution/expiry worker path: preserve the exact user/range pairing.
+  // Independent ANY(user_ids) and start/end arrays would create a cross-product
+  // and can pull years of unrelated samples for a late joiner. The ordinal is
+  // also the deterministic participant order used by the bounded loader.
+  async findRowsForUserRanges(
+    bounds,
+    { maxRows = 50_000, cursor = null } = {},
+  ) {
+    if (!Array.isArray(bounds) || bounds.length === 0) return [];
+    const requested = bounds.map((bound, index) => ({
+      user_id: bound.userId,
+      range_start: new Date(bound.rangeStart).toISOString(),
+      range_end: new Date(bound.rangeEnd).toISOString(),
+      ordinal: Number.isInteger(bound.ordinal) ? bound.ordinal : index,
+    }));
+    const limit = Math.max(1, Math.min(50_000, Number(maxRows) || 50_000));
+    return prisma.$queryRawUnsafe(
+      `WITH requested AS (
+         SELECT input.user_id,
+                input.range_start,
+                input.range_end,
+                input.ordinal
+         FROM jsonb_to_recordset($1::jsonb) AS input(
+           user_id text,
+           range_start timestamp,
+           range_end timestamp,
+           ordinal integer
+         )
+       )
+       SELECT requested.ordinal,
+              sample.id,
+              sample.user_id AS "userId",
+              sample.period_start AS "start",
+              sample.period_end AS "end",
+              sample.steps
+       FROM requested
+       JOIN step_samples sample
+         ON sample.user_id = requested.user_id
+        AND sample.period_end > requested.range_start
+        AND sample.period_start < requested.range_end
+       WHERE $2::integer IS NULL
+          OR (requested.ordinal, sample.period_start, sample.id) >
+             ($2::integer, $3::timestamp, $4::text)
+       ORDER BY requested.ordinal, sample.period_start, sample.id
+       LIMIT $5`,
+      JSON.stringify(requested),
+      cursor?.ordinal ?? null,
+      cursor?.periodStart ? new Date(cursor.periodStart).toISOString() : null,
+      cursor?.id ?? null,
+      limit,
+    );
+  },
+
   // Batched variant of sumStepsInWindow: ONE fetch spanning all windows, then
   // the same per-window proration. Returns an array of sums parallel to
   // `windows` ({start, end} each). Exists so per-day loops (see

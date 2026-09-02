@@ -3,8 +3,82 @@ const test = require("node:test");
 
 const {
   buildGlobalEventSummaryTick,
+  nextSummaryDueAt,
   scheduleGlobalEventSummaryTick,
 } = require("../../src/modules/steps/jobs/globalEventSummary");
+
+test("summary exact-due scheduling excludes recovery deadlines owned by the fallback sweep", async () => {
+  let sql = null;
+  const dueAt = await nextSummaryDueAt({
+    async $queryRawUnsafe(statement) {
+      sql = statement;
+      return [{ dueAt: null }];
+    },
+  });
+  assert.equal(dueAt, null);
+  assert.doesNotMatch(sql, /next_recovery_at/i);
+  assert.match(sql, /status='WAITING_SYNC'/i);
+  assert.doesNotMatch(sql, /GREATEST\(/i);
+  assert.match(sql, /MIN\(available_at\)[\s\S]*status='WAITING_RACES'[\s\S]*lease_until IS NULL/i);
+  assert.match(sql, /MIN\(lease_until\)[\s\S]*status='WAITING_RACES'[\s\S]*available_at <= CURRENT_TIMESTAMP/i);
+  assert.match(sql, /MIN\(expires_at\)[\s\S]*status='WAITING_SYNC'[\s\S]*lease_until IS NULL/i);
+  assert.match(sql, /MIN\(lease_until\)[\s\S]*status='WAITING_SYNC'[\s\S]*expires_at <= CURRENT_TIMESTAMP/i);
+});
+
+test("leased WAITING_RACES and WAITING_SYNC work rearm at the lease, never their past boundary", async () => {
+  const now = new Date("2026-09-02T12:00:00.000Z");
+  const leaseUntil = new Date(now.getTime() + 15_000);
+  const dueAt = await nextSummaryDueAt({
+    async $queryRawUnsafe(sql) {
+      assert.match(sql, /MIN\(lease_until\)/);
+      assert.doesNotMatch(sql, /GREATEST\(/);
+      return [{ dueAt: leaseUntil }];
+    },
+  });
+  assert.equal(dueAt.getTime(), leaseUntil.getTime());
+  assert.ok(dueAt > now);
+});
+
+test("an overdue recovery deadline runs only on fallback and cannot re-arm a zero-delay due loop", async () => {
+  const calls = [];
+  const scheduler = scheduleGlobalEventSummaryTick({
+    runV1Tick: async () => ({ candidatesSelected: 0, batchLimitSaturated: false }),
+    runV2Tick: async (options) => { calls.push(options); return { candidatesSelected: 0 }; },
+    setInterval() { return { unref() {} }; },
+    clearInterval() {},
+    setTimeout() { return { unref() {} }; },
+    clearTimeout() {},
+    logger: { log() {}, error() {} },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await scheduler.tickV2({ reason: "due" });
+  await scheduler.tickV2({ reason: "fallback" });
+  assert.equal(calls.some((call) => call.recovery === true), true);
+  assert.equal(calls.filter((call) => call.recovery === true).length, 1);
+  await scheduler.stop();
+});
+
+test("production summary drain failures reach the coordinator's one-second clamp", async () => {
+  const delays = [];
+  const scheduler = scheduleGlobalEventSummaryTick({
+    runV1Tick: async () => ({ candidatesSelected: 0 }),
+    runV2Tick: async () => { throw new Error("database unavailable"); },
+    nextDueAt: async () => new Date(0),
+    subscribeWake: async () => async () => {},
+    setDueTimer(handler, delay) {
+      delays.push(delay);
+      return { handler, unref() {} };
+    },
+    clearDueTimer() {},
+    setTimeout() { return { unref() {} }; },
+    clearTimeout() {},
+    logger: { log() {}, error() {} },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(delays.some((delay) => delay === 1_000));
+  assert.ok(delays.every((delay) => delay >= 1_000));
+  await scheduler.stop();
+});
 
 function summaryPrisma({ endsAt, pending = 0, nonzero = 1, sum = 12, count = 1 }) {
   const writes = [];

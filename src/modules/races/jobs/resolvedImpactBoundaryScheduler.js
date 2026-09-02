@@ -2,6 +2,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const {
   RaceResolutionJobV2: defaultJobModel,
 } = require("../models/raceResolutionJobV2");
+const redisCache = require("../../../shared/cache/redisCache");
 
 const POLL_INTERVAL_MS = 1000;
 const DEFAULT_LIMIT = 50;
@@ -18,6 +19,8 @@ function buildResolvedImpactBoundaryScheduler(dependencies = {}) {
   const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
   const now = dependencies.now || (() => new Date());
   const limit = Math.max(1, Math.min(200, Number(dependencies.limit) || DEFAULT_LIMIT));
+  const publishResolutionWake = dependencies.publishResolutionWake ||
+    (() => redisCache.publishDurableQueueWakeup("resolution"));
 
   return {
     async tick() {
@@ -50,6 +53,7 @@ function buildResolvedImpactBoundaryScheduler(dependencies = {}) {
         dirtyEnvelopeByRaceId,
         bypassDebounce: true,
       });
+      await publishResolutionWake();
       return raceIds.length;
     },
   };

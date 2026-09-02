@@ -3,6 +3,8 @@ const {
   ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
   lockNotificationAdmissionLane,
 } = require("../services/notificationAdmission");
+const redisCache = require("../../../shared/cache/redisCache");
+const { NotificationScheduleReceipt } = require("../models/notificationScheduleReceipt");
 
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -10,16 +12,24 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
   const pageSize = Math.min(500, Math.max(1, Number(dependencies.pageSize) || 500));
+  const publishDomainWake = dependencies.publishDomainWake ||
+    (() => redisCache.publishDurableQueueWakeup("domain-event"));
+  const publishNotificationWake = dependencies.publishNotificationWake ||
+    (() => redisCache.publishNotificationWakeup({ kind: "COMPLETENESS_REARM" }));
   return async function reconcileNotificationCompleteness() {
     await dependencies.startupBarrier?.();
     const current = now();
-    const unknownReset = await prisma.$executeRawUnsafe(
+    const unknownReset = await prisma.$transaction(async (tx) => tx.$executeRawUnsafe(
       `WITH candidates AS (
-         SELECT id FROM domain_event_outbox
+         SELECT id,event_key FROM domain_event_outbox
           WHERE event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
             AND status='FAILED_TERMINAL'
             AND last_error_code='UNKNOWN_DOMAIN_EVENT_VERSION'
           ORDER BY created_at, id LIMIT $1
+       ), receipts AS (
+         UPDATE domain_event_receipts receipt
+            SET terminal_status=NULL,completed_at=NULL,updated_at=$2
+           FROM candidates WHERE receipt.event_key=candidates.event_key
        )
        UPDATE domain_event_outbox event
           SET status='RETRY', available_at=$2, completed_at=NULL,
@@ -28,7 +38,7 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
          FROM candidates WHERE event.id=candidates.id`,
       pageSize,
       current,
-    );
+    ));
     const projectionsRearmed = await prisma.$executeRawUnsafe(
       `WITH candidates AS (
          SELECT projection.id
@@ -51,9 +61,11 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       pageSize,
       current,
     );
-    const linkedDormant = await prisma.$executeRawUnsafe(
-      `WITH candidates AS (
-         SELECT schedule.id
+    const linkedDormant = await prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRawUnsafe(
+      `WITH candidates AS MATERIALIZED (
+         SELECT schedule.id,schedule.recipient_user_id AS "recipientUserId",
+                schedule.delivery_key AS "deliveryKey"
            FROM notification_schedules schedule
           WHERE schedule.status='CANCELLED_NO_ACTIVE_RACE'
             AND EXISTS (
@@ -62,12 +74,20 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
                  AND alert.source_key=schedule.delivery_key
             )
           ORDER BY schedule.available_at,schedule.id LIMIT $2
-       )
+       ), updated AS (
        UPDATE notification_schedules schedule
           SET status='MATERIALIZED', released_at=COALESCE(schedule.released_at,$1), updated_at=$1
-         FROM candidates WHERE schedule.id=candidates.id`,
+         FROM candidates WHERE schedule.id=candidates.id
+       RETURNING schedule.id)
+       SELECT candidates."recipientUserId",candidates."deliveryKey"
+         FROM candidates JOIN updated ON updated.id=candidates.id`,
       current, pageSize,
-    );
+      );
+      await NotificationScheduleReceipt.markTerminalMany({
+        rows, terminalStatus: "MATERIALIZED", completedAt: current,
+      }, tx);
+      return rows.length;
+    });
     const materializationGapsRearmed = await prisma.$transaction(async (tx) => {
       await lockNotificationAdmissionLane(tx, {
         admissionClass: ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
@@ -168,18 +188,31 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
          FROM candidates WHERE outbox.id=candidates.id`,
       current, pageSize,
     );
-    const expired = await prisma.$executeRawUnsafe(
-      `WITH candidates AS (
-         SELECT id FROM notification_schedules
+    const expired = await prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRawUnsafe(
+      `WITH candidates AS MATERIALIZED (
+         SELECT id,recipient_user_id AS "recipientUserId",delivery_key AS "deliveryKey"
+           FROM notification_schedules
           WHERE status IN ('PENDING','ADMISSION_PENDING','CANCELLED_NO_ACTIVE_RACE')
             AND expires_at <= $1
-          ORDER BY expires_at,id LIMIT $2
-       )
+          ORDER BY expires_at,id LIMIT $2 FOR UPDATE SKIP LOCKED
+       ), updated AS (
        UPDATE notification_schedules schedule
           SET status='EXPIRED',canceled_at=$1,cancellation_reason='EXPIRED',updated_at=$1
-         FROM candidates WHERE schedule.id=candidates.id`,
+         FROM candidates WHERE schedule.id=candidates.id
+       RETURNING schedule.id)
+       SELECT candidates."recipientUserId",candidates."deliveryKey"
+         FROM candidates JOIN updated ON updated.id=candidates.id`,
       current, pageSize,
-    );
+      );
+      await NotificationScheduleReceipt.markTerminalMany({
+        rows, terminalStatus: "EXPIRED", completedAt: current,
+      }, tx);
+      return rows.length;
+    });
+    if (Number(unknownReset) + Number(projectionsRearmed) > 0) await publishDomainWake();
+    if (Number(materializationGapsRearmed) + Number(overdueOutboxesRearmed) +
+        Number(missingSnapshotsRearmed) > 0) await publishNotificationWake();
     return {
       unknownEventsReset: Number(unknownReset),
       projectionsRearmed: Number(projectionsRearmed),

@@ -92,7 +92,7 @@ test("whole-runner consolidated brake is exact literal true", () => {
   assert.equal(postTaskWorkerDisabled({}), false);
 });
 
-test("terminal cleanup is bounded, seven-day only, and uses the consolidated brake", async () => {
+test("terminal cleanup keeps seven days before cutoff and switches to 24h only after acceptance", async () => {
   assert.equal(postTaskCleanupDisabled({ OPS_DESTRUCTIVE_CLEANUPS_DISABLED: "true" }), true);
   assert.equal(postTaskCleanupDisabled({ OPS_DESTRUCTIVE_CLEANUPS_DISABLED: "TRUE" }), false);
   assert.equal(postTaskCleanupDisabled({ RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED: "true" }), false);
@@ -108,6 +108,21 @@ test("terminal cleanup is bounded, seven-day only, and uses the consolidated bra
   assert.equal(await runner.cleanup(), 3);
   assert.deepEqual(calls, [{
     before: new Date("2026-08-06T12:00:00.000Z"),
+    limit: 500,
+  }]);
+
+  calls.length = 0;
+  const accepted = buildRaceResolutionPostTaskRunner({
+    env: {},
+    now: () => now,
+    isReceiptCleanupCutoffAccepted: async () => true,
+    RaceResolutionPostTask: {
+      async cleanupTerminal(input) { calls.push(input); return 2; },
+    },
+  });
+  assert.equal(await accepted.cleanup(), 2);
+  assert.deepEqual(calls, [{
+    before: new Date("2026-08-12T12:00:00.000Z"),
     limit: 500,
   }]);
 
@@ -141,12 +156,40 @@ test("terminal cleanup drains at most two 500-row pages and yields between full 
   assert.ok(calls.every((call) => call.limit === 500));
 });
 
+test("terminal cleanup creates a fresh WAL/lag budget for every maintenance run", async () => {
+  let budgets = 0;
+  let cleanupCalls = 0;
+  const runner = buildRaceResolutionPostTaskRunner({
+    env: {},
+    isReceiptCleanupCutoffAccepted: async () => true,
+    cleanupBudgetFactory() {
+      budgets += 1;
+      const thisRun = budgets;
+      return {
+        async runPage(operation) {
+          if (thisRun === 1) return { rows: 0, allowedContinue: false, totalWalBytes: 65 * 1024 * 1024 };
+          return { rows: await operation(), allowedContinue: true, totalWalBytes: 1 };
+        },
+      };
+    },
+    RaceResolutionPostTask: {
+      async cleanupTerminal() { cleanupCalls += 1; return 2; },
+    },
+  });
+
+  assert.equal(await runner.cleanup(), 0);
+  assert.equal(await runner.cleanup(), 2);
+  assert.equal(budgets, 2);
+  assert.equal(cleanupCalls, 1);
+});
+
 test("scheduled cleanup does not overlap an in-flight cleanup", async () => {
   let calls = 0;
   let finishCleanup;
   const pending = new Promise((resolve) => { finishCleanup = resolve; });
   const scheduled = scheduleRaceResolutionPostTaskRunner({
     env: {},
+    drainOnStart: false,
     pollIntervalMs: 60_000,
     cleanupIntervalMs: 60_000,
     RaceResolutionPostTask: {
@@ -166,8 +209,7 @@ test("scheduled cleanup does not overlap an in-flight cleanup", async () => {
     await Promise.all([first, second]);
   } finally {
     finishCleanup();
-    clearInterval(scheduled.interval);
-    clearInterval(scheduled.cleanup);
+    await scheduled.stop();
   }
 });
 

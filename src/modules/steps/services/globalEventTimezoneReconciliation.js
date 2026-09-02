@@ -1,4 +1,10 @@
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  deferUntilAfterCommit,
+  isInPrismaTransactionScope,
+} = require("../../../db");
+const redisCache = require("../../../shared/cache/redisCache");
+const { DomainEventReceipt } = require("../../domainEvents/models/domainEventReceipt");
 const {
   canonicalIanaTimeZone,
   globalEventTimezoneMutation,
@@ -241,12 +247,14 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
            ), inserted AS (
              INSERT INTO domain_event_outbox (
                id,event_key,event_type,schema_version,aggregate_type,aggregate_id,
-               payload,occurred_at,available_at,status,created_at,updated_at
+               payload,occurred_at,available_at,status,
+               projection_count,terminal_projection_count,failed_projection_count,
+               projection_counts_valid_at,created_at,updated_at
              )
              SELECT gen_random_uuid(),input."eventKey",
                     'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1',1,
                     'GLOBAL_STEP_EVENT_ENTITLEMENT',input."aggregateId",input.payload,
-                    $2,$2,'PENDING',$2,$2
+                    $2,$2,'PENDING',0,0,0,$2,$2,$2
                FROM input ON CONFLICT (event_key) DO NOTHING
              RETURNING id,event_key
            )
@@ -257,6 +265,30 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
              FROM inserted JOIN input ON input."eventKey"=inserted.event_key`,
           JSON.stringify(eventInputs), current,
         ));
+        const stored = await tx.domainEventOutbox.findMany({
+          where: { eventKey: { in: eventInputs.map((row) => row.eventKey) } },
+          include: { audience: { orderBy: { ordinal: "asc" } } },
+        });
+        if (stored.length !== eventInputs.length || stored.some((row) => row.audience.length !== 1)) {
+          throw new Error("timezone reconciliation receipt finalization lost selected events");
+        }
+        await DomainEventReceipt.finalizeMany({
+          items: stored.map((record) => ({
+            envelope: {
+              ...record,
+              audience: record.audience.map((row) => ({
+                recipientId: row.recipientId, ordinal: row.ordinal, facts: row.facts,
+              })),
+            },
+            domainEventId: record.id,
+            replaySourceType: record.aggregateType,
+            replaySourceId: record.aggregateId,
+          })),
+        }, tx);
+        if (isInPrismaTransactionScope()) {
+          await deferUntilAfterCommit(() =>
+            redisCache.publishDurableQueueWakeup("domain-event"));
+        }
       }
       return {
         timezone: updatedUser.timezone,

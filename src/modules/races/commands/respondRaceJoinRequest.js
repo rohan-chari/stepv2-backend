@@ -2,6 +2,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { withRaceJoinLock: defaultWithRaceJoinLock } = require("../services/raceJoinLock");
 const { buildJoinRaceCore } = require("./joinRaceCore");
 const { createInboxAlert } = require("../../inbox/services/inbox");
+const redisCache = require("../../../shared/cache/redisCache");
 const {
   RaceJoinRequestError,
   assertRaceInviteRelationshipAllowed,
@@ -44,6 +45,8 @@ function buildRespondRaceJoinRequest(dependencies = {}) {
   const withRaceJoinLock = dependencies.withRaceJoinLock || defaultWithRaceJoinLock;
   const joinRaceCore = dependencies.joinRaceCore || buildJoinRaceCore(dependencies);
   const createAlert = dependencies.createInboxAlert || createInboxAlert;
+  const publishInboxWake = dependencies.publishInboxWake ||
+    (() => redisCache.publishNotificationWakeup({ kind: "INBOX_DELIVERY" }));
 
   return async function respondRaceJoinRequest({
     raceId,
@@ -76,7 +79,7 @@ function buildRespondRaceJoinRequest(dependencies = {}) {
     }
 
     if (action === "DECLINE") {
-      const row = await prisma.$transaction(async (tx) => {
+      const outcome = await prisma.$transaction(async (tx) => {
         const updated = await tx.raceJoinRequest.updateMany({
           where: { id: requestId, status: "PENDING" },
           data: {
@@ -104,9 +107,10 @@ function buildRespondRaceJoinRequest(dependencies = {}) {
             tx,
           });
         }
-        return terminal;
+        return { row: terminal, wakeInbox: updated.count === 1 };
       });
-      return { joinRequest: serializeJoinRequest(row) };
+      if (outcome.wakeInbox) await publishInboxWake().catch(() => {});
+      return { joinRequest: serializeJoinRequest(outcome.row) };
     }
 
     const locked = await withRaceJoinLock(raceId, async (tx) => {
@@ -189,9 +193,10 @@ function buildRespondRaceJoinRequest(dependencies = {}) {
         now,
         tx,
       });
-      return { row, runPostCommit: joined?.runPostCommit || null };
+      return { row, runPostCommit: joined?.runPostCommit || null, wakeInbox: true };
     }, { fundedExposureUserIds: [existing.requesterUserId] });
 
+    if (locked.wakeInbox) await publishInboxWake().catch(() => {});
     if (locked.runPostCommit) await locked.runPostCommit();
     if (locked.failure) throw locked.failure;
     return { joinRequest: serializeJoinRequest(locked.row) };

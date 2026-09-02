@@ -274,6 +274,21 @@ const prisma = new Proxy(rootPrisma, {
       };
     }
 
+    if (property === "$transaction" && !scope) {
+      return async (operation, options) => {
+        if (typeof operation !== "function") {
+          return rootPrisma.$transaction(operation, options);
+        }
+        const afterCommit = [];
+        const result = await rootPrisma.$transaction(
+          (tx) => prismaScope.run({ client: tx, afterCommit }, () => operation(tx)),
+          options,
+        );
+        await runAfterCommitTasks(afterCommit);
+        return result;
+      };
+    }
+
     const value = Reflect.get(client, property, client);
     return typeof value === "function" ? value.bind(client) : value;
   },
@@ -289,6 +304,10 @@ function deferUntilAfterCommit(task) {
   if (!scope) return Promise.resolve().then(task);
   scope.afterCommit.push(task);
   return Promise.resolve();
+}
+
+function isInPrismaTransactionScope() {
+  return Boolean(prismaScope.getStore());
 }
 
 async function runInPrismaTransaction(work, options = {}) {
@@ -323,5 +342,6 @@ module.exports = {
   databasePoolTelemetry,
   runInPrismaTransaction,
   deferUntilAfterCommit,
+  isInPrismaTransactionScope,
   runAfterCommitTasks,
 };

@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
+const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
 const { invalidate } = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
 const {
@@ -12,6 +13,11 @@ const {
 const {
   RaceResolutionJobV2,
 } = require("../../races/models/raceResolutionJobV2");
+const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
+const redisCache = require("../../../shared/cache/redisCache");
+const {
+  coordinatedOptimizationMetrics,
+} = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
 const ACTIVE_WORK_STATES = ["WAITING_SYNC", "QUEUED", "PROCESSING", "WAITING_RACES"];
 const RACE_RECONCILE_STATES = ["WAITING_RACES", "UNSCORABLE", "EXPIRED_UNDELIVERED"];
@@ -72,7 +78,7 @@ async function pendingWorkRaceScopes(client, work) {
 
 async function enqueueWorkRaceIds(client, work, raceIds, current, participantIdsByRaceId = new Map()) {
   if (raceIds.length === 0) return [];
-  return RaceResolutionJobV2.enqueueMany({
+  const jobs = await RaceResolutionJobV2.enqueueMany({
     raceIds,
     now: current,
     triggeredUserIdsByRaceId: new Map(raceIds.map((raceId) => [raceId, [work.userId]])),
@@ -85,6 +91,12 @@ async function enqueueWorkRaceIds(client, work, raceIds, current, participantIds
     }])),
     queuePriority: "MAINTENANCE",
   }, client);
+  if (jobs.length) {
+    const publish = () => redisCache.publishDurableQueueWakeup("resolution");
+    if (isInPrismaTransactionScope()) await deferUntilAfterCommit(publish);
+    else await publish();
+  }
+  return jobs;
 }
 
 async function reconcileWorkRaceQueues(prisma, current, batchSize, options = {}) {
@@ -350,44 +362,138 @@ async function aggregateReadyWork(prisma, work, current, options = {}) {
 
 async function claimActiveWork(prisma, current, batchSize, leaseMs) {
   return prisma.$transaction(async (tx) => {
-    const candidates = await tx.$queryRawUnsafe(
-      `SELECT id, status
-         FROM global_event_summary_work
-        WHERE status = ANY($1::text[])
-          AND available_at <= $2::timestamp
-          AND (lease_until IS NULL OR lease_until <= $2::timestamp)
-          AND (status <> 'WAITING_SYNC' OR expires_at <= $2::timestamp)
-        ORDER BY available_at ASC, id ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT $3`,
-      ACTIVE_WORK_STATES,
+    const leaseToken = crypto.randomUUID();
+    return tx.$queryRawUnsafe(
+      `WITH candidate_ids AS MATERIALIZED (
+         SELECT id,due_at FROM (
+           (SELECT id,available_at AS due_at FROM global_event_summary_work
+             WHERE status='QUEUED' AND available_at <= $1 AND lease_until IS NULL
+             ORDER BY available_at,id LIMIT $2)
+           UNION ALL
+           (SELECT id,lease_until AS due_at FROM global_event_summary_work
+             WHERE status='PROCESSING' AND lease_until <= $1
+             ORDER BY lease_until,available_at,id LIMIT $2)
+           UNION ALL
+           (SELECT id,available_at AS due_at FROM global_event_summary_work
+             WHERE status='WAITING_RACES' AND ready_at IS NOT NULL
+               AND available_at <= $1 AND lease_until IS NULL
+             ORDER BY available_at,id LIMIT $2)
+           UNION ALL
+           (SELECT id,lease_until AS due_at FROM global_event_summary_work
+             WHERE status='WAITING_RACES' AND ready_at IS NOT NULL
+               AND available_at <= $1 AND lease_until <= $1
+             ORDER BY lease_until,id LIMIT $2)
+           UNION ALL
+           (SELECT id,expires_at AS due_at FROM global_event_summary_work
+             WHERE status='WAITING_SYNC' AND expires_at <= $1
+               AND lease_until IS NULL
+             ORDER BY expires_at,id LIMIT $2)
+           UNION ALL
+           (SELECT id,lease_until AS due_at FROM global_event_summary_work
+             WHERE status='WAITING_SYNC' AND expires_at <= $1
+               AND lease_until <= $1
+             ORDER BY lease_until,id LIMIT $2)
+         ) branches ORDER BY due_at,id LIMIT $2
+       ), candidates AS (
+         SELECT work.id,work.status
+           FROM global_event_summary_work work JOIN candidate_ids USING(id)
+          WHERE (work.status='QUEUED' AND work.available_at <= $1
+                   AND work.lease_until IS NULL)
+             OR (work.status='PROCESSING' AND work.lease_until <= $1)
+             OR (work.status='WAITING_RACES' AND work.ready_at IS NOT NULL
+                   AND work.available_at <= $1
+                   AND COALESCE(work.lease_until,'-infinity'::timestamptz) <= $1)
+             OR (work.status='WAITING_SYNC' AND work.expires_at <= $1
+                   AND COALESCE(work.lease_until,'-infinity'::timestamptz) <= $1)
+          ORDER BY candidate_ids.due_at,work.id
+          LIMIT $2 FOR UPDATE OF work SKIP LOCKED
+       )
+       UPDATE global_event_summary_work work
+          SET status=CASE WHEN candidate.status='QUEUED' THEN 'PROCESSING' ELSE candidate.status END,
+              lease_token=$3,lease_until=$4,attempt_count=work.attempt_count+1,
+              updated_at=$1
+         FROM candidates candidate WHERE work.id=candidate.id
+       RETURNING work.id,work.event_id AS "eventId",work.user_id AS "userId",
+         work.status,work.expires_at AS "expiresAt",
+         work.required_race_count AS "requiredRaceCount",
+         work.final_race_count AS "finalRaceCount",
+         work.available_at AS "availableAt",work.ready_at AS "readyAt",
+         work.lease_token AS "leaseToken",work.lease_until AS "leaseUntil"`,
       current,
       batchSize,
+      leaseToken,
+      new Date(current.getTime() + leaseMs),
     );
-    const claimed = [];
-    for (const candidate of candidates) {
-      const leaseToken = crypto.randomUUID();
-      const updated = await tx.globalEventSummaryWork.updateMany({
-        where: {
-          id: candidate.id,
-          status: candidate.status,
-          OR: [{ leaseUntil: null }, { leaseUntil: { lte: current } }],
-        },
-        data: {
-          status: candidate.status === "QUEUED" ? "PROCESSING" : candidate.status,
-          leaseToken,
-          leaseUntil: new Date(current.getTime() + leaseMs),
-          attemptCount: { increment: 1 },
-        },
-      });
-      if (updated.count !== 1) continue;
-      const work = await tx.globalEventSummaryWork.findUnique({
-        where: { id: candidate.id },
-      });
-      if (work) claimed.push(work);
-    }
-    return claimed;
   });
+}
+
+async function repairSummaryReadiness(prisma, current, batchSize = 100) {
+  const repaired = await prisma.$executeRawUnsafe(
+    `WITH candidates AS MATERIALIZED (
+       SELECT id,event_id,user_id,required_race_count
+         FROM global_event_summary_work
+        WHERE status IN ('WAITING_SYNC','QUEUED','PROCESSING','WAITING_RACES')
+          AND next_recovery_at <= $1
+        ORDER BY next_recovery_at,id LIMIT $2
+        FOR UPDATE SKIP LOCKED
+     ), counts AS MATERIALIZED (
+       SELECT candidate.id,
+              COUNT(impact.*) FILTER (WHERE impact.status='FINAL')::int AS final_count,
+              COUNT(impact.*) FILTER (WHERE impact.status IN
+                ('FINAL','UNSCORABLE','EXPIRED_UNDELIVERED'))::int AS terminal_count
+         FROM candidates candidate
+         LEFT JOIN global_event_race_impacts impact
+           ON impact.event_id=candidate.event_id AND impact.user_id=candidate.user_id
+        GROUP BY candidate.id
+     )
+     UPDATE global_event_summary_work work
+        SET final_race_count=counts.final_count,
+            ready_at=CASE WHEN work.status='WAITING_RACES'
+                               AND counts.terminal_count>=work.required_race_count
+                          THEN COALESCE(work.ready_at,$1) ELSE work.ready_at END,
+            available_at=CASE WHEN work.status='WAITING_RACES'
+                                   AND counts.terminal_count>=work.required_race_count
+                              THEN LEAST(work.available_at,$1) ELSE work.available_at END,
+            lease_token=CASE WHEN work.lease_until <= $1 THEN NULL ELSE work.lease_token END,
+            lease_until=CASE WHEN work.lease_until <= $1 THEN NULL ELSE work.lease_until END,
+            next_recovery_at=$1+interval '60 seconds'
+       FROM counts WHERE work.id=counts.id`,
+    current,
+    Math.min(500, Math.max(1, Number(batchSize) || 100)),
+  );
+  if (repaired > 0) {
+    coordinatedOptimizationMetrics.increment("global_summary_recovery_repair_total", {}, repaired);
+  }
+  return repaired;
+}
+
+async function nextSummaryDueAt(prisma = defaultPrisma) {
+  const [row = {}] = await prisma.$queryRawUnsafe(
+    `SELECT LEAST(
+       (SELECT MIN(available_at) FROM global_event_summary_work
+         WHERE status='QUEUED' AND lease_until IS NULL),
+       (SELECT MIN(lease_until) FROM global_event_summary_work
+         WHERE status='PROCESSING' AND lease_until IS NOT NULL),
+       (SELECT MIN(available_at) FROM global_event_summary_work
+         WHERE status='WAITING_RACES' AND ready_at IS NOT NULL
+           AND lease_until IS NULL),
+       (SELECT MIN(available_at) FROM global_event_summary_work
+         WHERE status='WAITING_RACES' AND ready_at IS NOT NULL
+           AND lease_until <= CURRENT_TIMESTAMP),
+       (SELECT MIN(lease_until) FROM global_event_summary_work
+         WHERE status='WAITING_RACES' AND ready_at IS NOT NULL
+           AND available_at <= CURRENT_TIMESTAMP
+           AND lease_until > CURRENT_TIMESTAMP),
+       (SELECT MIN(expires_at) FROM global_event_summary_work
+         WHERE status='WAITING_SYNC' AND lease_until IS NULL),
+       (SELECT MIN(expires_at) FROM global_event_summary_work
+         WHERE status='WAITING_SYNC' AND lease_until <= CURRENT_TIMESTAMP),
+       (SELECT MIN(lease_until) FROM global_event_summary_work
+         WHERE status='WAITING_SYNC' AND expires_at <= CURRENT_TIMESTAMP
+           AND lease_until > CURRENT_TIMESTAMP)
+     ) AS "dueAt"`,
+  );
+  return row.dueAt || null;
 }
 
 async function releaseWorkLease(prisma, work, current, retryMs, errorCode = null) {
@@ -410,7 +516,8 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   if (!prisma.globalEventSummaryWork || !prisma.globalEventCaptureArtifact) {
     return { created: 0, expired: 0, candidatesSelected: 0, retries: 0 };
   }
-  const candidateIds = await prisma.$queryRawUnsafe(
+  const runRecovery = options.recovery !== false;
+  const candidateIds = runRecovery ? await prisma.$queryRawUnsafe(
     `SELECT e.id
        FROM global_step_event_entitlements e
        JOIN global_step_events event ON event.id = e.event_id
@@ -424,7 +531,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
       LIMIT $2`,
     current.toISOString(),
     batchSize,
-  ).catch(() => []);
+  ).catch(() => []) : [];
   const ended = candidateIds.length
     ? await prisma.globalStepEventEntitlement.findMany({
         where: { id: { in: candidateIds.map((row) => row.id) } },
@@ -434,7 +541,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   for (const entitlement of ended) {
     await createSummaryWorkForEntitlement(prisma, entitlement, current);
   }
-  const legacyGroups = await prisma.$queryRawUnsafe(
+  const legacyGroups = runRecovery ? await prisma.$queryRawUnsafe(
     `SELECT impact.event_id AS "eventId", impact.user_id AS "userId"
        FROM global_event_race_impacts impact
        JOIN global_step_events event ON event.id = impact.event_id
@@ -450,7 +557,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
       LIMIT $2`,
     current.toISOString(),
     batchSize,
-  ).catch(() => []);
+  ).catch(() => []) : [];
   for (const group of legacyGroups) {
     const event = await prisma.globalStepEvent.findUnique({
       where: { id: group.eventId },
@@ -463,16 +570,23 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
       await createSummaryWorkForEntitlement(prisma, entitlement, current);
     }
   }
+  if (runRecovery) await repairSummaryReadiness(prisma, current, batchSize);
 
-  // Reconcile durable handoffs from a previous tick before claiming summary
-  // work. This phase never holds a summary-work row lock while it acquires C0.
-  await reconcileWorkRaceQueues(prisma, current, batchSize, options);
+  // Only the recovery cadence scans for a handoff stranded by a crash. Normal
+  // Redis wakes process the explicit step-sync work IDs and perform one
+  // post-transition handoff below.
+  if (runRecovery) await reconcileWorkRaceQueues(prisma, current, batchSize, options);
 
   const leaseMs = options.leaseMs || DEFAULT_LEASE_MS;
   const retryMs = options.retryMs || DEFAULT_RETRY_MS;
   const tickBudgetMs = options.tickBudgetMs || DEFAULT_TICK_BUDGET_MS;
   const startedAtMs = Date.now();
   const works = await claimActiveWork(prisma, current, batchSize, leaseMs);
+  for (const work of works) {
+    coordinatedOptimizationMetrics.increment("global_summary_worker_claim_total", {
+      state: String(work.status).toLowerCase(),
+    });
+  }
   const result = {
     created: 0,
     expired: 0,
@@ -481,7 +595,9 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   };
   for (let work of works) {
     if (Date.now() - startedAtMs >= tickBudgetMs) {
-      await releaseWorkLease(prisma, work, current, retryMs);
+      if (work.status !== "WAITING_RACES") {
+        await releaseWorkLease(prisma, work, current, retryMs);
+      }
       continue;
     }
     try {
@@ -598,7 +714,7 @@ async function runV1(prisma, current, batchSize = 100) {
 function buildGlobalEventSummaryV2Tick(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
-  return async function globalEventSummaryV2Tick() {
+  return async function globalEventSummaryV2Tick(tickOptions = {}) {
     const startedAt = Date.now();
     const current = new Date(now());
     const result = await runV2(prisma, current, dependencies.batchSize || 100, {
@@ -609,6 +725,7 @@ function buildGlobalEventSummaryV2Tick(dependencies = {}) {
       afterSummaryWorkLock: dependencies.afterSummaryWorkLock,
       afterSummaryWorkTransition: dependencies.afterSummaryWorkTransition,
       afterSummaryRaceEnqueue: dependencies.afterSummaryRaceEnqueue,
+      recovery: tickOptions.recovery === true,
     });
     return { ...result, durationMs: Date.now() - startedAt };
   };
@@ -632,7 +749,10 @@ function buildGlobalEventSummaryTick(dependencies = {}) {
   const runV2Tick = buildGlobalEventSummaryV2Tick(dependencies);
   const runV1Tick = buildGlobalEventSummaryV1Tick(dependencies);
   return async function globalEventSummaryTick() {
-    const v2 = await runV2Tick();
+    // Explicit/manual combined ticks retain their historical recovery sweep.
+    // The production wake scheduler calls the V2 tick directly and supplies
+    // recovery only on its 60-second fallback cadence.
+    const v2 = await runV2Tick({ recovery: true });
     const v1 = await runV1Tick();
     return { upserts: v1.summariesCommitted + v2.created };
   };
@@ -683,6 +803,7 @@ function scheduleGlobalEventSummaryTick(dependencies = {}) {
   let v1Timer = null;
   let lastV1EmptyLogAt = 0;
   let lastV2EmptyLogAt = 0;
+  const usesExplicitIntervalSeam = Boolean(dependencies.setInterval);
 
   const logResult = (phase, result, nextDelay = null) => {
     const active = tickIsActive(result);
@@ -705,14 +826,18 @@ function scheduleGlobalEventSummaryTick(dependencies = {}) {
     }));
   };
 
-  const tickV2 = () => {
+  const tickV2 = (context = {}) => {
     if (stopped || v2InFlight) return v2InFlight;
     const startedAt = nowMs();
     v2InFlight = (async () => {
       try {
-        logResult("v2", await runV2Tick());
+        logResult("v2", await runV2Tick({ recovery: context.reason === "fallback" }));
       } catch (error) {
         logError("v2", error, startedAt);
+        // Production is owned by the shared wake coordinator, which must see
+        // failures so it can enforce the >=1s retry clamp. The explicit
+        // interval seam remains self-contained for deterministic unit tests.
+        if (!usesExplicitIntervalSeam) throw error;
       }
     })().finally(() => { v2InFlight = null; });
     return v2InFlight;
@@ -742,18 +867,40 @@ function scheduleGlobalEventSummaryTick(dependencies = {}) {
     return v1InFlight;
   };
 
-  tickV2();
   tickV1();
-  const interval = setIntervalFn(tickV2, dependencies.intervalMs || 1000);
-  interval.unref?.();
+  let interval = null;
+  let coordinator = null;
+  if (usesExplicitIntervalSeam) {
+    // Preserve the explicit unit seam. Production never enters this branch.
+    tickV2();
+    interval = setIntervalFn(tickV2, dependencies.intervalMs || 1000);
+    interval.unref?.();
+  } else {
+    coordinator = createPostgresWakeCoordinator({
+      queue: "summary",
+      fallbackIntervalMs: dependencies.intervalMs || 60_000,
+      drain: tickV2,
+      nextDueAt: dependencies.nextDueAt || (() => nextSummaryDueAt(dependencies.prisma || defaultPrisma)),
+      subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
+      logger,
+      now: dependencies.coordinatorNow,
+      setTimer: dependencies.setDueTimer,
+      clearTimer: dependencies.clearDueTimer,
+    });
+    coordinator.start({ drainOnStart: true }).catch((error) => logger.error(
+      "[CRON] Global event summary wake coordinator failed", error,
+    ));
+  }
+  interval?.unref?.();
   logger.log("[CRON] Global event summary scheduled");
   return {
     tickV1,
     tickV2,
     async stop() {
       stopped = true;
-      clearIntervalFn(interval);
+      if (interval) clearIntervalFn(interval);
       if (v1Timer) clearTimeoutFn(v1Timer);
+      await coordinator?.stop();
       await Promise.allSettled([v1InFlight, v2InFlight].filter(Boolean));
     },
   };
@@ -766,5 +913,7 @@ module.exports = {
   runV1,
   scheduleGlobalEventSummaryTick,
   runV2,
+  repairSummaryReadiness,
+  nextSummaryDueAt,
   summaryTickFields,
 };

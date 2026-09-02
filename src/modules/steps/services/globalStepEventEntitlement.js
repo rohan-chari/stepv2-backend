@@ -7,7 +7,10 @@ const { isValidIanaTimeZone } = require("../../users/services/globalEventTimezon
 const {
   prisma: defaultPrisma,
   runInPrismaTransaction,
+  deferUntilAfterCommit,
+  isInPrismaTransactionScope,
 } = require("../../../db");
+const redisCache = require("../../../shared/cache/redisCache");
 const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   enqueueRaceResolutionForUser: defaultEnqueueRaceResolutionForUser,
@@ -18,6 +21,7 @@ const {
 } = require("../../races/services/raceWriteFence");
 const { isGenerationUsable } = require("../models/globalStepEventGeneration");
 const { RaceResolutionJobV2 } = require("../../races/models/raceResolutionJobV2");
+const { DomainEventReceipt } = require("../../domainEvents/models/domainEventReceipt");
 
 const START_OUTCOMES = Object.freeze({
   PENDING: "PENDING",
@@ -109,6 +113,10 @@ async function appendScheduledEntitlementEventsBatch(tx, {
       aggregateId: entitlement.id,
       occurredAt,
       availableAt: occurredAt,
+      projectionCount: 0,
+      terminalProjectionCount: 0,
+      failedProjectionCount: 0,
+      projectionCountsValidAt: occurredAt,
       payload: {
         eventId: parent.id,
         entitlementId: entitlement.id,
@@ -146,6 +154,18 @@ async function appendScheduledEntitlementEventsBatch(tx, {
     })),
     skipDuplicates: true,
   });
+  await DomainEventReceipt.finalizeMany({
+    items: storedEvents.map((stored) => {
+      const expected = expectedByKey.get(stored.eventKey);
+      return {
+        envelope: { ...expected, audience: [{ recipientId: expected.payload.userId, ordinal: 0, facts: {} }] },
+        domainEventId: stored.id,
+        replaySourceType: expected.aggregateType,
+        replaySourceId: expected.aggregateId,
+      };
+    }),
+  }, tx);
+  await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("domain-event"));
   return rows.length;
 }
 
@@ -210,12 +230,14 @@ async function materializePreparedEntitlementsSetBased(tx, {
      ), inserted_events AS (
        INSERT INTO domain_event_outbox (
          id,event_key,event_type,schema_version,aggregate_type,aggregate_id,
-         payload,occurred_at,available_at,status,created_at,updated_at
+         payload,occurred_at,available_at,status,
+         projection_count,terminal_projection_count,failed_projection_count,
+         projection_counts_valid_at,created_at,updated_at
        )
        SELECT gen_random_uuid(),record.event_key,
               'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1',1,
               'GLOBAL_STEP_EVENT_ENTITLEMENT',record.id,record.event_payload,
-              $4,$4,'PENDING',$4,$4
+              $4,$4,'PENDING',0,0,0,$4,$4,$4
          FROM event_records record
        ON CONFLICT (event_key) DO NOTHING
        RETURNING id,event_key,event_type,schema_version,aggregate_type,aggregate_id,payload
@@ -252,6 +274,7 @@ async function materializePreparedEntitlementsSetBased(tx, {
      SELECT (SELECT count(*)::int FROM inserted_entitlements) AS created,
             (SELECT count(*)::int FROM selected_entitlements) AS selected,
             (SELECT count(*)::int FROM selected_events) AS events,
+            (SELECT array_agg(event_key ORDER BY event_key) FROM selected_events) AS "eventKeys",
             (SELECT count(*)::int FROM conflicts) AS conflicts`,
     JSON.stringify(rows),
     event.id,
@@ -267,6 +290,33 @@ async function materializePreparedEntitlementsSetBased(tx, {
   if (Number(result.conflicts || 0) > 0 || counts.selected !== rows.length ||
       (generationReady && counts.events !== rows.length)) {
     throw new Error("set-based entitlement materialization found conflicting immutable facts");
+  }
+  if (generationReady && counts.events > 0) {
+    const keys = result.eventKeys || [];
+    const stored = await tx.domainEventOutbox.findMany({
+      where: { eventKey: { in: keys } },
+      include: { audience: { orderBy: { ordinal: "asc" } } },
+    });
+    if (stored.length !== counts.events) {
+      throw new Error("set-based entitlement receipt finalization lost selected events");
+    }
+    await DomainEventReceipt.finalizeMany({
+      items: stored.map((record) => ({
+        envelope: {
+          ...record,
+          audience: record.audience.map((row) => ({
+            recipientId: row.recipientId, ordinal: row.ordinal, facts: row.facts,
+          })),
+        },
+        domainEventId: record.id,
+        replaySourceType: record.aggregateType,
+        replaySourceId: record.aggregateId,
+      })),
+    }, tx);
+  }
+  if (counts.events > 0 && isInPrismaTransactionScope()) {
+    await deferUntilAfterCommit(() =>
+      redisCache.publishDurableQueueWakeup("domain-event"));
   }
   return counts;
 }
@@ -953,7 +1003,7 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
         raceId,
         [...new Set(impactRows.filter((row) => row.raceId === raceId).map((row) => row.participantId))].sort(),
       ]));
-      await RaceResolutionJobV2.enqueueMany({
+      const resolutionJobs = await RaceResolutionJobV2.enqueueMany({
         raceIds: impactedRaceIds,
         now: current,
         triggeredUserIdsByRaceId: impactedUsersByRaceId,
@@ -967,6 +1017,9 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
         burstCoalescing: true,
         queuePriority: "LIVE",
       }, tx);
+      if (resolutionJobs.length) {
+        await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("resolution"));
+      }
     }
     if (activeIds.length) await tx.globalStepEventEntitlement.updateMany({
       where: { id: { in: activeIds }, startProcessedAt: null },

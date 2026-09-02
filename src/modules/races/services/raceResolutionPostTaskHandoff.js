@@ -10,6 +10,7 @@ const {
 const {
   raceResolutionDeliveryIntents,
 } = require("./raceResolutionDeliveryIntents");
+const redisCache = require("../../../shared/cache/redisCache");
 
 function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
   const model = dependencies.RaceResolutionPostTask || defaultPostTaskModel;
@@ -21,6 +22,8 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
   const deliverIntentInline =
     dependencies.deliverIntentInline ||
     ((intent) => raceResolutionDeliveryIntents.deliver(intent));
+  const publishWake = dependencies.publishWake ||
+    (() => redisCache.publishDurableQueueWakeup("post-task"));
 
   async function executeInline(snapshotCommand, intents) {
     const before = intents.filter((intent) =>
@@ -121,6 +124,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     // A duplicate generation already has one durable owner. Never execute a
     // second inline copy of its publication or intents.
     if (!task?.created) return { mode: "deduped", taskId: task?.id || null };
+    await publishWake();
     if (!(await measure("runnerReadiness", () => runner.isReady({
       positiveCacheMs: fastHandoff ? 1000 : 0,
     })))) {
@@ -147,6 +151,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     recordPhaseTiming = null,
   } = {}) {
     if (!taskId) return { mode: "none", taskId: null };
+    await publishWake();
     const measure = async (name, operation) => {
       if (typeof recordPhaseTiming !== "function") return operation();
       const startedAt = process.hrtime.bigint();

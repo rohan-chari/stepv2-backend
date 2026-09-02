@@ -922,6 +922,7 @@ describe("5a — one bulk writer per race", () => {
     let boundaryObserved = false;
     const failStops = [];
     const markers = [];
+    const queueWakes = [];
     const handoff = buildRaceResolutionPostTaskHandoff({
       runner: {
         async isReady() { return true; },
@@ -950,6 +951,7 @@ describe("5a — one bulk writer per race", () => {
       clearTimeout() {},
       failStop(code) { failStops.push(code); },
       writeAlertMarker(marker) { markers.push(marker); },
+      async publishDurableQueueWakeup(queue) { queueWakes.push(queue); },
       async flushDiagnostics() {},
       emitLiveDiagnostic() {},
       async onCommitted({ job }) {
@@ -959,6 +961,8 @@ describe("5a — one bulk writer per race", () => {
         };
       },
       async afterAuthoritativeCommit({ job }) {
+        assert.ok(queueWakes.includes("post-task"),
+          "the committed post-task must be signaled before any crash seam");
         const [storedJob, task] = await Promise.all([
           prisma.raceResolutionJobV2.findUnique({ where: { id: job.id } }),
           prisma.raceResolutionPostTask.findUnique({
@@ -985,6 +989,7 @@ describe("5a — one bulk writer per race", () => {
     assert.deepEqual(failStops, [70]);
     assert.equal(markers.length, 1);
     assert.equal(markers[0].authoritativeCommitCompleted, true);
+    assert.equal(queueWakes.filter((queue) => queue === "post-task").length, 1);
 
     const delivered = [];
     const published = [];

@@ -34,6 +34,16 @@ test("admission wake coalesces ten-millisecond tokens into bounded pages", () =>
   );
 });
 
+test("an active admission lease wakes at lease expiry instead of spinning on past availability", () => {
+  const now = new Date("2026-08-31T12:00:00.000Z");
+  const leaseUntil = new Date(now.getTime() + 30_000);
+  assert.equal(admissionWakeAt({
+    hasPending: true,
+    nextTokenAt: new Date(now.getTime() - 10_000),
+    nextAvailableAt: leaseUntil,
+  }, now.getTime()).toISOString(), leaseUntil.toISOString());
+});
+
 test("admitted provider outcomes persist device attempts and tokens in bounded set-based writes", async () => {
   const writes = [];
   const prisma = {

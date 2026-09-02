@@ -1,6 +1,7 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
+const redisCache = require("../../../shared/cache/redisCache");
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DESTINATION_ROUTES = new Set([
@@ -74,6 +75,8 @@ async function createInboxAlert({
   userId, type, title, body, destination, sourceKey, now = new Date(),
   payload = null, prisma = defaultPrisma, tx = null,
   expiresAt = null,
+  invalidateUnread = invalidateInboxUnread,
+  publishWakeup = () => redisCache.publishNotificationWakeup({ kind: "INBOX_DELIVERY" }),
 }) {
   if (!userId || typeof type !== "string" || !type || typeof title !== "string" ||
       typeof body !== "string" || !body || typeof sourceKey !== "string" || !sourceKey) {
@@ -113,7 +116,13 @@ async function createInboxAlert({
   const alert = tx ? await write(db) : await prisma.$transaction(write);
   // An outer transaction must invalidate after COMMIT itself (calling Redis
   // while still inside it would advertise data that could roll back).
-  if (!tx) await invalidateInboxUnread(userId);
+  if (!tx) {
+    // The owned transaction has committed before either hint is published.
+    // PostgreSQL remains authoritative, so a Redis/cache failure cannot turn
+    // a committed alert into an API failure.
+    await invalidateUnread(userId).catch(() => {});
+    await publishWakeup().catch(() => {});
+  }
   return alert;
 }
 

@@ -18,11 +18,99 @@ const {
 const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("../../../shared/observability/eventSurgeTelemetry");
 
 const LEASE_MS = 30_000;
-const TICK_INTERVAL_MS = 15_000;
+const TICK_INTERVAL_MS = 60_000;
 const DEFAULT_BATCH_SIZE = 128;
 const DEFAULT_CONCURRENCY = 16;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 5_000;
 const MAX_TARGETS_PER_RECIPIENT = 10;
+
+async function claimNormalInboxPage({
+  prisma = defaultPrisma,
+  now = new Date(),
+  batchSize = DEFAULT_BATCH_SIZE,
+  leaseMs = LEASE_MS,
+} = {}) {
+  const limit = Math.max(1, Math.min(500, Number(batchSize) || DEFAULT_BATCH_SIZE));
+  const leaseToken = crypto.randomUUID();
+  const leaseUntil = new Date(now.getTime() + leaseMs);
+  const claimed = await prisma.$transaction(async (tx) => tx.$queryRawUnsafe(
+    `WITH due_candidates AS MATERIALIZED (
+       SELECT id,available_at AS due_at,available_at
+         FROM inbox_delivery_outbox
+        WHERE status IN ('PENDING','RETRY') AND available_at <= $1
+          AND (expires_at IS NULL OR expires_at > $1)
+        ORDER BY available_at,id LIMIT $2
+     ), recovery_candidates AS MATERIALIZED (
+       SELECT id,lease_until AS due_at,available_at
+         FROM inbox_delivery_outbox
+        WHERE status='LEASED' AND lease_until <= $1
+          AND (expires_at IS NULL OR expires_at > $1)
+        ORDER BY lease_until,available_at,id LIMIT $2
+     ), candidate_ids AS MATERIALIZED (
+       SELECT id,due_at,available_at FROM (
+         SELECT id,due_at,available_at FROM due_candidates
+         UNION ALL
+         SELECT id,due_at,available_at FROM recovery_candidates
+       ) bounded ORDER BY due_at,available_at,id LIMIT $2
+     ), locked AS MATERIALIZED (
+       SELECT outbox.id
+         FROM inbox_delivery_outbox outbox
+         JOIN candidate_ids candidate ON candidate.id=outbox.id
+        WHERE (outbox.status IN ('PENDING','RETRY') AND outbox.available_at <= $1
+                 AND (outbox.expires_at IS NULL OR outbox.expires_at > $1))
+           OR (outbox.status='LEASED' AND outbox.lease_until <= $1
+                 AND (outbox.expires_at IS NULL OR outbox.expires_at > $1))
+        ORDER BY candidate.due_at,candidate.available_at,outbox.id
+        FOR UPDATE OF outbox SKIP LOCKED
+     )
+     UPDATE inbox_delivery_outbox outbox
+        SET status='LEASED',claimed_at=COALESCE(outbox.claimed_at,$1),
+            lease_until=$4,lease_token=$3,updated_at=$1
+       FROM locked WHERE outbox.id=locked.id
+     RETURNING outbox.id`,
+    now, limit, leaseToken, leaseUntil,
+  ));
+  if (!claimed.length) return [];
+  const rows = await prisma.inboxDeliveryOutbox.findMany({
+    where: { id: { in: claimed.map((row) => row.id) }, status: "LEASED", leaseToken },
+    include: { alert: { select: { userId: true, type: true, destination: true, sourceKey: true } } },
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return claimed.flatMap((claim) => {
+    const row = byId.get(claim.id);
+    return row ? [{ ...row, leaseToken }] : [];
+  });
+}
+
+async function nextInboxDeliveryDueAt(prisma = defaultPrisma) {
+  // The outbox row is the durable claim unit and its available_at is updated
+  // transactionally to the earliest remaining device-attempt retry. If a
+  // worker crashes before that update, the row remains LEASED and lease_until
+  // is the only safe recovery boundary. Reading an attempt timestamp without
+  // its parent state lets an old retry force a zero-delay loop during that
+  // active lease, so exact scheduling intentionally follows the parent lanes.
+  const [row = {}] = await prisma.$queryRawUnsafe(
+    `SELECT LEAST(
+       (SELECT MIN(available_at) FROM inbox_delivery_outbox
+         WHERE status IN ('PENDING','RETRY')),
+       (SELECT MIN(lease_until) FROM inbox_delivery_outbox
+         WHERE status='LEASED'),
+       (SELECT MIN(expires_at) FROM inbox_delivery_outbox
+         WHERE status IN ('PENDING','RETRY','LEASED') AND expires_at IS NOT NULL),
+       (SELECT MIN(available_at) FROM inbox_delivery_outbox
+         WHERE admission_class='visible:GLOBAL_EVENT_STARTED' AND status='ADMISSION_FIRST'),
+       (SELECT MIN(available_at) FROM inbox_delivery_outbox
+         WHERE admission_class='visible:GLOBAL_EVENT_STARTED' AND status='ADMISSION_RETRY'),
+       (SELECT MIN(lease_until) FROM inbox_delivery_outbox
+         WHERE admission_class='visible:GLOBAL_EVENT_STARTED' AND status='ADMISSION_LEASED'),
+       (SELECT MIN(admission_expires_at) FROM inbox_delivery_outbox
+         WHERE admission_class='visible:GLOBAL_EVENT_STARTED'
+           AND status IN ('ADMISSION_FIRST','ADMISSION_RETRY','ADMISSION_LEASED')
+           AND admission_expires_at IS NOT NULL)
+     ) AS "dueAt"`,
+  );
+  return row.dueAt || null;
+}
 const DEFAULT_PROVIDER_CONCURRENCY = 16;
 const DEFAULT_DB_WRITE_CONCURRENCY = 32;
 
@@ -916,34 +1004,20 @@ function buildInboxDelivery(dependencies = {}) {
         }),
       ]);
     }
-    const candidates = await prisma.inboxDeliveryOutbox.findMany({
-      where: {
-        OR: [
-          { status: { in: ["PENDING", "RETRY"] }, availableAt: { lte: current }, OR: [{ expiresAt: null }, { expiresAt: { gt: current } }] },
-          { status: "LEASED", leaseUntil: { lte: current } },
-        ],
-      },
-      orderBy: { availableAt: "asc" },
-      take: batchSize,
-      include: { alert: { select: { userId: true, type: true, destination: true, sourceKey: true } } },
-    });
+    const candidates = await claimNormalInboxPage({ prisma, now: current, batchSize });
     let delivered = 0;
     let claimed = 0;
     await mapWithConcurrency(candidates, concurrency, async (row) => {
-      const leaseToken = crypto.randomUUID();
+      const leaseToken = row.leaseToken;
       const leased = typeof prisma.$transaction === "function"
         ? await prisma.$transaction(async (tx) => {
-            const claim = await tx.inboxDeliveryOutbox.updateMany({
-              where: {
-                id: row.id,
-                OR: [
-                  { status: { in: ["PENDING", "RETRY"] }, availableAt: { lte: current }, OR: [{ expiresAt: null }, { expiresAt: { gt: current } }] },
-                  { status: "LEASED", leaseUntil: { lte: current }, OR: [{ expiresAt: null }, { expiresAt: { gt: current } }] },
-                ],
-              },
-              data: { status: "LEASED", claimedAt: row.claimedAt || current, leaseUntil: new Date(current.getTime() + LEASE_MS), leaseToken },
+            const owned = await tx.inboxDeliveryOutbox.findFirst({
+              where: { id: row.id, status: "LEASED", leaseToken },
+              select: { id: true },
             });
-            if (claim.count !== 1 || !tx.inboxDeliveryDeviceAttempt || !tx.deviceToken) return claim;
+            if (!owned || !tx.inboxDeliveryDeviceAttempt || !tx.deviceToken) {
+              return { count: owned ? 1 : 0 };
+            }
             const existingTargets = await tx.inboxDeliveryDeviceAttempt.findMany({
               where: { outboxId: row.id },
               orderBy: { id: "asc" },
@@ -1017,12 +1091,9 @@ function buildInboxDelivery(dependencies = {}) {
                 skipDuplicates: true,
               });
             }
-            return claim;
+            return { count: 1 };
           })
-        : await prisma.inboxDeliveryOutbox.updateMany({
-            where: { id: row.id, status: { in: ["PENDING", "RETRY"] }, availableAt: { lte: current } },
-            data: { status: "LEASED", claimedAt: row.claimedAt || current, leaseUntil: new Date(current.getTime() + LEASE_MS), leaseToken },
-          });
+        : { count: 1 };
       if (leased.count !== 1) return;
       claimed += 1;
       try {
@@ -1087,22 +1158,27 @@ function buildInboxDelivery(dependencies = {}) {
 }
 
 function scheduleInboxDelivery(dependencies = {}) {
-  const run = buildInboxDelivery(dependencies);
+  const run = dependencies.run || buildInboxDelivery(dependencies);
   // Compatibility seam for existing injected callers. Production starts the
   // dedicated schedule-release worker separately, so it deliberately leaves
   // this unset and avoids coupling visible delivery back to schedule release.
   const releaseDue = dependencies.releaseDue || null;
   const subscribeWakeup = dependencies.subscribeNotificationWakeup ||
     redisCache.subscribeNotificationWakeup;
-  const nextDueAt = dependencies.nextDueAt ||
-    (dependencies.notificationIntentService || defaultNotificationIntentService).nextDueAt;
+  const nextDueAt = dependencies.nextDueAt || (() =>
+    nextInboxDeliveryDueAt(dependencies.prisma || defaultPrisma));
   const logger = dependencies.logger || console;
+  const nowMs = dependencies.nowMs || Date.now;
+  const setDueTimer = dependencies.setDueTimer || setTimeout;
+  const clearDueTimer = dependencies.clearDueTimer || clearTimeout;
   let running = null;
+  let rerun = false;
   let dueTimer = null;
   let stopped = false;
   let unsubscribe = null;
   const tick = () => {
-    if (stopped || running) return running;
+    if (stopped) return running;
+    if (running) { rerun = true; return running; }
     running = Promise.resolve()
       .then(() => dependencies.startupBarrier?.())
       .then(() => releaseDue?.({ now: dependencies.now?.() }))
@@ -1118,13 +1194,26 @@ function scheduleInboxDelivery(dependencies = {}) {
           .map((value) => new Date(value))
           .sort((left, right) => left - right)[0];
         if (!dueAt) return;
-        const delay = Math.max(0, Math.min(60_000, new Date(dueAt).getTime() - Date.now()));
-        if (dueTimer) clearTimeout(dueTimer);
-        dueTimer = setTimeout(tick, delay);
+        const delay = Math.max(0, Math.min(60_000, new Date(dueAt).getTime() - nowMs()));
+        if (dueTimer) clearDueTimer(dueTimer);
+        dueTimer = setDueTimer(tick, delay);
         dueTimer.unref?.();
       })
-      .catch((error) => logger.error("[CRON] inboxDelivery tick error:", error))
-      .finally(() => { running = null; });
+      .catch((error) => {
+        logger.error("[CRON] inboxDelivery tick error:", error);
+        if (!stopped) {
+          if (dueTimer) clearDueTimer(dueTimer);
+          dueTimer = setDueTimer(tick, 1_000);
+          dueTimer.unref?.();
+        }
+      })
+      .finally(() => {
+        running = null;
+        if (rerun && !stopped) {
+          rerun = false;
+          setImmediate(tick);
+        }
+      });
     return running;
   };
   tick();
@@ -1142,7 +1231,7 @@ function scheduleInboxDelivery(dependencies = {}) {
       if (stopped) return;
       stopped = true;
       clearInterval(interval);
-      if (dueTimer) clearTimeout(dueTimer);
+      if (dueTimer) clearDueTimer(dueTimer);
       await unsubscribe?.();
       await running;
     },
@@ -1165,5 +1254,7 @@ module.exports = {
   admissionWakeAt,
   persistAdmittedAttemptResults,
   persistAdmittedPageResults,
+  nextInboxDeliveryDueAt,
+  claimNormalInboxPage,
   LEASE_MS,
 };

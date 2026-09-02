@@ -9,12 +9,14 @@ const TABLES_IN_ORDER = [
   // the whole FK graph and takes AccessExclusive locks on every discovered
   // table/index; on the local integration DB that turned an empty cleanup into
   // a 20s operation after the feature-batch tables were added.
+  "domain_event_receipts",
   "domain_event_notification_projections",
   "domain_event_audiences",
   "domain_event_outbox",
   "interstitial_ad_impressions",
   "interstitial_ad_permits",
   "interstitial_ad_caps",
+  "notification_schedule_receipts",
   "notification_schedules",
   "notification_release_lanes",
   "inbox_delivery_device_attempts",
@@ -49,6 +51,8 @@ const TABLES_IN_ORDER = [
   "race_payout_double_velocity_grants",
   "race_payout_double_claim_receipts",
   "race_payout_double_identities",
+  "race_resolution_delivery_intent_receipts",
+  "race_resolution_post_task_receipts",
   "race_resolution_delivery_intents",
   "race_resolution_post_tasks",
   "race_placement_transition_jobs",

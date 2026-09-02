@@ -140,6 +140,34 @@ function buildRacePlacementTransitionJobModel(prisma = defaultPrisma) {
       return normalize(rows[0]);
     },
 
+    async nextDueAt() {
+      const [row = {}] = await prisma.$queryRawUnsafe(
+        `SELECT LEAST(
+           (SELECT MIN(GREATEST(p.not_before_at,COALESCE(p.retry_at,'-infinity'::timestamp)))
+              FROM race_placement_transition_jobs p
+              JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id
+             WHERE p.state IN ('queued','retry')
+               AND p.requested_generation > COALESCE(p.completed_generation,0)
+               AND r.state='succeeded'
+               AND r.generation > 0
+               AND r.processing_generation=r.generation
+               AND r.generation=p.requested_generation
+               AND r.last_completed_at IS NOT NULL),
+           (SELECT MIN(p.lease_expires_at)
+              FROM race_placement_transition_jobs p
+              JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id
+             WHERE p.state='running'
+               AND p.requested_generation > COALESCE(p.completed_generation,0)
+               AND r.state='succeeded'
+               AND r.generation > 0
+               AND r.processing_generation=r.generation
+               AND r.generation=p.requested_generation
+               AND r.last_completed_at IS NOT NULL)
+         ) AS "dueAt"`,
+      );
+      return row.dueAt || null;
+    },
+
     async lockOwned(tx, { id, leaseToken, processingGeneration }) {
       const rows = await tx.$queryRawUnsafe(
         `SELECT ${columns("p.")}

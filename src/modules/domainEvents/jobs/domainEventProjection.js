@@ -2,14 +2,22 @@ const {
   buildNotificationProjector,
 } = require("../services/notificationProjector");
 const { buildGetDomainEventHealth } = require("../queries/getDomainEventHealth");
+const domainEventOutbox = require("../models/domainEventOutbox");
+const { DomainEventReceipt } = require("../models/domainEventReceipt");
+const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
+const redisCache = require("../../../shared/cache/redisCache");
 
-const TICK_INTERVAL_MS = 1_000;
+const TICK_INTERVAL_MS = 10_000;
 
 function buildDomainEventProjectionJob(dependencies = {}) {
   const projector = dependencies.projector || buildNotificationProjector(dependencies);
   const getHealth = dependencies.getHealth || buildGetDomainEventHealth(dependencies);
   const logger = dependencies.logger || console;
   const now = dependencies.now || (() => new Date());
+  const reconcileProjectionCounters = dependencies.reconcileProjectionCounters ||
+    domainEventOutbox.backfillProjectionCounters;
+  const reconcileEventReceipts = dependencies.reconcileEventReceipts ||
+    DomainEventReceipt.backfillPage;
   let nextHealthAt = 0;
   let consecutiveBacklogMinutes = 0;
   return async function projectDomainEvents() {
@@ -17,6 +25,10 @@ function buildDomainEventProjectionJob(dependencies = {}) {
     const currentMs = now().getTime();
     if (currentMs >= nextHealthAt) {
       nextHealthAt = currentMs + 60_000;
+      const [projectionCountersRepaired, eventReceiptsReconciled] = await Promise.all([
+        reconcileProjectionCounters({ now: now(), batchSize: 100 }),
+        reconcileEventReceipts({ limit: 100 }),
+      ]);
       const health = await getHealth();
       const agedBacklog = (health.oldestEvent?.ageMs || 0) > 60_000 ||
         (health.oldestProjection?.ageMs || 0) > 60_000;
@@ -27,6 +39,8 @@ function buildDomainEventProjectionJob(dependencies = {}) {
         downstream: health.downstream,
         terminalFailures: health.terminalFailures,
         consecutiveBacklogMinutes,
+        projectionCountersRepaired,
+        eventReceiptsReconciled,
       });
       if (health.terminalFailures.events > 0 || health.terminalFailures.projections > 0 ||
           consecutiveBacklogMinutes >= 5) {
@@ -43,23 +57,37 @@ function buildDomainEventProjectionJob(dependencies = {}) {
 }
 
 function scheduleDomainEventProjection(dependencies = {}) {
-  const run = buildDomainEventProjectionJob(dependencies);
+  const run = dependencies.run || buildDomainEventProjectionJob(dependencies);
   const logger = dependencies.logger || console;
   let running = null;
   const tick = () => {
     if (running) return running;
     running = run()
-      .catch((error) => logger.error("[CRON] domainEventProjection tick error", {
-        errorCode: error?.code || "PROJECTOR_TICK_ERROR",
-      }))
+      .catch((error) => {
+        logger.error("[CRON] domainEventProjection tick error", {
+          errorCode: error?.code || "PROJECTOR_TICK_ERROR",
+        });
+        throw error;
+      })
       .finally(() => { running = null; });
     return running;
   };
-  tick();
-  const interval = setInterval(tick, dependencies.intervalMs || TICK_INTERVAL_MS);
-  interval.unref?.();
-  logger.log("[CRON] Domain-event notification projection scheduled");
-  return { tick, stop: () => clearInterval(interval) };
+  const coordinator = createPostgresWakeCoordinator({
+    queue: "domain-event",
+    fallbackIntervalMs: dependencies.intervalMs || 10_000,
+    drain: tick,
+    nextDueAt: dependencies.nextDueAt || (() => domainEventOutbox.nextDueAt()),
+    subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
+    logger,
+    now: dependencies.coordinatorNow,
+    setTimer: dependencies.setDueTimer,
+    clearTimer: dependencies.clearDueTimer,
+  });
+  coordinator.start().catch((error) => logger.error(
+    "[CRON] domainEventProjection wake coordinator error", error,
+  ));
+  logger.log("[CRON] Domain-event notification projection scheduled (wake-first, 10s recovery)");
+  return { tick, coordinator, stop: () => coordinator.stop() };
 }
 
 module.exports = {

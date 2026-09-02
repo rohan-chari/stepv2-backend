@@ -19,6 +19,9 @@ const {
   releaseEventNotificationPage: releaseEventNotificationPageOn,
 } = require("./notificationAdmission");
 const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("../../../shared/observability/eventSurgeTelemetry");
+const {
+  NotificationScheduleReceipt: defaultScheduleReceipt,
+} = require("../models/notificationScheduleReceipt");
 
 const SCHEDULE_PENDING = "PENDING";
 const SCHEDULE_CLAIMED = "CLAIMED";
@@ -208,6 +211,8 @@ function buildNotificationIntentService(dependencies = {}) {
   const runTransaction = dependencies.transaction ||
     ((work) => prisma.$transaction(work));
   const scheduleModel = dependencies.notificationSchedule || prisma.notificationSchedule;
+  const scheduleReceipt = dependencies.notificationScheduleReceipt ||
+    (dependencies.prisma ? null : defaultScheduleReceipt);
   const eventSurgeTelemetry = dependencies.eventSurgeTelemetry || defaultEventSurgeTelemetry;
   const invalidateUnreadBatch = dependencies.invalidateInboxUnreadMany || invalidateInboxUnreadMany;
 
@@ -243,6 +248,21 @@ function buildNotificationIntentService(dependencies = {}) {
       throw new RangeError("global-event delivery safety window is empty");
     }
     if (!scheduleStore?.upsert) throw new Error("notification schedule store is unavailable");
+    if (scheduleReceipt?.reserve && tx.notificationScheduleReceipt) {
+      const receipt = await scheduleReceipt.reserve(intent, tx);
+      if (!receipt.inserted && !receipt.advanced) {
+        const existingSchedule = await scheduleStore.findUnique({
+          where: { recipientUserId_deliveryKey: {
+            recipientUserId: intent.recipientUserId,
+            deliveryKey: intent.deliveryKey,
+          } },
+          select: { id: true },
+        });
+        if (!existingSchedule) {
+          return { kind: "RECEIPT_ONLY", scheduleId: null, receiptOnly: true };
+        }
+      }
+    }
     let schedule;
     if (typeof tx.$queryRawUnsafe === "function") {
       if (admittedEvent && typeof tx.$executeRawUnsafe === "function") {
@@ -462,6 +482,11 @@ function buildNotificationIntentService(dependencies = {}) {
         where: { id: { in: ids("expired") }, status: SCHEDULE_PENDING },
         data: { status: SCHEDULE_EXPIRED, claimedAt: current, canceledAt: current, cancellationReason: "EXPIRED" },
       });
+      if (categories.expired.length && scheduleReceipt?.markTerminalMany) {
+        await scheduleReceipt.markTerminalMany({
+          rows: categories.expired, terminalStatus: SCHEDULE_EXPIRED, completedAt: current,
+        }, tx);
+      }
       if (categories.pending.length) await tx.notificationSchedule.updateMany({
         where: { id: { in: ids("pending") }, status: SCHEDULE_PENDING },
         data: { availableAt: new Date(current.getTime() + 250) },
@@ -470,10 +495,20 @@ function buildNotificationIntentService(dependencies = {}) {
         where: { id: { in: ids("dormant") }, status: SCHEDULE_PENDING },
         data: { status: "CANCELLED_NO_ACTIVE_RACE", claimedAt: current, canceledAt: current, cancellationReason: "NO_ACTIVE_RACES" },
       });
+      if (categories.dormant.length && scheduleReceipt?.markTerminalMany) {
+        await scheduleReceipt.markTerminalMany({
+          rows: categories.dormant, terminalStatus: "CANCELLED_NO_ACTIVE_RACE", completedAt: current,
+        }, tx);
+      }
       if (categories.canceled.length) await tx.notificationSchedule.updateMany({
         where: { id: { in: ids("canceled") }, status: SCHEDULE_PENDING },
         data: { status: SCHEDULE_CANCELED, claimedAt: current, canceledAt: current, cancellationReason: "INELIGIBLE_AT_BOUNDARY" },
       });
+      if (categories.canceled.length && scheduleReceipt?.markTerminalMany) {
+        await scheduleReceipt.markTerminalMany({
+          rows: categories.canceled, terminalStatus: SCHEDULE_CANCELED, completedAt: current,
+        }, tx);
+      }
       if (categories.eligible.length) {
         const inboxExpiry = new Date(current.getTime() + 30 * 24 * 60 * 60_000);
         const materialization = categories.eligible.map((row) => {
@@ -538,6 +573,12 @@ function buildNotificationIntentService(dependencies = {}) {
              FROM input WHERE schedule.id=input.id AND schedule.status='PENDING'`,
           JSON.stringify(materialization), current, inboxExpiry,
         );
+        if (scheduleReceipt?.markTerminalMany) {
+          await scheduleReceipt.markTerminalMany({
+            rows: categories.eligible, terminalStatus: SCHEDULE_MATERIALIZED,
+            completedAt: current,
+          }, tx);
+        }
         for (const row of categories.eligible) recipients.add(row.recipientUserId);
       }
       return {
@@ -596,6 +637,10 @@ function buildNotificationIntentService(dependencies = {}) {
           cancellationReason: "EXPIRED",
         },
       });
+      if (scheduleReceipt?.markTerminal) await scheduleReceipt.markTerminal({
+        recipientUserId, deliveryKey, terminalStatus: SCHEDULE_EXPIRED,
+        completedAt: current,
+      }, tx);
       return false;
     }
     if (!eligible) {
@@ -608,6 +653,10 @@ function buildNotificationIntentService(dependencies = {}) {
           cancellationReason: "INELIGIBLE_AT_BOUNDARY",
         },
       });
+      if (scheduleReceipt?.markTerminal) await scheduleReceipt.markTerminal({
+        recipientUserId, deliveryKey, terminalStatus: SCHEDULE_CANCELED,
+        completedAt: current,
+      }, tx);
       return false;
     }
     const claimed = await store.updateMany({
@@ -634,6 +683,10 @@ function buildNotificationIntentService(dependencies = {}) {
     if (materialized.count !== 1) {
       throw new Error(`notification schedule claim lost for ${row.id}`);
     }
+    if (scheduleReceipt?.markTerminal) await scheduleReceipt.markTerminal({
+      recipientUserId, deliveryKey, terminalStatus: SCHEDULE_MATERIALIZED,
+      completedAt: current,
+    }, tx);
     return { released: true, alertId: alert?.id || null, recipientUserId };
   }
 
@@ -643,12 +696,48 @@ function buildNotificationIntentService(dependencies = {}) {
 
   async function nextDueAt() {
     if (!scheduleModel?.findFirst) return null;
-    const row = await scheduleModel.findFirst({
-      where: { status: { in: [SCHEDULE_PENDING, ADMISSION_PENDING] } },
-      orderBy: { availableAt: "asc" },
-      select: { availableAt: true },
-    });
-    return row?.availableAt ? new Date(row.availableAt) : null;
+    // Keep the two active status branches separate so each lookup can use its
+    // small purpose-built partial index instead of bitmap-merging/sorting the
+    // combined active history.
+    const [normal, normalExpiry, admission, admissionExpiry] = await Promise.all([
+      scheduleModel.findFirst({
+        where: { status: SCHEDULE_PENDING },
+        orderBy: { availableAt: "asc" },
+        select: { availableAt: true },
+      }),
+      scheduleModel.findFirst({
+        where: { status: SCHEDULE_PENDING, expiresAt: { not: null } },
+        orderBy: { expiresAt: "asc" },
+        select: { expiresAt: true },
+      }),
+      scheduleModel.findFirst({
+        where: {
+          status: ADMISSION_PENDING,
+          admissionClass: ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+        },
+        orderBy: { availableAt: "asc" },
+        select: { availableAt: true },
+      }),
+      scheduleModel.findFirst({
+        where: {
+          status: ADMISSION_PENDING,
+          admissionClass: ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
+          expiresAt: { not: null },
+        },
+        orderBy: { expiresAt: "asc" },
+        select: { expiresAt: true },
+      }),
+    ]);
+    const due = [
+      normal?.availableAt,
+      normalExpiry?.expiresAt,
+      admission?.availableAt,
+      admissionExpiry?.expiresAt,
+    ]
+      .filter(Boolean)
+      .map((value) => new Date(value))
+      .sort((left, right) => left - right)[0];
+    return due || null;
   }
 
   return {

@@ -218,6 +218,7 @@ model User {
   appReviewPromptAttempts     AppReviewPromptAttempt[]
   inboxAlerts                 InboxAlert[]
   notificationSchedules       NotificationSchedule[]
+  notificationScheduleReceipts NotificationScheduleReceipt[]
   feedbackThreads             FeedbackThread[]
   raceShareLinksShared        RaceShareLink[]              @relation("RaceShareLinkSharer")
   raceJoinRequestsShared      RaceJoinRequest[]            @relation("RaceJoinRequestSharer")
@@ -304,20 +305,20 @@ enum OperationalEmailAlertState {
 // It is intentionally unrelated to FeedbackEmailAttempt: no user or feedback
 // content is persisted here, and frozen clients never observe these rows.
 model OperationalEmailAlert {
-  id            String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  dedupeKey     String                     @unique @map("dedupe_key") @db.VarChar(160)
-  alertType     String                     @map("alert_type") @db.VarChar(32)
-  payload       Json
-  state         OperationalEmailAlertState @default(PENDING)
-  attempts      Int                        @default(0)
-  notBeforeAt   DateTime                   @default(now()) @map("not_before_at")
-  leaseToken    String?                    @map("lease_token") @db.Uuid
-  leaseExpiresAt DateTime?                 @map("lease_expires_at")
-  acceptedAt    DateTime?                  @map("accepted_at")
-  lastErrorCode String?                    @map("last_error_code") @db.VarChar(64)
-  terminalAt    DateTime?                  @map("terminal_at")
-  createdAt     DateTime                   @default(now()) @map("created_at")
-  updatedAt     DateTime                   @default(now()) @updatedAt @map("updated_at")
+  id             String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dedupeKey      String                     @unique @map("dedupe_key") @db.VarChar(160)
+  alertType      String                     @map("alert_type") @db.VarChar(32)
+  payload        Json
+  state          OperationalEmailAlertState @default(PENDING)
+  attempts       Int                        @default(0)
+  notBeforeAt    DateTime                   @default(now()) @map("not_before_at")
+  leaseToken     String?                    @map("lease_token") @db.Uuid
+  leaseExpiresAt DateTime?                  @map("lease_expires_at")
+  acceptedAt     DateTime?                  @map("accepted_at")
+  lastErrorCode  String?                    @map("last_error_code") @db.VarChar(64)
+  terminalAt     DateTime?                  @map("terminal_at")
+  createdAt      DateTime                   @default(now()) @map("created_at")
+  updatedAt      DateTime                   @default(now()) @updatedAt @map("updated_at")
 
   @@index([state, notBeforeAt, id])
   @@index([state, leaseExpiresAt, id])
@@ -530,6 +531,8 @@ model GlobalEventSummaryWork {
   requiredRaceCount            Int       @default(0) @map("required_race_count")
   finalRaceCount               Int       @default(0) @map("final_race_count")
   raceReconciledAt             DateTime? @map("race_reconciled_at")
+  readyAt                      DateTime? @map("ready_at")
+  nextRecoveryAt               DateTime  @default(now()) @map("next_recovery_at")
   availableAt                  DateTime  @default(now()) @map("available_at")
   leaseUntil                   DateTime? @map("lease_until")
   leaseToken                   String?   @map("lease_token")
@@ -711,6 +714,25 @@ model NotificationSchedule {
   @@index([admissionClass, status, availableAt, admissionSequence, id])
   @@index([recipientUserId, createdAt])
   @@map("notification_schedules")
+}
+
+model NotificationScheduleReceipt {
+  recipientUserId   String    @map("recipient_user_id")
+  deliveryKey       String    @map("delivery_key")
+  sourceKind        String    @map("source_kind") @db.VarChar(16)
+  sourceType        String?   @map("source_type") @db.VarChar(64)
+  sourceId          String?   @map("source_id")
+  sourceRevision    Int?      @map("source_revision")
+  terminalStatus    String?   @map("terminal_status") @db.VarChar(32)
+  completedAt       DateTime? @map("completed_at")
+  directRetainUntil DateTime? @map("direct_retain_until")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@id([recipientUserId, deliveryKey])
+  @@map("notification_schedule_receipts")
 }
 
 model NotificationReleaseLane {
@@ -1723,6 +1745,8 @@ model Race {
   resolutionJob                RaceResolutionJobV2?
   placementTransitionJob       RacePlacementTransitionJob?
   resolutionPostTasks          RaceResolutionPostTask[]
+  resolutionPostTaskReceipts   RaceResolutionPostTaskReceipt[]
+  resolutionDeliveryIntentReceipts RaceResolutionDeliveryIntentReceipt[]
   shareLinks                   RaceShareLink[]
   joinRequests                 RaceJoinRequest[]
   adminCommands                RaceAdminCommand[]
@@ -2336,28 +2360,28 @@ model RaceActiveEffect {
 // reads and maintains this additive artifact but continues stamping v1/v2
 // effect metadata; a later separately authorized release may stamp v3.
 model HitchhikeAttributionCapture {
-  effectId                String    @id @map("effect_id")
-  raceId                  String    @map("race_id")
-  sourceUserId            String    @map("source_user_id")
-  targetUserId            String    @map("target_user_id")
-  scoringVersion          Int       @map("scoring_version")
-  raceTimezone            String    @map("race_timezone")
-  castDayStart            DateTime  @map("cast_day_start")
-  castDailySteps          Int       @default(0) @map("cast_daily_steps")
-  castSampleBoundaryAt    DateTime  @map("cast_sample_boundary_at")
-  scoringInputGeneration  BigInt    @default(0) @map("scoring_input_generation")
-  scoringInputFingerprint String?   @map("scoring_input_fingerprint") @db.Char(64)
-  rawSourceKind           String    @map("raw_source_kind") @db.VarChar(32)
-  rawSourceHighWater      Int       @default(0) @map("raw_source_high_water")
-  coarseSourceFrom        Int?      @map("coarse_source_from")
-  coarseSourceThrough     Int?      @map("coarse_source_through")
-  coarseRawAttributed     Int       @default(0) @map("coarse_raw_attributed")
-  coarseEffectiveContribution Int   @default(0) @map("coarse_effective_contribution")
-  effectiveContribution   Int       @default(0) @map("effective_contribution")
-  captureThrough          DateTime  @map("capture_through")
-  frozenAt                DateTime? @map("frozen_at")
-  createdAt               DateTime  @default(now()) @map("created_at")
-  updatedAt               DateTime  @updatedAt @map("updated_at")
+  effectId                    String    @id @map("effect_id")
+  raceId                      String    @map("race_id")
+  sourceUserId                String    @map("source_user_id")
+  targetUserId                String    @map("target_user_id")
+  scoringVersion              Int       @map("scoring_version")
+  raceTimezone                String    @map("race_timezone")
+  castDayStart                DateTime  @map("cast_day_start")
+  castDailySteps              Int       @default(0) @map("cast_daily_steps")
+  castSampleBoundaryAt        DateTime  @map("cast_sample_boundary_at")
+  scoringInputGeneration      BigInt    @default(0) @map("scoring_input_generation")
+  scoringInputFingerprint     String?   @map("scoring_input_fingerprint") @db.Char(64)
+  rawSourceKind               String    @map("raw_source_kind") @db.VarChar(32)
+  rawSourceHighWater          Int       @default(0) @map("raw_source_high_water")
+  coarseSourceFrom            Int?      @map("coarse_source_from")
+  coarseSourceThrough         Int?      @map("coarse_source_through")
+  coarseRawAttributed         Int       @default(0) @map("coarse_raw_attributed")
+  coarseEffectiveContribution Int       @default(0) @map("coarse_effective_contribution")
+  effectiveContribution       Int       @default(0) @map("effective_contribution")
+  captureThrough              DateTime  @map("capture_through")
+  frozenAt                    DateTime? @map("frozen_at")
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @updatedAt @map("updated_at")
 
   effect RaceActiveEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
 
@@ -3462,13 +3486,13 @@ model RacePlacementTransitionJob {
 // must not contend on a parent race row, and the bounded promoter discards a
 // trigger whose race no longer has a live queue destination.
 model RaceResolutionFullTrigger {
-  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  raceId                 String   @map("race_id")
-  userId                 String?  @map("user_id")
-  participantId          String?  @map("participant_id")
-  resolutionTimeZone     String?  @map("resolution_time_zone")
-  requestedAt            DateTime @map("requested_at")
-  createdAt              DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  raceId             String   @map("race_id")
+  userId             String?  @map("user_id")
+  participantId      String?  @map("participant_id")
+  resolutionTimeZone String?  @map("resolution_time_zone")
+  requestedAt        DateTime @map("requested_at")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([raceId, requestedAt, id])
   @@index([requestedAt, id])
@@ -3550,31 +3574,67 @@ model RaceResolutionDeliveryIntent {
   @@map("race_resolution_delivery_intents")
 }
 
+model RaceResolutionPostTaskReceipt {
+  raceId           String   @map("race_id")
+  sourceGeneration Int      @map("source_generation")
+  dedupeKey        String   @unique @map("dedupe_key")
+  terminalState    String   @map("terminal_state") @db.VarChar(32)
+  snapshotState    String   @map("snapshot_state") @db.VarChar(32)
+  intentCount      Int      @map("intent_count")
+  failureCount     Int      @map("failure_count")
+  completedAt      DateTime @map("completed_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@id([raceId, sourceGeneration])
+  @@map("race_resolution_post_task_receipts")
+}
+
+model RaceResolutionDeliveryIntentReceipt {
+  deliveryKeyHash     String   @id @map("delivery_key_hash") @db.Char(64)
+  raceId              String   @map("race_id")
+  sourceGeneration    Int      @map("source_generation")
+  taskDedupeKey       String   @map("task_dedupe_key")
+  intentKind          String   @map("intent_kind") @db.VarChar(64)
+  terminalDisposition String   @map("terminal_disposition") @db.VarChar(32)
+  completedAt         DateTime @map("completed_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@index([raceId, sourceGeneration, deliveryKeyHash])
+  @@map("race_resolution_delivery_intent_receipts")
+}
+
 // Generic, append-only durable handoff from committed domain facts to
 // independently retryable notification projection. Domain producers write
 // only this envelope and occurrence-time audience facts; notification code
 // owns every mutable projection/delivery concern downstream.
 model DomainEventOutbox {
-  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventKey             String    @unique @map("event_key") @db.VarChar(255)
-  eventType            String    @map("event_type") @db.VarChar(96)
-  schemaVersion        Int       @default(1) @map("schema_version")
-  aggregateType        String    @map("aggregate_type") @db.VarChar(64)
-  aggregateId          String    @map("aggregate_id") @db.VarChar(191)
-  payload              Json
-  occurredAt           DateTime  @map("occurred_at")
-  availableAt          DateTime  @map("available_at")
-  status               String    @default("PENDING") @db.VarChar(32)
-  expansionCursor      String?   @map("expansion_cursor") @db.VarChar(191)
-  expansionCompletedAt DateTime? @map("expansion_completed_at")
-  leaseToken           String?   @map("lease_token") @db.VarChar(64)
-  leaseUntil           DateTime? @map("lease_until")
-  attemptCount         Int       @default(0) @map("attempt_count")
-  lastErrorCode        String?   @map("last_error_code") @db.VarChar(128)
-  lastErrorAt          DateTime? @map("last_error_at")
-  completedAt          DateTime? @map("completed_at")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventKey                String    @unique @map("event_key") @db.VarChar(255)
+  eventType               String    @map("event_type") @db.VarChar(96)
+  schemaVersion           Int       @default(1) @map("schema_version")
+  aggregateType           String    @map("aggregate_type") @db.VarChar(64)
+  aggregateId             String    @map("aggregate_id") @db.VarChar(191)
+  payload                 Json
+  occurredAt              DateTime  @map("occurred_at")
+  availableAt             DateTime  @map("available_at")
+  status                  String    @default("PENDING") @db.VarChar(32)
+  expansionCursor         String?   @map("expansion_cursor") @db.VarChar(191)
+  expansionCompletedAt    DateTime? @map("expansion_completed_at")
+  leaseToken              String?   @map("lease_token") @db.VarChar(64)
+  leaseUntil              DateTime? @map("lease_until")
+  attemptCount            Int       @default(0) @map("attempt_count")
+  lastErrorCode           String?   @map("last_error_code") @db.VarChar(128)
+  lastErrorAt             DateTime? @map("last_error_at")
+  completedAt             DateTime? @map("completed_at")
+  projectionCount         Int?      @map("projection_count")
+  terminalProjectionCount Int?      @map("terminal_projection_count")
+  failedProjectionCount   Int?      @map("failed_projection_count")
+  projectionCountsValidAt DateTime? @map("projection_counts_valid_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
   audience    DomainEventAudience[]
   projections DomainEventNotificationProjection[]
@@ -3583,6 +3643,30 @@ model DomainEventOutbox {
   @@index([aggregateType, aggregateId, occurredAt])
   @@index([leaseToken])
   @@map("domain_event_outbox")
+}
+
+model DomainEventReceipt {
+  eventKey         String    @id @map("event_key") @db.VarChar(255)
+  domainEventId    String    @unique @map("domain_event_id") @db.Uuid
+  eventType        String    @map("event_type") @db.VarChar(96)
+  schemaVersion    Int       @map("schema_version")
+  aggregateType    String    @map("aggregate_type") @db.VarChar(96)
+  aggregateId      String    @map("aggregate_id")
+  occurredAt       DateTime  @map("occurred_at")
+  availableAt      DateTime  @map("available_at")
+  envelopeDigest   String?   @map("envelope_digest") @db.Char(64)
+  receiptState     String    @map("receipt_state") @db.VarChar(16)
+  digestVersion    Int       @map("digest_version") @db.SmallInt
+  terminalStatus   String?   @map("terminal_status") @db.VarChar(32)
+  completedAt      DateTime? @map("completed_at")
+  replaySourceType String    @map("replay_source_type") @db.VarChar(64)
+  replaySourceId   String    @map("replay_source_id")
+  finalizedAt      DateTime? @map("finalized_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([replaySourceType, replaySourceId, eventKey])
+  @@map("domain_event_receipts")
 }
 
 model DomainEventAudience {

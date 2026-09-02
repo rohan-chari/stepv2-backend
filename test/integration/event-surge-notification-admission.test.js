@@ -17,8 +17,15 @@ const {
   releaseEventNotificationPage,
   waitForNotificationAdmissionStartupBarrier,
 } = require("../../src/modules/notifications/services/notificationAdmission");
-const { buildInboxDelivery, eventCollapseId } = require("../../src/modules/inbox/jobs/inboxDelivery");
 const {
+  buildInboxDelivery,
+  claimNormalInboxPage,
+  eventCollapseId,
+} = require("../../src/modules/inbox/jobs/inboxDelivery");
+const {
+  claimEvents,
+  claimProjections,
+  nextDueAt: nextDomainEventDueAt,
   projectScheduledEntitlementEventsBatch,
 } = require("../../src/modules/domainEvents/models/domainEventOutbox");
 const {
@@ -489,9 +496,131 @@ describe("event-start durable notification admission", () => {
     ];
     assert.deepEqual(results.map((row) => row.processed).sort(), [0, 1]);
     assert.equal(await prisma.domainEventOutbox.count({ where: { status: "PENDING" } }), 1);
+    assert.deepEqual(await claimEvents({ prisma, now: startsAt, batchSize: 10 }), [],
+      "the generic event claim must not bypass the closed 200/s scheduled lane");
+    assert.equal((await nextDomainEventDueAt(prisma, startsAt)).toISOString(),
+      new Date(startsAt.getTime() + 1_000).toISOString(),
+      "exact scheduling waits for the durable lane boundary, not the past event availability");
     assert.equal((await projectScheduledEntitlementEventsBatch({
       prisma, now: new Date(startsAt.getTime() + 1_000), batchSize: 1,
     })).processed, 1);
+  });
+
+  it("uses authoritative entitlement facts for malformed legacy schedule JSON without poisoning ordinary claims", async () => {
+    const startsAt = new Date("2098-08-26T10:00:00.000Z");
+    const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
+    const fixture = await eventFixture({ startsAt, endsAt });
+    const account = fixture.accounts[0];
+    const entitlement = fixture.entitlements[0];
+    const malformed = await prisma.domainEventOutbox.create({ data: {
+      eventKey: `malformed-scheduled:${entitlement.id}`,
+      eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1", schemaVersion: 1,
+      aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT", aggregateId: entitlement.id,
+      occurredAt: startsAt, availableAt: startsAt,
+      payload: {
+        eventId: fixture.event.id, entitlementId: entitlement.id, userId: account.user.id,
+        multiplier: 2, startsAt: "2098-99-99T10:00:00Z",
+        endsAt: "2098-99-99T10:30:00Z", scheduleRevision: 1e100,
+      },
+    } });
+    await prisma.domainEventAudience.create({ data: {
+      domainEventId: malformed.id, recipientId: account.user.id, ordinal: 0, facts: {},
+    } });
+    const ordinary = await prisma.domainEventOutbox.create({ data: {
+      eventKey: `ordinary-after-malformed:${entitlement.id}`,
+      eventType: "FRIEND_REQUEST_SENT_V1", schemaVersion: 1,
+      aggregateType: "TEST", aggregateId: `ordinary-${entitlement.id}`,
+      occurredAt: startsAt, availableAt: startsAt, payload: {},
+    } });
+
+    assert.equal((await projectScheduledEntitlementEventsBatch({
+      prisma, now: startsAt, batchSize: 10,
+    })).processed, 1);
+    const [schedule, claim] = await Promise.all([
+      prisma.notificationSchedule.findFirstOrThrow({}),
+      claimEvents({ prisma, now: startsAt, batchSize: 10 }),
+    ]);
+    assert.equal(schedule.availableAt.toISOString(), startsAt.toISOString());
+    assert.equal(schedule.sourceRevision, entitlement.scheduleRevision);
+    assert.deepEqual(claim.map((row) => row.id), [ordinary.id]);
+  });
+
+  it("does not zero-loop on a due projection fenced behind an older future aggregate event", async () => {
+    const account = await createTestUser();
+    const current = new Date("2098-08-26T10:00:00.000Z");
+    const unblockAt = new Date(current.getTime() + 30_000);
+    const aggregateId = `fifo-${Date.now()}`;
+    await prisma.domainEventOutbox.create({ data: {
+      eventKey: `fifo-older-${aggregateId}`, eventType: "FRIEND_REQUEST_SENT_V1",
+      schemaVersion: 1, aggregateType: "TEST_FIFO", aggregateId,
+      occurredAt: new Date(current.getTime() - 2_000), availableAt: unblockAt,
+      payload: {},
+    } });
+    const later = await prisma.domainEventOutbox.create({ data: {
+      eventKey: `fifo-later-${aggregateId}`, eventType: "FRIEND_REQUEST_SENT_V1",
+      schemaVersion: 1, aggregateType: "TEST_FIFO", aggregateId,
+      occurredAt: new Date(current.getTime() - 1_000), availableAt: current,
+      status: "PROJECTING", expansionCursor: "0", expansionCompletedAt: current,
+      payload: {}, projectionCount: 1, terminalProjectionCount: 0,
+      failedProjectionCount: 0, projectionCountsValidAt: current,
+    } });
+    await prisma.domainEventNotificationProjection.create({ data: {
+      domainEventId: later.id, recipientUserId: account.user.id,
+      deliveryKey: `fifo:${aggregateId}`, projectionKind: "VISIBLE",
+      status: "PENDING", availableAt: new Date(current.getTime() - 5_000),
+    } });
+
+    assert.deepEqual(await claimProjections({ prisma, now: current, batchSize: 10 }), []);
+    assert.equal((await nextDomainEventDueAt(prisma, current)).toISOString(), unblockAt.toISOString());
+  });
+
+  it("atomically claims a normal Inbox row once across concurrent workers", async () => {
+    const account = await createTestUser();
+    const current = new Date("2098-08-26T10:00:00.000Z");
+    const alert = await prisma.inboxAlert.create({ data: {
+      userId: account.user.id, type: "TEST", title: "test", body: "test",
+      destination: { route: "home" }, sourceKey: `claim:${Date.now()}`,
+      expiresAt: new Date(current.getTime() + 60_000),
+    } });
+    await prisma.inboxDeliveryOutbox.create({ data: {
+      alertId: alert.id, payload: { title: "test", body: "test" },
+      status: "PENDING", availableAt: current,
+    } });
+    const pages = await Promise.all([
+      claimNormalInboxPage({ prisma, now: current, batchSize: 1 }),
+      claimNormalInboxPage({ prisma, now: current, batchSize: 1 }),
+    ]);
+    assert.equal(pages[0].length + pages[1].length, 1);
+    assert.equal(new Set(pages.flat().map((row) => row.id)).size, 1);
+  });
+
+  it("arms scheduled entitlement retries at the later of row due and lane due", async () => {
+    const startsAt = new Date("2098-08-26T10:00:00.000Z");
+    const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
+    const fixture = await eventFixture({ startsAt, endsAt });
+    const account = fixture.accounts[0];
+    const entitlement = fixture.entitlements[0];
+    const retryAt = new Date(startsAt.getTime() + 5_000);
+    const event = await prisma.domainEventOutbox.create({ data: {
+      eventKey: `paced-retry:${entitlement.id}`, eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1",
+      schemaVersion: 1, aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+      aggregateId: entitlement.id, occurredAt: startsAt, availableAt: startsAt,
+      status: "RETRY", leaseUntil: retryAt,
+      payload: {
+        eventId: fixture.event.id, entitlementId: entitlement.id, userId: account.user.id,
+        multiplier: 2, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(),
+        scheduleRevision: 0,
+      },
+    } });
+    await prisma.domainEventAudience.create({ data: {
+      domainEventId: event.id, recipientId: account.user.id, ordinal: 0, facts: {},
+    } });
+    await prisma.notificationReleaseLane.create({ data: {
+      admissionClass: "internal:GLOBAL_EVENT_SCHEDULED_PROJECTION",
+      nextTokenAt: new Date(startsAt.getTime() + 1_000),
+    } });
+
+    assert.equal((await nextDomainEventDueAt(prisma, startsAt)).toISOString(), retryAt.toISOString());
   });
 
   it("runs entitlement domain event through the bulk projector, admission lane, and real provider contract", async () => {
