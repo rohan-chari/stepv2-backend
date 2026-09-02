@@ -6,8 +6,93 @@ const path = require("node:path");
 
 const {
   PREFETCH_EFFECT_TYPES,
+  createScoringInputCache,
   prefetchRaceScoringModels,
 } = require("../../src/modules/races/services/raceScoringPrefetch");
+
+test("version-identical scoring inputs reuse samples and daily rows exactly", async () => {
+  const cache = createScoringInputCache({ maxUsers: 10, maxSampleRows: 100 });
+  const calls = { versions: 0, samples: 0, daily: 0 };
+  let generation = 7n;
+  const start = new Date("2026-08-10T00:00:00Z");
+  const models = {
+    scoringInputCache: cache,
+    scoringInputVersionModel: {
+      async findMany() {
+        calls.versions += 1;
+        return [{ userId: "user-1", generation }];
+      },
+    },
+    stepSampleModel: {
+      async findRowsForUsersInRange(userIds) {
+        calls.samples += 1;
+        assert.deepEqual(userIds, ["user-1"]);
+        return [{ userId: "user-1", start, end: new Date(start.getTime() + 3_600_000), steps: 321 }];
+      },
+    },
+    stepsModel: {
+      async findByUserIdsAndDateRange(userIds) {
+        calls.daily += 1;
+        assert.deepEqual(userIds, ["user-1"]);
+        return [{ userId: "user-1", date: start, steps: 654 }];
+      },
+    },
+    raceActiveEffectModel: {
+      async findEffectsForRaceParticipantsByTypes() { return {}; },
+    },
+  };
+  const options = {
+    ...models,
+    races: [{
+      id: "race-1", startedAt: start, powerupsEnabled: false,
+      participants: [{ id: "participant-1", userId: "user-1" }],
+    }],
+    now: new Date("2026-08-10T12:00:00Z"),
+  };
+
+  const first = await prefetchRaceScoringModels(options);
+  const before = {
+    sample: await first.stepSampleModel.sumStepsInWindow(
+      "user-1", start, new Date(start.getTime() + 3_600_000),
+    ),
+    daily: (await first.stepsModel.findByUserIdAndDate("user-1", start)).steps,
+  };
+  first.stepSampleModel.releaseUsers(["user-1"]);
+  await first.stepSampleModel.prepareUsers(["user-1"]);
+  assert.equal(
+    await first.stepSampleModel.sumStepsInWindow(
+      "user-1", start, new Date(start.getTime() + 3_600_000),
+    ),
+    321,
+  );
+  assert.equal(calls.samples, 1, "later scoring phases must reuse the cached timeline");
+  first.stepSampleModel.releaseAll();
+  const second = await prefetchRaceScoringModels(options);
+  const after = {
+    sample: await second.stepSampleModel.sumStepsInWindow(
+      "user-1", start, new Date(start.getTime() + 3_600_000),
+    ),
+    daily: (await second.stepsModel.findByUserIdAndDate("user-1", start)).steps,
+  };
+  second.stepSampleModel.releaseAll();
+
+  assert.deepEqual(after, before);
+  assert.deepEqual(before, { sample: 321, daily: 654 });
+  assert.deepEqual(calls, { versions: 2, samples: 1, daily: 1 });
+  assert.deepEqual(cache.snapshot(), { users: 1, sampleRows: 1 });
+
+  generation = 8n;
+  const changed = await prefetchRaceScoringModels(options);
+  await changed.stepSampleModel.sumStepsInWindow(
+    "user-1", start, new Date(start.getTime() + 3_600_000),
+  );
+  changed.stepSampleModel.releaseAll();
+  assert.deepEqual(
+    calls,
+    { versions: 3, samples: 2, daily: 2 },
+    "an authoritative version change must force fresh PostgreSQL inputs",
+  );
+});
 
 test("race scoring prefetch collapses participant reads into three bulk reads", async () => {
   const calls = { samples: 0, daily: 0, effects: 0 };

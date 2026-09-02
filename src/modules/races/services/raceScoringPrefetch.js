@@ -11,7 +11,66 @@ const MAX_USERS_PER_CHUNK = 25;
 const MAX_SAMPLE_ROWS_PER_CHUNK = 50_000;
 const MAX_RETAINED_SAMPLE_ROWS_PER_USER = 50_000;
 const MAX_HEAP_GROWTH_BYTES = 32 * 1024 * 1024;
+const SCORING_INPUT_CACHE_MAX_USERS = 500;
+const SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS = 500_000;
+const SCORING_INPUT_CACHE_TTL_MS = 2 * 60 * 1000;
 const PREFETCH_EFFECT_TYPES = [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"];
+
+function createScoringInputCache({
+  maxUsers = SCORING_INPUT_CACHE_MAX_USERS,
+  maxSampleRows = SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS,
+  ttlMs = SCORING_INPUT_CACHE_TTL_MS,
+  now = Date.now,
+} = {}) {
+  const entries = new Map();
+  let retainedSampleRows = 0;
+  function remove(key) {
+    const entry = entries.get(key);
+    if (!entry) return;
+    retainedSampleRows -= entry.sampleRows;
+    entries.delete(key);
+  }
+  function evict() {
+    while (entries.size > maxUsers || retainedSampleRows > maxSampleRows) {
+      remove(entries.keys().next().value);
+    }
+  }
+  return {
+    get({ userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs }) {
+      const entry = entries.get(userId);
+      if (!entry) return null;
+      if (entry.expiresAt <= now() || entry.generation !== String(generation) ||
+          entry.sampleStartMs > sampleStartMs || entry.sampleEndMs < sampleEndMs ||
+          entry.dailyStartMs > dailyStartMs || entry.dailyEndMs < dailyEndMs) {
+        remove(userId);
+        return null;
+      }
+      entries.delete(userId);
+      entries.set(userId, entry);
+      return entry;
+    },
+    set({ userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs,
+      timeline, dailyRows }) {
+      if (!userId || generation == null || timeline?.isPaged) return false;
+      const sampleRows = Number(timeline?.length) || 0;
+      if (sampleRows > maxSampleRows) return false;
+      remove(userId);
+      const entry = {
+        generation: String(generation), sampleStartMs, sampleEndMs,
+        dailyStartMs, dailyEndMs, timeline, dailyRows: [...(dailyRows || [])],
+        sampleRows, expiresAt: now() + ttlMs,
+      };
+      entries.set(userId, entry);
+      retainedSampleRows += sampleRows;
+      evict();
+      return entries.get(userId) === entry;
+    },
+    clear() { entries.clear(); retainedSampleRows = 0; },
+    snapshot() { return { users: entries.size, sampleRows: retainedSampleRows }; },
+  };
+}
+
+const processScoringInputCache = createScoringInputCache();
 
 class CompactSampleTimeline {
   constructor() {
@@ -412,6 +471,8 @@ async function prefetchRaceScoringModelsImpl({
   metrics = defaultMetrics,
   ownedTransientTimelines,
   createScoringScratchDirectory,
+  scoringInputCache = null,
+  scoringInputVersionModel = null,
 }) {
   const started = (races || []).filter((race) => race?.startedAt);
   if (started.length === 0) return null;
@@ -433,9 +494,12 @@ async function prefetchRaceScoringModelsImpl({
     ...started.map((race) => new Date(race.startedAt).getTime())
   );
   const sampleRangeStart = new Date(earliestStartMs);
-  const sampleRangeEnd = new Date(currentTime.getTime() + 7 * DAY_MS);
+  // Round the future coverage boundary up so successive generations can reuse
+  // the same immutable input-version entry instead of missing by milliseconds.
+  const coverageCeilingMs = Math.ceil(currentTime.getTime() / DAY_MS) * DAY_MS;
+  const sampleRangeEnd = new Date(coverageCeilingMs + 7 * DAY_MS);
   const dailyRangeStart = new Date(earliestStartMs - 3 * DAY_MS);
-  const dailyRangeEnd = new Date(currentTime.getTime() + 3 * DAY_MS);
+  const dailyRangeEnd = new Date(coverageCeilingMs + 3 * DAY_MS);
   const scoringIds = Array.isArray(scoringParticipantIds)
     ? new Set(scoringParticipantIds)
     : null;
@@ -477,9 +541,51 @@ async function prefetchRaceScoringModelsImpl({
       ordinal,
     };
   });
-  const samplesByUser = new Map();
-  const preparedSampleUsers = new Set();
+  let versionsByUser = new Map();
+  if (scoringInputCache && scoringInputVersionModel?.findMany) {
+    const versions = await scoringInputVersionModel.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true, generation: true },
+    });
+    versionsByUser = new Map((versions || []).map((row) => [
+      row.userId, String(row.generation),
+    ]));
+  }
+  const cachedByUser = new Map();
+  for (const bound of exactSampleBounds) {
+    const generation = versionsByUser.get(bound.userId);
+    if (generation == null) continue;
+    const cached = scoringInputCache?.get({
+      userId: bound.userId, generation,
+      sampleStartMs: bound.rangeStart.getTime(),
+      sampleEndMs: sampleRangeEnd.getTime(),
+      dailyStartMs: dailyRangeStart.getTime(),
+      dailyEndMs: dailyRangeEnd.getTime(),
+    });
+    if (cached) cachedByUser.set(bound.userId, cached);
+  }
+  const samplesByUser = new Map(
+    [...cachedByUser].map(([userId, entry]) => [userId, entry.timeline])
+  );
+  const preparedSampleUsers = new Set(cachedByUser.keys());
   const sampleBoundByUser = new Map(exactSampleBounds.map((bound) => [bound.userId, bound]));
+  let dailyByUser = null;
+  const cachePreparedUser = (userId) => {
+    if (!dailyByUser || cachedByUser.has(userId)) return;
+    const generation = versionsByUser.get(userId);
+    const bound = sampleBoundByUser.get(userId);
+    const timeline = samplesByUser.get(userId);
+    if (generation == null || !bound || !timeline) return;
+    const dailyRows = dailyByUser.get(userId) || [];
+    if (scoringInputCache?.set({
+      userId, generation,
+      sampleStartMs: bound.rangeStart.getTime(),
+      sampleEndMs: sampleRangeEnd.getTime(),
+      dailyStartMs: dailyRangeStart.getTime(),
+      dailyEndMs: dailyRangeEnd.getTime(),
+      timeline, dailyRows,
+    })) cachedByUser.set(userId, { timeline, dailyRows });
+  };
   const loadSampleBounds = async (requestedBounds) => {
     if (typeof stepSampleModel.findRowsForUserRanges !== "function") {
       if (strictWorkerMode) {
@@ -634,24 +740,34 @@ async function prefetchRaceScoringModelsImpl({
     return timelines;
   };
   const prepareSampleUsers = async (requestedUserIds) => {
-    const bounds = [...new Set(requestedUserIds || [])]
+    const requested = [...new Set(requestedUserIds || [])];
+    for (const userId of requested) {
+      const cached = cachedByUser.get(userId);
+      if (!preparedSampleUsers.has(userId) && cached) {
+        samplesByUser.set(userId, cached.timeline);
+        preparedSampleUsers.add(userId);
+      }
+    }
+    const bounds = requested
       .filter((userId) => !preparedSampleUsers.has(userId))
       .map((userId) => sampleBoundByUser.get(userId))
       .filter(Boolean);
     if (!bounds.length) return;
     mergeSampleTimelines(samplesByUser, await loadSampleBounds(bounds));
+    for (const bound of bounds) cachePreparedUser(bound.userId);
   };
   const sampleRowsPromise = deferredSampleLoading
     ? Promise.resolve(samplesByUser)
     : prepareSampleUsers(userIds).then(() => samplesByUser);
 
+  const uncachedUserIds = userIds.filter((userId) => !cachedByUser.has(userId));
   const [, dailyRows, effectsByParticipant, powerupEvents] = await Promise.all([
     sampleRowsPromise,
-    stepsModel.findByUserIdsAndDateRange(
-      userIds,
-      dailyRangeStart,
-      dailyRangeEnd
-    ),
+    uncachedUserIds.length > 0
+      ? stepsModel.findByUserIdsAndDateRange(
+          uncachedUserIds, dailyRangeStart, dailyRangeEnd
+        )
+      : Promise.resolve([]),
     participantIds.length > 0
       ? raceActiveEffectModel.findEffectsForRaceParticipantsByTypes(
           raceIds,
@@ -664,11 +780,16 @@ async function prefetchRaceScoringModelsImpl({
       : Promise.resolve([]),
   ]);
 
-  const dailyByUser = new Map();
+  dailyByUser = new Map(
+    [...cachedByUser].map(([userId, entry]) => [userId, entry.dailyRows])
+  );
   for (const row of dailyRows || []) {
     const list = dailyByUser.get(row.userId) || [];
     list.push(row);
     dailyByUser.set(row.userId, list);
+  }
+  if (!deferredSampleLoading) {
+    for (const userId of uncachedUserIds) cachePreparedUser(userId);
   }
 
   const sampleStartMs = sampleRangeStart.getTime();
@@ -928,5 +1049,7 @@ module.exports = {
   MAX_SAMPLE_ROWS_PER_CHUNK,
   MAX_RETAINED_SAMPLE_ROWS_PER_USER,
   MAX_HEAP_GROWTH_BYTES,
+  createScoringInputCache,
+  processScoringInputCache,
   prefetchRaceScoringModels,
 };

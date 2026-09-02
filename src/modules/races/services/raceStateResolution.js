@@ -43,6 +43,7 @@ const {
 } = require("./raceScoringEffectTypes");
 const {
   prefetchRaceScoringModels: defaultPrefetchRaceScoringModels,
+  processScoringInputCache,
 } = require("./raceScoringPrefetch");
 const {
   computeSelectedPrefixAttributionVector,
@@ -1285,6 +1286,9 @@ function buildResolveRaceState(dependencies = {}) {
   const prefetchRaceScoringModels =
     dependencies.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
   const strictScoringPrefetch = dependencies.strictScoringPrefetch === true;
+  const useProcessScoringInputCache =
+    dependencies.useProcessScoringInputCache === true;
+  const scoringInputVersionModel = dependencies.scoringInputVersionModel || null;
   const logger = dependencies.logger || console;
   const recordPhaseTiming =
     typeof dependencies.recordPhaseTiming === "function"
@@ -1459,6 +1463,12 @@ function buildResolveRaceState(dependencies = {}) {
             powerupEventModel,
             strictWorkerMode: strictScoringPrefetch,
             deferredSampleLoading: strictScoringPrefetch,
+            ...(useProcessScoringInputCache
+              ? {
+                  scoringInputCache: processScoringInputCache,
+                  scoringInputVersionModel,
+                }
+              : {}),
             ...(scoreScope
               ? { scoringParticipantIds: [...scoreScope] }
               : {}),

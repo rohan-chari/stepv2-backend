@@ -1739,6 +1739,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               now,
               activeImpactEnabled: resolveTimedActiveImpacts,
               strictScoringPrefetch: true,
+              useProcessScoringInputCache: true,
+              scoringInputVersionModel: defaultPrisma.userScoringInputVersion,
               ...(dependencies.prefetchRaceScoringModels
                 ? { prefetchRaceScoringModels: dependencies.prefetchRaceScoringModels }
                 : {}),
