@@ -212,6 +212,88 @@ test("resolution tears down generation scoring input when authoritative capture 
     "generation scratch input must be torn down on the failure path");
 });
 
+test("strict chunk scoring prepares Leech sources outside the participant chunk", async () => {
+  const participants = Array.from({ length: 26 }, (_, index) =>
+    makeParticipant(`rp-${index + 1}`, `user-${index + 1}`, `Runner ${index + 1}`)
+  );
+  const ctx = makeContext({ participants, powerupsEnabled: true });
+  const leech = {
+    id: "cross-chunk-leech",
+    raceId: "race-1",
+    type: "LEECH",
+    status: "ACTIVE",
+    targetParticipantId: "rp-1",
+    targetUserId: "user-1",
+    sourceUserId: "user-26",
+    startsAt: new Date(NOW.getTime() - 60 * 60 * 1000),
+    expiresAt: new Date(NOW.getTime() + 60 * 60 * 1000),
+    metadata: { ratio: 2 },
+    createdAt: new Date(NOW.getTime() - 60 * 60 * 1000),
+  };
+  const prepared = new Set();
+  const strictSamples = {
+    async prepareUsers(userIds) {
+      for (const userId of userIds) prepared.add(userId);
+    },
+    releaseUsers(userIds) {
+      for (const userId of userIds) prepared.delete(userId);
+    },
+    releaseAll() { prepared.clear(); },
+    async sumStepsInWindow(userId) {
+      assert.ok(prepared.has(userId), `${userId} was not prepared`);
+      return 100;
+    },
+    async sumStepsInWindows(userId, windows) {
+      assert.ok(prepared.has(userId), `${userId} was not prepared`);
+      return windows.map(() => 100);
+    },
+    async sumClosedStepsInWindow(userId) {
+      assert.ok(prepared.has(userId), `${userId} was not prepared`);
+      return 100;
+    },
+    async sumClosedStepsInWindows(userId, windows) {
+      assert.ok(prepared.has(userId), `${userId} was not prepared`);
+      return windows.map(() => 100);
+    },
+    async hasAnyInWindow(userId) {
+      assert.ok(prepared.has(userId), `${userId} was not prepared`);
+      return true;
+    },
+    async findByUserIdAndTimeRange(userId) {
+      assert.ok(prepared.has(userId), `${userId} was not prepared`);
+      return [];
+    },
+  };
+  const effects = {
+    ...ctx.deps.RaceActiveEffect,
+    async findEffectsForRaceByTypes(_raceId, participantId, types) {
+      return Object.fromEntries(types.map((type) => [
+        type,
+        type === "LEECH" && participantId === "rp-1" ? [leech] : [],
+      ]));
+    },
+    async findEffectsForRaceByType(_raceId, participantId, type) {
+      return type === "LEECH" && participantId === "rp-1" ? [leech] : [];
+    },
+    async findRaceEffectsByType() { return []; },
+    async findActiveForRace() { return [leech]; },
+  };
+  ctx.deps.prefetchRaceScoringModels = async () => ({
+    stepsModel: {
+      async findByUserIdAndDate() { return null; },
+      async findByUserIdAndDateRange() { return []; },
+    },
+    stepSampleModel: strictSamples,
+    raceActiveEffectModel: effects,
+    powerupEventModel: ctx.deps.RacePowerupEvent,
+  });
+  ctx.deps.strictScoringPrefetch = true;
+
+  const result = await buildResolveRaceState(ctx.deps)({ raceId: "race-1" });
+
+  assert.equal(result[0].updatedParticipants, 26);
+});
+
 test("resolveRaceState freezes finished participant totals on later syncs", async () => {
   const alice = makeParticipant("rp-1", "user-1", "Alice", {
     totalSteps: 10000,

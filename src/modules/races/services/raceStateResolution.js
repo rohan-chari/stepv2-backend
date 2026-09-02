@@ -1618,8 +1618,30 @@ function buildResolveRaceState(dependencies = {}) {
         const participantChunkSize = 25;
         for (let offset = 0; offset < scoredParticipants.length; offset += participantChunkSize) {
           const chunk = scoredParticipants.slice(offset, offset + participantChunkSize);
+          // A participant's Leech modifier reads the SOURCE user's closed
+          // samples. On fields larger than one chunk that source can sit in a
+          // later chunk, so preparing only the scored participants makes the
+          // strict worker reject an otherwise valid cross-chunk dependency.
+          // The effect model is backed by the generation's authoritative
+          // snapshot in production, so this discovers dependencies without
+          // adding database reads.
+          const chunkLeeches = strictScoringPrefetch
+            ? (await Promise.all(chunk.map((participant) =>
+                scoringEffectModel.findEffectsForRaceByType(
+                  race.id,
+                  participant.id,
+                  "LEECH",
+                )
+              ))).flat()
+            : [];
+          const chunkSampleUserIds = [...new Set([
+            ...chunk.map((participant) => participant.userId),
+            ...chunkLeeches
+              .map((effect) => effect.sourceUserId)
+              .filter(Boolean),
+          ])];
           await scoringStepSampleModel.prepareUsers?.(
-            chunk.map((participant) => participant.userId),
+            chunkSampleUserIds,
           );
           await Promise.all(chunk.map(async (participant, chunkIndex) => {
           const index = offset + chunkIndex;
@@ -1728,7 +1750,7 @@ function buildResolveRaceState(dependencies = {}) {
           // already carry finishedAt keep their frozen totals (handled above).
           }));
           scoringStepSampleModel.releaseUsers?.(
-            chunk.map((participant) => participant.userId),
+            chunkSampleUserIds,
           );
         }
       });

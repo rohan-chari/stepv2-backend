@@ -1653,6 +1653,75 @@ describe("resolved impact events v2 HTTP contract", () => {
     assert.equal(job.lastErrorCode, null);
   });
 
+  it("scores a Leech whose source is outside the target's worker chunk", async () => {
+    const users = [];
+    for (let index = 0; index < 26; index += 1) {
+      users.push(await createTestUser({ displayName: `Chunk Runner ${index + 1}` }));
+    }
+    const current = new Date();
+    const startedAt = new Date(current.getTime() - 2 * 60 * 60 * 1000);
+    const race = await createRaceWithParticipants(users, "ACTIVE", {
+      startedAt,
+      endsAt: new Date(current.getTime() + 4 * 60 * 60 * 1000),
+      timezone: "UTC",
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId: race.id },
+      data: { joinedAt: startedAt },
+    });
+    const participants = await prisma.raceParticipant.findMany({
+      where: { raceId: race.id },
+      orderBy: [{ joinedAt: "asc" }, { id: "asc" }],
+    });
+    const target = participants[0];
+    const source = participants[25];
+    await prisma.stepSample.create({ data: {
+      userId: source.userId,
+      periodStart: new Date(current.getTime() - 90 * 60 * 1000),
+      periodEnd: new Date(current.getTime() - 60 * 60 * 1000),
+      steps: 600,
+    } });
+    const powerup = await prisma.racePowerup.create({ data: {
+      raceId: race.id,
+      participantId: source.id,
+      userId: source.userId,
+      type: "LEECH",
+      rarity: "COMMON",
+      status: "USED",
+      earnedAtSteps: 1,
+    } });
+    await prisma.raceActiveEffect.create({ data: {
+      raceId: race.id,
+      targetParticipantId: target.id,
+      targetUserId: target.userId,
+      sourceUserId: source.userId,
+      powerupId: powerup.id,
+      type: "LEECH",
+      status: "ACTIVE",
+      startsAt: new Date(current.getTime() - 60 * 60 * 1000),
+      expiresAt: new Date(current.getTime() + 60 * 60 * 1000),
+      metadata: { ratio: 2 },
+    } });
+    await RaceResolutionJobV2.enqueue({
+      raceId: race.id,
+      now: current,
+      dirtyEnvelope: { reason: "FULL", priority: "IMMEDIATE" },
+      bypassDebounce: true,
+    });
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      logger: { log() {}, error() {} },
+    });
+
+    assert.ok(await worker.processOne());
+
+    const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    assert.equal(job.state, "SUCCEEDED");
+    assert.equal(job.lastErrorCode, null);
+  });
+
   it("covers every remaining timed-effect family through public use and C0", async () => {
     const timedCases = [
       { type: "CAMPFIRE_REST", sampleOffsetMinutes: -20 },
