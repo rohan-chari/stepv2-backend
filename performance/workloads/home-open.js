@@ -151,7 +151,9 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
       connectionTimeoutMillis: 2_000, statement_timeout: 3_000, query_timeout: 3_000 });
     try {
       const result = await pool.query(`SELECT queryid::text AS "queryId", calls::float,
-        total_exec_time::float AS "totalExecMs", mean_exec_time::float AS "meanExecMs", rows::float
+        total_exec_time::float AS "totalExecMs", mean_exec_time::float AS "meanExecMs", rows::float,
+        shared_blks_hit::float AS "sharedBlocksHit", shared_blks_read::float AS "sharedBlocksRead",
+        temp_blks_written::float AS "tempBlocksWritten", query AS "normalizedQuery"
         FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20`);
       topSql = result.rows;
     } finally { await pool.end(); }

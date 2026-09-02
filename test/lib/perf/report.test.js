@@ -70,9 +70,13 @@ test("first-run report has resource, queue, and Top SQL diagnostic sections", ()
   const value = input();
   value.levels[0].queueGrowth = 1.2;
   value.levels[0].resources = { postgresCpuPercent: 94, nodeCpuPercent: 51,
-    topSql: [{ queryId: "42", totalExecMs: 123 }] };
+    topSql: [{ queryId: "42", totalExecMs: 123, sharedBlocksHit: 90,
+      sharedBlocksRead: 10, tempBlocksWritten: 2,
+      normalizedQuery: "SELECT * FROM race_participants WHERE user_id = $1" }] };
   const report = renderReport(buildSummary(value));
   assert.match(report, /## Resource evidence/);
   assert.match(report, /## Queue evidence/);
   assert.match(report, /## Top SQL/);
+  assert.match(report, /race_participants WHERE user_id = \$1/);
+  assert.match(report, /90\/10\/2/);
 });

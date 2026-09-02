@@ -94,9 +94,11 @@ function renderReport(summary) {
   const queues = summary.levels.length ? summary.levels.map((row) =>
     `| ${row.rate}/sec | ${row.queueGrowth ?? "—"} | ${row.resources?.queueInsertRate ?? "—"} | ${row.resources?.queueProcessRate ?? "—"} |`).join("\n") :
     "| — | — | — | — |";
+  const sqlFingerprint = (value) => String(value || "—").replace(/\s+/g, " ")
+    .replaceAll("|", "\\|").replaceAll("`", "'").slice(0, 240);
   const topSql = summary.levels.flatMap((row) => (row.resources?.topSql || []).map((sql) =>
-    `| ${row.rate}/sec | ${sql.queryId ?? "—"} | ${sql.calls ?? "—"} | ${sql.totalExecMs ?? "—"} | ${sql.meanExecMs ?? "—"} |`)).join("\n") ||
-    "| — | — | — | — | — |";
+    `| ${row.rate}/sec | ${sql.queryId ?? "—"} | ${sql.calls ?? "—"} | ${sql.totalExecMs ?? "—"} | ${sql.meanExecMs ?? "—"} | ${sql.sharedBlocksHit ?? "—"}/${sql.sharedBlocksRead ?? "—"}/${sql.tempBlocksWritten ?? "—"} | \`${sqlFingerprint(sql.normalizedQuery)}\` |`)).join("\n") ||
+    "| — | — | — | — | — | — | — |";
   const warnings = [...summary.warnings];
   if (summary.runtimeBudgetWarning) warnings.unshift("RUNTIME BUDGET WARNING: scan exceeded 20 minutes.");
   return `# Bara Home Capacity — ${summary.runId}\n\n` +
@@ -117,7 +119,7 @@ function renderReport(summary) {
     `## Level measurements\n\n| Rate | Home p95 ms | Home p99 ms | HTTP error rate | Warmup actual/configured |\n|---:|---:|---:|---:|---:|\n${levels}\n\n` +
     `## Resource evidence\n\n| Rate | PostgreSQL CPU % | Node CPU % | Redis CPU % | DB pool wait p99 ms | Event-loop p99 ms |\n|---:|---:|---:|---:|---:|---:|\n${resources}\n\n` +
     `## Queue evidence\n\n| Rate | Growth items/sec | Insert rate | Process rate |\n|---:|---:|---:|---:|\n${queues}\n\n` +
-    `## Top SQL\n\n| Rate | Query ID | Calls | Total exec ms | Mean exec ms |\n|---:|---|---:|---:|---:|\n${topSql}\n\n` +
+    `## Top SQL\n\n| Rate | Query ID | Calls | Total exec ms | Mean exec ms | Shared hit/read/temp written | Normalized fingerprint |\n|---:|---|---:|---:|---:|---:|---|\n${topSql}\n\n` +
     `## Runtime breakdown\n\n| Phase | Seconds |\n|---|---:|\n${runtime}\n\n` +
     `## Environment binding\n\n\`\`\`json\n${JSON.stringify(summary.environmentBinding, null, 2)}\n\`\`\`\n\n` +
     `## Warnings\n\n${warnings.length ? warnings.map((row) => `- ${row}`).join("\n") : "None."}\n\n` +
