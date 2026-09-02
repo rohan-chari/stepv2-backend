@@ -3,7 +3,6 @@ const {
 } = require("../services/notificationProjector");
 const { buildGetDomainEventHealth } = require("../queries/getDomainEventHealth");
 const domainEventOutbox = require("../models/domainEventOutbox");
-const { DomainEventReceipt } = require("../models/domainEventReceipt");
 const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
 const redisCache = require("../../../shared/cache/redisCache");
 
@@ -14,10 +13,6 @@ function buildDomainEventProjectionJob(dependencies = {}) {
   const getHealth = dependencies.getHealth || buildGetDomainEventHealth(dependencies);
   const logger = dependencies.logger || console;
   const now = dependencies.now || (() => new Date());
-  const reconcileProjectionCounters = dependencies.reconcileProjectionCounters ||
-    domainEventOutbox.backfillProjectionCounters;
-  const reconcileEventReceipts = dependencies.reconcileEventReceipts ||
-    DomainEventReceipt.backfillPage;
   let nextHealthAt = 0;
   let consecutiveBacklogMinutes = 0;
   return async function projectDomainEvents() {
@@ -25,10 +20,6 @@ function buildDomainEventProjectionJob(dependencies = {}) {
     const currentMs = now().getTime();
     if (currentMs >= nextHealthAt) {
       nextHealthAt = currentMs + 60_000;
-      const [projectionCountersRepaired, eventReceiptsReconciled] = await Promise.all([
-        reconcileProjectionCounters({ now: now(), batchSize: 100 }),
-        reconcileEventReceipts({ limit: 100 }),
-      ]);
       const health = await getHealth();
       const agedBacklog = (health.oldestEvent?.ageMs || 0) > 60_000 ||
         (health.oldestProjection?.ageMs || 0) > 60_000;
@@ -39,8 +30,6 @@ function buildDomainEventProjectionJob(dependencies = {}) {
         downstream: health.downstream,
         terminalFailures: health.terminalFailures,
         consecutiveBacklogMinutes,
-        projectionCountersRepaired,
-        eventReceiptsReconciled,
       });
       if (health.terminalFailures.events > 0 || health.terminalFailures.projections > 0 ||
           consecutiveBacklogMinutes >= 5) {

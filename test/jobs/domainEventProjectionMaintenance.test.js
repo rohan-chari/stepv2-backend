@@ -8,7 +8,7 @@ const {
   buildDomainEventProjectionJob,
 } = require("../../src/modules/domainEvents/jobs/domainEventProjection");
 
-test("domain event projection performs bounded counter and receipt reconciliation once per minute", async () => {
+test("domain event projection health checks never scan legacy history", async () => {
   let current = new Date("2026-09-02T12:00:00.000Z");
   const calls = { project: 0, health: 0, counters: 0, receipts: 0 };
   const run = buildDomainEventProjectionJob({
@@ -25,15 +25,13 @@ test("domain event projection performs bounded counter and receipt reconciliatio
         terminalFailures: { events: 0, projections: 0 },
       };
     },
-    reconcileProjectionCounters: async ({ batchSize }) => {
-      assert.equal(batchSize, 100);
+    reconcileProjectionCounters: async () => {
       calls.counters += 1;
-      return 0;
+      throw new Error("legacy counter reconciliation entered live projection loop");
     },
-    reconcileEventReceipts: async ({ limit }) => {
-      assert.equal(limit, 100);
+    reconcileEventReceipts: async () => {
       calls.receipts += 1;
-      return 0;
+      throw new Error("legacy receipt reconciliation entered live projection loop");
     },
     logger: { log() {}, error() {} },
   });
@@ -44,7 +42,7 @@ test("domain event projection performs bounded counter and receipt reconciliatio
   current = new Date(current.getTime() + 50_000);
   await run();
 
-  assert.deepEqual(calls, { project: 3, health: 2, counters: 2, receipts: 2 });
+  assert.deepEqual(calls, { project: 3, health: 2, counters: 0, receipts: 0 });
 });
 
 test("domain projection drain failures reach the coordinator and rearm no sooner than one second", async () => {
