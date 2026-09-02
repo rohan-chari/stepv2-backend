@@ -43,6 +43,9 @@ describe("home-open capacity session public HTTP contract", () => {
 
   it("creates the real fixture, runs the coherent session, verifies its report, and cleans up", async () => {
     const runId = `home-http-${crypto.randomUUID()}`.slice(0, 63);
+    const metricsEpoch = await prisma.adminMetricsCollectionEpoch.create({
+      data: { startedAt: new Date(Date.now() - 60_000) },
+    });
     const snapshotUser = await prisma.user.create({ data: {
       appleId: `snapshot-${crypto.randomUUID()}`, email: `snapshot-${crypto.randomUUID()}@example.com`,
       displayName: "Snapshot Event User",
@@ -56,6 +59,12 @@ describe("home-open capacity session public HTTP contract", () => {
       expiresAt: new Date(Date.now() + 3_600_000),
     } });
     const fixture = await createHomeOpenFixtures({ prisma, runId, users: 10, arrivalRate: 1, env: process.env });
+    const fixtureUserBefore = await prisma.user.findUniqueOrThrow({
+      where: { id: fixture.users[0].id },
+      select: { metricsV2EligibleEpochId: true, metricsV2EligibleAt: true },
+    });
+    assert.equal(fixtureUserBefore.metricsV2EligibleEpochId, metricsEpoch.id);
+    assert.ok(fixtureUserBefore.metricsV2EligibleAt instanceof Date);
     assert.equal(await prisma.globalStepEvent.count(), 0);
     assert.equal(await prisma.globalEventSummaryWork.count(), 0);
     assert.deepEqual(fixture.topology.globalEventIsolation, {
@@ -75,6 +84,12 @@ describe("home-open capacity session public HTTP contract", () => {
       assert.equal(session.criticalComplete, true);
       assert.equal(session.allSettled, true);
       assert.equal(session.samples[0].endpoint, "POST /steps/sync-v2");
+      const fixtureUserAfter = await prisma.user.findUniqueOrThrow({
+        where: { id: fixture.users[0].id },
+        select: { metricsV2EligibleEpochId: true, metricsV2EligibleAt: true },
+      });
+      assert.deepEqual(fixtureUserAfter, fixtureUserBefore,
+        "Home traffic must not perform an artificial first-touch metrics stamp");
     } finally {
       cleanup = await cleanupHomeOpenFixtures({ prisma, manifest: fixture.manifest });
     }

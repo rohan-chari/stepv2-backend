@@ -192,6 +192,7 @@ const ME_ID = "user-1";
 
 function homePrisma({ myActiveParticipation }) {
   return {
+    async $queryRaw() { return []; },
     raceParticipant: {
       async findMany() { return []; },
       async findFirst({ where }) {

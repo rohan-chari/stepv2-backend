@@ -24,6 +24,14 @@ const { buildRaceResolutionWorkerV2 } = require("../../../src/modules/races/jobs
 
 const root = path.resolve(__dirname, "../../..");
 
+test("home-open fixture stamps the active metrics epoch before load begins", () => {
+  const source = fs.readFileSync(path.join(root,
+    "src/modules/loadTesting/homeOpenFixtures.js"), "utf8");
+  assert.match(source, /adminMetricsCollectionEpoch\.findFirst/);
+  assert.match(source, /metricsV2EligibleEpochId:\s*activeMetricsEpoch\.id/);
+  assert.match(source, /metricsV2EligibleAt:\s*priorSeenAt/);
+});
+
 test("home-open aggregates identifier-free resolution phase evidence", () => {
   const log = [
     { event: "race_resolution_v2_claim", schemaVersion: 2,

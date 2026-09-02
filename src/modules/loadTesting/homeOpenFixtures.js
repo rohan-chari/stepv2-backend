@@ -210,6 +210,12 @@ async function createHomeOpenFixtures({
   const ids = { users: [], races: [], raceParticipants: [], steps: [], stepSamples: [] };
   try {
     const marker = `capacity-home:${runId}`;
+    const activeMetricsEpoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+      where: { endedAt: null },
+      orderBy: { startedAt: "desc" },
+      select: { id: true },
+    });
+    const priorSeenAt = new Date(now.getTime() - 24 * 60 * 60_000);
     await createMany(prisma.user, Array.from({ length: users }, (_, index) => ({
       appleId: `${marker}:apple:${index}`,
       email: `${marker}:${String(index).padStart(5, "0")}@synthetic.invalid`,
@@ -217,7 +223,11 @@ async function createHomeOpenFixtures({
       timezone: "America/New_York",
       clientFeatures: CURRENT_FEATURES,
       lastAppVersion: "2.3.11",
-      lastSeenAt: new Date(now.getTime() - 24 * 60 * 60_000),
+      lastSeenAt: priorSeenAt,
+      ...(activeMetricsEpoch ? {
+        metricsV2EligibleEpochId: activeMetricsEpoch.id,
+        metricsV2EligibleAt: priorSeenAt,
+      } : {}),
     })));
     const userRows = await prisma.user.findMany({ where: { email: { startsWith: `${marker}:` } },
       orderBy: { email: "asc" }, select: { id: true, appleId: true, email: true } });

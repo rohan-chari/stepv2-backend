@@ -28,6 +28,13 @@ function makePrisma({
   publicRaces = [],
 } = {}) {
   return {
+    async $queryRaw() {
+      return publicRaces.map((race) => ({
+        ...race,
+        participantCount: race.participantCount ?? race._count?.participants ?? 0,
+        seedKind: race.seedKind ?? race.seed?.kind ?? null,
+      }));
+    },
     raceParticipant: {
       async findMany({ where, include }) {
         // Invite lookup
@@ -198,6 +205,7 @@ const STEALTH_NOW = FIXED_NOW;
 // list returned by raceParticipant.findMany for status ACCEPTED + ACTIVE race.
 function makeActivePrisma({ activeParticipations = [], activeEffects = {} } = {}) {
   return {
+    async $queryRaw() { return []; },
     raceParticipant: {
       async findMany({ where }) {
         if (where.status === "INVITED") return [];
@@ -629,15 +637,15 @@ test("opt-in with NO active races falls through to legacy single-state logic", a
     activeParticipations: [],
   });
   // Make public race available so fallthrough has something to return.
-  prisma.race.findMany = async () => [
+  prisma.$queryRaw = async () => [
     {
       id: "race-daily",
       name: "Daily 10K Sprint",
       targetSteps: 10000,
       maxParticipants: 100,
       endsAt: new Date("2026-05-22T00:00:00Z"),
-      seed: { kind: "DAILY_10K" },
-      _count: { participants: 8 },
+      seedKind: "DAILY_10K",
+      participantCount: 8,
     },
   ];
   const get = buildGetHomeRaceCard({ prisma, now: () => STEALTH_NOW });

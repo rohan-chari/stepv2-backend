@@ -38,6 +38,9 @@ const {
 const {
   homeLaunchReadBatch: defaultHomeLaunchReadBatch,
 } = require("./services/homeLaunchReadBatch");
+const {
+  findLegacyPublicRaceCandidates,
+} = require("../races/queries/publicRaceHomeCandidates");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -1705,34 +1708,20 @@ async function checkFriendFinished(
 
 async function checkPublicRace(prisma, userId) {
   // Active public races the user isn't already in. Prefer DAILY_10K, then WEEKLY_50K, then anything.
-  const candidates = await prisma.race.findMany({
-    where: {
-      status: "ACTIVE",
-      isPublic: true,
-      // Hide demo-seeded races from real users' home suggestions.
-      creator: { isReviewAccount: false },
-      participants: { none: { userId, status: { in: ["ACCEPTED", "INVITED"] } } },
-    },
-    include: {
-      seed: { select: { kind: true } },
-      _count: { select: { participants: { where: { status: "ACCEPTED" } } } },
-    },
-    orderBy: { startedAt: "asc" },
-    take: 25,
-  });
+  const candidates = await findLegacyPublicRaceCandidates({ prisma, userId });
 
   if (candidates.length === 0) return null;
 
   // Filter out full races, then rank by seed preference.
   const joinable = candidates.filter(
-    (r) => r.maxParticipants == null || r._count.participants < r.maxParticipants
+    (r) => r.maxParticipants == null || r.participantCount < r.maxParticipants
   );
   if (joinable.length === 0) return null;
 
   const seedRank = { DAILY_10K: 0, WEEKLY_50K: 1 };
   joinable.sort((a, b) => {
-    const aRank = a.seed ? (seedRank[a.seed.kind] ?? 2) : 3;
-    const bRank = b.seed ? (seedRank[b.seed.kind] ?? 2) : 3;
+    const aRank = a.seedKind ? (seedRank[a.seedKind] ?? 2) : 3;
+    const bRank = b.seedKind ? (seedRank[b.seedKind] ?? 2) : 3;
     return aRank - bRank;
   });
 
@@ -1744,8 +1733,8 @@ async function checkPublicRace(prisma, userId) {
       raceId: race.id,
       name: race.name,
       endsAt: race.endsAt,
-      participantCount: race._count.participants,
-      seedKind: race.seed?.kind || null,
+      participantCount: race.participantCount,
+      seedKind: race.seedKind || null,
     },
   };
 }
