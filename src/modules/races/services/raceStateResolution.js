@@ -1180,7 +1180,21 @@ async function computeActiveTimedImpactCapture({
     }
   }
   const hitchhikes = effects.filter((effect) => effect.type === "HITCHHIKE");
-  const captureUserIds = captureParticipants.map((participant) => participant.userId);
+  // The bounded recipient expansion can discover another historical Leech in
+  // its second prefix read. Its source does not need to become an attribution
+  // recipient, but computeLeechEarnedTransfer still reads that source user's
+  // closed samples. Strict worker prefetching must therefore prepare every
+  // Leech source present in the assembled prefix, not only the participants
+  // whose signed impact we will emit. Otherwise production aborts the whole
+  // effect-boundary generation with "sample user outside the prepared worker
+  // scoring chunk" and downstream inventory promotion never runs.
+  const captureUserIds = [...new Set([
+    ...captureParticipants.map((participant) => participant.userId),
+    ...effects
+      .filter((effect) => effect.type === "LEECH")
+      .map((effect) => effect.sourceUserId)
+      .filter(Boolean),
+  ])];
   if (prepareSampleUsers) await prepareSampleUsers(captureUserIds);
   let vector;
   try {

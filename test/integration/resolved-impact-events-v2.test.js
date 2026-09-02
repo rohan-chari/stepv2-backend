@@ -1556,6 +1556,103 @@ describe("resolved impact events v2 HTTP contract", () => {
     }), 2);
   });
 
+  it("resolves a due impact whose expanded prefix introduces another Leech source", async () => {
+    const a = await createTestUser({ displayName: "Impact Chain A" });
+    const b = await createTestUser({ displayName: "Impact Chain B" });
+    const c = await createTestUser({ displayName: "Impact Chain C" });
+    const current = new Date();
+    const startedAt = new Date(current.getTime() - 4 * 60 * 60 * 1000);
+    const race = await createRaceWithParticipants([a, b, c], "ACTIVE", {
+      startedAt,
+      endsAt: new Date(current.getTime() + 4 * 60 * 60 * 1000),
+      timezone: "UTC",
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId: race.id },
+      data: { joinedAt: startedAt },
+    });
+    const participants = await prisma.raceParticipant.findMany({
+      where: { raceId: race.id },
+    });
+    const byUser = new Map(participants.map((row) => [row.userId, row]));
+    for (const runner of [a, b, c]) {
+      await prisma.stepSample.create({ data: {
+        userId: runner.user.id,
+        periodStart: new Date(current.getTime() - 3 * 60 * 60 * 1000),
+        periodEnd: new Date(current.getTime() - 150 * 60 * 1000),
+        steps: 600,
+      } });
+      await prisma.userScoringInputVersion.create({
+        data: { userId: runner.user.id, generation: 1n },
+      });
+    }
+    const createEffect = async ({ owner, target, type, status, startsAt, expiresAt, metadata }) => {
+      const powerup = await prisma.racePowerup.create({ data: {
+        raceId: race.id,
+        participantId: byUser.get(owner.user.id).id,
+        userId: owner.user.id,
+        type,
+        rarity: "COMMON",
+        status: "USED",
+        earnedAtSteps: 1,
+      } });
+      return prisma.raceActiveEffect.create({ data: {
+        raceId: race.id,
+        targetParticipantId: byUser.get(target.user.id).id,
+        targetUserId: target.user.id,
+        sourceUserId: owner.user.id,
+        powerupId: powerup.id,
+        type,
+        status,
+        startsAt,
+        expiresAt,
+        metadata,
+      } });
+    };
+    await createEffect({
+      owner: b,
+      target: a,
+      type: "LEECH",
+      status: "EXPIRED",
+      startsAt: new Date(current.getTime() - 180 * 60 * 1000),
+      expiresAt: new Date(current.getTime() - 120 * 60 * 1000),
+      metadata: { ratio: 2 },
+    });
+    await createEffect({
+      owner: c,
+      target: b,
+      type: "LEECH",
+      status: "EXPIRED",
+      startsAt: new Date(current.getTime() - 170 * 60 * 1000),
+      expiresAt: new Date(current.getTime() - 110 * 60 * 1000),
+      metadata: { ratio: 2 },
+    });
+    const due = await createEffect({
+      owner: a,
+      target: a,
+      type: "RUNNERS_HIGH",
+      status: "ACTIVE",
+      startsAt: new Date(current.getTime() - 60 * 60 * 1000),
+      expiresAt: new Date(current.getTime() - 10 * 60 * 1000),
+      metadata: { multiplier: 2 },
+    });
+
+    await scheduleNaturalEffectBoundaries();
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      logger: { log() {}, error() {} },
+    });
+    assert.ok(await worker.processOne());
+
+    const [effect, job] = await Promise.all([
+      prisma.raceActiveEffect.findUniqueOrThrow({ where: { id: due.id } }),
+      prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: race.id } }),
+    ]);
+    assert.equal(effect.status, "EXPIRED");
+    assert.equal(job.state, "SUCCEEDED");
+    assert.equal(job.lastErrorCode, null);
+  });
+
   it("covers every remaining timed-effect family through public use and C0", async () => {
     const timedCases = [
       { type: "CAMPFIRE_REST", sampleOffsetMinutes: -20 },
