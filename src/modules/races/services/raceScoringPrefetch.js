@@ -11,9 +11,9 @@ const MAX_USERS_PER_CHUNK = 25;
 const MAX_SAMPLE_ROWS_PER_CHUNK = 50_000;
 const MAX_RETAINED_SAMPLE_ROWS_PER_USER = 50_000;
 const MAX_HEAP_GROWTH_BYTES = 32 * 1024 * 1024;
-const SCORING_INPUT_CACHE_MAX_USERS = 500;
-const SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS = 500_000;
-const SCORING_INPUT_CACHE_TTL_MS = 2 * 60 * 1000;
+const SCORING_INPUT_CACHE_MAX_USERS = 2_000;
+const SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS = 2_000_000;
+const SCORING_INPUT_CACHE_TTL_MS = 10 * 60 * 1000;
 const PREFETCH_EFFECT_TYPES = [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"];
 
 function createScoringInputCache({
@@ -21,6 +21,7 @@ function createScoringInputCache({
   maxSampleRows = SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS,
   ttlMs = SCORING_INPUT_CACHE_TTL_MS,
   now = Date.now,
+  metrics = null,
 } = {}) {
   const entries = new Map();
   let retainedSampleRows = 0;
@@ -33,20 +34,31 @@ function createScoringInputCache({
   function evict() {
     while (entries.size > maxUsers || retainedSampleRows > maxSampleRows) {
       remove(entries.keys().next().value);
+      metrics?.increment("race_scoring_input_cache_total", { outcome: "eviction" });
     }
+  }
+  function observeSize() {
+    metrics?.observe("race_scoring_input_cache_users", entries.size);
+    metrics?.observe("race_scoring_input_cache_sample_rows", retainedSampleRows);
   }
   return {
     get({ userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs }) {
       const entry = entries.get(userId);
-      if (!entry) return null;
+      if (!entry) {
+        metrics?.increment("race_scoring_input_cache_total", { outcome: "miss_absent" });
+        return null;
+      }
       if (entry.expiresAt <= now() || entry.generation !== String(generation) ||
           entry.sampleStartMs > sampleStartMs || entry.sampleEndMs < sampleEndMs ||
           entry.dailyStartMs > dailyStartMs || entry.dailyEndMs < dailyEndMs) {
         remove(userId);
+        metrics?.increment("race_scoring_input_cache_total", { outcome: "miss_invalid" });
+        observeSize();
         return null;
       }
       entries.delete(userId);
       entries.set(userId, entry);
+      metrics?.increment("race_scoring_input_cache_total", { outcome: "hit" });
       return entry;
     },
     set({ userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs,
@@ -63,14 +75,17 @@ function createScoringInputCache({
       entries.set(userId, entry);
       retainedSampleRows += sampleRows;
       evict();
-      return entries.get(userId) === entry;
+      const retained = entries.get(userId) === entry;
+      if (retained) metrics?.increment("race_scoring_input_cache_total", { outcome: "store" });
+      observeSize();
+      return retained;
     },
-    clear() { entries.clear(); retainedSampleRows = 0; },
+    clear() { entries.clear(); retainedSampleRows = 0; observeSize(); },
     snapshot() { return { users: entries.size, sampleRows: retainedSampleRows }; },
   };
 }
 
-const processScoringInputCache = createScoringInputCache();
+const processScoringInputCache = createScoringInputCache({ metrics: defaultMetrics });
 
 class CompactSampleTimeline {
   constructor() {
@@ -1096,6 +1111,9 @@ async function prefetchRaceScoringModels(options) {
 
 module.exports = {
   PREFETCH_EFFECT_TYPES,
+  SCORING_INPUT_CACHE_MAX_USERS,
+  SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS,
+  SCORING_INPUT_CACHE_TTL_MS,
   MAX_USERS_PER_CHUNK,
   MAX_SAMPLE_ROWS_PER_CHUNK,
   MAX_RETAINED_SAMPLE_ROWS_PER_USER,

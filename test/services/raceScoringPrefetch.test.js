@@ -6,9 +6,49 @@ const path = require("node:path");
 
 const {
   PREFETCH_EFFECT_TYPES,
+  SCORING_INPUT_CACHE_MAX_USERS,
+  SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS,
+  SCORING_INPUT_CACHE_TTL_MS,
   createScoringInputCache,
   prefetchRaceScoringModels,
 } = require("../../src/modules/races/services/raceScoringPrefetch");
+
+test("process scoring cache has the reviewed production memory bounds", () => {
+  assert.equal(SCORING_INPUT_CACHE_MAX_USERS, 2_000);
+  assert.equal(SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS, 2_000_000);
+  assert.equal(SCORING_INPUT_CACHE_TTL_MS, 10 * 60 * 1000);
+});
+
+test("scoring cache reports hits, misses, evictions, rows, and users", () => {
+  const increments = [];
+  const observations = [];
+  const metrics = {
+    increment(name, labels) { increments.push({ name, labels }); },
+    observe(name, value) { observations.push({ name, value }); },
+  };
+  const cache = createScoringInputCache({ maxUsers: 1, maxSampleRows: 10, metrics });
+  const timeline = { length: 2 };
+  const key = {
+    generation: 1, sampleStartMs: 0, sampleEndMs: 10,
+    dailyStartMs: 0, dailyEndMs: 10,
+  };
+  assert.equal(cache.get({ userId: "missing", ...key }), null);
+  assert.equal(cache.set({ userId: "one", ...key, timeline, dailyRows: [] }), true);
+  assert.ok(cache.get({ userId: "one", ...key }));
+  assert.equal(cache.set({ userId: "two", ...key, timeline, dailyRows: [] }), true);
+
+  assert.deepEqual(increments, [
+    { name: "race_scoring_input_cache_total", labels: { outcome: "miss_absent" } },
+    { name: "race_scoring_input_cache_total", labels: { outcome: "store" } },
+    { name: "race_scoring_input_cache_total", labels: { outcome: "hit" } },
+    { name: "race_scoring_input_cache_total", labels: { outcome: "eviction" } },
+    { name: "race_scoring_input_cache_total", labels: { outcome: "store" } },
+  ]);
+  assert.ok(observations.some((row) =>
+    row.name === "race_scoring_input_cache_users" && row.value === 1));
+  assert.ok(observations.some((row) =>
+    row.name === "race_scoring_input_cache_sample_rows" && row.value === 2));
+});
 
 test("version-identical scoring inputs reuse samples and daily rows exactly", async () => {
   const cache = createScoringInputCache({ maxUsers: 10, maxSampleRows: 100 });
