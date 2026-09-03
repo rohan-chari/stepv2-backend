@@ -331,30 +331,31 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
       preflight = preflightLima({ repository: root, configPath, verifySnapshot: true });
       fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
       const bundlePath = path.join(stateRoot, `source-${commit.slice(0, 12)}`);
-      const sourceBundle = workflow.createSourceBundle({ repository: root, output: bundlePath });
-      const effective = workflow.buildEffectiveEnvironment({ capacity: {
-        CAPACITY_MODE: "true", CAPACITY_OUTBOUND_DISABLED: "true",
-        CAPACITY_GLOBAL_EVENT_PROFILE: "home-open", CAPACITY_DATABASE_POOL_PROFILE: "role-budget",
-        NODE_ENV: "production", PATH: process.env.PATH,
-      }, parity: preflight.parity, secrets: Object.fromEntries(REQUIRED_SECRETS
-        .map((name) => [name, preflight.local[name]])),
-      hmacKey: preflight.local.CAPACITY_SCRUB_ATTESTATION_SECRET });
-      const manifest = workflow.buildWorkflowManifest({ workflowId: ENVIRONMENT_ID, mode: "level",
-        rate: 1, commit, sourceBundleHash: sourceBundle.hash,
-        snapshotHash: preflight.verified.snapshot.snapshotHash,
-        scrubAttestationHash: sha(fs.readFileSync(preflight.verified.attestationPath)),
-        parityHash: sha(fs.readFileSync(preflight.parityPath)),
-        resourceManifestHash: workflow.hashObject(preflight.verified.liveManifest),
-        effectiveEnvironmentHash: effective.report.hash, configHash: sha(preflight.configBytes),
-        snapshotMetadataHash: sha(fs.readFileSync(preflight.verified.metadataPath)),
-        migrationHash: sourceSubsetHash(sourceBundle, "prisma/migrations"),
-        topologyHash: workflow.hashObject({ processes: { http: 2, resolution: 1, cron: 1 },
-          resolutionConcurrency: 2 }), profileVersion: "shared-screen-capacity-v1",
-        startRate: 2, maxRate: 500,
-        provider: { instance: preflight.config.lima_instance, target: preflight.config.target,
-          database: preflight.config.db_name, dbHostPort: Number(preflight.config.db_host_port) } });
       const manifestPath = path.join(stateRoot, "environment-manifest.json");
+      let manifest = null;
       try {
+        const sourceBundle = workflow.createSourceBundle({ repository: root, output: bundlePath });
+        const effective = workflow.buildEffectiveEnvironment({ capacity: {
+          CAPACITY_MODE: "true", CAPACITY_OUTBOUND_DISABLED: "true",
+          CAPACITY_GLOBAL_EVENT_PROFILE: "home-open", CAPACITY_DATABASE_POOL_PROFILE: "role-budget",
+          NODE_ENV: "production", PATH: process.env.PATH,
+        }, parity: preflight.parity, secrets: Object.fromEntries(REQUIRED_SECRETS
+          .map((name) => [name, preflight.local[name]])),
+        hmacKey: preflight.local.CAPACITY_SCRUB_ATTESTATION_SECRET });
+        manifest = workflow.buildWorkflowManifest({ workflowId: ENVIRONMENT_ID, mode: "level",
+          rate: 1, commit, sourceBundleHash: sourceBundle.hash,
+          snapshotHash: preflight.verified.snapshot.snapshotHash,
+          scrubAttestationHash: sha(fs.readFileSync(preflight.verified.attestationPath)),
+          parityHash: sha(fs.readFileSync(preflight.parityPath)),
+          resourceManifestHash: workflow.hashObject(preflight.verified.liveManifest),
+          effectiveEnvironmentHash: effective.report.hash, configHash: sha(preflight.configBytes),
+          snapshotMetadataHash: sha(fs.readFileSync(preflight.verified.metadataPath)),
+          migrationHash: sourceSubsetHash(sourceBundle, "prisma/migrations"),
+          topologyHash: workflow.hashObject({ processes: { http: 2, resolution: 1, cron: 1 },
+            resolutionConcurrency: 2 }), profileVersion: "shared-screen-capacity-v1",
+          startRate: 2, maxRate: 500,
+          provider: { instance: preflight.config.lima_instance, target: preflight.config.target,
+            database: preflight.config.db_name, dbHostPort: Number(preflight.config.db_host_port) } });
         const preparation = lima.prepareWorkflowEnvironment({ configPath: preflight.configPath,
           manifest, sourceBundle, environment: { ...effective.environment,
             CAPACITY_WORKFLOW_MANIFEST: manifestPath }, providerLock: lock });
@@ -372,16 +373,18 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
         fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, { flag: "wx", mode: 0o600 });
         return runtimeEnvironment(state, preflight);
       } catch (error) {
-        try { lima.removeWorkflowChildResources(preflight.config, manifest,
-          { runId: CHILD_ID }, lock); } catch (cleanupError) {
-          error.message += `; partial environment cleanup failed: ${cleanupError.message}`;
-        }
-        try { removeOwnedChildState(); } catch (cleanupError) {
-          error.message += `; partial child-state cleanup failed: ${cleanupError.message}`;
-        }
-        try { gracefulStop(preflight.config.lima_instance); } catch {}
-        if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
-        writableTree(bundlePath); fs.rmSync(bundlePath, { recursive: true, force: true });
+        const cleanupErrors = [];
+        const attempt = (operation) => { try { operation(); } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        } };
+        if (manifest) attempt(() => lima.removeWorkflowChildResources(preflight.config, manifest,
+          { runId: CHILD_ID }, lock));
+        attempt(() => removeOwnedChildState());
+        attempt(() => gracefulStop(preflight.config.lima_instance));
+        attempt(() => { if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath); });
+        attempt(() => { writableTree(bundlePath); fs.rmSync(bundlePath, { recursive: true, force: true }); });
+        if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors],
+          `partial Lima environment cleanup failed: ${error.message}`);
         throw error;
       }
     },
@@ -396,17 +399,21 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
       }
       const preflight = preflightLima({ repository: root, configPath, verifySnapshot: false });
       startExisting(state, preflight.local);
-      lima.removeWorkflowChildResources(state.config, state.manifest,
-        { runId: CHILD_ID }, lock);
-      removeOwnedChildState();
-      gracefulStop(state.config.lima_instance);
+      const cleanupErrors = [];
+      const attempt = (operation) => { try { operation(); } catch (error) { cleanupErrors.push(error); } };
+      attempt(() => lima.removeWorkflowChildResources(state.config, state.manifest,
+        { runId: CHILD_ID }, lock));
+      attempt(() => removeOwnedChildState());
+      attempt(() => gracefulStop(state.config.lima_instance));
       const sourcePath = path.resolve(state.sourceBundle.path);
       if (sourcePath !== stateRoot && sourcePath.startsWith(`${stateRoot}${path.sep}source-`)) {
-        writableTree(sourcePath); fs.rmSync(sourcePath, { recursive: true, force: true });
-      } else throw new Error("prepared source path is outside the performance state root");
+        attempt(() => { writableTree(sourcePath); fs.rmSync(sourcePath, { recursive: true, force: true }); });
+      } else cleanupErrors.push(new Error("prepared source path is outside the performance state root"));
       for (const file of [statePath, path.join(stateRoot, "environment-manifest.json")]) {
-        if (fs.existsSync(file)) fs.unlinkSync(file);
+        attempt(() => { if (fs.existsSync(file)) fs.unlinkSync(file); });
       }
+      if (cleanupErrors.length) throw new AggregateError(cleanupErrors,
+        "Lima environment reset cleanup failed");
       return { reset: true };
     },
     async validate({ environment }) {
@@ -476,9 +483,11 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
       if (count !== 0) throw new Error(`owned cache was not empty after reset (${count} keys)`);
     },
     async cleanup({ environment }) {
-      await environment.prisma.$disconnect();
-      await environment.prismaPool.end().catch(() => {});
-      gracefulStop(environment.state.config.lima_instance);
+      const errors = [];
+      try { await environment.prisma.$disconnect(); } catch (error) { errors.push(error); }
+      try { await environment.prismaPool.end(); } catch (error) { errors.push(error); }
+      try { gracefulStop(environment.state.config.lima_instance); } catch (error) { errors.push(error); }
+      if (errors.length) throw new AggregateError(errors, "Lima capacity cleanup failed");
     },
   };
 }

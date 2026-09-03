@@ -57,6 +57,9 @@ test("Lima runtime flushes guest state and stops gracefully after mutations", ()
   assert.match(source, /resetEnvironment[\s\S]*gracefulStop\(state\.config\.lima_instance\)/);
   assert.match(source, /removeOwnedChildState[\s\S]*children[\s\S]*CHILD_ID/);
   assert.match(source, /catch \(error\)[\s\S]*removeOwnedChildState\(\)/);
+  assert.match(source, /partial Lima environment cleanup failed/);
+  assert.match(source, /new AggregateError\(\[error, \.\.\.cleanupErrors\]/);
+  assert.match(source, /Lima environment reset cleanup failed/);
 });
 
 test("configured and inspected VM/backend/Postgres caps match production-shaped allocations", () => {

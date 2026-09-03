@@ -48,8 +48,143 @@ test("the full-page plan materializes every API-backed variant and no cancelled 
   assert.equal(plan.tournamentParticipants.length > 0, true);
   assert.equal(plan.powerups.length > 0, true);
   assert.equal(plan.activeEffects.length > 0, true);
+  assert.ok(plan.shopItems.length > 0);
+  assert.equal(plan.equippedAccessories.length, plan.userShopItems.length);
   assert.ok(plan.races.every((row) => new Date(row.endsAt || "2099-01-01") >
     new Date("2026-09-03T00:00:00Z")) || plan.races.some((row) => row.status === "COMPLETED"));
+});
+
+test("correlated labels share one logical graph", () => {
+  const users = Array.from({ length: 4 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: [["ordinary_classic_active", "pinned_classic",
+    "ordinary_inventory_held_typed", "ordinary_effect_positive"], [], [], []] };
+  const plan = materializationPlan({ base: { users }, coverage,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "correlated" });
+  assert.equal(plan.races.length, 1);
+  assert.equal(plan.participants.length, 2);
+  assert.equal(plan.powerups.length, 2);
+  assert.equal(plan.activeEffects.length, 1);
+});
+
+test("graph-first scaling shares production-sized graphs across measured identities", () => {
+  const users = Array.from({ length: 6 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: users.map(() => ["ordinary_classic_active"]) };
+  const plan = materializationPlan({ base: { users }, coverage,
+    sourceCensus: { graphHistograms: { ordinaryParticipantsPerRace: { 3: 1 } } },
+    now: new Date("2026-09-03T00:00:00Z"), runId: "shared" });
+  assert.equal(plan.races.length, 2);
+  assert.deepEqual(plan.races.map((race) => plan.participants
+    .filter((participant) => participant.raceId === race.id).length), [3, 3]);
+});
+
+test("graph materialization samples production graph histograms deterministically", () => {
+  const users = Array.from({ length: 300 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = buildCoverageAssignments({ users: 300 });
+  const sourceCensus = { graphHistograms: { ordinaryParticipantsPerRace: { 3: 2, 5: 1 },
+    tournamentBracketSize: { 8: 1 }, tournamentParticipants: { 4: 1 },
+    inventoryPerRace: { 0: 1, 2: 1 }, effectsPerRace: { 0: 1, 1: 1 } } };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "graph-hist" });
+  assert.deepEqual(plan.graphEvidence.reconciliation.ordinaryParticipantsPerRace.sourceValues,
+    [3, 5]);
+  assert.equal(plan.graphEvidence.reconciliation.ordinaryParticipantsPerRace
+    .generatedWithinSourceSupport, true);
+  assert.equal(plan.graphEvidence.reconciliation.tournamentBracketSize
+    .generatedWithinSourceSupport, true);
+  assert.ok(plan.graphEvidence.graphRows.some((row) => row.family === "ordinary" &&
+    row.participantCount > 2));
+});
+
+test("joint graph census keeps participant, inventory, and effect cardinalities correlated", () => {
+  const users = Array.from({ length: 8 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: users.map(() => ["ordinary_classic_active"]) };
+  const sourceCensus = { graphJointHistogram: { ordinary: [{ graphs: 1, dimensions: {
+    status: "active", team: false, participants: 4, inventory: 2, effects: 1,
+  } }], tournaments: [] }, graphHistograms: {} };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "joint-shape" });
+  assert.equal(plan.races.length, 2);
+  assert.ok(plan.graphEvidence.graphRows.every((row) => row.participantCount === 4 &&
+    row.inventoryCount === 2 && row.effectCount === 1));
+});
+
+test("joint graph scaling preserves team size and tournament total versus accepted cardinality", () => {
+  const users = Array.from({ length: 8 }, (_, index) => ({ id: `u${index}` }));
+  const ordinaryCoverage = { byUser: users.map(() => ["ordinary_team_active"]) };
+  const ordinary = materializationPlan({ base: { users }, coverage: ordinaryCoverage,
+    sourceCensus: { graphJointHistogram: { ordinary: [{ graphs: 1, dimensions: {
+      status: "active", team: true, teamSize: 3, participants: 6, inventory: 0, effects: 0,
+    } }], tournaments: [] } }, now: new Date("2026-09-03T00:00:00Z"), runId: "teams" });
+  assert.ok(ordinary.races.every((race) => race.teamSize === 3 && race.maxParticipants === 6));
+
+  const tournamentCoverage = { byUser: users.map(() => ["tournament_invite"]) };
+  const tournaments = materializationPlan({ base: { users }, coverage: tournamentCoverage,
+    sourceCensus: { graphJointHistogram: { ordinary: [], tournaments: [{ graphs: 1,
+      dimensions: { status: "pending", bracketSize: 4, participants: 5, accepted: 2 } }] } },
+    now: new Date("2026-09-03T00:00:00Z"), runId: "tournament-cardinality" });
+  for (const tournament of tournaments.tournaments) {
+    const rows = tournaments.tournamentParticipants.filter((row) =>
+      row.tournamentId === tournament.id);
+    assert.equal(rows.length, 5);
+    assert.equal(rows.filter((row) => row.status === "ACCEPTED").length, 2);
+    assert.equal(tournament.bracketSize, 4);
+  }
+});
+
+test("graph materialization rejects malformed source census rows instead of silently falling back", () => {
+  const users = Array.from({ length: 2 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: users.map(() => ["ordinary_classic_active"]) };
+  assert.throws(() => materializationPlan({ base: { users }, coverage,
+    sourceCensus: { graphJointHistogram: { ordinary: [{ graphs: 0,
+      dimensions: { status: "active", participants: 2 } }], tournaments: [] } },
+    now: new Date("2026-09-03T00:00:00Z"), runId: "bad-census" }),
+  /invalid Races-tab source graph joint histogram/i);
+});
+
+test("joint per-user census preserves repeated personal-bucket rows before coverage augmentation", () => {
+  const users = Array.from({ length: 6 }, (_, index) => ({ id: `u${index}` }));
+  const sourceCensus = { counts: { userCount: 6 }, jointHistogram: [{ users: 6,
+    dimensions: { active: 2, pending: 1, completed: 0, invited: 0, team: false,
+      pinned: false, tournamentInvited: 0, tournamentPending: 0,
+      tournamentActive: 0, tournamentCompleted: 0, tournamentPinned: false } }],
+  graphJointHistogram: { ordinary: [{ graphs: 1, dimensions: { status: "active",
+    team: false, participants: 3, inventory: 0, effects: 0 } }], tournaments: [] } };
+  const coverage = buildCoverageAssignments({ users: 6, prefixSize: 2,
+    requiredVariants: ["ordinary_classic_active", "ordinary_pending_accepted"],
+    maximumAugmentationShare: 1, sourceCensus });
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "personal-rows" });
+  for (const user of users) {
+    assert.equal(plan.participants.filter((row) => row.userId === user.id &&
+      plan.races.some((race) => race.id === row.raceId && race.status === "ACTIVE")).length, 2);
+    assert.equal(plan.participants.filter((row) => row.userId === user.id &&
+      plan.races.some((race) => race.id === row.raceId && race.status === "PENDING")).length, 1);
+  }
+});
+
+test("joint per-user census preserves mixed classic and team active rows", () => {
+  const users = Array.from({ length: 4 }, (_, index) => ({ id: `u${index}` }));
+  const sourceCensus = { counts: { userCount: 4 }, jointHistogram: [{ users: 4,
+    dimensions: { classicActive: 1, teamActive: 1, pendingOwner: 0, pendingAccepted: 0,
+      completed: 0, invited: 0, pinnedClassic: false, pinnedTeam: false,
+      tournamentInvited: 0, tournamentPending: 0, tournamentActive: 0,
+      tournamentCompleted: 0, tournamentPinned: false } }], graphJointHistogram: {
+    ordinary: [{ graphs: 1, dimensions: { status: "active", team: false,
+      participants: 2, inventory: 0, effects: 0 } }, { graphs: 1,
+      dimensions: { status: "active", team: true, teamSize: 1,
+        participants: 2, inventory: 0, effects: 0 } }], tournaments: [] } };
+  const coverage = buildCoverageAssignments({ users: 4, prefixSize: 2,
+    requiredVariants: ["ordinary_classic_active", "ordinary_team_active"],
+    maximumAugmentationShare: 1, sourceCensus });
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "mixed-active" });
+  for (const user of users) {
+    const memberships = plan.participants.filter((row) => row.userId === user.id);
+    assert.equal(memberships.filter((row) => !plan.races.find((race) => race.id === row.raceId)
+      .isTeamRace).length, 1);
+    assert.equal(memberships.filter((row) => plan.races.find((race) => race.id === row.raceId)
+      .isTeamRace).length, 1);
+  }
 });
 
 test("partial graph failure registers every exact cleanup ID before the first write", async () => {
@@ -57,6 +192,9 @@ test("partial graph failure registers every exact cleanup ID before the first wr
   const coverage = buildCoverageAssignments({ users: 300 });
   const manifest = { ids: {} };
   const prisma = {
+    shopItem: { createMany: async () => ({ count: 1 }) },
+    userShopItem: { createMany: async () => ({ count: 1 }) },
+    userEquippedAccessory: { createMany: async () => ({ count: 1 }) },
     tournament: { createMany: async () => { throw new Error("injected preparation failure"); } },
     tournamentParticipant: { createMany: async () => ({ count: 0 }) },
     race: { createMany: async () => ({ count: 0 }) },
@@ -70,6 +208,26 @@ test("partial graph failure registers every exact cleanup ID before the first wr
   assert.ok(manifest.ids.tournaments.length > 0);
   assert.ok(manifest.ids.races.length > 0);
   assert.ok(manifest.ids.raceParticipants.length > 0);
+});
+
+test("every materialization phase leaves the complete owned-ID manifest available to cleanup", async () => {
+  const users = Array.from({ length: 300 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = buildCoverageAssignments({ users: 300 });
+  const phases = ["shopItem", "userShopItem", "userEquippedAccessory", "tournament",
+    "tournamentParticipant", "race", "raceParticipant", "racePowerup", "raceActiveEffect"];
+  for (const failingPhase of phases) {
+    const manifest = { ids: {} };
+    const prisma = Object.fromEntries(phases.map((phase) => [phase, { createMany: async () => {
+      if (phase === failingPhase) throw new Error(`injected ${phase}`);
+      return { count: 1 };
+    } }]));
+    await assert.rejects(materializeFullPageFixtureGraph({ prisma, runId: `partial-${failingPhase}`,
+      base: { users, manifest }, manifest, coverage,
+      now: new Date("2026-09-03T00:00:00Z") }), new RegExp(`injected ${failingPhase}`));
+    for (const key of ["races", "raceParticipants", "tournaments", "tournamentParticipants",
+      "racePowerups", "raceActiveEffects", "shopItems", "userShopItems",
+      "userEquippedAccessories"]) assert.ok(Array.isArray(manifest.ids[key]), key);
+  }
 });
 
 test("zero-friends cohort is deterministic and representative in early prefixes", () => {
@@ -164,6 +322,8 @@ test("fixture materializes the measured branch share and authenticated identitie
   });
   assert.equal(fixture.topology.preScanState.stableFingerprint.length, 64);
   assert.equal(fixture.topology.schema, "races-tab-open-fixture-topology-v2");
+  assert.equal(Object.hasOwn(fixture.topology.coverage, "byUser"), false);
+  assert.equal(Object.hasOwn(fixture.topology.coverage, "rowTargetsByUser"), false);
   assert.equal(fixture.users[0].expectedProjection.marker, "u0");
   assert.equal(fixture.users[0].expectedProjectionVersion,
     "races-tab-open-projection-v2");

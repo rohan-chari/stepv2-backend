@@ -181,14 +181,15 @@ function buildRacesMismatchArtifact(summary) {
   let total = 0;
   for (const level of summary.levels || []) {
     total += Number(level.racesTabOpen?.content?.mismatchCount || 0);
-    for (const [reason, count] of Object.entries(
-      level.racesTabOpen?.content?.mismatchCounts || {})) {
-      if (samples.length < 50) samples.push({ rate: level.rate, reason, count: Number(count) });
+    for (const sample of level.racesTabOpen?.content?.mismatchSamples || []) {
+      if (samples.length < 50) samples.push({ rate: level.rate,
+        fixtureIndex: sample.fixtureIndex, path: sample.path, reason: sample.reason,
+        expectedType: sample.expectedType, observedType: sample.observedType });
     }
   }
   return { schema: "races-tab-mismatches-v1", totalMismatchCount: total,
-    samples, sampleLimit: 50, truncated: total > samples.reduce((sum, row) => sum + row.count, 0),
-    redaction: "aggregate-only-no-user-or-race-identifiers" };
+    samples, sampleLimit: 50, truncated: total > samples.length,
+    redaction: "fixture-index-and-projection-path-only-no-user-or-race-identifiers" };
 }
 
 function writeReports({ directory, input }) {

@@ -37,6 +37,7 @@ async function runLevel({ rate, cacheMode, warmupSeconds, ceremonyTargetSeconds,
     measurementSeconds: 0, metricsCollectionSeconds: 0 };
   let result = await timed(operations.settle, now); timings.settlingDrainingSeconds = result.seconds;
   result = await timed(operations.targetedReset, now); timings.targetedResetSeconds = result.seconds;
+  const targetedReset = result.value;
   result = await timed(operations.liveness, now); timings.livenessSeconds = result.seconds;
   if (cacheMode === "warm") {
     if (typeof operations.warmup !== "function") throw new Error("warm level requires warmup");
@@ -60,7 +61,7 @@ async function runLevel({ rate, cacheMode, warmupSeconds, ceremonyTargetSeconds,
   return { rate, cacheMode, configuredWarmupSeconds: warmupSeconds,
     actualWarmupSeconds: timings.warmupSeconds, timings, ceremonySeconds,
     ceremonyBudgetWarning: ceremonySeconds > ceremonyTargetSeconds,
-    measurement: measurement.value, metrics: collection.value };
+    targetedReset, measurement: measurement.value, metrics: collection.value };
 }
 
 function runtimeSummary(values = {}, { targetSeconds, warningSeconds } = {}) {

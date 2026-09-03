@@ -48,19 +48,33 @@ function buildCoverageAssignments({ users, prefixSize = 300,
     throw new Error(`Races-tab v2 requires at least ${prefixSize} fixture identities`);
   }
   const byUser = Array.from({ length: users }, () => []);
+  const rowTargetsByUser = Array.from({ length: users }, () => ({
+    classicActive: 0, teamActive: 0, pendingOwner: 0, pendingAccepted: 0,
+    completed: 0, invited: 0,
+    tournamentInvited: 0, tournamentPending: 0, tournamentActive: 0,
+    tournamentCompleted: 0,
+  }));
   const sourceUsers = Math.max(1, Number(sourceCensus?.counts?.userCount || users));
   const naturalCounts = {};
   const jointMappedVariants = new Set();
   let jointOrdinal = 0;
   for (const entry of sourceCensus?.jointHistogram || []) {
     const dimensions = entry.dimensions || {};
+    const classicActive = Number(dimensions.classicActive ??
+      (dimensions.team ? 0 : dimensions.active)) || 0;
+    const teamActive = Number(dimensions.teamActive ??
+      (dimensions.team ? dimensions.active : 0)) || 0;
+    const pendingOwner = Number(dimensions.pendingOwner || 0);
+    const pendingAccepted = Number(dimensions.pendingAccepted ?? dimensions.pending) || 0;
     const variants = [
-      Number(dimensions.active) > 0 ? (dimensions.team ? "ordinary_team_active" :
-        "ordinary_classic_active") : null,
-      Number(dimensions.pending) > 0 ? "ordinary_pending_accepted" : null,
+      classicActive > 0 ? "ordinary_classic_active" : null,
+      teamActive > 0 ? "ordinary_team_active" : null,
+      pendingOwner > 0 ? "ordinary_pending_owner" : null,
+      pendingAccepted > 0 ? "ordinary_pending_accepted" : null,
       Number(dimensions.completed) > 0 ? "ordinary_completed" : null,
       Number(dimensions.invited) > 0 ? "ordinary_invite" : null,
-      dimensions.pinned ? (dimensions.team ? "pinned_team" : "pinned_classic") : null,
+      dimensions.pinnedClassic ? "pinned_classic" : null,
+      dimensions.pinnedTeam ? "pinned_team" : null,
       Number(dimensions.tournamentInvited) > 0 ? "tournament_invite" : null,
       Number(dimensions.tournamentPending) > 0 ? "tournament_lobby" : null,
       Number(dimensions.tournamentActive) > 0 ? "tournament_between_rounds" : null,
@@ -72,6 +86,15 @@ function buildCoverageAssignments({ users, prefixSize = 300,
     for (let ordinal = 0; ordinal < scaled; ordinal += 1) {
       const index = (Math.floor((ordinal + 0.5) * users / Math.max(1, scaled)) +
         jointOrdinal * 17) % users;
+      const rowTargets = { classicActive, teamActive, pendingOwner, pendingAccepted,
+        completed: dimensions.completed, invited: dimensions.invited,
+        tournamentInvited: dimensions.tournamentInvited,
+        tournamentPending: dimensions.tournamentPending,
+        tournamentActive: dimensions.tournamentActive,
+        tournamentCompleted: dimensions.tournamentCompleted };
+      for (const [key, value] of Object.entries(rowTargets)) {
+        rowTargetsByUser[index][key] += Math.max(0, Number(value) || 0);
+      }
       for (const variant of variants) if (!byUser[index].includes(variant)) {
         byUser[index].push(variant);
       }
@@ -111,6 +134,7 @@ function buildCoverageAssignments({ users, prefixSize = 300,
     prefixSize,
     requiredVariants: [...requiredVariants],
     byUser,
+    rowTargetsByUser,
     augmentedByUser,
     augmentedIdentities,
     augmentationShare,
@@ -143,15 +167,205 @@ async function createMany(model, rows, size = 500) {
   }
 }
 
-function materializationPlan({ base, coverage, now = new Date(), runId } = {}) {
+function histogramValue(histogram, ordinal, fallback, { minimum = 1, maximum = 64 } = {}) {
+  const entries = Object.entries(histogram || {}).map(([value, count]) =>
+    [Number(value), Number(count)]).filter(([value, count]) => Number.isInteger(value) &&
+      value >= minimum && value <= maximum && Number.isInteger(count) && count > 0)
+    .sort((left, right) => left[0] - right[0]);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  if (!total) return fallback;
+  let position = ordinal % total;
+  for (const [value, count] of entries) {
+    if (position < count) return value;
+    position -= count;
+  }
+  return fallback;
+}
+
+function jointGraphShape(entries, ordinal, predicate = () => true) {
+  const eligible = (Array.isArray(entries) ? entries : []).filter((entry) =>
+    Number.isInteger(Number(entry?.graphs)) && Number(entry.graphs) > 0 &&
+    entry.dimensions && predicate(entry.dimensions));
+  const total = eligible.reduce((sum, entry) => sum + Number(entry.graphs), 0);
+  if (!total) return null;
+  let position = ordinal % total;
+  for (const entry of eligible) {
+    if (position < Number(entry.graphs)) return entry.dimensions;
+    position -= Number(entry.graphs);
+  }
+  return null;
+}
+
+function assertGraphCensus(sourceCensus) {
+  if (!sourceCensus) return;
+  const joint = sourceCensus.graphJointHistogram;
+  if (joint != null) {
+    if (!joint || !Array.isArray(joint.ordinary) || !Array.isArray(joint.tournaments)) {
+      throw new Error("invalid Races-tab source graph joint histogram");
+    }
+    for (const [family, entries] of Object.entries(joint)) {
+      for (const entry of entries) {
+        const dimensions = entry?.dimensions;
+        const required = family === "ordinary"
+          ? ["participants", "inventory", "effects"]
+          : ["bracketSize", "participants", "accepted"];
+        if (!Number.isInteger(Number(entry?.graphs)) || Number(entry.graphs) < 1 ||
+            !dimensions || typeof dimensions.status !== "string" ||
+            required.some((key) => !Number.isInteger(Number(dimensions[key])) ||
+              Number(dimensions[key]) < 0)) {
+          throw new Error("invalid Races-tab source graph joint histogram");
+        }
+      }
+    }
+  }
+  for (const histogram of Object.values(sourceCensus.graphHistograms || {})) {
+    if (!histogram || typeof histogram !== "object" || Array.isArray(histogram) ||
+        Object.entries(histogram).some(([value, count]) => !Number.isInteger(Number(value)) ||
+          Number(value) < 0 || !Number.isInteger(Number(count)) || Number(count) < 1)) {
+      throw new Error("invalid Races-tab source graph histogram");
+    }
+  }
+}
+
+function groupedVariants(variants, rowTargets = {}) {
+  const groups = [];
+  const has = (name) => variants.includes(name);
+  const addRepeated = (primary, features, count, family) => {
+    if (!has(primary) && !features.some(has)) return;
+    const total = Math.max(1, Number(count) || 0);
+    for (let occurrence = 0; occurrence < total; occurrence += 1) {
+      groups.push({ variantGroup: occurrence === 0
+        ? [primary, ...features.filter(has)] : [primary], family, occurrence });
+    }
+  };
+  addRepeated("ordinary_classic_active", ["pinned_classic", "ordinary_placement_visible",
+    "ordinary_placement_hidden", "ordinary_inventory_held_typed",
+    "ordinary_inventory_mystery_box", "ordinary_inventory_queued_box",
+    "ordinary_effect_positive", "ordinary_effect_negative"], rowTargets.classicActive,
+  "ordinary_active");
+  addRepeated("ordinary_team_active", ["pinned_team"], rowTargets.teamActive, "ordinary_active");
+  addRepeated("ordinary_pending_owner", [], rowTargets.pendingOwner, "ordinary_pending_owner");
+  addRepeated("ordinary_pending_accepted", [], rowTargets.pendingAccepted,
+    "ordinary_pending_accepted");
+  addRepeated("ordinary_invite", [], rowTargets.invited, "ordinary_invited");
+  addRepeated("ordinary_completed", [], rowTargets.completed, "ordinary_completed");
+  addRepeated("tournament_invite", [], rowTargets.tournamentInvited, "tournament_invited");
+  addRepeated("tournament_lobby", ["pinned_tournament"], rowTargets.tournamentPending,
+    "tournament_pending");
+  const activeTournament = variants.some((variant) => variant.startsWith("tournament_match_")) ||
+    has("tournament_live_match") ? "tournament_live_match" :
+    has("tournament_eliminated") ? "tournament_eliminated" : "tournament_between_rounds";
+  addRepeated(activeTournament, ["tournament_match_placement_visible",
+    "tournament_match_placement_hidden", "tournament_match_inventory_held_typed",
+    "tournament_match_inventory_mystery_box", "tournament_match_inventory_queued_box"],
+  rowTargets.tournamentActive, "tournament_active");
+  const completedTournament = has("tournament_champion") ? "tournament_champion" :
+    "tournament_completed_non_champion";
+  addRepeated(completedTournament, [], rowTargets.tournamentCompleted, "tournament_completed");
+  return groups;
+}
+
+function graphAssignments({ coverage, sourceCensus }) {
+  const grouped = new Map();
+  coverage.byUser.forEach((variants, userIndex) => {
+    for (const group of groupedVariants(variants, coverage.rowTargetsByUser?.[userIndex])) {
+      const { variantGroup } = group;
+      const key = `${[...variantGroup].sort().join("|")}#${group.family}:${group.occurrence}`;
+      if (!grouped.has(key)) grouped.set(key, { variantGroup, userIndexes: [] });
+      grouped.get(key).userIndexes.push(userIndex);
+    }
+  });
+  const assignments = [];
+  let ordinal = 0;
+  for (const entry of grouped.values()) {
+    const tournament = entry.variantGroup.some((variant) =>
+      variant.startsWith("tournament_") || variant === "pinned_tournament");
+    const ownerOnly = entry.variantGroup.includes("ordinary_pending_owner") ||
+      entry.variantGroup.includes("tournament_champion");
+    const needsExternal = entry.variantGroup.includes("ordinary_invite") ||
+      entry.variantGroup.includes("tournament_invite");
+    const ordinaryStatus = entry.variantGroup.includes("ordinary_completed") ? "COMPLETED" :
+      entry.variantGroup.some((variant) => ["ordinary_pending_owner", "ordinary_pending_accepted",
+        "ordinary_invite"].includes(variant)) ? "PENDING" : "ACTIVE";
+    const ordinaryTeam = entry.variantGroup.some((variant) =>
+      ["ordinary_team_active", "pinned_team"].includes(variant));
+    const tournamentStatus = entry.variantGroup.some((variant) => ["tournament_invite",
+      "tournament_lobby", "pinned_tournament"].includes(variant)) ? "PENDING" :
+      entry.variantGroup.some((variant) => ["tournament_champion",
+        "tournament_completed_non_champion"].includes(variant)) ? "COMPLETED" : "ACTIVE";
+    const jointShape = tournament
+      ? jointGraphShape(sourceCensus?.graphJointHistogram?.tournaments, ordinal,
+        (dimensions) => String(dimensions.status || "").toUpperCase() === tournamentStatus)
+      : jointGraphShape(sourceCensus?.graphJointHistogram?.ordinary, ordinal,
+        (dimensions) => String(dimensions.status || "").toUpperCase() === ordinaryStatus &&
+          Boolean(dimensions.team) === ordinaryTeam);
+    const sampled = tournament
+      ? Number(jointShape?.accepted) || histogramValue(sourceCensus?.graphHistograms?.tournamentAcceptedParticipants ||
+        sourceCensus?.graphHistograms?.tournamentParticipants, ordinal, 2,
+      { minimum: 1, maximum: 64 })
+      : Number(jointShape?.participants) || histogramValue(sourceCensus?.graphHistograms?.ordinaryParticipantsPerRace,
+        ordinal, 2, { minimum: 2, maximum: 32 });
+    const inviteCapacity = tournament && entry.variantGroup.includes("tournament_invite")
+      ? Math.max(1, Number(jointShape?.participants || 0) - Number(jointShape?.accepted || 0))
+      : sampled - (needsExternal ? 1 : 0);
+    const capacity = ownerOnly ? 1 : Math.max(1,
+      Math.min(tournament && entry.variantGroup.some((variant) =>
+        variant === "tournament_live_match" || variant.startsWith("tournament_match_")) ? 2 : 64,
+      inviteCapacity));
+    for (let index = 0; index < entry.userIndexes.length; index += capacity) {
+      assignments.push({ variantGroup: entry.variantGroup,
+        userIndexes: entry.userIndexes.slice(index, index + capacity) });
+      ordinal += 1;
+    }
+  }
+  return assignments;
+}
+
+function histogramOf(values) {
+  return values.reduce((result, value) => {
+    result[value] = (result[value] || 0) + 1; return result;
+  }, {});
+}
+
+function reconcileGraphEvidence(evidence) {
+  const dimensions = ["ordinaryParticipantsPerRace", "tournamentBracketSize",
+    "tournamentParticipants", "tournamentAcceptedParticipants", "inventoryPerRace",
+    "effectsPerRace"];
+  const reconciliation = Object.fromEntries(dimensions.map((name) => {
+    const sourceValues = Object.keys(evidence.source?.[name] || {}).map(Number)
+      .filter(Number.isFinite).sort((a, b) => a - b);
+    const generatedValues = Object.keys(evidence.generated?.[name] || {}).map(Number)
+      .filter(Number.isFinite).sort((a, b) => a - b);
+    return [name, { sourceValues, generatedValues,
+      generatedWithinSourceSupport: sourceValues.length === 0 ||
+        generatedValues.every((value) => sourceValues.includes(value)) }];
+  }));
+  for (const name of ["ordinaryParticipantsPerRace", "tournamentBracketSize",
+    "tournamentAcceptedParticipants"]) {
+    if (!reconciliation[name].generatedWithinSourceSupport) {
+      throw new Error(`Races-tab generated graph ${name} escaped the production census support`);
+    }
+  }
+  return { ...evidence, reconciliation };
+}
+
+function materializationPlan({ base, coverage, now = new Date(), runId,
+  sourceCensus = null } = {}) {
+  assertGraphCensus(sourceCensus);
   const races = [];
   const participants = [];
   const tournaments = [];
   const tournamentParticipants = [];
   const powerups = [];
   const activeEffects = [];
+  const shopItems = [];
+  const userShopItems = [];
+  const equippedAccessories = [];
   const ids = { races: [], raceParticipants: [], tournaments: [],
-    tournamentParticipants: [], racePowerups: [], raceActiveEffects: [] };
+    tournamentParticipants: [], racePowerups: [], raceActiveEffects: [], shopItems: [],
+    userShopItems: [], userEquippedAccessories: [] };
+  const graphRows = [];
+  let graphOrdinal = 0;
   const marker = `capacity-races:${runId}`;
   const startedAt = new Date(now.getTime() - 60 * 60_000);
   const endsAt = new Date(now.getTime() + 14 * 24 * 60 * 60_000);
@@ -174,75 +388,149 @@ function materializationPlan({ base, coverage, now = new Date(), runId } = {}) {
       earnedAtSteps: 20_000 + index };
     powerups.push(row); ids.racePowerups.push(row.id); return row;
   };
-  coverage.byUser.forEach((variants, userIndex) => {
-    for (const variant of variants) {
+  for (const assignment of graphAssignments({ coverage, sourceCensus })) {
+    const { variantGroup, userIndexes } = assignment;
+    const userIndex = userIndexes[0];
+    const variant = variantGroup[0];
+    const hasVariant = (name) => variantGroup.includes(name);
     const caller = base.users[userIndex];
-    const support = base.users[(userIndex + 1) % base.users.length];
+    const support = base.users[(userIndex + userIndexes.length + 1) % base.users.length];
     const isTournament = variant.startsWith("tournament_") || variant === "pinned_tournament";
     if (!isTournament) {
       const raceId = crypto.randomUUID();
-      const teamRace = variant === "ordinary_team_active" || variant === "pinned_team";
-      const status = variant === "ordinary_completed" ? "COMPLETED" :
-        variant.startsWith("ordinary_pending") || variant === "ordinary_invite" ? "PENDING" : "ACTIVE";
-      const callerIsCreator = variant === "ordinary_pending_owner" ||
-        variant === "pinned_classic" || variant === "pinned_team";
-      const requiresFullEffectRoster = variant.includes("effect") ||
-        variant === "ordinary_placement_hidden";
+      const teamRace = hasVariant("ordinary_team_active") || hasVariant("pinned_team");
+      const status = hasVariant("ordinary_completed") ? "COMPLETED" :
+        hasVariant("ordinary_pending_owner") || hasVariant("ordinary_pending_accepted") ||
+        hasVariant("ordinary_invite") ? "PENDING" : "ACTIVE";
+      const callerIsCreator = hasVariant("ordinary_pending_owner") ||
+        hasVariant("pinned_classic") || hasVariant("pinned_team");
+      const requiresFullEffectRoster = hasVariant("ordinary_effect_positive") ||
+        hasVariant("ordinary_effect_negative") || hasVariant("ordinary_placement_hidden");
+      const jointShape = jointGraphShape(sourceCensus?.graphJointHistogram?.ordinary,
+        graphOrdinal, (dimensions) => String(dimensions.status || "").toUpperCase() === status &&
+          Boolean(dimensions.team) === teamRace);
+      const sampledParticipants = Number(jointShape?.participants) || histogramValue(
+        sourceCensus?.graphHistograms?.ordinaryParticipantsPerRace, graphOrdinal, 2,
+        { minimum: 2, maximum: 32 });
+      const sampledInventory = Number.isInteger(Number(jointShape?.inventory))
+        ? Number(jointShape.inventory) : histogramValue(sourceCensus?.graphHistograms?.inventoryPerRace,
+        graphOrdinal, 0, { minimum: 0, maximum: 32 });
+      const sampledEffects = Number.isInteger(Number(jointShape?.effects))
+        ? Number(jointShape.effects) : histogramValue(sourceCensus?.graphHistograms?.effectsPerRace,
+        graphOrdinal, 0, { minimum: 0, maximum: 32 });
       races.push({ id: raceId, creatorId: callerIsCreator ? caller.id : support.id,
-        name: `${marker}:${variant}:${userIndex}`, targetSteps: 1_000_000,
-        potCoins: requiresFullEffectRoster ? 1 : 0,
+        name: `${marker}:${variantGroup.join("+")}:${userIndex}`, targetSteps: 1_000_000,
+        potCoins: requiresFullEffectRoster || sampledEffects > 0 ? 1 : 0,
         maxDurationDays: 14, status, startedAt: status === "PENDING" ? null : startedAt,
         endsAt: status === "PENDING" ? null : status === "COMPLETED" ? completedAt : endsAt,
         completedAt: status === "COMPLETED" ? completedAt : null,
         scheduledStartAt: status === "PENDING" ? endsAt : null,
         scheduledEndAt: status === "PENDING" ? new Date(endsAt.getTime() + 24 * 60 * 60_000) : null,
-        powerupsEnabled: variant.includes("inventory") || variant.includes("effect") ||
-          variant.includes("placement_hidden"), powerupStepInterval: 5000,
-        isPublic: variant === "ordinary_classic_active" && userIndex % 10 === 0,
-        maxParticipants: teamRace ? 4 : 10, isTeamRace: teamRace,
-        teamSize: teamRace ? 2 : null, teamAName: teamRace ? "Trail Blazers" : null,
+        powerupsEnabled: sampledInventory > 0 || sampledEffects > 0 ||
+          variantGroup.some((value) => value.includes("inventory") ||
+            value.includes("effect") || value.includes("placement_hidden")), powerupStepInterval: 5000,
+        isPublic: hasVariant("ordinary_classic_active") && userIndex % 10 === 0,
+        maxParticipants: teamRace ? 2 * Math.max(1, Number(jointShape?.teamSize) ||
+          Math.ceil(sampledParticipants / 2)) : Math.max(sampledParticipants, 2),
+        isTeamRace: teamRace,
+        teamSize: teamRace ? Math.max(1, Number(jointShape?.teamSize) ||
+          Math.ceil(sampledParticipants / 2)) : null,
+        teamAName: teamRace ? "Trail Blazers" : null,
         teamBName: teamRace ? "Peak Pacers" : null });
       ids.races.push(raceId);
       const callerParticipant = addParticipant({ raceId, userId: caller.id,
-        status: variant === "ordinary_invite" ? "INVITED" : "ACCEPTED", index: userIndex,
-        favorite: variant.startsWith("pinned_"), team: teamRace ? "TEAM_A" : null,
+        status: hasVariant("ordinary_invite") ? "INVITED" : "ACCEPTED", index: userIndex,
+        favorite: hasVariant("pinned_classic") || hasVariant("pinned_team"), team: teamRace ? "TEAM_A" : null,
         placement: status === "COMPLETED" ? 1 : null });
-      const supportParticipant = addParticipant({ raceId, userId: support.id,
-        index: userIndex + 50_000, team: teamRace ? "TEAM_B" : null,
-        placement: status === "COMPLETED" ? 2 : null });
-      if (variant === "ordinary_inventory_held_typed") {
-        addPowerup({ raceId, participant: callerParticipant, userId: caller.id, index: userIndex });
-      } else if (variant === "ordinary_inventory_mystery_box") {
-        addPowerup({ raceId, participant: callerParticipant, userId: caller.id,
-          status: "MYSTERY_BOX", index: userIndex });
-      } else if (variant === "ordinary_inventory_queued_box") {
-        addPowerup({ raceId, participant: callerParticipant, userId: caller.id,
-          status: "QUEUED", index: userIndex });
+      const callerParticipants = [{ user: caller, participant: callerParticipant }];
+      for (const [sharedOrdinal, sharedIndex] of userIndexes.slice(1).entries()) {
+        const sharedUser = base.users[sharedIndex];
+        callerParticipants.push({ user: sharedUser, participant: addParticipant({ raceId,
+          userId: sharedUser.id, status: hasVariant("ordinary_invite") ? "INVITED" : "ACCEPTED",
+          index: sharedIndex, favorite: hasVariant("pinned_classic") || hasVariant("pinned_team"),
+          team: teamRace ? (sharedOrdinal % 2 ? "TEAM_A" : "TEAM_B") : null,
+          placement: status === "COMPLETED" ? sharedOrdinal + 2 : null }) });
       }
-      if (variant === "ordinary_effect_positive" || variant === "ordinary_effect_negative" ||
-          variant === "ordinary_placement_hidden") {
-        const type = variant === "ordinary_effect_positive" ? "RUNNERS_HIGH" :
-          variant === "ordinary_placement_hidden" ? "DETOUR_SIGN" : "LEG_CRAMP";
+      let supportParticipant = callerParticipants[1]?.participant || null;
+      let supportOrdinal = callerParticipants.length;
+      while (participants.filter((row) => row.raceId === raceId).length < sampledParticipants) {
+        const extra = supportOrdinal === callerParticipants.length ? support :
+          base.users[(userIndex + supportOrdinal + 1) % base.users.length];
+        supportOrdinal += 1;
+        if (participants.some((row) => row.raceId === raceId && row.userId === extra.id)) continue;
+        supportParticipant = addParticipant({ raceId, userId: extra.id,
+          index: userIndex + 50_000 + supportOrdinal,
+          team: teamRace ? (supportOrdinal % 2 ? "TEAM_A" : "TEAM_B") : null,
+          placement: status === "COMPLETED" ? supportOrdinal : null });
+      }
+      supportParticipant ||= callerParticipant;
+      for (const entry of callerParticipants) {
+        if (hasVariant("ordinary_inventory_held_typed")) addPowerup({ raceId,
+          participant: entry.participant, userId: entry.user.id, index: userIndex });
+        if (hasVariant("ordinary_inventory_mystery_box")) addPowerup({ raceId,
+          participant: entry.participant, userId: entry.user.id,
+          status: "MYSTERY_BOX", index: userIndex });
+        if (hasVariant("ordinary_inventory_queued_box")) addPowerup({ raceId,
+          participant: entry.participant, userId: entry.user.id,
+          status: "QUEUED", index: userIndex });
+        for (const effectVariant of ["ordinary_effect_positive", "ordinary_effect_negative",
+          "ordinary_placement_hidden"].filter(hasVariant)) {
+          const type = effectVariant === "ordinary_effect_positive" ? "RUNNERS_HIGH" :
+            effectVariant === "ordinary_placement_hidden" ? "DETOUR_SIGN" : "LEG_CRAMP";
+          const powerup = addPowerup({ raceId, participant: supportParticipant,
+            userId: supportParticipant.userId, type, status: "USED", index: userIndex });
+          const effect = { id: crypto.randomUUID(), raceId,
+            targetParticipantId: entry.participant.id, targetUserId: entry.user.id,
+            sourceUserId: supportParticipant.userId, powerupId: powerup.id, type, status: "ACTIVE",
+            startsAt: startedAt, expiresAt: endsAt };
+          activeEffects.push(effect); ids.raceActiveEffects.push(effect.id);
+        }
+      }
+      while (activeEffects.filter((row) => row.raceId === raceId).length < sampledEffects) {
         const powerup = addPowerup({ raceId, participant: supportParticipant,
-          userId: support.id, type, status: "USED", index: userIndex });
+          userId: supportParticipant.userId, type: "RUNNERS_HIGH", status: "USED",
+          index: userIndex + activeEffects.length });
         const effect = { id: crypto.randomUUID(), raceId,
           targetParticipantId: callerParticipant.id, targetUserId: caller.id,
-          sourceUserId: support.id, powerupId: powerup.id, type, status: "ACTIVE",
+          sourceUserId: supportParticipant.userId, powerupId: powerup.id, type: "RUNNERS_HIGH", status: "ACTIVE",
           startsAt: startedAt, expiresAt: endsAt };
         activeEffects.push(effect); ids.raceActiveEffects.push(effect.id);
       }
+      while (powerups.filter((row) => row.raceId === raceId).length < sampledInventory) {
+        addPowerup({ raceId, participant: callerParticipant, userId: caller.id,
+          index: userIndex + powerups.length });
+      }
+      graphRows.push({ family: "ordinary", bucket: status.toLowerCase(),
+        participantCount: participants.filter((row) => row.raceId === raceId).length,
+        inventoryCount: powerups.filter((row) => row.raceId === raceId).length,
+        effectCount: activeEffects.filter((row) => row.raceId === raceId).length });
+      graphOrdinal += 1;
       continue;
     }
 
     const tournamentId = crypto.randomUUID();
-    const render = variant === "pinned_tournament" ? "lobby" :
-      variant.replace(/^tournament_(match_)?/, "");
+    const render = variantGroup.some((value) => value === "tournament_live_match" ||
+      value.startsWith("tournament_match_")) ? "live_match" :
+      hasVariant("pinned_tournament") ? "lobby" : variant.replace(/^tournament_/, "");
     const completed = ["champion", "completed_non_champion"].includes(render);
     const pending = ["invite", "lobby"].includes(render);
-    const liveMatch = render === "live_match" || variant.startsWith("tournament_match_");
+    const liveMatch = render === "live_match";
+    const tournamentStatus = completed ? "COMPLETED" : pending ? "PENDING" : "ACTIVE";
+    const jointShape = jointGraphShape(sourceCensus?.graphJointHistogram?.tournaments,
+      graphOrdinal, (dimensions) => String(dimensions.status || "").toUpperCase() === tournamentStatus);
+    const sampledTournamentParticipants = Number(jointShape?.accepted) || histogramValue(
+      sourceCensus?.graphHistograms?.tournamentAcceptedParticipants ||
+        sourceCensus?.graphHistograms?.tournamentParticipants, graphOrdinal, 2,
+      { minimum: 1, maximum: 64 });
+    const sampledTournamentTotal = Math.max(sampledTournamentParticipants,
+      Number(jointShape?.participants) || sampledTournamentParticipants);
+    const sampledBracketSize = Number(jointShape?.bracketSize) || histogramValue(
+      sourceCensus?.graphHistograms?.tournamentBracketSize,
+      graphOrdinal, 4, { minimum: 2, maximum: 64 });
     const tournament = { id: tournamentId, creatorId: support.id,
-      name: `${marker}:${variant}:${userIndex}`, status: completed ? "COMPLETED" :
-        pending ? "PENDING" : "ACTIVE", bracketSize: 4, matchupDurationDays: 2,
+      name: `${marker}:${variantGroup.join("+")}:${userIndex}`, status: completed ? "COMPLETED" :
+        pending ? "PENDING" : "ACTIVE",
+      bracketSize: Math.max(sampledBracketSize, sampledTournamentParticipants), matchupDurationDays: 2,
       potCoins: 100, currentRound: pending ? 0 : completed ? 2 : render === "eliminated" ? 2 : 1,
       totalRounds: 2, startedAt: pending ? null : startedAt,
       completedAt: completed ? completedAt : null,
@@ -252,43 +540,117 @@ function materializationPlan({ base, coverage, now = new Date(), runId } = {}) {
     const callerTournament = { id: crypto.randomUUID(), tournamentId, userId: caller.id,
       status: render === "invite" ? "INVITED" : "ACCEPTED", seed: render === "invite" ? null : 0,
       eliminatedInRound: render === "eliminated" ? 1 : null,
-      favoritedAt: variant === "pinned_tournament" ? now : null };
-    const supportTournament = { id: crypto.randomUUID(), tournamentId, userId: support.id,
-      status: "ACCEPTED", seed: 1, eliminatedInRound: null };
-    tournamentParticipants.push(callerTournament, supportTournament);
-    ids.tournamentParticipants.push(callerTournament.id, supportTournament.id);
+      favoritedAt: hasVariant("pinned_tournament") ? now : null };
+    tournamentParticipants.push(callerTournament);
+    ids.tournamentParticipants.push(callerTournament.id);
+    for (const [sharedOrdinal, sharedIndex] of userIndexes.slice(1).entries()) {
+      const row = { id: crypto.randomUUID(), tournamentId, userId: base.users[sharedIndex].id,
+        status: render === "invite" ? "INVITED" : "ACCEPTED",
+        seed: render === "invite" ? null : sharedOrdinal + 1,
+        eliminatedInRound: render === "eliminated" ? 1 : null,
+        favoritedAt: hasVariant("pinned_tournament") ? now : null };
+      tournamentParticipants.push(row); ids.tournamentParticipants.push(row.id);
+    }
+    let tournamentSupportOrdinal = userIndexes.length;
+    while (tournamentParticipants.filter((row) => row.tournamentId === tournamentId &&
+      row.status === "ACCEPTED").length < sampledTournamentParticipants) {
+      const extra = tournamentSupportOrdinal === userIndexes.length ? support :
+        base.users[(userIndex + tournamentSupportOrdinal + 1) % base.users.length];
+      tournamentSupportOrdinal += 1;
+      if (tournamentParticipants.some((row) => row.tournamentId === tournamentId &&
+        row.userId === extra.id)) continue;
+      const extraRow = { id: crypto.randomUUID(), tournamentId, userId: extra.id,
+        status: "ACCEPTED", seed: tournamentSupportOrdinal, eliminatedInRound: null };
+      tournamentParticipants.push(extraRow); ids.tournamentParticipants.push(extraRow.id);
+    }
+    while (tournamentParticipants.filter((row) => row.tournamentId === tournamentId).length <
+      sampledTournamentTotal) {
+      const extra = base.users[(userIndex + tournamentSupportOrdinal + 1) % base.users.length];
+      tournamentSupportOrdinal += 1;
+      if (tournamentParticipants.some((row) => row.tournamentId === tournamentId &&
+        row.userId === extra.id)) continue;
+      const extraRow = { id: crypto.randomUUID(), tournamentId, userId: extra.id,
+        status: "DECLINED", seed: null, eliminatedInRound: null };
+      tournamentParticipants.push(extraRow); ids.tournamentParticipants.push(extraRow.id);
+    }
     if (liveMatch) {
       const raceId = crypto.randomUUID();
       races.push({ id: raceId, creatorId: null,
         name: `${marker}:match:${variant}:${userIndex}`, targetSteps: 1_000_000,
         maxDurationDays: 2, status: "ACTIVE", startedAt, endsAt,
-        powerupsEnabled: variant.includes("inventory") || variant.includes("placement_hidden"),
+        powerupsEnabled: variantGroup.some((value) => value.includes("inventory") ||
+          value.includes("placement_hidden")),
         powerupStepInterval: 5000, isPublic: false, maxParticipants: 2,
         tournamentId, tournamentRound: tournament.currentRound, tournamentMatchIndex: 0 });
       ids.races.push(raceId);
-      const callerMatch = addParticipant({ raceId, userId: caller.id, index: userIndex });
-      const supportMatch = addParticipant({ raceId, userId: support.id, index: userIndex + 50_000 });
-      if (variant === "tournament_match_inventory_held_typed") {
-        addPowerup({ raceId, participant: callerMatch, userId: caller.id, index: userIndex });
-      } else if (variant === "tournament_match_inventory_mystery_box") {
-        addPowerup({ raceId, participant: callerMatch, userId: caller.id,
+      const matchEntries = userIndexes.map((sharedIndex) => ({ user: base.users[sharedIndex],
+        participant: addParticipant({ raceId, userId: base.users[sharedIndex].id,
+          index: sharedIndex }) }));
+      if (matchEntries.length < 2) matchEntries.push({ user: support,
+        participant: addParticipant({ raceId, userId: support.id, index: userIndex + 50_000 }) });
+      const supportMatch = matchEntries[1].participant;
+      for (const entry of matchEntries.slice(0, userIndexes.length)) {
+        if (hasVariant("tournament_match_inventory_held_typed")) addPowerup({ raceId,
+          participant: entry.participant, userId: entry.user.id, index: userIndex });
+        if (hasVariant("tournament_match_inventory_mystery_box")) addPowerup({ raceId,
+          participant: entry.participant, userId: entry.user.id,
           status: "MYSTERY_BOX", index: userIndex });
-      } else if (variant === "tournament_match_inventory_queued_box") {
-        addPowerup({ raceId, participant: callerMatch, userId: caller.id,
+        if (hasVariant("tournament_match_inventory_queued_box")) addPowerup({ raceId,
+          participant: entry.participant, userId: entry.user.id,
           status: "QUEUED", index: userIndex });
-      } else if (variant === "tournament_match_placement_hidden") {
-        const powerup = addPowerup({ raceId, participant: supportMatch, userId: support.id,
-          type: "DETOUR_SIGN", status: "USED", index: userIndex });
-        const effect = { id: crypto.randomUUID(), raceId, targetParticipantId: callerMatch.id,
-          targetUserId: caller.id, sourceUserId: support.id, powerupId: powerup.id,
-          type: "DETOUR_SIGN", status: "ACTIVE", startsAt: startedAt, expiresAt: endsAt };
-        activeEffects.push(effect); ids.raceActiveEffects.push(effect.id);
+        if (hasVariant("tournament_match_placement_hidden")) {
+          const powerup = addPowerup({ raceId, participant: supportMatch,
+            userId: supportMatch.userId, type: "DETOUR_SIGN", status: "USED", index: userIndex });
+          const effect = { id: crypto.randomUUID(), raceId,
+            targetParticipantId: entry.participant.id, targetUserId: entry.user.id,
+            sourceUserId: supportMatch.userId, powerupId: powerup.id,
+            type: "DETOUR_SIGN", status: "ACTIVE", startsAt: startedAt, expiresAt: endsAt };
+          activeEffects.push(effect); ids.raceActiveEffects.push(effect.id);
+        }
       }
     }
+    graphRows.push({ family: "tournament", bucket: render,
+      bracketSize: tournament.bracketSize,
+      participantCount: tournamentParticipants.filter((row) => row.tournamentId === tournamentId).length,
+      acceptedCount: tournamentParticipants.filter((row) => row.tournamentId === tournamentId &&
+        row.status === "ACCEPTED").length });
+    graphOrdinal += 1;
+  }
+  const tournamentUsers = coverage.byUser.flatMap((variants, userIndex) =>
+    variants.some((variant) => variant.startsWith("tournament_") || variant === "pinned_tournament")
+      ? [userIndex] : []);
+  if (tournamentUsers.length) {
+    const item = { id: crypto.randomUUID(), sku: `capacity_races_${crypto.createHash("sha256")
+      .update(String(runId)).digest("hex").slice(0, 16)}`, name: "Capacity Races Hat",
+    description: "Owned capacity fixture", slot: "HEAD", priceCoins: 0,
+    assetKey: "cowboy_hat", active: true, testOnly: false, earnOnly: true };
+    shopItems.push(item); ids.shopItems.push(item.id);
+    for (const userIndex of tournamentUsers) {
+      const purchase = { id: crypto.randomUUID(), userId: base.users[userIndex].id,
+        shopItemId: item.id, purchasedAt: now };
+      const equipped = { id: crypto.randomUUID(), userId: base.users[userIndex].id,
+        slot: "HEAD", shopItemId: item.id };
+      userShopItems.push(purchase); equippedAccessories.push(equipped);
+      ids.userShopItems.push(purchase.id); ids.userEquippedAccessories.push(equipped.id);
     }
-  });
+  }
   return { races, participants, tournaments, tournamentParticipants, powerups,
-    activeEffects, ids };
+    activeEffects, shopItems, userShopItems, equippedAccessories, ids,
+    graphEvidence: reconcileGraphEvidence({ schema: "races-tab-generated-graph-census-v1",
+      source: sourceCensus?.graphHistograms || {}, generated: {
+        ordinaryParticipantsPerRace: histogramOf(graphRows.filter((row) => row.family === "ordinary")
+          .map((row) => row.participantCount)),
+        tournamentBracketSize: histogramOf(graphRows.filter((row) => row.family === "tournament")
+          .map((row) => row.bracketSize)),
+        tournamentParticipants: histogramOf(graphRows.filter((row) => row.family === "tournament")
+          .map((row) => row.participantCount)),
+        tournamentAcceptedParticipants: histogramOf(graphRows.filter((row) => row.family === "tournament")
+          .map((row) => row.acceptedCount)),
+        inventoryPerRace: histogramOf(graphRows.filter((row) => row.family === "ordinary")
+          .map((row) => row.inventoryCount)),
+        effectsPerRace: histogramOf(graphRows.filter((row) => row.family === "ordinary")
+          .map((row) => row.effectCount)),
+      }, graphRows }) };
 }
 
 function sourceCountForVariant(variant, counts = {}) {
@@ -317,10 +679,13 @@ function sourceCountForVariant(variant, counts = {}) {
 
 async function materializeFullPageFixtureGraph({ prisma, runId, base, coverage, now,
   sourceCensus, manifest = base?.manifest } = {}) {
-  const plan = materializationPlan({ base, coverage, now, runId });
+  const plan = materializationPlan({ base, coverage, now, runId, sourceCensus });
   for (const [name, values] of Object.entries(plan.ids)) {
     manifest.ids[name] = [...(manifest.ids[name] || []), ...values];
   }
+  await createMany(prisma.shopItem, plan.shopItems);
+  await createMany(prisma.userShopItem, plan.userShopItems);
+  await createMany(prisma.userEquippedAccessory, plan.equippedAccessories);
   await createMany(prisma.tournament, plan.tournaments);
   await createMany(prisma.tournamentParticipant, plan.tournamentParticipants);
   await createMany(prisma.race, plan.races);
@@ -329,7 +694,7 @@ async function materializeFullPageFixtureGraph({ prisma, runId, base, coverage, 
   await createMany(prisma.raceActiveEffect, plan.activeEffects);
   const augmented = Object.fromEntries(REQUIRED_COVERAGE_VARIANTS.map((variant) => [variant,
     coverage.augmentedByUser.filter((values) => values.includes(variant)).length]));
-  return { manifestIds: plan.ids,
+  return { manifestIds: plan.ids, graphEvidence: plan.graphEvidence,
     naturallyGenerated: { ordinaryActiveMemberships:
       base.manifest?.ids?.raceParticipants?.length || 0, ...(coverage.naturalCounts || {}) },
     augmented, sourceZeroVariants: REQUIRED_COVERAGE_VARIANTS.filter((variant) =>
@@ -437,14 +802,18 @@ async function readRacesTabSourceCensus(prisma) {
   const [joint] = await prisma.$queryRawUnsafe(`WITH per_user AS (
     SELECT u.id,
       count(*) FILTER (WHERE r.tournament_id IS NULL AND r.status='active'
-        AND rp.status='accepted')::int AS active,
+        AND rp.status='accepted' AND COALESCE(r.is_team_race,false)=false)::int AS classic_active,
+      count(*) FILTER (WHERE r.tournament_id IS NULL AND r.status='active'
+        AND rp.status='accepted' AND COALESCE(r.is_team_race,false)=true)::int AS team_active,
       count(*) FILTER (WHERE r.tournament_id IS NULL AND r.status='pending'
-        AND rp.status='accepted')::int AS pending,
+        AND rp.status='accepted' AND r.creator_id=rp.user_id)::int AS pending_owner,
+      count(*) FILTER (WHERE r.tournament_id IS NULL AND r.status='pending'
+        AND rp.status='accepted' AND r.creator_id IS DISTINCT FROM rp.user_id)::int AS pending_accepted,
       count(*) FILTER (WHERE r.tournament_id IS NULL AND r.status='completed'
         AND rp.status='accepted')::int AS completed,
       count(*) FILTER (WHERE r.tournament_id IS NULL AND rp.status='invited')::int AS invited,
-      bool_or(COALESCE(r.is_team_race,false)) AS team,
-      bool_or(rp.favorited_at IS NOT NULL) AS pinned
+      bool_or(rp.favorited_at IS NOT NULL AND COALESCE(r.is_team_race,false)=false) AS pinned_classic,
+      bool_or(rp.favorited_at IS NOT NULL AND COALESCE(r.is_team_race,false)=true) AS pinned_team
     FROM users u LEFT JOIN race_participants rp ON rp.user_id=u.id
       LEFT JOIN races r ON r.id=rp.race_id GROUP BY u.id
   ), tournament_user AS (
@@ -457,16 +826,20 @@ async function readRacesTabSourceCensus(prisma) {
     FROM users u LEFT JOIN tournament_participants tp ON tp.user_id=u.id
       LEFT JOIN tournaments t ON t.id=tp.tournament_id GROUP BY u.id
   ), grouped AS (
-    SELECT p.active,p.pending,p.completed,p.invited,p.team,p.pinned,
+    SELECT p.classic_active,p.team_active,p.pending_owner,p.pending_accepted,
+      p.completed,p.invited,p.pinned_classic,p.pinned_team,
       t.tournament_invited,t.tournament_pending,t.tournament_active,t.tournament_completed,
       t.tournament_pinned,count(*)::int AS users
     FROM per_user p JOIN tournament_user t USING(id)
-    GROUP BY p.active,p.pending,p.completed,p.invited,p.team,p.pinned,
+    GROUP BY p.classic_active,p.team_active,p.pending_owner,p.pending_accepted,
+      p.completed,p.invited,p.pinned_classic,p.pinned_team,
       t.tournament_invited,t.tournament_pending,t.tournament_active,t.tournament_completed,
       t.tournament_pinned
   ) SELECT COALESCE(jsonb_agg(jsonb_build_object('users',users,'dimensions',
-      jsonb_build_object('active',active,'pending',pending,'completed',completed,
-        'invited',invited,'team',team,'pinned',pinned,
+      jsonb_build_object('classicActive',classic_active,'teamActive',team_active,
+        'pendingOwner',pending_owner,'pendingAccepted',pending_accepted,
+        'completed',completed,'invited',invited,
+        'pinnedClassic',pinned_classic,'pinnedTeam',pinned_team,
         'tournamentInvited',tournament_invited,'tournamentPending',tournament_pending,
         'tournamentActive',tournament_active,'tournamentCompleted',tournament_completed,
         'tournamentPinned',tournament_pinned)) ORDER BY users DESC), '[]'::jsonb)
@@ -482,13 +855,49 @@ async function readRacesTabSourceCensus(prisma) {
     'tournamentParticipants', COALESCE((SELECT jsonb_object_agg(x::text,n)
       FROM (SELECT x,count(*)::int n FROM (SELECT count(*)::int x FROM tournament_participants
         GROUP BY tournament_id) z GROUP BY x) q), '{}'::jsonb),
+    'tournamentAcceptedParticipants', COALESCE((SELECT jsonb_object_agg(x::text,n)
+      FROM (SELECT x,count(*)::int n FROM (SELECT count(*)::int x FROM tournament_participants
+        WHERE status='accepted' GROUP BY tournament_id) z GROUP BY x) q), '{}'::jsonb),
     'inventoryPerRace', COALESCE((SELECT jsonb_object_agg(x::text,n)
-      FROM (SELECT x,count(*)::int n FROM (SELECT count(*)::int x FROM race_powerups
-        GROUP BY race_id) z GROUP BY x) q), '{}'::jsonb),
+      FROM (SELECT x,count(*)::int n FROM (SELECT count(rp.id)::int x FROM races r
+        LEFT JOIN race_powerups rp ON rp.race_id=r.id GROUP BY r.id) z GROUP BY x) q), '{}'::jsonb),
     'effectsPerRace', COALESCE((SELECT jsonb_object_agg(x::text,n)
-      FROM (SELECT x,count(*)::int n FROM (SELECT count(*)::int x FROM race_active_effects
-        GROUP BY race_id) z GROUP BY x) q), '{}'::jsonb)
+      FROM (SELECT x,count(*)::int n FROM (SELECT count(rae.id)::int x FROM races r
+        LEFT JOIN race_active_effects rae ON rae.race_id=r.id GROUP BY r.id) z GROUP BY x) q), '{}'::jsonb)
   ) AS "histograms"`);
+  const [graphJoint] = await prisma.$queryRawUnsafe(`WITH ordinary_graph AS (
+    SELECT r.status::text AS status, COALESCE(r.is_team_race,false) AS team,
+      COALESCE(r.team_size,0)::int AS team_size,
+      count(DISTINCT rp.id)::int AS participants,
+      count(DISTINCT powerup.id)::int AS inventory,
+      count(DISTINCT effect.id)::int AS effects
+    FROM races r LEFT JOIN race_participants rp ON rp.race_id=r.id
+      LEFT JOIN race_powerups powerup ON powerup.race_id=r.id
+      LEFT JOIN race_active_effects effect ON effect.race_id=r.id
+    WHERE r.tournament_id IS NULL
+    GROUP BY r.id,r.status,r.is_team_race,r.team_size
+  ), ordinary_grouped AS (
+    SELECT status,team,team_size,participants,inventory,effects,count(*)::int AS graphs
+    FROM ordinary_graph GROUP BY status,team,team_size,participants,inventory,effects
+  ), tournament_graph AS (
+    SELECT t.status::text AS status,t.bracket_size::int AS bracket_size,
+      count(tp.id)::int AS participants,
+      count(tp.id) FILTER (WHERE tp.status='accepted')::int AS accepted
+    FROM tournaments t LEFT JOIN tournament_participants tp ON tp.tournament_id=t.id
+    GROUP BY t.id,t.status,t.bracket_size
+  ), tournament_grouped AS (
+    SELECT status,bracket_size,participants,accepted,count(*)::int AS graphs
+    FROM tournament_graph GROUP BY status,bracket_size,participants,accepted
+  ) SELECT jsonb_build_object(
+    'ordinary',COALESCE((SELECT jsonb_agg(jsonb_build_object('graphs',graphs,'dimensions',
+      jsonb_build_object('status',status,'team',team,'participants',participants,
+        'teamSize',team_size,'inventory',inventory,'effects',effects))
+        ORDER BY status,team,team_size,participants,inventory,effects)
+      FROM ordinary_grouped),'[]'::jsonb),
+    'tournaments',COALESCE((SELECT jsonb_agg(jsonb_build_object('graphs',graphs,'dimensions',
+      jsonb_build_object('status',status,'bracketSize',bracket_size,
+        'participants',participants,'accepted',accepted)) ORDER BY status,bracket_size,participants,accepted)
+      FROM tournament_grouped),'[]'::jsonb)) AS "histogram"`);
   const sourceTimestamp = new Date(row?.sourceTimestamp || 0);
   if (Number.isNaN(sourceTimestamp.getTime())) throw new Error("invalid Races-tab source census timestamp");
   const counts = Object.fromEntries(Object.entries(row || {})
@@ -502,9 +911,12 @@ async function readRacesTabSourceCensus(prisma) {
       Number(entry.users) < 1 || !entry.dimensions || typeof entry.dimensions !== "object")) {
     throw new Error("invalid Races-tab source joint histogram");
   }
+  assertGraphCensus({ graphHistograms: graphs?.histograms || {},
+    graphJointHistogram: graphJoint?.histogram || { ordinary: [], tournaments: [] } });
   const result = { schema: "races-tab-source-census-v2",
     sourceTimestamp: sourceTimestamp.toISOString(), counts, jointHistogram,
-    graphHistograms: graphs?.histograms || {} };
+    graphHistograms: graphs?.histograms || {}, graphJointHistogram: graphJoint?.histogram || {
+      ordinary: [], tournaments: [] } };
   return { ...result, sourceHash: crypto.createHash("sha256")
     .update(JSON.stringify(result)).digest("hex") };
 }
@@ -575,12 +987,22 @@ function fixtureStateEvidence(rows = {}) {
     status: row.status, targetUserId: row.targetUserId, sourceUserId: row.sourceUserId,
     powerupId: row.powerupId, startsAt: stableDate(row.startsAt), expiresAt: stableDate(row.expiresAt) }))
     .sort((left, right) => left.id.localeCompare(right.id));
+  const shopItems = (rows.shopItems || []).map((row) => ({ id: row.id, sku: row.sku,
+    slot: row.slot, assetKey: row.assetKey, active: row.active, testOnly: row.testOnly }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const userShopItems = (rows.userShopItems || []).map((row) => ({ id: row.id,
+    userId: row.userId, shopItemId: row.shopItemId }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const equippedAccessories = (rows.equippedAccessories || []).map((row) => ({ id: row.id,
+    userId: row.userId, shopItemId: row.shopItemId, slot: row.slot }))
+    .sort((left, right) => left.id.localeCompare(right.id));
   const byStatus = (values) => values.reduce((result, row) => {
     result[row.status] = (result[row.status] || 0) + 1; return result;
   }, {});
   const stableFingerprint = crypto.createHash("sha256")
     .update(JSON.stringify({ users, races, participants, friendships, tournaments,
-      tournamentParticipants, powerups, activeEffects,
+      tournamentParticipants, powerups, activeEffects, shopItems, userShopItems,
+      equippedAccessories,
       publicRaceCount: Number(rows.publicRaceCount || 0) })).digest("hex");
   return {
     schema: "races-tab-fixture-state-evidence-v1",
@@ -601,6 +1023,9 @@ function fixtureStateEvidence(rows = {}) {
       powerupsByStatus: byStatus(powerups),
       activeEffects: activeEffects.length,
       activeEffectsByStatus: byStatus(activeEffects),
+      shopItems: shopItems.length,
+      userShopItems: userShopItems.length,
+      equippedAccessories: equippedAccessories.length,
       publicRaceCount: Number(rows.publicRaceCount || 0),
     },
   };
@@ -616,8 +1041,13 @@ async function captureFixtureState(prisma, ids = {}) {
     ? ids.tournamentParticipants : [];
   const powerups = Array.isArray(ids.racePowerups) ? ids.racePowerups : [];
   const activeEffects = Array.isArray(ids.raceActiveEffects) ? ids.raceActiveEffects : [];
+  const shopItems = Array.isArray(ids.shopItems) ? ids.shopItems : [];
+  const userShopItems = Array.isArray(ids.userShopItems) ? ids.userShopItems : [];
+  const equippedAccessories = Array.isArray(ids.userEquippedAccessories)
+    ? ids.userEquippedAccessories : [];
   const [userRows, raceRows, participantRows, friendshipStateRows, tournamentRows,
-    tournamentParticipantRows, powerupRows, activeEffectRows, publicRaceCount] = await Promise.all([
+    tournamentParticipantRows, powerupRows, activeEffectRows, shopItemRows, userShopItemRows,
+    equippedAccessoryRows, publicRaceCount] = await Promise.all([
     users.length ? prisma.user.findMany({ where: { id: { in: users } },
       select: { id: true } }) : [],
     races.length ? prisma.race.findMany({ where: { id: { in: races } },
@@ -649,6 +1079,14 @@ async function captureFixtureState(prisma, ids = {}) {
         targetParticipantId: true, targetUserId: true, sourceUserId: true, powerupId: true,
         type: true, status: true, startsAt: true,
         expiresAt: true } }) : [],
+    shopItems.length ? prisma.shopItem.findMany({ where: { id: { in: shopItems } },
+      select: { id: true, sku: true, slot: true, assetKey: true, active: true,
+        testOnly: true } }) : [],
+    userShopItems.length ? prisma.userShopItem.findMany({ where: { id: { in: userShopItems } },
+      select: { id: true, userId: true, shopItemId: true } }) : [],
+    equippedAccessories.length ? prisma.userEquippedAccessory.findMany({
+      where: { id: { in: equippedAccessories } }, select: { id: true, userId: true,
+        shopItemId: true, slot: true } }) : [],
     typeof prisma.race.count === "function" ? prisma.race.count({ where: {
       isPublic: true, status: { in: ["PENDING", "ACTIVE"] }, tournamentId: null,
     } }) : 0,
@@ -656,7 +1094,9 @@ async function captureFixtureState(prisma, ids = {}) {
   return fixtureStateEvidence({ users: userRows, races: raceRows,
     participants: participantRows, friendships: friendshipStateRows,
     tournaments: tournamentRows, tournamentParticipants: tournamentParticipantRows,
-    powerups: powerupRows, activeEffects: activeEffectRows, publicRaceCount });
+    powerups: powerupRows, activeEffects: activeEffectRows, shopItems: shopItemRows,
+    userShopItems: userShopItemRows, equippedAccessories: equippedAccessoryRows,
+    publicRaceCount });
 }
 
 async function createRacesTabOpenFixtures({
@@ -701,7 +1141,7 @@ async function createRacesTabOpenFixtures({
         base, fullPage, coverageVariants: coverage.byUser[index], now });
       projectedUsers.push({ ...user, expectedProjectionVersion: PROJECTION_VERSION,
         expectedProjection, coverageVariants: coverage.byUser[index],
-        coverageAugmented: coverage.byUser[index].length > 0 });
+        coverageAugmented: coverage.augmentedByUser[index].length > 0 });
     }
     const preScanState = await captureFixtureState(prisma, base.manifest.ids);
     base.manifest.racesTabState = preScanState;
@@ -732,45 +1172,66 @@ async function createRacesTabOpenFixtures({
         },
         expectedProjectionVersion: PROJECTION_VERSION,
         pinnedSettings,
-        coverage,
+        coverage: {
+          schema: coverage.schema,
+          prefixSize: coverage.prefixSize,
+          requiredVariants: coverage.requiredVariants,
+          augmentedIdentities: coverage.augmentedIdentities,
+          augmentationShare: coverage.augmentationShare,
+          naturalCounts: coverage.naturalCounts,
+          jointHistogramApplied: coverage.jointHistogramApplied,
+          policy: coverage.policy,
+        },
         contentDistribution: {
           naturallyGenerated: fullPage.naturallyGenerated || {},
           augmented: fullPage.augmented || {},
           sourceZeroVariants: fullPage.sourceZeroVariants || [],
+          graphEvidence: fullPage.graphEvidence || null,
         },
         preScanState,
       },
       cleanupFriendships,
     };
   } catch (error) {
-    await cleanupRacesTabOpenFixtures({ prisma, manifest: base.manifest }).catch(() => {});
+    try { await cleanupRacesTabOpenFixtures({ prisma, manifest: base.manifest }); }
+    catch (cleanupError) {
+      throw new AggregateError([error, ...(cleanupError.errors || [cleanupError])],
+        `Races-tab fixture preparation and cleanup failed: ${error.message}`);
+    }
     throw error;
   }
 }
 
 async function cleanupRacesTabOpenFixtures({ prisma, manifest } = {}) {
+  const errors = [];
+  const attempt = async (operation) => {
+    try { return await operation(); } catch (error) { errors.push(error); return null; }
+  };
   const ids = Array.isArray(manifest?.ids?.friendships) ? manifest.ids.friendships : [];
-  if (ids.length) await prisma.friendship.deleteMany({ where: { id: { in: ids } } });
+  if (ids.length) await attempt(() => prisma.friendship.deleteMany({ where: { id: { in: ids } } }));
   const owned = manifest?.ids || {};
-  if (owned.raceActiveEffects?.length) await prisma.raceActiveEffect.deleteMany({
-    where: { id: { in: owned.raceActiveEffects } } });
-  if (owned.racePowerups?.length) await prisma.racePowerup.deleteMany({
-    where: { id: { in: owned.racePowerups } } });
-  if (owned.tournamentParticipants?.length) await prisma.tournamentParticipant.deleteMany({
-    where: { id: { in: owned.tournamentParticipants } } });
+  if (owned.raceActiveEffects?.length) await attempt(() => prisma.raceActiveEffect.deleteMany({
+    where: { id: { in: owned.raceActiveEffects } } }));
+  if (owned.racePowerups?.length) await attempt(() => prisma.racePowerup.deleteMany({
+    where: { id: { in: owned.racePowerups } } }));
+  if (owned.userEquippedAccessories?.length) await attempt(() =>
+    prisma.userEquippedAccessory.deleteMany({ where: { id: { in: owned.userEquippedAccessories } } }));
+  if (owned.userShopItems?.length) await attempt(() =>
+    prisma.userShopItem.deleteMany({ where: { id: { in: owned.userShopItems } } }));
+  if (owned.tournamentParticipants?.length) await attempt(() => prisma.tournamentParticipant.deleteMany({
+    where: { id: { in: owned.tournamentParticipants } } }));
   if (owned.tournaments?.length) {
-    await prisma.raceParticipant.deleteMany({ where: { race: {
-      tournamentId: { in: owned.tournaments } } } });
-    await prisma.race.deleteMany({ where: { tournamentId: { in: owned.tournaments } } });
-    await prisma.tournament.deleteMany({ where: { id: { in: owned.tournaments } } });
+    await attempt(() => prisma.raceParticipant.deleteMany({ where: { race: {
+      tournamentId: { in: owned.tournaments } } } }));
+    await attempt(() => prisma.race.deleteMany({ where: { tournamentId: { in: owned.tournaments } } }));
+    await attempt(() => prisma.tournament.deleteMany({ where: { id: { in: owned.tournaments } } }));
   }
-  let cleanup;
-  let cleanupError;
-  try { cleanup = await cleanupHomeOpenFixtures({ prisma, manifest }); }
-  catch (error) { cleanupError = error; }
-  const restoredSettings = await restoreRacesTabSettings({ prisma,
-    evidence: manifest?.racesTabPinnedSettings });
-  if (cleanupError) throw cleanupError;
+  let cleanup = await attempt(() => cleanupHomeOpenFixtures({ prisma, manifest }));
+  if (owned.shopItems?.length) await attempt(() => prisma.shopItem.deleteMany({
+    where: { id: { in: owned.shopItems } } }));
+  const restoredSettings = await attempt(() => restoreRacesTabSettings({ prisma,
+    evidence: manifest?.racesTabPinnedSettings }));
+  if (errors.length) throw new AggregateError(errors, "Races-tab fixture cleanup failed");
   return { ...cleanup, restoredSettings };
 }
 

@@ -17,10 +17,12 @@ test("bounded read telemetry uses the same identifier-free cache event schema", 
     env: { CAPACITY_MODE: "true" },
   });
   recordRead({ fragment: "all", source: "postgres", outcome: "bounded",
-    variant: "compact", raceCount: 3 });
+    variant: "compact", raceCount: 3, runId: "run-1", attemptId: "narrowing-2",
+    phase: "measurement" });
   assert.deepEqual(events, [{ event: "race_list_cache_v1", surface: "races",
     fragment: "all", source: "postgres", outcome: "bounded",
-    variant: "compact", raceCount: 3 }]);
+    variant: "compact", raceCount: 3, runId: "run-1", attemptId: "narrowing-2",
+    phase: "measurement" }]);
   assert.equal(JSON.stringify(events).includes("userId"), false);
 });
 
@@ -120,9 +122,11 @@ test("legacy cache hits and misses use the same logical read recorder", async ()
     readRecorder: (event) => missEvents.push(event),
   });
   await missCache.getStableMembership({ userId: "u1", variant: "legacy",
+    evidenceDimensions: { runId: "run-1", attemptId: "discovery-2", phase: "measurement" },
     load: async () => [stable("fresh", "ACTIVE")] });
   assert.deepEqual(missEvents, [{ fragment: "all", source: "postgres",
-    outcome: "miss", variant: "legacy", raceCount: 1 }]);
+    outcome: "miss", variant: "legacy", raceCount: 1,
+    runId: "run-1", attemptId: "discovery-2", phase: "measurement" }]);
 
   const bypassEvents = [];
   const bypassCache = buildRaceListCache({
@@ -132,9 +136,11 @@ test("legacy cache hits and misses use the same logical read recorder", async ()
     readRecorder: (event) => bypassEvents.push(event),
   });
   await bypassCache.getStableMembership({ userId: "u1", variant: "legacy",
+    evidenceDimensions: { runId: "run-1", attemptId: "discovery-3", phase: "measurement" },
     load: async () => [stable("direct", "ACTIVE")] });
   assert.deepEqual(bypassEvents, [{ fragment: "all", source: "postgres",
-    outcome: "bypass", variant: "legacy", raceCount: 1 }]);
+    outcome: "bypass", variant: "legacy", raceCount: 1,
+    runId: "run-1", attemptId: "discovery-3", phase: "measurement" }]);
 });
 
 test("race list variants canonicalize supported dimensions and ignore unknown tokens", () => {

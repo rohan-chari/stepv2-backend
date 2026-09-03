@@ -75,7 +75,10 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
   let cleanupError = null;
   let workflowError = null;
   try {
-    environment = await time("environmentPreparation", () => provider.prepare({ runId: id, cli, config }));
+    await time("environmentPreparation", async () => {
+      environment = await provider.prepare({ runId: id, cli, config });
+      return environment;
+    });
     if (typeof provider.deleteExactRaceListCache === "function") {
       environment.deleteExactRaceListCache = (input) => provider.deleteExactRaceListCache(input);
     }
@@ -134,6 +137,7 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
         actualWarmupSeconds: level.actualWarmupSeconds,
         warmupBudgetWarning: level.actualWarmupSeconds > level.configuredWarmupSeconds,
         ceremonySeconds: level.ceremonySeconds, ceremonyBudgetWarning: level.ceremonyBudgetWarning,
+        cacheConditioning: level.targetedReset?.cacheConditioning || null,
         ...level.measurement, outcome: classified.outcome });
       output.write(`${classified.outcome}\n`);
       return classified;
@@ -167,17 +171,26 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
     workflowError = error;
   } finally {
     if (!cli.keepRunning && environment) {
-      try { await time("cleanup", async () => {
+      const cleanupStartedAt = now();
+      try { await (async () => {
+        const errors = [];
         if (typeof workload.cleanup === "function") {
-          await workload.cleanup({ environment, fixtures, config });
+          try { await workload.cleanup({ environment, fixtures, config }); }
+          catch (error) { errors.push(error); }
         }
-        await provider.cleanup({ environment, config });
-      }); }
+        try { await provider.cleanup({ environment, config }); }
+        catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, "performance cleanup failed");
+      })(); }
       catch (error) { cleanupError = error; }
+      finally { breakdown.cleanup += Math.max(0, (now() - cleanupStartedAt) / 1000); }
     }
   }
   workflowError ||= interruptionError();
-  if (!workflowError && cleanupError) workflowError = cleanupError;
+  if (workflowError && cleanupError) {
+    workflowError = new AggregateError([workflowError, ...(cleanupError.errors || [cleanupError])],
+      `performance workflow and cleanup failed: ${workflowError.message}`);
+  } else if (!workflowError && cleanupError) workflowError = cleanupError;
   scan ||= { highestPassingRate: null, firstFailingRate: null, rateClassifications: [],
     headroomPolicy: config.safeCapacity?.headroomFactor ?? null,
     calculatedHeadroomTarget: null, safeCapacityCandidateTested: null,

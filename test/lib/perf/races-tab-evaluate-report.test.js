@@ -8,10 +8,15 @@ const { buildRacesMismatchArtifact, buildSummary, renderReport } = require(
 test("Races mismatch artifact is identifier-free and capped", () => {
   const artifact = buildRacesMismatchArtifact({ levels: Array.from({ length: 60 }, (_, rate) => ({
     rate, racesTabOpen: { content: { mismatchCount: 1,
-      mismatchCounts: { ordinary_field: 1 } } },
+      mismatchCounts: { ordinary_field: 1 }, mismatchSamples: [{ fixtureIndex: rate,
+        path: "ordinary.active.0.name", reason: "ordinary_field",
+        expectedType: "string", observedType: "null" }] } },
   })) });
   assert.equal(artifact.samples.length, 50);
   assert.equal(artifact.truncated, true);
+  assert.deepEqual(artifact.samples[0], { rate: 0, fixtureIndex: 0,
+    path: "ordinary.active.0.name", reason: "ordinary_field",
+    expectedType: "string", observedType: "null" });
   assert.doesNotMatch(JSON.stringify(artifact), /userId|raceId/);
 });
 

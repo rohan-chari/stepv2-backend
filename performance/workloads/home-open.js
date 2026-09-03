@@ -210,9 +210,12 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   runId, metricEpoch, cacheOnly = false, expectedPids = null,
   userOffset = 0,
   scriptPath = "scripts/k6/home-open.js", profile = "home-open", k6Variables = null,
+  captureConsole = false,
   captureBackendLog = captureCapacityBackendLog } = {}) {
   fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
   const summaryPath = path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.k6.json`);
+  const consolePath = captureConsole
+    ? path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.console.log`) : null;
   const commonVariables = {
     K6_BASE_URL: baseUrl, K6_FIXTURE_PATH: fixturePath, K6_SUMMARY_PATH: summaryPath,
   };
@@ -236,6 +239,7 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   let generatorCpu = { sampleCount: 0, cpuPercentAverage: null, cpuPercentMax: null };
   try {
     const k6 = spawn("k6", ["run", ...(phase === "measurement" ? [] : ["--no-thresholds"]),
+      ...(consolePath ? ["--console-output", consolePath] : []),
       ...args, path.join(repository, scriptPath)], {
       cwd: repository, env: { ...environment, ...variables }, stdio: "inherit",
     });
@@ -271,7 +275,7 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   return { summary: JSON.parse(fs.readFileSync(summaryPath, "utf8")),
     generator: { k6Exit, cpu: generatorCpu },
     binding: metricEpoch ? { measurementId: metricEpoch.measurementId } : null,
-    metrics: runtime, resources: runtime.resources, summaryPath, metricsPath };
+    metrics: runtime, resources: runtime.resources, summaryPath, metricsPath, consolePath };
 }
 
 function createHomeOpenWorkload(dependencies = {}) {

@@ -13,7 +13,7 @@ const { cleanupRacesTabOpenFixtures, createRacesTabOpenFixtures } =
 const { appSettings } = require("../../src/shared/config/appSettings");
 const { projectRacesTabPayload } = require(
   "../../src/modules/loadTesting/racesTabOpenProjection");
-const { REQUIRED_COVERAGE_VARIANTS } = require(
+const { REQUIRED_COVERAGE_VARIANTS, observedCoverageVariants } = require(
   "../../src/modules/loadTesting/racesTabOpenProjection");
 const { cleanDatabase, createTestUser, getSharedServer, prisma } = require("./setup");
 
@@ -140,6 +140,20 @@ describe("Races-tab capacity session public HTTP contract", () => {
       assert.ok(projections.some((projection) => projection.ordinaryEffectsByRace
         .some((row) => Object.keys(row.negative).length > 0)));
       for (const [userIndex, user] of fixture.users.entries()) {
+        const observedVariants = new Set(observedCoverageVariants(user.expectedProjection));
+        for (const assigned of user.coverageVariants) assert.ok(observedVariants.has(assigned),
+          `assigned fixture label ${assigned} must be proven by the actual HTTP response`);
+        if (user.coverageVariants.some((variant) => variant.startsWith("tournament_") ||
+            variant === "pinned_tournament")) {
+          const tournamentRows = Object.values(user.expectedProjection.tournaments).flat();
+          assert.ok(tournamentRows.some((row) => row.callerIdentity.equippedAccessories
+            .some((item) => item.assetId === "cowboy_hat")),
+          "real equipped accessory must be projected through GET /races");
+        }
+        if (user.coverageVariants.includes("tournament_live_match")) {
+          assert.ok(user.expectedProjection.tournaments.active
+            .some((row) => row.hasCurrentMatchRaceId && row.renderState === "live_match"));
+        }
         const result = await runRacesTabOpenSession({ baseUrl: server.baseUrl,
           context: user, sequence: userIndex,
           requestOne: async ({ baseUrl, entry }) => {

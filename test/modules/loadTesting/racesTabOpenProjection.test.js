@@ -6,6 +6,7 @@ const {
   PROJECTION_VERSION,
   REQUIRED_COVERAGE_VARIANTS,
   compareRacesTabProjection,
+  observedCoverageVariants,
   projectRacesTabPayload,
 } = require("../../../src/modules/loadTesting/racesTabOpenProjection");
 
@@ -44,6 +45,7 @@ function corePayload() {
       myIdentity: { displayName: "Runner", animal: "capybara",
         equippedAccessories: [{ slot: "head", assetId: "hat" }] },
       myEliminatedInRound: null, championUserId: null,
+      myCurrentMatchRaceId: "match-1",
       myCurrentMatch: { raceId: "match-1", myPlacement: 1,
         myPlacementHidden: false, endsAt: "2026-09-04T00:00:00.000Z",
         queuedBoxCount: 1, mysteryBoxCount: 1,
@@ -75,6 +77,7 @@ test("v2 projection separates ordinary and tournament-match content without IDs"
   assert.equal(projected.ordinaryEffectsByRace[0].positive.PROTEIN_SHAKE, 1);
   assert.equal(projected.ordinaryEffectsByRace[0].negative.DETOUR_SIGN, 1);
   assert.equal(projected.tournaments.active[0].renderState, "live_match");
+  assert.equal(projected.tournaments.active[0].hasCurrentMatchRaceId, true);
   assert.equal(projected.tournamentMatchByTournament[0].rowKey, "tournaments.active.0");
   assert.equal(projected.tournamentMatchByTournament[0].placement.value, 1);
   assert.equal(projected.discovery.publicRaceCount, 7);
@@ -82,6 +85,22 @@ test("v2 projection separates ordinary and tournament-match content without IDs"
     expectedContract: "friends-summary-v1" });
   assert.equal(JSON.stringify(projected).includes("race-active"), false);
   assert.equal(JSON.stringify(projected).includes("match-1"), false);
+});
+
+test("coverage is derived from observed response predicates rather than fixture labels", () => {
+  const projected = projectRacesTabPayload({ core: corePayload(), viewerUserId: "viewer" });
+  const variants = observedCoverageVariants(projected);
+  for (const variant of ["ordinary_classic_active", "pinned_classic",
+    "ordinary_placement_hidden", "ordinary_inventory_held_typed",
+    "ordinary_inventory_mystery_box", "ordinary_inventory_queued_box",
+    "ordinary_effect_positive", "ordinary_effect_negative", "ordinary_invite",
+    "pinned_tournament", "tournament_live_match",
+    "tournament_match_placement_visible", "tournament_match_inventory_held_typed",
+    "tournament_match_inventory_mystery_box", "tournament_match_inventory_queued_box"]) {
+    assert.ok(variants.includes(variant), variant);
+  }
+  assert.equal(variants.includes("ordinary_team_active"), false);
+  assert.equal(variants.includes("tournament_between_rounds"), false);
 });
 
 test("projection comparison is additive-field tolerant and returns stable mismatch enums", () => {

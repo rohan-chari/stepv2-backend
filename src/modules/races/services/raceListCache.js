@@ -317,6 +317,7 @@ function buildRaceListCache({
       outcome: read?.disabled === true ? "disabled" : "miss",
       variant: safeVariant,
       raceCount: races.length,
+      ...(evidenceDimensions || {}),
     });
     return { races, source: "postgres" };
   }

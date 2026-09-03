@@ -3,7 +3,7 @@ import exec from "k6/execution";
 import { Counter, Rate, Trend } from "k6/metrics";
 import { SharedArray } from "k6/data";
 import { compareRacesTabProjection, projectRacesTabPayload, PROJECTION_VERSION,
-  REQUIRED_COVERAGE_VARIANTS } from "./races-tab-projection.js";
+  REQUIRED_COVERAGE_VARIANTS, observedCoverageVariants } from "./races-tab-projection.js";
 
 const fixture = new SharedArray("races-tab-open-fixture", () =>
   [JSON.parse(open(__ENV.K6_FIXTURE_PATH))])[0];
@@ -158,29 +158,81 @@ function coreProjection(value = {}) {
     tournamentMatchByTournament: value.tournamentMatchByTournament };
 }
 
-function recordContentComparison(comparison) {
+function recordContentComparison(comparison, user) {
   if (comparison.matches) return;
   contentMismatches.add(comparison.mismatchCount);
   for (const [reason, count] of Object.entries(comparison.mismatchCounts)) {
     mismatchReasons.add(count, { reason });
+  }
+  if (trafficPhase === "measurement" && user.userIndex < 50) {
+    for (const sample of comparison.samples.slice(0, 1)) console.error(JSON.stringify({
+      event: "races_tab_projection_mismatch_sample_v1", fixtureIndex: user.userIndex,
+      reason: sample.reason, path: sample.path,
+      expectedType: sample.expectedType, observedType: sample.observedType,
+    }));
   }
 }
 
 function recordProjectionTotals(projection) {
   for (const [bucket, rows] of Object.entries(projection.ordinary || {})) {
     contentRows.add(rows.length, { family: "ordinary", state: bucket });
+    for (const row of rows) {
+      if (row.isFavorite) contentRows.add(1,
+        { family: "favorites", state: row.kind === "team" ? "team" : "classic" });
+      if (row.kind === "team") contentRows.add(1,
+        { family: "teams", state: `size_${row.team?.size ?? "unknown"}` });
+      if (row.placement?.privacyActive) contentRows.add(1,
+        { family: "placement", state: "privacy" });
+      if (row.placement?.hidden) contentRows.add(1,
+        { family: "placement", state: "hidden" });
+      else if (row.placement?.value != null || row.placement?.displayValue != null) {
+        contentRows.add(1, { family: "placement", state: "visible" });
+      }
+    }
   }
   for (const [bucket, rows] of Object.entries(projection.tournaments || {})) {
     contentRows.add(rows.length, { family: "tournament", state: bucket });
     for (const row of rows) contentRows.add(1,
       { family: "tournament_render", state: row.renderState || "unknown" });
+    for (const row of rows) if (row.isFavorite) {
+      contentRows.add(1, { family: "favorites", state: "tournament" });
+    }
   }
   contentRows.add((projection.ordinaryInventoryByRace || []).length,
     { family: "ordinary_inventory", state: "rows" });
+  for (const row of projection.ordinaryInventoryByRace || []) {
+    contentRows.add((row.heldTypedItems || []).length,
+      { family: "ordinary_inventory", state: "held" });
+    contentRows.add(Number(row.mysteryBoxCount || 0),
+      { family: "ordinary_inventory", state: "mystery" });
+    contentRows.add(Number(row.queuedBoxCount || 0),
+      { family: "ordinary_inventory", state: "queued" });
+  }
   contentRows.add((projection.ordinaryEffectsByRace || []).length,
     { family: "ordinary_effect", state: "rows" });
+  for (const row of projection.ordinaryEffectsByRace || []) {
+    contentRows.add(Object.values(row.positive || {}).reduce((sum, count) => sum + count, 0),
+      { family: "ordinary_effect", state: "positive" });
+    contentRows.add(Object.values(row.negative || {}).reduce((sum, count) => sum + count, 0),
+      { family: "ordinary_effect", state: "negative" });
+  }
   contentRows.add((projection.tournamentMatchByTournament || []).length,
     { family: "tournament_match", state: "rows" });
+  for (const row of projection.tournamentMatchByTournament || []) {
+    if (row.placement?.privacyActive) contentRows.add(1,
+      { family: "match_placement", state: "privacy" });
+    if (row.placement?.hidden) contentRows.add(1,
+      { family: "match_placement", state: "hidden" });
+    else if (row.placement?.value != null || row.placement?.displayValue != null) {
+      contentRows.add(1, { family: "match_placement", state: "visible" });
+    }
+    contentRows.add((row.inventory?.heldTypedItems || []).length,
+      { family: "match_inventory", state: "held" });
+    contentRows.add(Number(row.inventory?.mysteryBoxCount || 0),
+      { family: "match_inventory", state: "mystery" });
+    contentRows.add(Number(row.inventory?.queuedBoxCount || 0),
+      { family: "match_inventory", state: "queued" });
+  }
   contentRows.add(Number(projection.discovery?.publicRaceCount || 0),
     { family: "discovery", state: "public_races" });
 }
@@ -293,9 +345,11 @@ export async function racesTabOpen() {
     discovery: parseMap(discovery) || {}, friends: friendsBody,
     friendsShouldRequest: user.zeroFriends === true, viewerUserId: user.viewerUserId });
   const contentComparison = compareRacesTabProjection(user.expectedProjection, observedProjection);
-  recordContentComparison(contentComparison);
+  recordContentComparison(contentComparison, user);
   recordProjectionTotals(observedProjection);
-  for (const variant of user.coverageVariants) coverageVariantSeen.add(1, { variant });
+  for (const variant of observedCoverageVariants(observedProjection)) {
+    coverageVariantSeen.add(1, { variant });
+  }
   if (!coreValid && core?.status !== 0) contractErrors.add(1, { endpoint: "compact-races" });
   const deadlineExceeded = Date.now() - began > ITERATION_DEADLINE_MS;
   if (deadlineExceeded) deadlineTimeouts.add(1);

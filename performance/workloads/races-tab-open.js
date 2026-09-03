@@ -5,7 +5,7 @@ const path = require("node:path");
 const { PROFILES } = require("../../src/modules/loadTesting/contract");
 const { canonicalRaceListVariant } = require(
   "../../src/modules/races/services/raceListCache");
-const { PROJECTION_VERSION, projectRacesTabPayload } = require(
+const { PROJECTION_VERSION, observedCoverageVariants, projectRacesTabPayload } = require(
   "../../src/modules/loadTesting/racesTabOpenProjection");
 const {
   cleanupRacesTabOpenFixtures,
@@ -85,8 +85,6 @@ async function captureExpectedProjections({ fixture, baseUrl, runId, fetchImpl =
   if (!fixture?.users?.length || !baseUrl || typeof fetchImpl !== "function") {
     throw new Error("Races-tab expected projection capture requires users and the prepared target");
   }
-  if (fixture.users.every((user) => user.expectedProjection?.expectedProjectionVersion ===
-      PROJECTION_VERSION)) return fixture;
   let cursor = 0;
   const responseBytes = [];
   const workers = Array.from({ length: Math.min(concurrency, fixture.users.length) }, async () => {
@@ -106,16 +104,42 @@ async function captureExpectedProjections({ fixture, baseUrl, runId, fetchImpl =
         friends: user.zeroFriends ? { contract: "friends-summary-v1", friends: [] } : null,
         friendsShouldRequest: user.zeroFriends === true, viewerUserId: user.id });
       user.expectedProjectionVersion = PROJECTION_VERSION;
-      responseBytes[index] = Buffer.byteLength(JSON.stringify(core), "utf8");
+      const observed = new Set(observedCoverageVariants(user.expectedProjection));
+      const missing = (user.coverageVariants || []).filter((variant) => !observed.has(variant));
+      if (missing.length) {
+        throw new Error(`Races-tab fixture labels do not match captured response predicates at user ${index}: ${missing.join(",")}`);
+      }
+      responseBytes[index] = { bytes: Buffer.byteLength(JSON.stringify(core), "utf8"),
+        rowCount: ["active", "pending", "completed", "tournaments"]
+          .reduce((sum, key) => sum + (Array.isArray(core[key]) ? core[key].length : 0), 0),
+        observedVariants: [...observed].sort(),
+        provenance: user.coverageAugmented === true ? "augmented" : "natural" };
     }
   });
   await Promise.all(workers);
-  const sortedBytes = responseBytes.filter(Number.isFinite).sort((a, b) => a - b);
-  const percentile = (fraction) => sortedBytes.length
-    ? sortedBytes[Math.min(sortedBytes.length - 1, Math.ceil(sortedBytes.length * fraction) - 1)] : 0;
+  const summarize = (values) => {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    const percentile = (fraction) => sorted.length
+      ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] : 0;
+    return { count: sorted.length, p50: percentile(0.5), p95: percentile(0.95) };
+  };
+  const byCoreRowCount = {};
+  const byObservedVariant = {};
+  const byProvenance = { natural: [], augmented: [] };
+  for (const row of responseBytes) {
+    (byCoreRowCount[row.rowCount] ||= []).push(row.bytes);
+    for (const variant of row.observedVariants) (byObservedVariant[variant] ||= []).push(row.bytes);
+    byProvenance[row.provenance].push(row.bytes);
+  }
   fixture.topology ||= {};
   fixture.topology.generatedCoreResponseBytes = { schema: "races-tab-response-bytes-v1",
-    count: sortedBytes.length, p50: percentile(0.5), p95: percentile(0.95) };
+    ...summarize(responseBytes.map((row) => row.bytes)),
+    byCoreRowCount: Object.fromEntries(Object.entries(byCoreRowCount)
+      .map(([key, values]) => [key, summarize(values)])),
+    byObservedVariant: Object.fromEntries(Object.entries(byObservedVariant)
+      .map(([key, values]) => [key, summarize(values)])),
+    byProvenance: Object.fromEntries(Object.entries(byProvenance)
+      .map(([key, values]) => [key, summarize(values)])) };
   return fixture;
 }
 
@@ -141,27 +165,37 @@ function measurementIdentityOffset(config) {
   return identityPoolSize({ rate: maximumConfiguredRate(config), config });
 }
 
-async function fetchCoreCohort({ users, baseUrl, runId, attemptId, fetchImpl, concurrency = 24 }) {
+async function fetchCoreCohort({ users, baseUrl, runId, attemptId, fetchImpl, concurrency = 24,
+  deadlineMillis, nowMillis = Date.now, deadlineError = () =>
+    new Error("Races-tab cache conditioning exceeded wall-clock budget") }) {
   let cursor = 0;
   await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, users.length)) },
     async () => {
       while (cursor < users.length) {
+        const remaining = deadlineMillis - nowMillis();
+        if (remaining <= 0) throw deadlineError();
         const user = users[cursor++];
         const headers = { ...racesHeaders({ token: user.token, runId }),
           "X-Capacity-Attempt-Id": attemptId, "X-Capacity-Phase": "cache-conditioning" };
         const response = await fetchImpl(`${baseUrl}/races?view=compact-v1`, {
-          headers, redirect: "error", signal: AbortSignal.timeout(15_000),
+          headers, redirect: "error", signal: AbortSignal.timeout(Math.max(1,
+            Math.min(15_000, remaining))),
         });
         await responseJson(response, `cache conditioning ${attemptId}`);
+        if (nowMillis() > deadlineMillis) {
+          throw deadlineError();
+        }
       }
     }));
 }
 
 async function conditionMeasurementCache({ rate, purpose, attempt, environment, fixtures, config,
-  deleteExact, fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+  deleteExact, fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  nowMillis = Date.now }) {
   if (typeof deleteExact !== "function") {
     throw new Error("Races-tab cache conditioning requires exact-key Redis cleanup");
   }
+  const startedAtMillis = nowMillis();
   const poolSize = identityPoolSize({ rate, config });
   const offset = measurementIdentityOffset(config);
   const users = fixtures.users.slice(offset, offset + poolSize);
@@ -179,6 +213,20 @@ async function conditionMeasurementCache({ rate, purpose, attempt, environment, 
         Number(profile.expired300Share) - 1) > 1e-9 || profile.maximumSeconds > 30) {
     throw new Error("invalid bounded Races-tab cache conditioning profile");
   }
+  const deadlineMillis = startedAtMillis + Number(profile.maximumSeconds) * 1000;
+  const deadlineError = () => {
+    const durationSeconds = (nowMillis() - startedAtMillis) / 1000;
+    const error = new Error(`Races-tab cache conditioning exceeded wall-clock budget of ${profile.maximumSeconds}s`);
+    error.cacheConditioning = { schema: "races-tab-cache-conditioning-overrun-v1",
+      durationSeconds, budgetSeconds: Number(profile.maximumSeconds), budgetExceeded: true };
+    return error;
+  };
+  const assertBudget = () => {
+    if (nowMillis() > deadlineMillis) {
+      throw deadlineError();
+    }
+  };
+  assertBudget();
   const bucket = (index) => (index * 37) % 100;
   const hot30 = users.filter((_, index) => bucket(index) < profile.hot30Share * 100);
   const hot15 = users.filter((_, index) => bucket(index) >= profile.hot30Share * 100 &&
@@ -187,20 +235,24 @@ async function conditionMeasurementCache({ rate, purpose, attempt, environment, 
     bucket(index) >= (profile.hot30Share + profile.hot15Share) * 100);
   const workloadRunId = fixtures.manifest?.runId || environment.runId;
   await fetchCoreCohort({ users: hot30, baseUrl: environment.baseUrl, runId: workloadRunId,
-    attemptId, fetchImpl });
+    attemptId, fetchImpl, deadlineMillis, nowMillis, deadlineError });
   // Stay inside the 30-second membership TTL rather than racing its expiry.
-  await sleep(14_000);
+  await sleep(Math.max(0, startedAtMillis + 14_000 - nowMillis()));
+  assertBudget();
   await fetchCoreCohort({ users: hot15, baseUrl: environment.baseUrl, runId: workloadRunId,
-    attemptId, fetchImpl });
-  await sleep(15_000);
+    attemptId, fetchImpl, deadlineMillis, nowMillis, deadlineError });
+  await sleep(Math.max(0, startedAtMillis + 29_000 - nowMillis()));
+  assertBudget();
+  const durationSeconds = (nowMillis() - startedAtMillis) / 1000;
   return { schema: "races-tab-cache-conditioning-v1", attemptId, deletedKeys,
     profile: profile.profile, cohorts: { hot30Seconds: hot30.length, hot15Seconds: hot15.length,
-    expired300Seconds: expired300.length }, durationSeconds: 29,
+    expired300Seconds: expired300.length }, durationSeconds, budgetSeconds: profile.maximumSeconds,
+    budgetExceeded: durationSeconds > Number(profile.maximumSeconds),
     expiredDisposition: "exact-keys-absent-equivalent-to-expired" };
 }
 
 function normalizeRacesTabEvidence({ summary, rate, measurementSeconds, fixture,
-  cacheEvidence = null, userOffset = 0, identityPool = null } = {}) {
+  cacheEvidence = null, userOffset = 0, identityPool = null, mismatchSamples = [] } = {}) {
   const phase = { phase: "measurement" };
   const started = metric(summary, "races_tab_sessions_started", "count", phase, 0);
   const offered = metric(summary, "races_tab_sessions_offered", "count", phase, started);
@@ -261,6 +313,15 @@ function normalizeRacesTabEvidence({ summary, rate, measurementSeconds, fixture,
     discovery: ["public_races"] })) {
     contentTotals[family] = Object.fromEntries(states.map((state) => [state,
       metric(summary, "races_tab_content_rows", "count", { ...phase, family, state }, 0)]));
+  }
+  for (const [metricName, row] of Object.entries(summary?.metrics || {})) {
+    if (!metricName.startsWith("races_tab_content_rows{") || !metricName.endsWith("}")) continue;
+    const tags = Object.fromEntries(metricName.slice(metricName.indexOf("{") + 1, -1)
+      .split(",").map((part) => { const at = part.indexOf(":");
+        return [part.slice(0, at), part.slice(at + 1)]; }));
+    if (tags.phase !== "measurement" || !tags.family || !tags.state) continue;
+    contentTotals[tags.family] ||= {};
+    contentTotals[tags.family][tags.state] = Number(row?.values?.count || 0);
   }
   const racesTabOpen = {
     started,
@@ -338,8 +399,9 @@ function normalizeRacesTabEvidence({ summary, rate, measurementSeconds, fixture,
       coveredVariants: requiredVariants.length - missingVariants.length,
       coverageCounts,
       totals: contentTotals,
+      mismatchSamples: mismatchSamples.slice(0, 50),
+      mismatchSamplesTruncated: mismatchCount > Math.min(50, mismatchSamples.length),
     },
-    fixtureCohort: fixture?.topology || null,
   };
   return {
     racesCoreP50Ms: racesTabOpen.coreLatencyMs.p50,
@@ -388,6 +450,33 @@ function raceListCacheEvidenceFromLog(log = "", expectedDimensions = null) {
   }
   if (result.eventCount === 0) result.unavailableReason = "no-cache-source-events-observed";
   return result;
+}
+
+function racesTabMismatchSamplesFromLog(log = "", sampleLimit = 50) {
+  const samples = [];
+  const seen = new Set();
+  let observedSampleCount = 0;
+  const safeType = new Set(["array", "null", "object", "string", "number", "boolean", "undefined"]);
+  for (const line of String(log).split("\n")) {
+    const start = line.indexOf("{");
+    if (start < 0) continue;
+    let row;
+    try { row = JSON.parse(line.slice(start)); } catch { continue; }
+    if (row?.event !== "races_tab_projection_mismatch_sample_v1" ||
+        !Number.isInteger(row.fixtureIndex) || row.fixtureIndex < 0 ||
+        typeof row.path !== "string" || row.path.length > 256 ||
+        !require("../../src/modules/loadTesting/racesTabOpenProjection").MISMATCH_REASONS
+          .includes(row.reason) || !safeType.has(row.expectedType) || !safeType.has(row.observedType)) {
+      continue;
+    }
+    const key = `${row.fixtureIndex}:${row.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key); observedSampleCount += 1;
+    if (samples.length < sampleLimit) samples.push({ fixtureIndex: row.fixtureIndex,
+      path: row.path, reason: row.reason, expectedType: row.expectedType,
+      observedType: row.observedType });
+  }
+  return { samples, observedSampleCount, truncated: observedSampleCount > samples.length };
 }
 
 function shares(counts, total) {
@@ -450,6 +539,7 @@ function createRacesTabOpenWorkload(dependencies = {}) {
     userOffset,
     scriptPath: "scripts/k6/races-tab-open.js",
     profile: "races-tab-open",
+    captureConsole: phase === "measurement",
     k6Variables: {
       K6_RACES_TAB_RATE: String(rate),
       K6_RACES_TAB_MEASUREMENT_SECONDS: String(seconds),
@@ -494,15 +584,21 @@ function createRacesTabOpenWorkload(dependencies = {}) {
         fs.writeFileSync(fixturePath, serialized, { flag: "wx", mode: 0o600 });
         return { ...fixture, fixturePath };
       } catch (error) {
-        if (fixturePath && fs.existsSync(fixturePath)) fs.unlinkSync(fixturePath);
+        const cleanupErrors = [];
+        if (fixturePath && fs.existsSync(fixturePath)) {
+          try { fs.unlinkSync(fixturePath); } catch (cleanupError) { cleanupErrors.push(cleanupError); }
+        }
         if (typeof environment.deleteExactRaceListCache === "function") {
           const variant = canonicalRaceListVariant({ clientFeatures: new Set(
             PROFILES["races-tab-open"].racesTabOpen.clientFeatures), compact: true });
-          await environment.deleteExactRaceListCache({ environment,
-            userIds: fixture.users.map((user) => user.id), variant }).catch(() => {});
+          try { await environment.deleteExactRaceListCache({ environment,
+            userIds: fixture.users.map((user) => user.id), variant }); }
+          catch (cleanupError) { cleanupErrors.push(cleanupError); }
         }
-        await cleanupFixtures({ prisma: environment.prisma, manifest: fixture.manifest })
-          .catch(() => {});
+        try { await cleanupFixtures({ prisma: environment.prisma, manifest: fixture.manifest }); }
+        catch (cleanupError) { cleanupErrors.push(...(cleanupError.errors || [cleanupError])); }
+        if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors],
+          `Races-tab fixture serialization and cleanup failed: ${error.message}`);
         throw error;
       }
     },
@@ -527,6 +623,8 @@ function createRacesTabOpenWorkload(dependencies = {}) {
       const normalized = normalizeRacesTabEvidence({ summary: result.summary, rate,
         measurementSeconds, fixture: fixtures, userOffset: measurementOffset,
         identityPool: poolSize,
+        mismatchSamples: result.consolePath && fs.existsSync(result.consolePath)
+          ? racesTabMismatchSamplesFromLog(fs.readFileSync(result.consolePath, "utf8")).samples : [],
         cacheEvidence: cacheEvidenceFromResult(result, config.cache.raceListTargetMix, {
           runId: fixtures.manifest?.runId || environment.runId,
           attemptId: `${purpose}-${attempt}`, phase: "measurement",
@@ -570,17 +668,21 @@ function createRacesTabOpenWorkload(dependencies = {}) {
       return evidence;
     },
     async cleanup({ environment, fixtures }) {
+      const errors = [];
       if (fixtures?.users?.length && typeof environment.deleteExactRaceListCache === "function") {
         const variant = canonicalRaceListVariant({ clientFeatures: new Set(
           PROFILES["races-tab-open"].racesTabOpen.clientFeatures), compact: true,
         });
-        await environment.deleteExactRaceListCache({ environment,
-          userIds: fixtures.users.map((user) => user.id), variant });
+        try { await environment.deleteExactRaceListCache({ environment,
+          userIds: fixtures.users.map((user) => user.id), variant }); }
+        catch (error) { errors.push(error); }
       }
-      await cleanupFixtures({ prisma: environment.prisma, manifest: fixtures?.manifest });
+      try { await cleanupFixtures({ prisma: environment.prisma, manifest: fixtures?.manifest }); }
+      catch (error) { errors.push(...(error.errors || [error])); }
       if (fixtures?.fixturePath && fs.existsSync(fixtures.fixturePath)) {
-        fs.unlinkSync(fixtures.fixturePath);
+        try { fs.unlinkSync(fixtures.fixturePath); } catch (error) { errors.push(error); }
       }
+      if (errors.length) throw new AggregateError(errors, "Races-tab workload cleanup failed");
     },
   };
 }
@@ -595,4 +697,5 @@ module.exports = {
   measurementIdentityOffset,
   normalizeRacesTabEvidence,
   raceListCacheEvidenceFromLog,
+  racesTabMismatchSamplesFromLog,
 };

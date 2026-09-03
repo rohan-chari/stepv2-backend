@@ -85,7 +85,7 @@ function tournamentRenderState(row, viewerUserId) {
       ? "champion" : "completed_non_champion";
   }
   if (row?.myEliminatedInRound != null) return "eliminated";
-  if (row?.myCurrentMatch) return "live_match";
+  if (row?.myCurrentMatchRaceId || row?.myCurrentMatch) return "live_match";
   return "between_rounds";
 }
 function tournamentBucket(row, viewerUserId) {
@@ -106,6 +106,7 @@ function tournamentRow(row, bucket, index, viewerUserId) {
   return { rowKey: `tournaments.${bucket}.${index}`, name: nullableString(row?.name),
     callerStatus: nullableString(row?.myStatus), status: nullableString(row?.status),
     renderState: tournamentRenderState(row, viewerUserId),
+    hasCurrentMatchRaceId: typeof row?.myCurrentMatchRaceId === "string",
     isFavorite: boolean(row?.isFavorite), favoriteOrder: timeValue(row?.favoritedAt),
     bracketSize: integer(row?.bracketSize), acceptedCount: integer(row?.acceptedCount),
     currentRound: integer(row?.currentRound), totalRounds: integer(row?.totalRounds),
@@ -116,6 +117,58 @@ function tournamentRow(row, bucket, index, viewerUserId) {
       animal: nullableString(row?.myIdentity?.animal),
       equippedAccessories: array(row?.myIdentity?.equippedAccessories).map((item) => ({
         slot: nullableString(item?.slot), assetId: nullableString(item?.assetId) })) } };
+}
+
+function objectCount(value) {
+  return value && typeof value === "object" ? Object.values(value)
+    .reduce((total, count) => total + Number(count || 0), 0) : 0;
+}
+
+export function observedCoverageVariants(projection = {}) {
+  const seen = new Set();
+  const ordinary = projection.ordinary || {};
+  for (const row of array(ordinary.active)) {
+    seen.add(row.kind === "team" ? "ordinary_team_active" : "ordinary_classic_active");
+    if (row.isFavorite) seen.add(row.kind === "team" ? "pinned_team" : "pinned_classic");
+    if (row.placement?.hidden || row.placement?.privacyActive) seen.add("ordinary_placement_hidden");
+    else if (row.placement?.value != null || row.placement?.displayValue != null) {
+      seen.add("ordinary_placement_visible");
+    }
+  }
+  for (const row of array(ordinary.pending)) {
+    seen.add(row.isCreator ? "ordinary_pending_owner" : "ordinary_pending_accepted");
+    if (row.isFavorite) seen.add(row.kind === "team" ? "pinned_team" : "pinned_classic");
+  }
+  if (array(ordinary.invited).length) seen.add("ordinary_invite");
+  if (array(ordinary.completed).length) seen.add("ordinary_completed");
+  for (const row of array(projection.ordinaryInventoryByRace)) {
+    if (array(row.heldTypedItems).length) seen.add("ordinary_inventory_held_typed");
+    if (Number(row.mysteryBoxCount) > 0) seen.add("ordinary_inventory_mystery_box");
+    if (Number(row.queuedBoxCount) > 0) seen.add("ordinary_inventory_queued_box");
+  }
+  for (const row of array(projection.ordinaryEffectsByRace)) {
+    if (objectCount(row.positive) > 0) seen.add("ordinary_effect_positive");
+    if (objectCount(row.negative) > 0) seen.add("ordinary_effect_negative");
+  }
+  const stateVariant = { invite: "tournament_invite", lobby: "tournament_lobby",
+    between_rounds: "tournament_between_rounds", live_match: "tournament_live_match",
+    eliminated: "tournament_eliminated", champion: "tournament_champion",
+    completed_non_champion: "tournament_completed_non_champion" };
+  for (const rows of Object.values(projection.tournaments || {})) for (const row of array(rows)) {
+    if (stateVariant[row.renderState]) seen.add(stateVariant[row.renderState]);
+    if (row.isFavorite) seen.add("pinned_tournament");
+  }
+  for (const row of array(projection.tournamentMatchByTournament)) {
+    if (row.placement?.hidden || row.placement?.privacyActive) {
+      seen.add("tournament_match_placement_hidden");
+    } else if (row.placement?.value != null || row.placement?.displayValue != null) {
+      seen.add("tournament_match_placement_visible");
+    }
+    if (array(row.inventory?.heldTypedItems).length) seen.add("tournament_match_inventory_held_typed");
+    if (Number(row.inventory?.mysteryBoxCount) > 0) seen.add("tournament_match_inventory_mystery_box");
+    if (Number(row.inventory?.queuedBoxCount) > 0) seen.add("tournament_match_inventory_queued_box");
+  }
+  return REQUIRED_COVERAGE_VARIANTS.filter((variant) => seen.has(variant));
 }
 function tournamentMatch(row, rowKey) {
   const match = row?.myCurrentMatch;

@@ -14,6 +14,7 @@ const {
   measurementIdentityOffset,
   normalizeRacesTabEvidence,
   raceListCacheEvidenceFromLog,
+  racesTabMismatchSamplesFromLog,
 } = require("../../../performance/workloads/races-tab-open");
 
 test("v2 identity pools use the locked deadline factor and remain disjoint", () => {
@@ -43,6 +44,37 @@ test("expected projections are captured once from the prepared target without ID
   assert.doesNotMatch(JSON.stringify(fixture.users[0].expectedProjection), /viewer-a/);
 });
 
+test("projection capture rejects a fixture label that the HTTP response does not satisfy", async () => {
+  const fixture = { users: [{ id: "viewer", token: "token", zeroFriends: false,
+    coverageAugmented: false,
+    expectedProjectionVersion: "races-tab-open-projection-v2",
+    expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2",
+      ordinary: { active: [{ team: true }] } },
+    coverageVariants: ["ordinary_team_active"] }] };
+  await assert.rejects(captureExpectedProjections({ fixture, baseUrl: "http://127.0.0.1",
+    runId: "run", fetchImpl: async (url) => ({ status: 200, json: async () =>
+      url.includes("discovery") ? { publicRaceCount: 0 } : { contract: "race-list-compact-v1",
+        active: [], pending: [], completed: [], tournaments: [] } }) }),
+  /labels do not match.*ordinary_team_active/i);
+});
+
+test("projection capture reports response bytes by independently observed family and row count", async () => {
+  const fixture = { users: [{ id: "viewer", token: "token", zeroFriends: false,
+    coverageVariants: ["ordinary_classic_active"] }] };
+  await captureExpectedProjections({ fixture, baseUrl: "http://127.0.0.1", runId: "run",
+    fetchImpl: async (url) => ({ status: 200, json: async () => url.includes("discovery")
+      ? { publicRaceCount: 0 }
+      : { contract: "race-list-compact-v1", active: [{ id: "redacted", isTeamRace: false,
+        myStatus: "ACCEPTED" }], pending: [], completed: [], tournaments: [] } }) });
+  assert.equal(fixture.topology.generatedCoreResponseBytes.count, 1);
+  assert.equal(fixture.topology.generatedCoreResponseBytes.byCoreRowCount["1"].count, 1);
+  assert.equal(fixture.topology.generatedCoreResponseBytes
+    .byObservedVariant.ordinary_classic_active.count, 1);
+  assert.equal(fixture.topology.generatedCoreResponseBytes.byProvenance.natural.count, 1);
+  assert.equal(fixture.topology.generatedCoreResponseBytes.byProvenance.augmented.count, 0);
+  assert.doesNotMatch(JSON.stringify(fixture.topology.generatedCoreResponseBytes), /redacted/);
+});
+
 test("per-attempt cache conditioning uses exact measurement identities and bounded ages", async () => {
   const users = Array.from({ length: 400 }, (_, index) => ({
     id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, token: `t${index}`,
@@ -50,6 +82,7 @@ test("per-attempt cache conditioning uses exact measurement identities and bound
   const deleted = [];
   const requested = [];
   const sleeps = [];
+  let clock = 1_000;
   const result = await conditionMeasurementCache({ rate: 5, purpose: "discovery", attempt: 2,
     environment: { baseUrl: "http://127.0.0.1", runId: "run-1" }, fixtures: { users },
     config: { workload: { sessionDeadlineSeconds: 31, identitySafetyFactor: 1.05 },
@@ -60,13 +93,32 @@ test("per-attempt cache conditioning uses exact measurement identities and bound
     deleteExact: async (input) => (deleted.push(input), 12),
     fetchImpl: async (url, options) => (requested.push({ url, headers: options.headers }),
       { status: 200, json: async () => ({}) }),
-    sleep: async (ms) => sleeps.push(ms) });
+    sleep: async (ms) => { sleeps.push(ms); clock += ms; },
+    nowMillis: () => clock });
   assert.equal(deleted[0].userIds.length, 163);
   assert.equal(requested.length,
     result.cohorts.hot30Seconds + result.cohorts.hot15Seconds);
   assert.deepEqual(sleeps, [14_000, 15_000]);
   assert.equal(requested[0].headers["X-Capacity-Attempt-Id"], "discovery-2");
   assert.equal(Object.values(result.cohorts).reduce((sum, value) => sum + value, 0), 163);
+  assert.equal(result.durationSeconds, 29);
+  assert.equal(result.budgetExceeded, false);
+});
+
+test("cache conditioning has one wall-clock deadline across Redis, requests, and sleeps", async () => {
+  const users = Array.from({ length: 400 }, (_, index) => ({ id: `u${index}`, token: `t${index}` }));
+  let clock = 0;
+  await assert.rejects(conditionMeasurementCache({ rate: 5, purpose: "discovery", attempt: 1,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 31, identitySafetyFactor: 1.05 },
+      scan: { rates: [5] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "test", hot30Share: 1,
+        hot15Share: 0, expired300Share: 0, maximumSeconds: 30 } } },
+    deleteExact: async () => { clock += 10_000; return 1; },
+    fetchImpl: async () => { clock += 20_001; return { status: 200, json: async () => ({}) }; },
+    sleep: async (ms) => { clock += ms; }, nowMillis: () => clock,
+  }), (error) => error.cacheConditioning?.budgetExceeded === true &&
+    error.cacheConditioning.durationSeconds > 30);
 });
 
 function metric(values) { return { values }; }
@@ -120,6 +172,24 @@ test("oversized fixture output fails before k6 and cleans the owned graph", asyn
   assert.equal(cleaned, true);
 });
 
+test("workload cleanup settles Redis, graph, and credential-file cleanup", async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "races-cleanup-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const fixturePath = path.join(directory, "fixture.json");
+  fs.writeFileSync(fixturePath, "{}\n");
+  const calls = [];
+  const workload = createRacesTabOpenWorkload({ cleanupFixtures: async () => {
+    calls.push("graph"); throw new Error("graph cleanup failed");
+  } });
+  await assert.rejects(workload.cleanup({ environment: {
+    deleteExactRaceListCache: async () => { calls.push("redis"); throw new Error("redis cleanup failed"); },
+    prisma: {},
+  }, fixtures: { fixturePath, users: [{ id: "u" }], manifest: {} } }),
+  (error) => error instanceof AggregateError && error.errors.length === 2);
+  assert.deepEqual(calls, ["redis", "graph"]);
+  assert.equal(fs.existsSync(fixturePath), false);
+});
+
 test("Races summary normalizes core, background, endpoint, scheduler, and deadline evidence", () => {
   const summary = { metrics: {
     "races_tab_sessions_started{phase:measurement}": metric({ count: 600 }),
@@ -154,6 +224,12 @@ test("Races summary normalizes core, background, endpoint, scheduler, and deadli
     "races_tab_endpoint_response_bytes{endpoint:compact-races,phase:measurement}": metric({ avg: 1200, "p(95)": 1800 }),
     "races_tab_endpoint_response_bytes{endpoint:discovery-summary,phase:measurement}": metric({ avg: 300, "p(95)": 500 }),
     "races_tab_endpoint_response_bytes{endpoint:friends-summary,phase:measurement}": metric({ avg: 200, "p(95)": 350 }),
+    "races_tab_content_rows{family:favorites,phase:measurement,state:classic}": metric({ count: 17 }),
+    "races_tab_content_rows{family:teams,phase:measurement,state:size_4}": metric({ count: 9 }),
+    "races_tab_content_rows{family:placement,phase:measurement,state:privacy}": metric({ count: 3 }),
+    "races_tab_content_rows{family:ordinary_inventory,phase:measurement,state:held}": metric({ count: 11 }),
+    "races_tab_content_rows{family:ordinary_effect,phase:measurement,state:negative}": metric({ count: 4 }),
+    "races_tab_content_rows{family:match_inventory,phase:measurement,state:queued}": metric({ count: 2 }),
   } };
   const result = normalizeRacesTabEvidence({ summary, rate: 10, measurementSeconds: 60,
     fixture: { topology: { zeroFriendsShare: 0.3 } } });
@@ -176,6 +252,13 @@ test("Races summary normalizes core, background, endpoint, scheduler, and deadli
   assert.equal(result.racesTabOpen.coreResponseBytes.p95, 1800);
   assert.deepEqual(result.racesTabOpen.discovery.latencyMs, { p95: 91, p99: 141 });
   assert.deepEqual(result.racesTabOpen.friends.latencyMs, { p95: 42, p99: 72 });
+  assert.equal(result.racesTabOpen.content.totals.favorites.classic, 17);
+  assert.equal(result.racesTabOpen.content.totals.teams.size_4, 9);
+  assert.equal(result.racesTabOpen.content.totals.placement.privacy, 3);
+  assert.equal(result.racesTabOpen.content.totals.ordinary_inventory.held, 11);
+  assert.equal(result.racesTabOpen.content.totals.ordinary_effect.negative, 4);
+  assert.equal(result.racesTabOpen.content.totals.match_inventory.queued, 2);
+  assert.equal(Object.hasOwn(result.racesTabOpen, "fixtureCohort"), false);
 });
 
 test("cache evidence is grouped without user identifiers", () => {
@@ -209,6 +292,22 @@ test("cache evidence accepts only the current measurement attempt", () => {
   const evidence = raceListCacheEvidenceFromLog(log, current);
   assert.equal(evidence.eventCount, 1);
   assert.deepEqual(evidence.sources, { redis: 1 });
+});
+
+test("mismatch samples are redacted, deduplicated, and capped accurately", () => {
+  const rows = Array.from({ length: 55 }, (_, fixtureIndex) => JSON.stringify({
+    event: "races_tab_projection_mismatch_sample_v1", fixtureIndex,
+    path: `ordinary.active.${fixtureIndex}.name`, reason: "ordinary_field",
+    expectedType: "string", observedType: "null", userId: "must-not-survive",
+  }));
+  rows.push(rows[0], JSON.stringify({ event: "races_tab_projection_mismatch_sample_v1",
+    fixtureIndex: 56, path: "x", reason: "not-an-enum", expectedType: "string",
+    observedType: "string" }));
+  const result = racesTabMismatchSamplesFromLog(rows.join("\n"));
+  assert.equal(result.samples.length, 50);
+  assert.equal(result.observedSampleCount, 55);
+  assert.equal(result.truncated, true);
+  assert.equal(JSON.stringify(result).includes("must-not-survive"), false);
 });
 
 test("versioned cache targets compare observed source/outcome shares with tolerance", () => {

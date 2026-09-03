@@ -154,12 +154,13 @@ test("operator interruption emits a partial failed result before another phase s
   const config = loadConfig({ repository, mode: "scan" });
   let interrupted = false;
   let validated = false;
+  let cleaned = false;
   const result = await runPerformanceWorkflow({ repository, cli: { command: "scan",
     target: "lima", background: "normal", cache: "warm", keepRunning: false }, config,
   provider: {
     prepare: async () => { interrupted = true; return { datasetId: "test", binding: {} }; },
     validate: async () => { validated = true; },
-    cleanup: async () => {},
+    cleanup: async () => { cleaned = true; },
   }, workload: {}, writeResult: false,
   getInterruption: () => interrupted ? "SIGINT" : null });
   assert.equal(validated, false);
@@ -167,4 +168,45 @@ test("operator interruption emits a partial failed result before another phase s
   assert.equal(result.summary.status, "failed");
   assert.equal(result.summary.error.stage, "interruption");
   assert.match(result.summary.error.message, /SIGINT/);
+  assert.equal(cleaned, true);
+});
+
+test("a targeted-reset timeout still settles workload and provider cleanup", async () => {
+  const config = loadConfig({ repository, mode: "smoke", overrides: {
+    smoke: { warmupSeconds: 0, measurementSeconds: 1 }, cache: { initialPrewarmSeconds: 0 },
+  } });
+  const calls = [];
+  const result = await runPerformanceWorkflow({ repository, cli: { command: "smoke",
+    target: "lima", background: "normal", cache: "warm", keepRunning: false }, config,
+  provider: {
+    prepare: async () => ({ datasetId: "test", binding: {} }), validate: async () => {},
+    settle: async () => {}, liveness: async () => {}, cleanup: async () => calls.push("provider"),
+  }, workload: {
+    prepareFixtures: async () => ({}), initialPrewarm: async () => {},
+    targetedReset: async () => { const error = new Error("conditioning timeout");
+      error.stage = "cache_conditioning"; throw error; },
+    cleanup: async () => calls.push("workload"),
+  }, writeResult: false });
+  assert.equal(result.failed, true);
+  assert.equal(result.summary.error.stage, "cache_conditioning");
+  assert.deepEqual(calls, ["workload", "provider"]);
+});
+
+test("cleanup is settled so provider teardown runs and both failures are preserved", async () => {
+  const config = loadConfig({ repository, mode: "scan" });
+  const calls = [];
+  const result = await runPerformanceWorkflow({ repository, cli: { command: "scan",
+    target: "lima", background: "normal", cache: "warm", keepRunning: false }, config,
+  provider: {
+    prepare: async () => ({ datasetId: "test", binding: {} }),
+    validate: async () => { throw new Error("validation failed"); },
+    cleanup: async () => { calls.push("provider"); throw new Error("provider cleanup failed"); },
+  }, workload: {
+    cleanup: async () => { calls.push("workload"); throw new Error("workload cleanup failed"); },
+  }, writeResult: false });
+  assert.deepEqual(calls, ["workload", "provider"]);
+  assert.equal(result.failed, true);
+  assert.ok(result.error instanceof AggregateError);
+  assert.deepEqual(result.error.errors.map((error) => error.message),
+    ["validation failed", "workload cleanup failed", "provider cleanup failed"]);
 });

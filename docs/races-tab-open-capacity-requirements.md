@@ -206,6 +206,10 @@ contains:
   these rows use the app's action-first shelves: `live_match` is active;
   `lobby` and `between_rounds` are pending; and `eliminated`, `champion`, and
   `completed_non_champion` are completed;
+  the normalized row also records the identifier-free
+  `hasCurrentMatchRaceId` signal used by the real client to select live-match
+  actions. Fixture accessories are real owned/equipped database rows and are
+  validated through `GET /races`, not projected from invented fixture JSON;
 - `tournamentMatchByTournament[]`: current matchup race key, caller
   placement/hidden state, ends-at, round label, per-match inventory, and queued
   boxes. Opponent details and matchup effects are not in this endpoint contract.
@@ -238,6 +242,9 @@ Every discovery, confirmation, deciding, narrowing, and safe-candidate attempt
 must compare every response to this projection. Exact bucket row keys and
 semantic values must agree; aggregate totals alone are insufficient. A mismatch
 is both a contract failure and a failed attempt.
+Coverage counters are derived independently from predicates over each observed
+normalized response. Assigned fixture labels are validated against the initial
+HTTP capture, but k6 never increments coverage from those labels.
 
 The k6 arrival rate means complete Races-tab reveals started per second. It is
 not endpoint RPS. With default fan-out, `10/sec` means approximately ten core
@@ -291,6 +298,11 @@ preserves shared membership by scaling race graphs first and assigning users
 second; it does not create one private race per user merely to match marginal
 counts. Source, naturally generated, and augmented histograms and p50/p95
 response bytes are reported separately for each core fixture family.
+Generated-response capture is keyed by independently observed projection
+variant, total core row count, and natural-versus-coverage-floor provenance;
+fixture-assigned labels are not accepted as response-size evidence. Per-user
+assignment arrays remain only in the bounded credential fixture and are not
+duplicated into `fixtureProfile` or per-level evidence.
 
 Every normal measured attempt has at least 300 sessions. In the deterministic
 ordered 300-session prefix, every one of the 28 required variants must occur at
@@ -370,6 +382,10 @@ the configured versioned conditioning profile into core-fragment
 the harness deletes only that attempt's exact run-owned measurement identity
 cache keys and calls only the core route at scheduled offsets needed to
 establish those ages; it never calls discovery or friends. This bounded
+schedule has one wall-clock deadline, including Redis deletion, HTTP requests,
+and sleeps. Each attempt records actual duration, configured budget, and an
+explicit overrun state; an overrun fails the harness rather than silently
+extending level ceremony. This bounded
 per-attempt cache conditioning is not environment setup, Redis recreation, or a
 namespace flush. Per-level stabilization traffic uses its separate identity
 pool and never changes the upcoming measurement identities. After conditioning
