@@ -128,11 +128,18 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
           passes: attempt.outcome === "PASS" ? 1 : 0, failures: attempt.outcome === "FAIL" ? 1 : 0,
           unstable: false, attempts: [{ outcome: attempt.outcome }] }],
         headroomPolicy: null, calculatedHeadroomTarget: null, safeCapacityCandidateTested: null,
-        safeCapacityCandidates: [], safeHomeOpensPerSecond: null,
+        safeCapacityCandidates: [], safeHomeOpensPerSecond: null, safeOperatingRate: null,
+        safeOperatingRateUnit: cli.workload === "races-tab-open"
+          ? "races_tab_opens_per_second" : "home_opens_per_second",
         failureReason: attempt.failureReason, failureReasonDetail: attempt.failureReasonDetail,
         primaryBottleneck: attempt.outcome === "FAIL" ? require("./evaluate").inferPrimaryBottleneck(attempt.evidence) : "inconclusive" };
     } else {
       throw new Error(`${cli.command} is not enabled in the first-run workflow`);
+    }
+    if (typeof workload.verifyFixtures === "function") {
+      await time("workflowValidation", () => workload.verifyFixtures({
+        runId: id, cli, config, environment, fixtures,
+      }));
     }
   } catch (error) {
     workflowError = error;
@@ -153,9 +160,16 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
     headroomPolicy: config.safeCapacity?.headroomFactor ?? null,
     calculatedHeadroomTarget: null, safeCapacityCandidateTested: null,
     safeCapacityCandidates: [], safeHomeOpensPerSecond: null,
+    safeOperatingRate: null, safeOperatingRateUnit: cli.workload === "races-tab-open"
+      ? "races_tab_opens_per_second" : "home_opens_per_second",
     safeCapacityUnavailableReason: workflowError ? "workflow_failed" : null,
     failureReason: workflowError ? "unknown" : null, failureReasonDetail: null,
     primaryBottleneck: "inconclusive" };
+  if (workflowError) {
+    scan.safeOperatingRate = null;
+    scan.safeHomeOpensPerSecond = null;
+    scan.safeCapacityUnavailableReason = "workflow_failed";
+  }
   const accounted = () => Object.values(breakdown).reduce((sum, value) => sum + value, 0);
   const wallBeforeReport = Math.max(0, (now() - startedAt) / 1000);
   breakdown.workflowValidation += Math.max(0, wallBeforeReport - accounted());
@@ -172,13 +186,7 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
     dataset: environment?.datasetId || "unknown", backgroundMode: cli.background,
     cacheMode: cli.cache, workload: config.workload, environmentBinding: environment?.binding || null,
     topology: config.topology,
-    fixtureProfile: fixtures?.topology ? {
-      schema: fixtures.topology.schema,
-      scoreShape: fixtures.topology.scoreShape,
-      productionShapedScores: fixtures.topology.productionShapedScores,
-      snapshotReference: fixtures.topology.snapshotReference,
-      aggregateSourceHash: fixtures.topology.aggregateSourceHash,
-    } : null,
+    fixtureProfile: fixtures?.topology || null,
     scan, runtime, levels,
     warnings: [cleanupError ? `Cleanup failed: ${cleanupError.message}` : null,
       ...levels.filter((row) => row.ceremonyBudgetWarning).map((row) =>
@@ -186,7 +194,10 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
       ...levels.filter((row) => row.warmupBudgetWarning).map((row) =>
         `${row.rate}/sec warmup exceeded its configured budget`)]
       .filter(Boolean),
-    limitations: ["Lima is regression evidence, not production certification."], };
+    limitations: ["Lima is regression evidence, not production certification.",
+      ...(cli.workload === "races-tab-open" ? [
+        "The first Races-tab profile models active-race count, zero-race users, and the zero-friends branch; pending, completed, invited, tournament, team-race, review-opportunity, and payout-double states are deferred.",
+      ] : [])], };
   let reports;
   if (writeResult) {
     const directory = path.join(repository, "performance", "results", id);

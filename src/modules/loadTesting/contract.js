@@ -269,6 +269,7 @@ function buildProfiles() {
         iterationDeadlineMs: 31_000,
         gracefulStopMs: 32_000,
         friendsSelection: "fixture-zero-friends",
+        friendsCacheAgeMs: 5_000,
         discovery404Policy: "contract-failure-no-legacy-fanout",
       }),
     }),
@@ -365,7 +366,7 @@ function buildProfiles() {
 }
 
 function validateProfileRegistry(registry = PROFILES) {
-  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "home-open", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
+  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "home-open", "races-tab-open", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
   for (const name of names) {
     const profile = registry[name];
     const expectedVersion = name === "home-open" ? "2.3.0" : "1.0.0";

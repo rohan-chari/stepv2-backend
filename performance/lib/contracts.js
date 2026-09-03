@@ -1,16 +1,24 @@
-const SUMMARY_SCHEMA = "bara-perf-summary-v2";
+const SUMMARY_SCHEMA = "bara-perf-summary-v3";
 const MANIFEST_SCHEMA = "bara-perf-manifest-v1";
 const CONFIG_SCHEMA = "bara-perf-config-v1";
-const FAILURE_REASON_SCHEMA = "bara-perf-failure-reason-v1";
+const FAILURE_REASON_SCHEMA = "bara-perf-failure-reason-v2";
 const BOTTLENECK_SCHEMA = "bara-perf-bottleneck-v1";
 
 const RATE_STATES = Object.freeze(["PASS", "FAIL", "UNSTABLE"]);
 const FAILURE_REASONS = Object.freeze([
   "home_p95_threshold",
   "home_p99_threshold",
+  "races_core_p95_threshold",
+  "races_core_p99_threshold",
   "http_error_rate",
   "network_errors",
   "incomplete_home_transactions",
+  "incomplete_races_core_transactions",
+  "incomplete_races_discovery",
+  "incomplete_races_friends",
+  "races_contract_error",
+  "scheduler_quota_drift",
+  "cache_profile_mismatch",
   "dropped_arrivals",
   "worker_restart",
   "db_connection_exhaustion",

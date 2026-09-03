@@ -36,7 +36,7 @@ function input() {
 
 test("summary and report distinguish failure reason, bottleneck, and measured safe capacity", () => {
   const summary = buildSummary(input());
-  assert.equal(summary.schema, "bara-perf-summary-v2");
+  assert.equal(summary.schema, "bara-perf-summary-v3");
   assert.equal(summary.highestPassingRate, 24);
   assert.equal(summary.firstFailingRate, 25);
   assert.equal(summary.calculatedHeadroomTarget, 19.2);
@@ -61,7 +61,7 @@ test("reports are written atomically to the canonical result files", (context) =
   const result = writeReports({ directory, input: input() });
   assert.equal(result.summaryPath, path.join(directory, "summary.json"));
   assert.equal(result.reportPath, path.join(directory, "report.md"));
-  assert.equal(JSON.parse(fs.readFileSync(result.summaryPath)).schema, "bara-perf-summary-v2");
+  assert.equal(JSON.parse(fs.readFileSync(result.summaryPath)).schema, "bara-perf-summary-v3");
   assert.match(fs.readFileSync(result.reportPath, "utf8"), /Bara Home Capacity/);
   assert.deepEqual(fs.readdirSync(directory).sort(), ["manifest.json", "report.md", "summary.json"]);
 });

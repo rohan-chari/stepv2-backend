@@ -26,7 +26,10 @@ The current mobile client defines the workload:
 4. Once the core request completes, it starts
    `GET /races/discovery-summary` without awaiting it.
 5. It conditionally refreshes shared friends data when the loaded list is empty
-   or its client timestamp is older than 60 seconds.
+   or its client timestamp is older than 60 seconds. The repository may reuse
+   an identical friends read for one second, so the ordinary baseline fixes the
+   reveal between one and 60 seconds after Home: a zero-friends user therefore
+   performs the request, while a non-empty fresh list does not.
 
 The baseline cohort has no pending device-local acknowledgements. A future
 explicit `pending-acks` variant may cover that behavior; it must not be mixed
@@ -43,11 +46,15 @@ silently into the baseline.
   report locations.
 - Generate one core request and one background discovery request per tab open.
 - Model the conditional `GET /friends?view=summary-v1` branch from fixture
-  client state. The ordinary baseline represents a Races reveal within 60
+  client state. The ordinary baseline represents a typical Races reveal more
+  than one second and within 60
   seconds of Home loading: users with a non-empty loaded list do not refetch;
   users with zero friends do, matching the current `_friendsSteps.isEmpty`
   condition. The zero-friends share comes from the versioned production-shaped
   fixture distribution, not an invented probability.
+- Keep the first baseline deliberately bounded to the already measured
+  Home-derived active-race/zero-race topology plus the production-shaped
+  zero-friends branch. It does not claim to represent every Races-card state.
 - Gate successful core-refresh completion on the core request. Track discovery and conditional
   friends completion/error/latency separately and fail a rate if background
   requests are dropped, incomplete, or exceed their configured error gate.
@@ -67,6 +74,10 @@ silently into the baseline.
 - Recreating PostgreSQL, Redis, backend processes, or fixtures per level.
 - Changing any application endpoint or mobile behavior.
 - Certification-grade endurance evidence in the initial smoke/scan.
+- Pending, completed, invited, tournament, team-race, review-opportunity, and
+  payout-double fixture-state distributions. Those require a separately
+  calibrated, versioned joint-state profile before they can be added without
+  inventing production traffic.
 
 ## Operator contract and configuration
 
@@ -139,15 +150,20 @@ identity, and reconcile every request plus the background tail.
 
 ## Fixtures, cache, and reset
 
-Reuse authenticated synthetic/sanitized capacity users, but materialize a
-versioned joint distribution of active, pending, completed, invited, zero-race,
-tournament, team-race, review-opportunity, payout-double, and zero-friends
-states. Lock the platform/capability mix. Inputs include a source timestamp and
-content hash, are identifier-free and deterministic, and appear in fixture
-evidence. Users are interleaved so early rate prefixes do not overrepresent one
-bucket. Fixture races remain away from start/end, invite-expiry, and
-payout-expiry boundaries for the maximum scan duration. Verify the distribution
+Reuse authenticated synthetic/sanitized capacity users. The first profile
+combines the existing versioned, production-shaped Home fixture distribution
+for active-race counts and zero-race users with the measured zero-friends share.
+Lock the platform/capability mix. Inputs include source timestamps and content
+hashes, are identifier-free and deterministic, and appear in fixture evidence.
+Users are interleaved so early rate prefixes do not overrepresent the active-
+race or zero-friends buckets. Fixture races remain away from start/end
+boundaries for the maximum scan duration. Verify the modeled distribution
 before and after the scan so cron cannot silently change later levels.
+
+This profile explicitly does not model pending, completed, invited,
+tournament, team-race, review-opportunity, or payout-double states. A future
+profile may add them only after their joint production distribution is measured
+and versioned; reports must retain this limitation rather than imply coverage.
 
 The workload is read-only for the baseline. Its reset plan must prove that no
 endpoint in the baseline mutates durable user/race state. If source inspection
@@ -175,11 +191,13 @@ The existing versioned summary receives workload-neutral screen fields plus a
 - discovery started/completed/error counts and p95/p99 latency;
 - conditional friends started/completed/error counts and p95/p99 latency;
 - the fixture zero-friends share that selected the branch;
+- the fixed fresh-client cache age (>1 second and <60 seconds) that makes the
+  zero-friends branch observable rather than hidden by one-second read reuse;
 - request counts by endpoint;
 - observed endpoint RPS, scheduler lag/quota drift, and race-list cache-source
   mix versus its configured target;
 - incomplete background work and iteration-deadline timeouts;
-- fixture cohort distribution.
+- fixture cohort distribution and its explicit first-profile state limitations.
 
 The additive summary schema becomes `bara-perf-summary-v3`. Existing Home fields
 remain unchanged. Each `levels[]` row gains `racesTabOpen`. Workload-neutral
@@ -225,8 +243,10 @@ version update rather than silently changing historical comparisons.
    followed by background launch, discovery/friends parallelism, partial
    discovery resolution, and supported-profile 404 rejection; ensure no false
    completed transaction is recorded.
-4. Add failing fixture tests for deterministic cohort interleaving, valid auth,
-   response materiality, and read-only/reset evidence.
+4. Add failing fixture tests for deterministic active-race/zero-race and
+   zero-friends cohort interleaving, valid auth, response materiality, modeled
+   distribution stability, explicit state limitations, and read-only/reset
+   evidence.
 5. Add failing evaluator/report tests for Races-specific metrics, endpoint
    counts, cache mix, scheduler accounting, background incompleteness, stable
    Races failure reasons, bottleneck, workload-neutral rate fields, Home legacy
@@ -259,6 +279,9 @@ version update rather than silently changing historical comparisons.
 - Core refresh completion and background completion are distinct metrics.
 - Generated endpoint counts reconcile with iteration counts and fixture branch
   membership.
+- Fixture evidence claims only the measured Home-derived active/zero-race
+  topology and zero-friends branch; deferred Races-card states are named as a
+  limitation.
 - Scan records app, DB, Redis, pool, event-loop, queue, and SQL evidence for
   every measured level.
 - The existing failure-confirmation and tested-safe-capacity algorithms apply

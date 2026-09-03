@@ -22,6 +22,7 @@ test("Races-tab config locks the versioned workload and threshold contract", () 
     scoreShape: "production",
     cohortWeight: 1,
     cohortSize: 5000,
+    friendsCacheAgeSeconds: 5,
     sessionDeadlineSeconds: 31,
     gracefulStopSeconds: 32,
   });

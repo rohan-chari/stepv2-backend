@@ -32,6 +32,7 @@ test("scan prepares and validates once, prewarms once, and reuses one environmen
     initialPrewarm: async () => log.push("initialPrewarm"),
     targetedReset: async () => log.push("targetedReset"),
     warmup: async () => log.push("warmup"),
+    verifyFixtures: async () => log.push("verifyFixtures"),
     measure: async ({ rate, purpose }) => {
       log.push(`measure:${rate}:${purpose}`);
       const outcome = outcomes.get(rate)?.shift();
@@ -54,6 +55,7 @@ test("scan prepares and validates once, prewarms once, and reuses one environmen
   assert.equal(log.filter((row) => row === "initialPrewarm").length, 1);
   assert.equal(log.includes("restore"), false);
   assert.equal(log.includes("recreateDatabase"), false);
+  assert.equal(log.filter((row) => row === "verifyFixtures").length, 1);
   assert.equal(result.summary.highestPassingRate, 5);
   assert.equal(result.summary.firstFailingRate, 10);
   assert.equal(result.summary.safeHomeOpensPerSecond, 4);
@@ -79,6 +81,42 @@ test("fixture provisioning is included in reported end-to-end runtime", async ()
     target: "lima", background: "normal", cache: "warm", keepRunning: false }, config,
   provider, workload, writeResult: false, now });
   assert.ok(result.summary.scanRuntimeSeconds >= 8, "all workflow wall time must be visible");
+});
+
+test("a failed final fixture-stability check withholds an already measured safe rate", async () => {
+  const config = loadConfig({ repository, mode: "scan", overrides: {
+    scan: { rates: [1, 2], narrowingResolutionPerSecond: 1, warmupSeconds: 0,
+      measurementSeconds: 1 },
+    cache: { initialPrewarmSeconds: 0 },
+    thresholds: { queueGrowth: 1, resourceSafety: 1 },
+  } });
+  const provider = {
+    prepare: async () => ({ datasetId: "test", binding: {} }), validate: async () => {},
+    settle: async () => {}, liveness: async () => {}, resetMetrics: async () => {},
+    collectMetrics: async () => ({}), cleanup: async () => {},
+  };
+  let rateTwoAttempts = 0;
+  const workload = {
+    prepareFixtures: async () => ({}), initialPrewarm: async () => {},
+    targetedReset: async () => {}, warmup: async () => {}, cleanup: async () => {},
+    verifyFixtures: async () => { throw new Error("fixture distribution drifted"); },
+    measure: async ({ rate }) => {
+      if (rate === 2) rateTwoAttempts += 1;
+      return { homeP95Ms: rate === 2 ? 1500 : 100, homeP99Ms: 200,
+        httpErrorRate: 0, networkErrors: 0, incompleteHomeTransactions: 0,
+        droppedArrivals: 0, workerRestarts: 0, databaseConnectionsExhausted: 0,
+        targetIdentityValid: true, queueGrowth: 0, resourceSafety: 0,
+        safeCapacityGatesPassed: true, resources: {} };
+    },
+  };
+  const result = await runPerformanceWorkflow({ repository, cli: { command: "scan",
+    target: "lima", background: "normal", cache: "warm", keepRunning: false }, config,
+  provider, workload, writeResult: false });
+  assert.equal(rateTwoAttempts, 2);
+  assert.equal(result.failed, true);
+  assert.equal(result.summary.safeOperatingRate, null);
+  assert.equal(result.summary.safeHomeOpensPerSecond, null);
+  assert.equal(result.summary.safeCapacityUnavailableReason, "workflow_failed");
 });
 
 test("setup failure still emits a partial result", async () => {

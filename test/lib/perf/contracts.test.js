@@ -12,14 +12,22 @@ test("Bara perf contracts are versioned and stable", () => {
     SUMMARY_SCHEMA,
   } = require("../../../performance/lib/contracts");
 
-  assert.equal(SUMMARY_SCHEMA, "bara-perf-summary-v2");
+  assert.equal(SUMMARY_SCHEMA, "bara-perf-summary-v3");
   assert.deepEqual([...RATE_STATES], ["PASS", "FAIL", "UNSTABLE"]);
   assert.deepEqual([...FAILURE_REASONS], [
     "home_p95_threshold",
     "home_p99_threshold",
+    "races_core_p95_threshold",
+    "races_core_p99_threshold",
     "http_error_rate",
     "network_errors",
     "incomplete_home_transactions",
+    "incomplete_races_core_transactions",
+    "incomplete_races_discovery",
+    "incomplete_races_friends",
+    "races_contract_error",
+    "scheduler_quota_drift",
+    "cache_profile_mismatch",
     "dropped_arrivals",
     "worker_restart",
     "db_connection_exhaustion",

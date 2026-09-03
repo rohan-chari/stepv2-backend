@@ -159,5 +159,8 @@ test("baseline-required queue/resource gates cannot produce safe operating capac
   });
   assert.equal(result.safeHomeOpensPerSecond, null);
   assert.equal(result.safeCapacityUnavailableReason, "safe_gate_baseline_required");
+  assert.equal(result.calculatedHeadroomTarget,
+    Number((result.highestPassingRate * baselineConfig.safeCapacity.headroomFactor).toFixed(6)));
+  assert.equal(result.safeCapacityCandidateTested, null);
   assert.deepEqual(result.safeCapacityCandidates, []);
 });

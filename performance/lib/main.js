@@ -3,6 +3,12 @@ const { parseCli } = require("./cli");
 
 async function main(argv = process.argv.slice(2), dependencies = {}) {
   const cli = parseCli(argv);
+  if (cli.workload === "races-tab-open" && cli.cache !== "warm") {
+    throw new Error("the first Races-tab workload is a warm-cache profile");
+  }
+  if (cli.workload === "races-tab-open" && cli.scoreShape && cli.scoreShape !== "production") {
+    throw new Error("the first Races-tab workload requires the production-shaped score profile");
+  }
   if (["certify", "compare", "refresh-data"].includes(cli.command)) {
     throw new Error(`${cli.command} is not enabled in the first-run implementation`);
   }

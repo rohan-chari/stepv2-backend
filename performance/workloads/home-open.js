@@ -178,11 +178,15 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   baseUrl, outputDirectory, environment = process.env, metricsConfig, databaseUrl,
   runId, metricEpoch, cacheOnly = false, expectedPids = null,
   userOffset = 0,
+  scriptPath = "scripts/k6/home-open.js", profile = "home-open", k6Variables = null,
   captureBackendLog = captureCapacityBackendLog } = {}) {
   fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
   const summaryPath = path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.k6.json`);
-  const variables = {
+  const commonVariables = {
     K6_BASE_URL: baseUrl, K6_FIXTURE_PATH: fixturePath, K6_SUMMARY_PATH: summaryPath,
+  };
+  const variables = k6Variables ? { ...commonVariables, ...k6Variables } : {
+    ...commonVariables,
     K6_HOME_RATE: String(rate), K6_HOME_WARMUP_RATE: String(rate),
     K6_HOME_WARMUP_SECONDS: "0", K6_HOME_MEASUREMENT_SECONDS: String(measurementSeconds),
     K6_HOME_CACHE_ONLY: cacheOnly ? "1" : "0",
@@ -193,14 +197,14 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   const args = Object.entries(variables).flatMap(([name, value]) => ["-e", `${name}=${value}`]);
   const metricsPath = path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.metrics.json`);
   const collector = metricsConfig ? createCollector({ config: metricsConfig, output: metricsPath,
-    databaseUrl, provenance: { runId, profile: "home-open", repeat: 1 } }) : null;
+    databaseUrl, provenance: { runId, profile, repeat: 1 } }) : null;
   const startedAt = new Date();
   collector?.start();
   let exit;
   let endedAt;
   try {
     exit = await wait(spawn("k6", ["run", ...(phase === "measurement" ? [] : ["--no-thresholds"]),
-      ...args, path.join(repository, "scripts/k6/home-open.js")], {
+      ...args, path.join(repository, scriptPath)], {
       cwd: repository, env: { ...environment, ...variables }, stdio: "inherit",
     }));
     endedAt = new Date();

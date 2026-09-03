@@ -31,6 +31,8 @@ function buildSummary(input = {}) {
     calculatedHeadroomTarget: scan.calculatedHeadroomTarget ?? null,
     safeCapacityCandidateTested: scan.safeCapacityCandidateTested ?? null,
     safeCapacityCandidates: scan.safeCapacityCandidates || [],
+    safeOperatingRate: scan.safeOperatingRate ?? null,
+    safeOperatingRateUnit: scan.safeOperatingRateUnit ?? null,
     safeHomeOpensPerSecond: scan.safeHomeOpensPerSecond ?? null,
     safeCapacityUnavailableReason: scan.safeCapacityUnavailableReason ?? null,
     failureReason: scan.failureReason ?? null,
@@ -76,18 +78,25 @@ function failureSentence(summary) {
   if (summary.failureReason === "home_p95_threshold" && detail) {
     return `${summary.firstFailingRate} Home opens/sec failed because Home p95 reached ${Number(detail.observed).toLocaleString("en-US")} ms, above the configured ${Number(detail.threshold).toLocaleString("en-US")} ms threshold.`;
   }
+  if (summary.failureReason === "races_core_p95_threshold" && detail) {
+    return `${summary.firstFailingRate} Races tab opens/sec failed because Races core-refresh p95 reached ${Number(detail.observed).toLocaleString("en-US")} ms, above the configured ${Number(detail.threshold).toLocaleString("en-US")} ms threshold.`;
+  }
   if (summary.firstFailingRate == null) return "No confirmed failing rate was observed.";
-  return `${summary.firstFailingRate} Home opens/sec failed the ${summary.failureReason || "unknown"} capacity gate.`;
+  const unit = summary.workload?.name === "authenticated-races-tab-reveal-v1"
+    ? "Races tab opens/sec" : "Home opens/sec";
+  return `${summary.firstFailingRate} ${unit} failed the ${summary.failureReason || "unknown"} capacity gate.`;
 }
 
 function renderReport(summary) {
+  const isRaces = summary.workload?.name === "authenticated-races-tab-reveal-v1";
+  const capacityLabel = isRaces ? "Races tab opens/sec" : "Home opens/sec";
   const profile = summary.fixtureProfile?.productionShapedScores;
   const classifications = summary.rateClassifications.length
     ? summary.rateClassifications.map((row) =>
       `| ${row.rate}/sec | ${row.unstable ? "UNSTABLE → " : ""}${row.state} | ${row.failures} fail, ${row.passes} pass |`).join("\n")
     : "| — | — | — |";
   const levels = summary.levels.length
-    ? summary.levels.map((row) => `| ${row.rate}/sec | ${row.homeP95Ms ?? "—"} | ${row.homeP99Ms ?? "—"} | ${row.httpErrorRate ?? "—"} | ${row.actualWarmupSeconds ?? "—"}/${row.configuredWarmupSeconds ?? "—"} sec |`).join("\n")
+    ? summary.levels.map((row) => `| ${row.rate}/sec | ${isRaces ? row.racesCoreP95Ms ?? "—" : row.homeP95Ms ?? "—"} | ${isRaces ? row.racesCoreP99Ms ?? "—" : row.homeP99Ms ?? "—"} | ${row.httpErrorRate ?? "—"} | ${row.actualWarmupSeconds ?? "—"}/${row.configuredWarmupSeconds ?? "—"} sec |`).join("\n")
     : "| — | — | — | — | — |";
   const runtime = Object.entries(summary.runtimeBreakdownSeconds)
     .map(([name, value]) => `| ${name} | ${value} |`).join("\n") || "| — | — |";
@@ -104,7 +113,16 @@ function renderReport(summary) {
     "| — | — | — | — | — | — | — |";
   const warnings = [...summary.warnings];
   if (summary.runtimeBudgetWarning) warnings.unshift("RUNTIME BUDGET WARNING: scan exceeded 20 minutes.");
-  return `# Bara Home Capacity — ${summary.runId}\n\n` +
+  const racesBackground = isRaces ? summary.levels.map((row) =>
+    `| ${row.rate}/sec | ${row.racesTabOpen?.discovery?.started ?? "—"}/${row.racesTabOpen?.discovery?.completed ?? "—"}/${row.racesTabOpen?.discovery?.errors ?? "—"} | ${row.racesTabOpen?.friends?.started ?? "—"}/${row.racesTabOpen?.friends?.completed ?? "—"}/${row.racesTabOpen?.friends?.errors ?? "—"} |`).join("\n") : "";
+  const racesEndpoints = isRaces ? summary.levels.flatMap((row) =>
+    Object.entries(row.racesTabOpen?.requestCountsByEndpoint || {}).map(([endpoint, count]) =>
+      `| ${row.rate}/sec | ${endpoint.replaceAll("|", "\\|")} | ${count} | ${row.racesTabOpen?.observedEndpointRps?.[endpoint] ?? "—"} |`)).join("\n") : "";
+  const racesAccounting = isRaces ? summary.levels.map((row) =>
+    `| ${row.rate}/sec | ${row.racesTabOpen?.fixtureZeroFriendsShare ?? "—"} | ${row.racesTabOpen?.fixtureFriendsCacheAgeMs ?? "—"} | ${row.racesTabOpen?.coreResponseBytes?.average ?? "—"}/${row.racesTabOpen?.coreResponseBytes?.p95 ?? "—"} | ${row.racesTabOpen?.scheduler?.lagMs?.p99 ?? "—"} | ${row.racesTabOpen?.scheduler?.offeredQuotaDrift ?? "—"}/${row.racesTabOpen?.scheduler?.quotaDrift ?? "—"}/${row.racesTabOpen?.scheduler?.completionQuotaDrift ?? "—"} | ${row.racesTabOpen?.iterationDeadlineTimeouts ?? "—"} |`).join("\n") : "";
+  const racesCache = isRaces ? summary.levels.map((row) =>
+    `| ${row.rate}/sec | ${row.racesTabOpen?.cacheSourceMix?.eventCount ?? "—"} | ${JSON.stringify(row.racesTabOpen?.cacheSourceMix?.sources || {})} | ${JSON.stringify(row.racesTabOpen?.cacheSourceMix?.outcomes || {})} | ${row.racesTabOpen?.cacheSourceMix?.unavailableReason || (row.racesTabOpen?.cacheSourceMix?.matchesTarget === true ? "match" : "observed") } |`).join("\n") : "";
+  return `# Bara ${isRaces ? "Races Tab" : "Home"} Capacity — ${summary.runId}\n\n` +
     `Status: ${summary.status}; mode: ${summary.mode}; cache: ${summary.cacheMode}; background: ${summary.backgroundMode}.\n\n` +
     `Workload: ${summary.workload?.name || "unknown"}@${summary.workload?.profileVersion || "unknown"}; ` +
     `dataset: ${summary.dataset || "unknown"}.\n\n` +
@@ -115,13 +133,18 @@ function renderReport(summary) {
     `- Headroom policy: ${summary.headroomPolicy == null ? "unavailable" : `${summary.headroomPolicy * 100}%`}\n` +
     `- Calculated headroom target: ${summary.calculatedHeadroomTarget ?? "unavailable"}/sec\n` +
     `- Safe-capacity candidate tested: ${summary.safeCapacityCandidateTested ?? "unavailable"}/sec\n` +
-    `- Safe operating capacity: ${summary.safeHomeOpensPerSecond ?? "unavailable"}/sec\n` +
+    `- Safe operating capacity: ${summary.safeOperatingRate ?? summary.safeHomeOpensPerSecond ?? "unavailable"}/sec\n` +
     `${summary.safeCapacityUnavailableReason ? `- Safe-capacity unavailable reason: ${summary.safeCapacityUnavailableReason}\n` : ""}` +
     `- Total runtime: ${summary.scanRuntimeSeconds ?? "unavailable"} sec\n\n` +
     `## FIRST FAILURE\n\n${failureSentence(summary)}\n\n` +
     `## PRIMARY BOTTLENECK\n\n${displayBottleneck(summary.primaryBottleneck)}. This is an evidence-based subsystem inference, separate from the failed capacity criterion.\n\n` +
     `## Rate classifications\n\n| Rate | Classification | Votes |\n|---:|---|---|\n${classifications}\n\n` +
-    `## Level measurements\n\n| Rate | Home p95 ms | Home p99 ms | HTTP error rate | Warmup actual/configured |\n|---:|---:|---:|---:|---:|\n${levels}\n\n` +
+    `## Level measurements\n\nRate unit: ${capacityLabel}. ${isRaces ? "A tab-open rate is not total HTTP RPS." : ""}\n\n| Rate | ${isRaces ? "Core refresh" : "Home"} p95 ms | ${isRaces ? "Core refresh" : "Home"} p99 ms | HTTP error rate | Warmup actual/configured |\n|---:|---:|---:|---:|---:|\n${levels}\n\n` +
+    (isRaces ? `## Background completion\n\nThe baseline models a typical reveal more than 1 second and less than 60 seconds after Home. Zero-friends fixtures therefore perform the real conditional friends request.\n\n| Rate | Discovery start/complete/error | Friends start/complete/error |\n|---:|---|---|\n${racesBackground || "| — | — | — |"}\n\n` +
+      `## Endpoint fan-out\n\n| Rate | Endpoint | Requests | Observed RPS |\n|---:|---|---:|---:|\n${racesEndpoints || "| — | — | — | — |"}\n\n` : "") +
+    (isRaces ? `## Session accounting and fixture branch\n\n| Rate | Zero-friends share | Friends cache age ms | Core bytes avg/p95 | Scheduler lag p99 ms | Offered/started/completed quota drift | Deadline timeouts |\n|---:|---:|---:|---|---:|---|---:|\n${racesAccounting || "| — | — | — | — | — | — | — |"}\n\n` +
+      `Modeled fixture states: ${(summary.fixtureProfile?.modeledStateProfile?.included || []).join(", ") || "unknown"}. Deferred states: ${(summary.fixtureProfile?.modeledStateProfile?.deferred || []).join(", ") || "none recorded"}.\n\n` +
+      `## Race-list cache evidence\n\n| Rate | Events | Sources | Outcomes | Target status |\n|---:|---:|---|---|---|\n${racesCache || "| — | — | — | — | — |"}\n\n` : "") +
     `## Resource evidence\n\n| Rate | PostgreSQL CPU % | Node CPU % | Redis CPU % | DB pool wait p99 ms | Event-loop p99 ms |\n|---:|---:|---:|---:|---:|---:|\n${resources}\n\n` +
     `## Queue evidence\n\n| Rate | Growth items/sec | Insert rate | Process rate |\n|---:|---:|---:|---:|\n${queues}\n\n` +
     `## Top SQL\n\n| Rate | Query ID | Calls | Total exec ms | Mean exec ms | Shared hit/read/temp written | Normalized fingerprint |\n|---:|---|---:|---:|---:|---:|---|\n${topSql}\n\n` +

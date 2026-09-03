@@ -34,7 +34,7 @@ function validateConfig(config, mode) {
   if (!["authenticated-home-reveal-v1", "authenticated-races-tab-reveal-v1"]
     .includes(config.workload?.name)) throw new Error("unsupported workload contract");
   if (!["production", "placement-churn"].includes(config.workload?.scoreShape)) {
-    throw new Error("Home workload score shape must be production or placement-churn");
+    throw new Error("screen workload score shape must be production or placement-churn");
   }
   if (config.result?.summarySchema !== SUMMARY_SCHEMA) throw new Error("summary schema mismatch");
   positiveInteger(config.topology?.httpWorkers, "HTTP workers", { maximum: 16 });
@@ -50,12 +50,12 @@ function validateConfig(config, mode) {
   }
   positiveInteger(config.scan?.measurementSeconds, "scan measurement");
   const cohortSize = config.workload.cohortSize || 5000;
-  positiveInteger(cohortSize, "Home workload cohort", { maximum: 5000 });
+  positiveInteger(cohortSize, "screen workload cohort", { maximum: 5000 });
   const maximumRate = mode === "smoke" ? config.smoke.rate : Math.max(...config.scan.rates);
   const warmup = mode === "smoke" ? config.smoke.warmupSeconds : config.scan.warmupSeconds;
   const measurement = mode === "smoke" ? config.smoke.measurementSeconds : config.scan.measurementSeconds;
   if (maximumRate * (warmup + measurement) > cohortSize) {
-    throw new Error("Home workload cohort is too small to separate warmup and measurement users");
+    throw new Error("screen workload cohort is too small to separate warmup and measurement users");
   }
   if (config.scan.confirmBoundaryFailure !== true ||
       config.scan.classificationPolicy !== "majority" ||

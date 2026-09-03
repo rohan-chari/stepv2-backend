@@ -6,9 +6,32 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createLimaProvider } = require("../../../performance/providers/lima");
-const { ownedRedisCommand,
+const { environmentRelevantPerformanceConfig, ownedRedisCommand,
   readReusableSnapshotMarker,
   requestTargetIdentity } = require("../../../performance/providers/lima-runtime");
+
+test("prepared environment binding excludes per-run workload selection", () => {
+  const shared = {
+    schema: "bara-perf-config-v1",
+    provider: { name: "lima", target: "capacity-vm" },
+    topology: { httpWorkers: 2, resolutionWorkers: 1, cronWorkersNormal: 1 },
+    background: { mode: "normal" },
+    reset: { selectors: [{ table: "owned", column: "run_id", scope: "run" }] },
+  };
+  const home = environmentRelevantPerformanceConfig({ ...shared,
+    workload: { name: "authenticated-home-reveal-v1" },
+    thresholds: { homeP95Ms: 1000 },
+    cache: { mode: "warm", raceListTargetMix: "calibration-required" },
+  });
+  const races = environmentRelevantPerformanceConfig({ ...shared,
+    workload: { name: "authenticated-races-tab-reveal-v1" },
+    thresholds: { racesCoreP95Ms: 1000 },
+    cache: { mode: "warm", raceListTargetMix: { redis: 0.5 } },
+  });
+  assert.deepEqual(home, races);
+  assert.equal(Object.hasOwn(home, "workload"), false);
+  assert.equal(Object.hasOwn(home, "thresholds"), false);
+});
 
 test("Lima provider prepares one disposable environment and never recreates it between levels", async () => {
   const calls = [];

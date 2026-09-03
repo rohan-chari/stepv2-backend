@@ -24,6 +24,7 @@
       "scoreShape": "production",
       "cohortWeight": 1,
       "cohortSize": 5000,
+      "friendsCacheAgeSeconds": 5,
       "sessionDeadlineSeconds": 31,
       "gracefulStopSeconds": 32
     }
@@ -39,7 +40,8 @@
     "ownedPrefix": "capacity:",
     "initialPrewarmSeconds": 30,
     "initialPrewarmRate": 10,
-    "initialPrewarmMaxUsers": 300
+    "initialPrewarmMaxUsers": 300,
+    "raceListTargetMix": "calibration-required"
   },
   "background": { "mode": "normal" },
   "runtime": {
@@ -142,8 +144,8 @@
     }
   },
   "result": {
-    "summarySchema": "bara-perf-summary-v2",
-    "failureReasonSchema": "bara-perf-failure-reason-v1",
+    "summarySchema": "bara-perf-summary-v3",
+    "failureReasonSchema": "bara-perf-failure-reason-v2",
     "bottleneckSchema": "bara-perf-bottleneck-v1"
   }
 }

@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const { PROFILES } = require("../../../src/modules/loadTesting/contract");
@@ -26,6 +28,8 @@ test("races-tab-open locks the current read-only endpoint and client contract", 
   ]);
   assert.equal(profile.racesTabOpen.requestTimeoutMs, 15_000);
   assert.equal(profile.racesTabOpen.iterationDeadlineMs, 31_000);
+  assert.ok(profile.racesTabOpen.friendsCacheAgeMs > 1_000);
+  assert.ok(profile.racesTabOpen.friendsCacheAgeMs < 60_000);
 });
 
 test("one successful Races reveal completes core before concurrent selected background work", async () => {
@@ -114,4 +118,73 @@ test("core failure still launches background and never records false core comple
   assert.equal(result.coreComplete, false);
   assert.equal(completed, 0);
   assert.equal(result.discovery.contractError, true);
+});
+
+test("timeouts, malformed background, and supported-profile 404 fail closed", async () => {
+  const cases = [
+    { name: "core timeout", context: { zeroFriends: false },
+      responseFor: (path) => path === "/races"
+        ? { ...response(0), timeout: true } : response(200, { publicRaceCount: 0,
+          featuredRaces: [], featuredTournaments: [], resolved: { publicRaceCount: true,
+            featuredRaces: true, featuredTournaments: true } }),
+      assertResult: (result) => assert.equal(result.coreComplete, false) },
+    { name: "partial discovery", context: { zeroFriends: false },
+      responseFor: (path) => path === "/races"
+        ? response(200, { contract: "race-list-compact-v1", active: [], pending: [], completed: [] })
+        : response(200, { publicRaceCount: 0, featuredRaces: [], featuredTournaments: [],
+          resolved: { publicRaceCount: true, featuredRaces: false, featuredTournaments: true } }),
+      assertResult: (result) => assert.equal(result.discovery.complete, false) },
+    { name: "discovery 404", context: { zeroFriends: false },
+      responseFor: (path) => path === "/races"
+        ? response(200, { contract: "race-list-compact-v1", active: [], pending: [], completed: [] })
+        : response(404),
+      assertResult: (result) => assert.equal(result.discovery.contractError, true) },
+    { name: "friends timeout", context: { zeroFriends: true },
+      responseFor: (path) => path === "/races"
+        ? response(200, { contract: "race-list-compact-v1", active: [], pending: [], completed: [] })
+        : path === "/friends" ? { ...response(0), timeout: true }
+          : response(200, { publicRaceCount: 0, featuredRaces: [], featuredTournaments: [],
+            resolved: { publicRaceCount: true, featuredRaces: true, featuredTournaments: true } }),
+      assertResult: (result) => assert.equal(result.friends.complete, false) },
+  ];
+  for (const row of cases) {
+    const calls = [];
+    const result = await runRacesTabOpenSession({ context: { userIndex: 1, ...row.context },
+      requestOne: async ({ entry }) => (calls.push(entry.path), row.responseFor(entry.path)) });
+    row.assertResult(result);
+    assert.ok(calls.includes("/races/discovery-summary"), `${row.name} launches discovery`);
+  }
+});
+
+test("iteration deadline is measured across core plus the background tail", async () => {
+  const times = [0, 15_000, 31_001];
+  const result = await runRacesTabOpenSession({ context: { userIndex: 1, zeroFriends: false },
+    clock: () => times.shift() ?? 31_001,
+    requestOne: async ({ entry }) => entry.path === "/races"
+      ? response(200, { contract: "race-list-compact-v1", active: [], pending: [], completed: [] })
+      : response(200, { publicRaceCount: 0, featuredRaces: [], featuredTournaments: [],
+        resolved: { publicRaceCount: true, featuredRaces: true, featuredTournaments: true } }) });
+  assert.equal(result.coreRefreshMs, 15_000);
+  assert.equal(result.deadlineTimedOut, true);
+});
+
+test("k6 session preserves core-first, parallel background, exact accounting, and bounded deadlines", () => {
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../../scripts/k6/races-tab-open.js"), "utf8");
+  assert.match(source, /ITERATION_DEADLINE_MS = 31_000/);
+  assert.match(source, /REQUEST_TIMEOUT = "15s"/);
+  assert.match(source, /gracefulStop: "32s"/);
+  assert.match(source, /http\.request\(\.\.\.request\("\/races\?view=compact-v1"/);
+  assert.match(source, /discoveryPromise = http\.asyncRequest[\s\S]*friendsPromise = http\.asyncRequest[\s\S]*Promise\.all/);
+  assert.match(source, /user\.zeroFriends === true/);
+  assert.match(source, /races_tab_sessions_started\{phase:measurement\}.*count==/);
+  assert.match(source, /races_tab_friends_started\{phase:measurement\}.*count==\$\{expectedFriends\}/);
+  assert.match(source, /K6_RACES_TAB_CORE_P95_MS/);
+  assert.match(source, /K6_RACES_TAB_CORE_P99_MS/);
+  assert.match(source, /K6_RACES_TAB_HTTP_ERROR_RATE/);
+  assert.match(source,
+    /http_reqs\{endpoint:\$\{endpoint\},phase:measurement,telemetry:sut\}/);
+  assert.match(source,
+    /races_tab_endpoint_response_bytes\{endpoint:\$\{endpoint\},phase:measurement\}/);
+  assert.doesNotMatch(source, /Math\.random/);
 });

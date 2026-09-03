@@ -23,6 +23,33 @@ test("main dispatches exact ./perf scan contract with centralized rate override"
   assert.deepEqual(calls.at(-1), ["output", "Report: /tmp/report.md\n"]);
 });
 
+test("main binds the selected Races-tab config and workload adapter", async () => {
+  const calls = [];
+  await main(["smoke", "--workload=races-tab-open"], {
+    repository: "/tmp/repository",
+    loadConfig: ({ mode, workload }) => (calls.push(["config", mode, workload]),
+      { mode, workload: { name: "authenticated-races-tab-reveal-v1" } }),
+    createRuntime: () => ({}), createProvider: () => ({}),
+    createWorkload: (name) => (calls.push(["adapter", name]), { name }),
+    runWorkflow: async ({ workload }) => (calls.push(["run", workload.name]), {
+      summary: { highestPassingRate: 5 }, reportPath: "/tmp/races.md",
+    }),
+    output: { write: () => {} },
+  });
+  assert.deepEqual(calls, [
+    ["config", "smoke", "races-tab-open"],
+    ["adapter", "races-tab-open"],
+    ["run", "races-tab-open"],
+  ]);
+});
+
+test("the first Races-tab profile rejects cold-cache and placement-churn variants", async () => {
+  await assert.rejects(main(["smoke", "--workload=races-tab-open", "--cache=cold"], {}),
+    /warm-cache/i);
+  await assert.rejects(main(["scan", "--workload=races-tab-open",
+    "--score-shape=placement-churn"], {}), /production-shaped/i);
+});
+
 test("unimplemented certification cannot silently fall back to the scan path", async () => {
   await assert.rejects(main(["certify"], { repository: "/tmp/repository" }),
     /not enabled.*first-run/i);

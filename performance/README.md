@@ -4,7 +4,9 @@ The operator entrypoint is intentionally small:
 
 ```bash
 ./perf smoke
+./perf smoke --workload=races-tab-open
 ./perf scan
+./perf scan --workload=races-tab-open --rates=5,10,15,20,25,30
 ./perf scan --rates=5,10,15,20 --cache=warm --background=normal
 ./perf reset
 ```
@@ -22,9 +24,17 @@ The complete requirements and migration design are in
 ## What a scan does
 
 The tool sends k6 open-loop arrival traffic from the host to a reusable,
-production-shaped Lima target. One k6 iteration represents one complete Home
-screen opening, including the current mobile client's step sync and conditional
-request graph.
+production-shaped Lima target. The default `home-open` workload represents one
+complete Home opening. `--workload=races-tab-open` represents one real Races-tab
+reveal: the compact race list refresh completes first, then discovery and the
+fixture-selected zero-friends branch run in the background. The configured rate
+is screen opens per second, not total endpoint RPS.
+
+The ordinary Races baseline fixes the reveal five seconds after Home. That is
+outside the friends repository's one-second duplicate-read reuse window but
+inside its 60-second freshness window, so zero-friends users make the same
+conditional friends request as the shipped app. The report records this cache
+age, the fixture's measured zero-friends share, and request counts by endpoint.
 
 The environment is prepared once. PostgreSQL, Redis, the two HTTP workers, the
 resolution worker, and cron worker stay alive across every ladder level. Test
@@ -39,7 +49,7 @@ consistently with those scores. Use `placement-churn` only for the explicit
 worst-case scenario where racers begin tied and large syncs cause race-wide
 placement movement; it is not the normal Home capacity profile.
 
-Warm scans prewarm a bounded representative cohort once with GET-only Home
+Warm scans prewarm a bounded representative cohort once with GET-only core
 reads (10 opens/sec, at most 300 users by default), then use a bounded
 stabilization warmup at each rate. Initial prewarm never calls step sync or
 feeds resolution queues. Cold scans perform non-cache-filling health checks, clear
@@ -65,9 +75,11 @@ snapshot metadata and secrets in `.env.capacity.local` plus the checked local
 production-parity overlay.
 
 The initial preparation can restore and scrub the approved snapshot once. An
-unchanged prepared environment is reused. If its code, dataset, hardware, or
-workload binding changes, the command stops with an explicit `./perf reset`
-instruction instead of guessing or mutating unrelated resources.
+unchanged prepared environment is reused across Home and Races workloads;
+workload fixtures are regenerated and cleaned up per run. If environment-
+relevant code, dataset, hardware, topology, parity, or provider binding changes,
+the command stops with an explicit `./perf reset` instruction instead of
+guessing or mutating unrelated resources.
 
 `./perf reset` is destructive only inside the environment whose persisted
 state, resource labels, workflow ancestry, and live provider lock all prove

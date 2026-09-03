@@ -11,19 +11,34 @@ function failure(reason, observed, threshold, unit) {
 function classifyAttempt(evidence = {}, config = {}) {
   const thresholds = config.thresholds || {};
   const failures = [];
+  const races = config.workload?.name === "authenticated-races-tab-reveal-v1";
   if (evidence.timedOut === true) failures.push(failure("timeout", true, false, "boolean"));
-  if (!finite(evidence.homeP95Ms) || !finite(evidence.homeP99Ms) ||
+  const screenEvidenceValid = races
+    ? finite(evidence.racesCoreP95Ms) && finite(evidence.racesCoreP99Ms) &&
+      finite(evidence.incompleteRacesCoreTransactions) &&
+      finite(evidence.incompleteRacesDiscovery) && finite(evidence.incompleteRacesFriends) &&
+      finite(evidence.racesContractErrors)
+    : finite(evidence.homeP95Ms) && finite(evidence.homeP99Ms) &&
+      finite(evidence.incompleteHomeTransactions);
+  if (!screenEvidenceValid ||
       !finite(evidence.httpErrorRate) || !finite(evidence.networkErrors) ||
-      !finite(evidence.incompleteHomeTransactions) || !finite(evidence.droppedArrivals) ||
+      !finite(evidence.droppedArrivals) ||
       !finite(evidence.workerRestarts) || !finite(evidence.databaseConnectionsExhausted) ||
       evidence.targetIdentityValid !== true) {
     failures.push(failure("unknown", "missing", "finite evidence", "evidence"));
   } else {
-    if (evidence.homeP95Ms > thresholds.homeP95Ms) {
-      failures.push(failure("home_p95_threshold", evidence.homeP95Ms, thresholds.homeP95Ms, "ms"));
-    }
-    if (evidence.homeP99Ms > thresholds.homeP99Ms) {
-      failures.push(failure("home_p99_threshold", evidence.homeP99Ms, thresholds.homeP99Ms, "ms"));
+    if (races) {
+      if (evidence.racesCoreP95Ms > thresholds.racesCoreP95Ms) failures.push(failure(
+        "races_core_p95_threshold", evidence.racesCoreP95Ms, thresholds.racesCoreP95Ms, "ms"));
+      if (evidence.racesCoreP99Ms > thresholds.racesCoreP99Ms) failures.push(failure(
+        "races_core_p99_threshold", evidence.racesCoreP99Ms, thresholds.racesCoreP99Ms, "ms"));
+    } else {
+      if (evidence.homeP95Ms > thresholds.homeP95Ms) {
+        failures.push(failure("home_p95_threshold", evidence.homeP95Ms, thresholds.homeP95Ms, "ms"));
+      }
+      if (evidence.homeP99Ms > thresholds.homeP99Ms) {
+        failures.push(failure("home_p99_threshold", evidence.homeP99Ms, thresholds.homeP99Ms, "ms"));
+      }
     }
     if (evidence.httpErrorRate >= thresholds.httpErrorRate) {
       failures.push(failure("http_error_rate", evidence.httpErrorRate, thresholds.httpErrorRate, "ratio"));
@@ -31,9 +46,42 @@ function classifyAttempt(evidence = {}, config = {}) {
     if (evidence.networkErrors > thresholds.networkErrors) {
       failures.push(failure("network_errors", evidence.networkErrors, thresholds.networkErrors, "count"));
     }
-    if (evidence.incompleteHomeTransactions > thresholds.incompleteHomeTransactions) {
+    if (!races && evidence.incompleteHomeTransactions > thresholds.incompleteHomeTransactions) {
       failures.push(failure("incomplete_home_transactions", evidence.incompleteHomeTransactions,
         thresholds.incompleteHomeTransactions, "count"));
+    }
+    if (races) {
+      if (evidence.incompleteRacesCoreTransactions > thresholds.incompleteRacesCoreTransactions) {
+        failures.push(failure("incomplete_races_core_transactions",
+          evidence.incompleteRacesCoreTransactions, thresholds.incompleteRacesCoreTransactions, "count"));
+      }
+      if (evidence.incompleteRacesDiscovery > thresholds.incompleteRacesDiscovery) {
+        failures.push(failure("incomplete_races_discovery", evidence.incompleteRacesDiscovery,
+          thresholds.incompleteRacesDiscovery, "count"));
+      }
+      if (evidence.incompleteRacesFriends > thresholds.incompleteRacesFriends) {
+        failures.push(failure("incomplete_races_friends", evidence.incompleteRacesFriends,
+          thresholds.incompleteRacesFriends, "count"));
+      }
+      if (evidence.racesContractErrors > 0) {
+        failures.push(failure("races_contract_error", evidence.racesContractErrors, 0, "count"));
+      }
+      const quotaDrift = Number(evidence.racesTabOpen?.scheduler?.quotaDrift);
+      const offeredQuotaDrift = Number(evidence.racesTabOpen?.scheduler?.offeredQuotaDrift);
+      const completionQuotaDrift = Number(evidence.racesTabOpen?.scheduler?.completionQuotaDrift);
+      if (!Number.isFinite(quotaDrift) || quotaDrift !== 0 ||
+          !Number.isFinite(offeredQuotaDrift) || offeredQuotaDrift !== 0 ||
+          !Number.isFinite(completionQuotaDrift) || completionQuotaDrift !== 0) {
+        failures.push(failure("scheduler_quota_drift",
+          [quotaDrift, offeredQuotaDrift, completionQuotaDrift].every(Number.isFinite)
+            ? { started: quotaDrift, offered: offeredQuotaDrift,
+              completed: completionQuotaDrift } : "missing", 0, "sessions"));
+      }
+      const targetMix = config.cache?.raceListTargetMix;
+      if (targetMix && targetMix !== "calibration-required" &&
+          evidence.racesTabOpen?.cacheSourceMix?.matchesTarget !== true) {
+        failures.push(failure("cache_profile_mismatch", "mismatch", targetMix, "profile"));
+      }
     }
     if (evidence.droppedArrivals > thresholds.droppedArrivals) {
       failures.push(failure("dropped_arrivals", evidence.droppedArrivals,
@@ -184,6 +232,9 @@ async function runScan({ config, executeRate, onEvent = () => {} } = {}) {
     safeCapacityCandidateTested: null,
     safeCapacityCandidates: [],
     safeHomeOpensPerSecond: null,
+    safeOperatingRate: null,
+    safeOperatingRateUnit: config.workload?.name === "authenticated-races-tab-reveal-v1"
+      ? "races_tab_opens_per_second" : "home_opens_per_second",
     safeCapacityUnavailableReason: null,
     failureReason: null,
     failureReasonDetail: null,
@@ -193,24 +244,36 @@ async function runScan({ config, executeRate, onEvent = () => {} } = {}) {
   if (firstFailingRate != null) {
     Object.assign(result, aggregateFailure(records.get(firstFailingRate).attempts));
   }
-  if (highestPassingRate != null && firstFailingRate != null &&
-      [config.thresholds.queueGrowth, config.thresholds.resourceSafety].includes("baseline-required")) {
+  const safeGateBaselineRequired =
+    [config.thresholds.queueGrowth, config.thresholds.resourceSafety].includes("baseline-required") ||
+    config.workload?.name === "authenticated-races-tab-reveal-v1" &&
+    config.cache?.raceListTargetMix === "calibration-required";
+  if (highestPassingRate != null && safeGateBaselineRequired) {
     result.safeCapacityUnavailableReason = "safe_gate_baseline_required";
-  } else if (highestPassingRate != null && firstFailingRate != null) {
+  }
+  if (highestPassingRate != null && firstFailingRate != null) {
     const target = Number((highestPassingRate * config.safeCapacity.headroomFactor).toFixed(6));
     const initial = Math.min(highestPassingRate, Math.ceil(target));
     result.calculatedHeadroomTarget = target;
-    result.safeCapacityCandidateTested = initial;
-    for (let candidate = initial; candidate >= 1;
-      candidate -= config.safeCapacity.fallbackStepPerSecond) {
-      let attempt = records.get(candidate)?.attempts.find((row) =>
-        row.outcome === "PASS" && row.passedSafeCapacityGates === true);
-      const evidenceReused = Boolean(attempt);
-      if (!attempt) attempt = await executeRate({ rate: candidate, purpose: "safe_capacity", attempt: 1 });
-      const passed = attempt?.outcome === "PASS" && attempt.passedSafeCapacityGates === true;
-      result.safeCapacityCandidates.push({ rate: candidate, passedSafeCapacityGates: passed,
-        evidenceReused, binding: attempt?.evidence?.binding || null });
-      if (passed) { result.safeHomeOpensPerSecond = candidate; break; }
+    if (!safeGateBaselineRequired) {
+      result.safeCapacityCandidateTested = initial;
+      for (let candidate = initial; candidate >= 1;
+        candidate -= config.safeCapacity.fallbackStepPerSecond) {
+        let attempt = records.get(candidate)?.attempts.find((row) =>
+          row.outcome === "PASS" && row.passedSafeCapacityGates === true);
+        const evidenceReused = Boolean(attempt);
+        if (!attempt) attempt = await executeRate({ rate: candidate, purpose: "safe_capacity", attempt: 1 });
+        const passed = attempt?.outcome === "PASS" && attempt.passedSafeCapacityGates === true;
+        result.safeCapacityCandidates.push({ rate: candidate, passedSafeCapacityGates: passed,
+          evidenceReused, binding: attempt?.evidence?.binding || null });
+        if (passed) {
+          result.safeOperatingRate = candidate;
+          if (config.workload?.name !== "authenticated-races-tab-reveal-v1") {
+            result.safeHomeOpensPerSecond = candidate;
+          }
+          break;
+        }
+      }
     }
   }
 

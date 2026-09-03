@@ -156,14 +156,22 @@ function readReusableSnapshotMarker(config) {
     metadataPath, attestationPath };
 }
 
+function environmentRelevantPerformanceConfig(config = {}) {
+  return {
+    schema: config.schema,
+    topology: config.topology,
+    background: config.background,
+  };
+}
+
 function reusableBinding({ commit, preflight, perfConfig, snapshotMarker }) {
   const liveManifestPath = path.resolve(preflight.config.live_manifest || "");
   if (!fs.existsSync(liveManifestPath)) throw new Error("approved live capacity resource manifest is missing");
   return { code: commit, dataset: snapshotMarker.snapshotHash,
     hardware: workflow.hashObject({ vps: preflight.config.vps_specs,
       database: preflight.config.database_specs }),
-    profile: perfConfig.workload.profileVersion,
-    performanceConfig: workflow.hashObject(perfConfig),
+    profile: "shared-screen-capacity-v1",
+    performanceConfig: workflow.hashObject(environmentRelevantPerformanceConfig(perfConfig)),
     providerConfig: sha(preflight.configBytes),
     parity: sha(fs.readFileSync(preflight.parityPath)),
     liveManifest: sha(fs.readFileSync(liveManifestPath)),
@@ -302,7 +310,7 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
         snapshotMetadataHash: sha(fs.readFileSync(preflight.verified.metadataPath)),
         migrationHash: sourceSubsetHash(sourceBundle, "prisma/migrations"),
         topologyHash: workflow.hashObject({ processes: { http: 2, resolution: 1, cron: 1 },
-          resolutionConcurrency: 2 }), profileVersion: perfConfig.workload.profileVersion,
+          resolutionConcurrency: 2 }), profileVersion: "shared-screen-capacity-v1",
         startRate: 2, maxRate: 500,
         provider: { instance: preflight.config.lima_instance, target: preflight.config.target,
           database: preflight.config.db_name, dbHostPort: Number(preflight.config.db_host_port) } });
@@ -424,6 +432,7 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
   };
 }
 
-module.exports = { CHILD_ID, ENVIRONMENT_ID, createLegacyLimaRuntime, ownedRedisCommand,
+module.exports = { CHILD_ID, ENVIRONMENT_ID, createLegacyLimaRuntime,
+  environmentRelevantPerformanceConfig, ownedRedisCommand,
   preflightLima, readReusableSnapshotMarker, requestTargetIdentity, reusableBinding,
   targetIdentityCensus };
