@@ -3,6 +3,19 @@ const net = require("node:net");
 
 const RESULT_SCHEMA = "load-test-result-v1";
 const PROFILE_SCHEMA = "load-profile-v1";
+const CURRENT_IOS_CLIENT_FEATURES = Object.freeze([
+  "characters", "ads", "ad_coin_random", "jammer", "spinpowerups", "team_races",
+  "tournaments", "race_leave", "powerups2", "powerups3", "powerups4", "powerups5",
+  "stealth_runner_duration", "hitchhike_effective_steps", "remote_assets",
+  "remote_asset_preferred", "next_race_cta", "discoverable_identity",
+  "home_suggested_races", "seeded_race_buckets", "home_invite_modal",
+  "race_participants_paging", "race_preview", "privacy_safe_display_ranks",
+  "powerup_stacking_guide_v1", "impact_notices", "active_impact_notices_v1",
+  "resolved_impact_events_v2", "impact_summaries", "impact_summary_expiry_v1",
+  "review_prompt", "inbox_v1", "privateJoinApproval", "api_payload_compact_v1",
+  "referral_contest_v1", "referral_contest_global_v1", "admin_metrics_v2",
+  "race_payout_flat_50",
+]);
 const PROFILES = Object.freeze(buildProfiles());
 
 function entry(method, path, options = {}) {
@@ -151,6 +164,17 @@ function buildProfiles() {
       allowedStatuses: [200], queue: true,
     }),
   ];
+  const racesTabOpenTraffic = [
+    entry("GET", "/races", {
+      query: "view=compact-v1", fixturePrerequisites: ["synthetic-user"],
+    }),
+    entry("GET", "/races/discovery-summary", {
+      fixturePrerequisites: ["synthetic-user"],
+    }),
+    entry("GET", "/friends", {
+      query: "view=summary-v1", fixturePrerequisites: ["synthetic-user", "zero-friends"],
+    }),
+  ];
   return {
     smoke: profile("smoke", [health, authMe, home[0], races[1]], { maxUsers: 2, maxDurationSeconds: 60, maxArrivalRatePerSecond: 10 }),
     home: profile("home", home),
@@ -212,19 +236,7 @@ function buildProfiles() {
       homeOpen: Object.freeze({
         schema: "home-open-session-v1",
         clientHeaderProfile: "current-home-2.3.11-ios-v1",
-        clientFeatures: Object.freeze([
-          "characters", "ads", "ad_coin_random", "jammer", "spinpowerups", "team_races",
-          "tournaments", "race_leave", "powerups2", "powerups3", "powerups4", "powerups5",
-          "stealth_runner_duration", "hitchhike_effective_steps", "remote_assets",
-          "remote_asset_preferred", "next_race_cta", "discoverable_identity",
-          "home_suggested_races", "seeded_race_buckets", "home_invite_modal",
-          "race_participants_paging", "race_preview", "privacy_safe_display_ranks",
-          "powerup_stacking_guide_v1", "impact_notices", "active_impact_notices_v1",
-          "resolved_impact_events_v2", "impact_summaries", "impact_summary_expiry_v1",
-          "review_prompt", "inbox_v1", "privateJoinApproval", "api_payload_compact_v1",
-          "referral_contest_v1", "referral_contest_global_v1", "admin_metrics_v2",
-          "race_payout_flat_50",
-        ]),
+        clientFeatures: CURRENT_IOS_CLIENT_FEATURES,
         arrivalBucketMs: 1000,
         allSettledDeadlineMs: 15_000,
         resolutionPollWaitMs: Object.freeze([750, 1500, 3000, 5000]),
@@ -234,6 +246,30 @@ function buildProfiles() {
           "POST /steps/sync-v2", "POST /steps", "GET /home/race-card",
           "GET /races", "GET /shop/catalog", "GET /friends", "GET /auth/me",
         ]),
+      }),
+    }),
+    "races-tab-open": Object.freeze({
+      ...profile("races-tab-open", racesTabOpenTraffic, {
+        fixtureRaces: 20,
+        defaultUsers: 5000,
+        defaultDuration: "600s",
+        defaultArrivalRatePerSecond: 5,
+        defaultConcurrency: 5000,
+        maxUsers: 5000,
+        maxDurationSeconds: 900,
+        maxArrivalRatePerSecond: 500,
+        queue: { workerServiceRatePerSecond: 500, lagThresholdMs: 30_000 },
+      }),
+      version: "1.0.0",
+      racesTabOpen: Object.freeze({
+        schema: "races-tab-open-session-v1",
+        clientHeaderProfile: "current-races-2.3.11-ios-v1",
+        clientFeatures: CURRENT_IOS_CLIENT_FEATURES,
+        requestTimeoutMs: 15_000,
+        iterationDeadlineMs: 31_000,
+        gracefulStopMs: 32_000,
+        friendsSelection: "fixture-zero-friends",
+        discovery404Policy: "contract-failure-no-legacy-fanout",
       }),
     }),
     "frozen-step-sync-burst": profile(

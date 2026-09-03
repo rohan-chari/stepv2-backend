@@ -15,8 +15,9 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     ((input) => require("../providers/lima-runtime").createLegacyLimaRuntime(input));
   const createProvider = dependencies.createProvider ||
     ((input) => require("../providers/lima").createLimaProvider(input));
-  const createWorkload = dependencies.createWorkload ||
-    (() => require("../workloads/home-open").createHomeOpenWorkload());
+  const createWorkload = dependencies.createWorkload || ((name) => name === "races-tab-open"
+    ? require("../workloads/races-tab-open").createRacesTabOpenWorkload()
+    : require("../workloads/home-open").createHomeOpenWorkload());
   const runWorkflow = dependencies.runWorkflow || require("./workflow").runPerformanceWorkflow;
   const output = dependencies.output || process.stdout;
   const signalSource = dependencies.signalSource || process;
@@ -25,7 +26,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     ...(cli.scoreShape ? { workload: { scoreShape: cli.scoreShape } } : {}),
   };
   const mode = cli.command === "reset" ? "scan" : cli.command;
-  const config = loadConfig({ repository, mode, overrides });
+  const config = loadConfig({ repository, mode, workload: cli.workload, overrides });
   const adapter = createRuntime({ repository,
     configPath: path.join(repository, config.provider?.legacyConfigPath ||
       "docs/capacity-load.config.json") });
@@ -46,7 +47,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   let result;
   try {
     result = await runWorkflow({ repository, cli, config, provider,
-      workload: createWorkload(), output, getInterruption: () => interruptedSignal });
+      workload: createWorkload(cli.workload), output, getInterruption: () => interruptedSignal });
   } finally {
     signalSource.removeListener("SIGINT", onSigint);
     signalSource.removeListener("SIGTERM", onSigterm);

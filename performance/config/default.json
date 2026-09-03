@@ -11,6 +11,23 @@
     "scoreShape": "production",
     "cohortWeight": 1
   },
+  "workloads": {
+    "home-open": {
+      "name": "authenticated-home-reveal-v1",
+      "profileVersion": "2.3.0",
+      "scoreShape": "production",
+      "cohortWeight": 1
+    },
+    "races-tab-open": {
+      "name": "authenticated-races-tab-reveal-v1",
+      "profileVersion": "1.0.0",
+      "scoreShape": "production",
+      "cohortWeight": 1,
+      "cohortSize": 5000,
+      "sessionDeadlineSeconds": 31,
+      "gracefulStopSeconds": 32
+    }
+  },
   "topology": {
     "httpWorkers": 2,
     "resolutionWorkers": 1,
@@ -107,6 +124,22 @@
     "databaseConnectionsExhausted": 0,
     "queueGrowth": "baseline-required",
     "resourceSafety": "baseline-required"
+  },
+  "workloadThresholds": {
+    "races-tab-open": {
+      "racesCoreP95Ms": 1000,
+      "racesCoreP99Ms": 2000,
+      "httpErrorRate": 0.001,
+      "networkErrors": 0,
+      "incompleteRacesCoreTransactions": 0,
+      "incompleteRacesDiscovery": 0,
+      "incompleteRacesFriends": 0,
+      "droppedArrivals": 0,
+      "workerRestarts": 0,
+      "databaseConnectionsExhausted": 0,
+      "queueGrowth": "baseline-required",
+      "resourceSafety": "baseline-required"
+    }
   },
   "result": {
     "summarySchema": "bara-perf-summary-v2",

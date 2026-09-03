@@ -84,11 +84,11 @@ test("CLI accepts only the documented safe grammar", () => {
 
   assert.deepEqual(parseCli(["scan"]), {
     command: "scan", target: "lima", background: "normal", cache: "warm",
-    rates: null, scoreShape: null, keepRunning: false,
+    rates: null, scoreShape: null, workload: "home-open", keepRunning: false,
   });
   assert.deepEqual(parseCli(["smoke", "--cache=cold", "--background=off"]), {
     command: "smoke", target: "lima", background: "off", cache: "cold",
-    rates: null, scoreShape: null, keepRunning: false,
+    rates: null, scoreShape: null, workload: "home-open", keepRunning: false,
   });
   assert.equal(parseCli(["scan", "--rates=5,10,25"]).rates.join(","), "5,10,25");
   assert.equal(parseCli(["scan", "--score-shape=placement-churn"]).scoreShape,

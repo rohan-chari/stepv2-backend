@@ -31,9 +31,8 @@ function validateConfig(config, mode) {
   if (config.schema !== CONFIG_SCHEMA) throw new Error("unsupported performance config schema");
   if (!["smoke", "scan", "certify"].includes(mode)) throw new Error(`unsupported mode: ${mode}`);
   if (config.mode !== mode) throw new Error("performance mode layer mismatch");
-  if (config.workload?.name !== "authenticated-home-reveal-v1") {
-    throw new Error("unsupported Home workload contract");
-  }
+  if (!["authenticated-home-reveal-v1", "authenticated-races-tab-reveal-v1"]
+    .includes(config.workload?.name)) throw new Error("unsupported workload contract");
   if (!["production", "placement-churn"].includes(config.workload?.scoreShape)) {
     throw new Error("Home workload score shape must be production or placement-churn");
   }
@@ -79,12 +78,18 @@ function validateConfig(config, mode) {
   return Object.freeze(config);
 }
 
-function loadConfig({ repository, mode, overrides = {} } = {}) {
+function loadConfig({ repository, mode, workload = "home-open", overrides = {} } = {}) {
   const root = path.resolve(repository || path.join(__dirname, "../.."));
   const configRoot = path.join(root, "performance", "config");
   const base = readJson(path.join(configRoot, "default.json"));
   const modeLayer = readJson(path.join(configRoot, `${mode}.json`));
-  return validateConfig(merge(merge(base, modeLayer), overrides), mode);
+  const selected = base.workloads?.[workload];
+  if (!selected) throw new Error(`unsupported workload: ${workload}`);
+  const thresholds = base.workloadThresholds?.[workload] || base.thresholds;
+  return validateConfig(merge(merge(merge(base, modeLayer), {
+    workload: selected,
+    thresholds,
+  }), overrides), mode);
 }
 
 module.exports = { loadConfig, merge, validateConfig };

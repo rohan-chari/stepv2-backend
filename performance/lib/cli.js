@@ -3,8 +3,8 @@ const COMMANDS = new Set(["smoke", "scan", "certify", "compare", "reset", "refre
 function usage() {
   return [
     "usage: ./perf <smoke|scan|certify|compare|reset|refresh-data> [options]",
-    "  ./perf smoke [--target=lima] [--score-shape=production|placement-churn] [--background=normal|off] [--cache=warm|cold]",
-    "  ./perf scan [--target=lima] [--rates=5,10,...] [--score-shape=production|placement-churn] [--background=normal|off] [--cache=warm|cold]",
+    "  ./perf smoke [--workload=home-open|races-tab-open] [--target=lima] [--score-shape=production|placement-churn] [--background=normal|off] [--cache=warm|cold]",
+    "  ./perf scan [--workload=home-open|races-tab-open] [--target=lima] [--rates=5,10,...] [--score-shape=production|placement-churn] [--background=normal|off] [--cache=warm|cold]",
   ].join("\n");
 }
 
@@ -21,7 +21,7 @@ function parseCli(argv = []) {
   const [command, ...tokens] = argv;
   if (!COMMANDS.has(command)) throw new Error(usage());
   const result = { command, target: "lima", background: "normal", cache: "warm",
-    rates: null, scoreShape: null, keepRunning: false };
+    rates: null, scoreShape: null, workload: "home-open", keepRunning: false };
   for (const token of tokens) {
     if (token === "--keep-running") { result.keepRunning = true; continue; }
     const match = token.match(/^--([a-z-]+)=(.*)$/);
@@ -38,6 +38,11 @@ function parseCli(argv = []) {
       result.cache = value;
     } else if (name === "rates" && command === "scan") {
       result.rates = parseRates(value);
+    } else if (name === "workload" && ["smoke", "scan"].includes(command)) {
+      if (!["home-open", "races-tab-open"].includes(value)) {
+        throw new Error("workload must be home-open or races-tab-open");
+      }
+      result.workload = value;
     } else if (name === "score-shape" && ["smoke", "scan"].includes(command)) {
       if (!["production", "placement-churn"].includes(value)) {
         throw new Error("score-shape must be production or placement-churn");
