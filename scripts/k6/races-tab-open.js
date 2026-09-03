@@ -3,7 +3,8 @@ import exec from "k6/execution";
 import { Counter, Rate, Trend } from "k6/metrics";
 import { SharedArray } from "k6/data";
 import { compareRacesTabProjection, projectRacesTabPayload, PROJECTION_VERSION,
-  REQUIRED_COVERAGE_VARIANTS, observedCoverageVariants } from "./races-tab-projection.js";
+  REQUIRED_COVERAGE_VARIANTS, observedCoverageVariants,
+  measurementPoolFixtureIndex } from "./races-tab-projection.js";
 
 const fixture = new SharedArray("races-tab-open-fixture", () =>
   [JSON.parse(open(__ENV.K6_FIXTURE_PATH))])[0];
@@ -164,9 +165,10 @@ function recordContentComparison(comparison, user) {
   for (const [reason, count] of Object.entries(comparison.mismatchCounts)) {
     mismatchReasons.add(count, { reason });
   }
-  if (trafficPhase === "measurement" && user.userIndex < 50) {
+  const relativeFixtureIndex = measurementPoolFixtureIndex(user.userIndex, userOffset);
+  if (trafficPhase === "measurement" && relativeFixtureIndex != null && relativeFixtureIndex < 50) {
     for (const sample of comparison.samples.slice(0, 1)) console.error(JSON.stringify({
-      event: "races_tab_projection_mismatch_sample_v1", fixtureIndex: user.userIndex,
+      event: "races_tab_projection_mismatch_sample_v1", fixtureIndex: relativeFixtureIndex,
       reason: sample.reason, path: sample.path,
       expectedType: sample.expectedType, observedType: sample.observedType,
     }));

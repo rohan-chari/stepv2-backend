@@ -121,6 +121,56 @@ test("cache conditioning has one wall-clock deadline across Redis, requests, and
     error.cacheConditioning.durationSeconds > 30);
 });
 
+test("cache conditioning waits for every started HTTP operation to settle before failing", async () => {
+  const users = Array.from({ length: 4 }, (_, index) => ({ id: `u${index}`, token: `t${index}` }));
+  let calls = 0;
+  let slowSettled = false;
+  await assert.rejects(conditionMeasurementCache({ rate: 2, purpose: "discovery", attempt: 1,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 1, identitySafetyFactor: 1 },
+      scan: { rates: [2] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "test", hot30Share: 1,
+        hot15Share: 0, expired300Share: 0, maximumSeconds: 30 } } },
+    deleteExact: async () => 1,
+    fetchImpl: async () => { calls += 1; if (calls === 1) throw new Error("first failed");
+      await new Promise((resolve) => setTimeout(resolve, 20)); slowSettled = true;
+      return { status: 200, json: async () => ({}) }; },
+    sleep: async () => {}, nowMillis: () => 0,
+  }), /first failed/);
+  assert.equal(slowSettled, true);
+});
+
+test("Redis deletion consumes the same conditioning deadline before HTTP begins", async () => {
+  const users = Array.from({ length: 2 }, (_, index) => ({ id: `u${index}`, token: `t${index}` }));
+  let clock = 0;
+  let requests = 0;
+  await assert.rejects(conditionMeasurementCache({ rate: 1, purpose: "discovery", attempt: 1,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 1, identitySafetyFactor: 1 },
+      scan: { rates: [1] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "test", hot30Share: 1,
+        hot15Share: 0, expired300Share: 0, maximumSeconds: 30 } } },
+    deleteExact: async () => { clock = 30_001; return 1; },
+    fetchImpl: async () => { requests += 1; return { status: 200, json: async () => ({}) }; },
+    sleep: async () => {}, nowMillis: () => clock,
+  }), (error) => error.cacheConditioning?.budgetExceeded === true);
+  assert.equal(requests, 0);
+});
+
+test("cache conditioning validates its deadline policy before deleting owned keys", async () => {
+  const users = Array.from({ length: 2 }, (_, index) => ({ id: `u${index}`, token: `t${index}` }));
+  let deleteCalls = 0;
+  await assert.rejects(conditionMeasurementCache({ rate: 1, purpose: "discovery", attempt: 1,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 1, identitySafetyFactor: 1 },
+      scan: { rates: [1] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "bad", hot30Share: 1,
+        hot15Share: 0, expired300Share: 0, maximumSeconds: 31 } } },
+    deleteExact: async () => { deleteCalls += 1; return 1; },
+  }), /invalid bounded/i);
+  assert.equal(deleteCalls, 0);
+});
+
 function metric(values) { return { values }; }
 
 test("Races k6 fixture is versioned, authenticated, deterministic, and identifier-free outside credentials", () => {

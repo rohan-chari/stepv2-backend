@@ -169,7 +169,7 @@ async function fetchCoreCohort({ users, baseUrl, runId, attemptId, fetchImpl, co
   deadlineMillis, nowMillis = Date.now, deadlineError = () =>
     new Error("Races-tab cache conditioning exceeded wall-clock budget") }) {
   let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, users.length)) },
+  const workers = Array.from({ length: Math.min(concurrency, Math.max(1, users.length)) },
     async () => {
       while (cursor < users.length) {
         const remaining = deadlineMillis - nowMillis();
@@ -186,7 +186,10 @@ async function fetchCoreCohort({ users, baseUrl, runId, attemptId, fetchImpl, co
           throw deadlineError();
         }
       }
-    }));
+    });
+  const results = await Promise.allSettled(workers);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 async function conditionMeasurementCache({ rate, purpose, attempt, environment, fixtures, config,
@@ -201,12 +204,6 @@ async function conditionMeasurementCache({ rate, purpose, attempt, environment, 
   const users = fixtures.users.slice(offset, offset + poolSize);
   if (users.length !== poolSize) throw new Error("Races-tab measurement identity pool is incomplete");
   const attemptId = `${purpose}-${attempt}`;
-  const variant = canonicalRaceListVariant({
-    clientFeatures: new Set(PROFILES["races-tab-open"].racesTabOpen.clientFeatures),
-    compact: true, releaseChannel: "prod",
-  });
-  const deletedKeys = await deleteExact({ environment, userIds: users.map((user) => user.id),
-    variant, initializeGeneration: true });
   const profile = config.cache?.racesTabConditioning;
   if (profile?.schema !== "races-tab-cache-conditioning-v1" ||
       Math.abs(Number(profile.hot30Share) + Number(profile.hot15Share) +
@@ -226,6 +223,13 @@ async function conditionMeasurementCache({ rate, purpose, attempt, environment, 
       throw deadlineError();
     }
   };
+  assertBudget();
+  const variant = canonicalRaceListVariant({
+    clientFeatures: new Set(PROFILES["races-tab-open"].racesTabOpen.clientFeatures),
+    compact: true, releaseChannel: "prod",
+  });
+  const deletedKeys = await deleteExact({ environment, userIds: users.map((user) => user.id),
+    variant, initializeGeneration: true });
   assertBudget();
   const bucket = (index) => (index * 37) % 100;
   const hot30 = users.filter((_, index) => bucket(index) < profile.hot30Share * 100);

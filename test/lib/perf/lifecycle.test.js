@@ -22,7 +22,7 @@ test("warm level preserves cache and excludes warmup from measurement epoch", as
   const log = [];
   await runLevel({ rate: 10, cacheMode: "warm", warmupSeconds: 15,
     ceremonyTargetSeconds: 15, operations: operations(log) });
-  assert.deepEqual(log, ["settle", "targetedReset", "liveness", "warmup", "resetMetrics",
+  assert.deepEqual(log, ["settle", "liveness", "warmup", "targetedReset", "resetMetrics",
     "measure", "collectMetrics"]);
   assert.equal(log.includes("clearOwnedCache"), false);
 });

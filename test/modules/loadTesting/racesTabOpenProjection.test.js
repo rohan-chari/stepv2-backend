@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const {
   MISMATCH_REASONS,
@@ -91,7 +94,7 @@ test("coverage is derived from observed response predicates rather than fixture 
   const projected = projectRacesTabPayload({ core: corePayload(), viewerUserId: "viewer" });
   const variants = observedCoverageVariants(projected);
   for (const variant of ["ordinary_classic_active", "pinned_classic",
-    "ordinary_placement_hidden", "ordinary_inventory_held_typed",
+    "ordinary_placement_visible", "ordinary_inventory_held_typed",
     "ordinary_inventory_mystery_box", "ordinary_inventory_queued_box",
     "ordinary_effect_positive", "ordinary_effect_negative", "ordinary_invite",
     "pinned_tournament", "tournament_live_match",
@@ -101,6 +104,41 @@ test("coverage is derived from observed response predicates rather than fixture 
   }
   assert.equal(variants.includes("ordinary_team_active"), false);
   assert.equal(variants.includes("tournament_between_rounds"), false);
+});
+
+test("privacy-aware placement coverage uses the display projection and has Node/k6 parity", () => {
+  const rows = [
+    { placement: { value: 2, hidden: false, displayValue: 3, privacyActive: true },
+      expected: "ordinary_placement_visible" },
+    { placement: { value: 2, hidden: false, displayValue: null, privacyActive: true },
+      expected: "ordinary_placement_hidden" },
+    { placement: { value: 2, hidden: true, displayValue: 3, privacyActive: true },
+      expected: "ordinary_placement_hidden" },
+  ];
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../../scripts/k6/races-tab-projection.js"), "utf8").replaceAll("export ", "");
+  const k6Observed = vm.runInNewContext(`${source}\nobservedCoverageVariants`);
+  for (const row of rows) {
+    const projection = { ordinary: { active: [{ kind: "classic", isFavorite: false,
+      placement: row.placement }] }, tournaments: {}, ordinaryInventoryByRace: [],
+    ordinaryEffectsByRace: [], tournamentMatchByTournament: [] };
+    const nodeVariants = observedCoverageVariants(projection);
+    const k6Variants = [...k6Observed(projection)];
+    assert.deepEqual(k6Variants, nodeVariants);
+    assert.ok(nodeVariants.includes(row.expected));
+    assert.equal(nodeVariants.includes(row.expected === "ordinary_placement_visible"
+      ? "ordinary_placement_hidden" : "ordinary_placement_visible"), false);
+  }
+});
+
+test("measurement mismatch indexes are relative to a nonzero measurement pool offset", () => {
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../../scripts/k6/races-tab-projection.js"), "utf8").replaceAll("export ", "");
+  const poolIndex = vm.runInNewContext(`${source}\nmeasurementPoolFixtureIndex`);
+  assert.equal(poolIndex(977, 977), 0);
+  assert.equal(poolIndex(1026, 977), 49);
+  assert.equal(poolIndex(1027, 977), 50);
+  assert.equal(poolIndex(10, 20), null);
 });
 
 test("projection comparison is additive-field tolerant and returns stable mismatch enums", () => {

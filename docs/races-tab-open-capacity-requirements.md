@@ -230,6 +230,10 @@ placement, hidden tournament-match placement, tournament-match held typed item,
 tournament-match mystery box, and tournament-match queued box. There are 28
 variants. All API fields that drive these projections have exact type
 and nullability assertions; extra additive API fields remain allowed.
+Placement coverage follows the real privacy projection: a privacy-active row
+with a valid `myDisplayPlacement` is visible, while hidden means either the
+explicit hidden flag or privacy-active with no display placement. Node capture
+and k6 use the same predicate for ordinary and tournament-match rows.
 
 `CANCELLED` is an app render branch but is not a 29th measured variant: the
 current `GET /races` tournament query explicitly excludes cancelled rows. The
@@ -277,7 +281,14 @@ free source census records user counts and joint combinations for:
 - non-empty ordinary-race active positive/negative effects;
 - public-race count returned by discovery.
 
-The generator scales that census deterministically to the synthetic cohort. The
+The generator deterministically apportions the complete mutually exclusive
+source user profiles so each generated identity inherits exactly one source
+profile before any coverage-floor additions. It scales complete ordinary-race,
+tournament-parent, and live-match graph shapes first, then assigns those
+identities to the graph capacity; natural ordinary and matchup
+inventory/effect marginals and joint combinations must stay inside source
+support. Generated shapes outside that support are permitted only when
+explicitly labeled coverage-floor augmentation. The
 central 300-session/28-variant coverage floor guarantees that every visible
 family appears in every measured attempt even when its source incidence is
 rare; the report separates naturally scaled rows from coverage-floor
@@ -385,10 +396,14 @@ establish those ages; it never calls discovery or friends. This bounded
 schedule has one wall-clock deadline, including Redis deletion, HTTP requests,
 and sleeps. Each attempt records actual duration, configured budget, and an
 explicit overrun state; an overrun fails the harness rather than silently
-extending level ceremony. This bounded
+extending level ceremony. Concurrent conditioning requests use settled cleanup
+semantics: after any rejection or timeout, every already-started request must
+settle before the workflow can clean up or advance. This bounded
 per-attempt cache conditioning is not environment setup, Redis recreation, or a
-namespace flush. Per-level stabilization traffic uses its separate identity
-pool and never changes the upcoming measurement identities. After conditioning
+namespace flush. Per-level stabilization traffic runs first using its separate
+identity pool and never changes the upcoming measurement identities. Only after
+stabilization finishes does the harness condition the measurement pool, so the
+15/30-second cohorts retain their intended ages. After conditioning
 finishes and immediately before measured traffic, the harness resets the
 metrics epoch and records worker-log byte offsets. Cache evidence accepts only events carrying
 the current run ID, measurement attempt ID, phase `measurement`, and timestamps
@@ -448,6 +463,9 @@ A separate `races-tab-mismatches.json` contains at most 50 samples using
 synthetic fixture indexes and redacted expected/observed details; truncation is
 explicit. Exact endpoint, branch, public-count, and projection reconciliation
 is required for every attempt purpose.
+Mismatch fixture indexes are relative to the current measurement pool
+(`userIndex - userOffset`), so the capped first-50 policy applies correctly to
+nonzero measurement offsets and never silently samples the stabilization pool.
 
 The additive summary schema becomes `bara-perf-summary-v3`. Existing Home fields
 remain unchanged. Each `levels[]` row gains `racesTabOpen`. Workload-neutral

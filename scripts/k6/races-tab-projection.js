@@ -130,7 +130,10 @@ export function observedCoverageVariants(projection = {}) {
   for (const row of array(ordinary.active)) {
     seen.add(row.kind === "team" ? "ordinary_team_active" : "ordinary_classic_active");
     if (row.isFavorite) seen.add(row.kind === "team" ? "pinned_team" : "pinned_classic");
-    if (row.placement?.hidden || row.placement?.privacyActive) seen.add("ordinary_placement_hidden");
+    if (row.placement?.hidden ||
+        (row.placement?.privacyActive && row.placement?.displayValue == null)) {
+      seen.add("ordinary_placement_hidden");
+    }
     else if (row.placement?.value != null || row.placement?.displayValue != null) {
       seen.add("ordinary_placement_visible");
     }
@@ -159,7 +162,8 @@ export function observedCoverageVariants(projection = {}) {
     if (row.isFavorite) seen.add("pinned_tournament");
   }
   for (const row of array(projection.tournamentMatchByTournament)) {
-    if (row.placement?.hidden || row.placement?.privacyActive) {
+    if (row.placement?.hidden ||
+        (row.placement?.privacyActive && row.placement?.displayValue == null)) {
       seen.add("tournament_match_placement_hidden");
     } else if (row.placement?.value != null || row.placement?.displayValue != null) {
       seen.add("tournament_match_placement_visible");
@@ -169,6 +173,11 @@ export function observedCoverageVariants(projection = {}) {
     if (Number(row.inventory?.queuedBoxCount) > 0) seen.add("tournament_match_inventory_queued_box");
   }
   return REQUIRED_COVERAGE_VARIANTS.filter((variant) => seen.has(variant));
+}
+
+export function measurementPoolFixtureIndex(fixtureIndex, userOffset) {
+  const relative = Number(fixtureIndex) - Number(userOffset);
+  return Number.isInteger(relative) && relative >= 0 ? relative : null;
 }
 function tournamentMatch(row, rowKey) {
   const match = row?.myCurrentMatch;

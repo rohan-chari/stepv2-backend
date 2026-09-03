@@ -212,7 +212,8 @@ function observedCoverageVariants(projection = {}) {
   for (const row of array(ordinary.active)) {
     seen.add(row.kind === "team" ? "ordinary_team_active" : "ordinary_classic_active");
     if (row.isFavorite) seen.add(row.kind === "team" ? "pinned_team" : "pinned_classic");
-    if (row.placement?.hidden || row.placement?.privacyActive) {
+    if (row.placement?.hidden ||
+        (row.placement?.privacyActive && row.placement?.displayValue == null)) {
       seen.add("ordinary_placement_hidden");
     } else if (row.placement?.value != null || row.placement?.displayValue != null) {
       seen.add("ordinary_placement_visible");
@@ -246,7 +247,8 @@ function observedCoverageVariants(projection = {}) {
     }
   }
   for (const row of array(projection.tournamentMatchByTournament)) {
-    if (row.placement?.hidden || row.placement?.privacyActive) {
+    if (row.placement?.hidden ||
+        (row.placement?.privacyActive && row.placement?.displayValue == null)) {
       seen.add("tournament_match_placement_hidden");
     } else if (row.placement?.value != null || row.placement?.displayValue != null) {
       seen.add("tournament_match_placement_visible");

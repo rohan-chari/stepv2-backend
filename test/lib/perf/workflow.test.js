@@ -182,7 +182,7 @@ test("a targeted-reset timeout still settles workload and provider cleanup", asy
     prepare: async () => ({ datasetId: "test", binding: {} }), validate: async () => {},
     settle: async () => {}, liveness: async () => {}, cleanup: async () => calls.push("provider"),
   }, workload: {
-    prepareFixtures: async () => ({}), initialPrewarm: async () => {},
+    prepareFixtures: async () => ({}), initialPrewarm: async () => {}, warmup: async () => {},
     targetedReset: async () => { const error = new Error("conditioning timeout");
       error.stage = "cache_conditioning"; throw error; },
     cleanup: async () => calls.push("workload"),

@@ -36,14 +36,18 @@ async function runLevel({ rate, cacheMode, warmupSeconds, ceremonyTargetSeconds,
     livenessSeconds: 0, warmupSeconds: 0, metricResetSeconds: 0,
     measurementSeconds: 0, metricsCollectionSeconds: 0 };
   let result = await timed(operations.settle, now); timings.settlingDrainingSeconds = result.seconds;
-  result = await timed(operations.targetedReset, now); timings.targetedResetSeconds = result.seconds;
-  const targetedReset = result.value;
-  result = await timed(operations.liveness, now); timings.livenessSeconds = result.seconds;
+  let targetedReset;
   if (cacheMode === "warm") {
+    result = await timed(operations.liveness, now); timings.livenessSeconds = result.seconds;
     if (typeof operations.warmup !== "function") throw new Error("warm level requires warmup");
     result = await timed(() => operations.warmup({ rate, warmupSeconds }), now);
     timings.warmupSeconds = result.seconds;
+    result = await timed(operations.targetedReset, now); timings.targetedResetSeconds = result.seconds;
+    targetedReset = result.value;
   } else {
+    result = await timed(operations.targetedReset, now); timings.targetedResetSeconds = result.seconds;
+    targetedReset = result.value;
+    result = await timed(operations.liveness, now); timings.livenessSeconds = result.seconds;
     for (const name of ["nonCacheFillingStabilize", "clearOwnedCache", "verifyOwnedCacheEmpty"]) {
       if (typeof operations[name] !== "function") throw new Error(`cold level operation is missing: ${name}`);
       result = await timed(operations[name], now);
