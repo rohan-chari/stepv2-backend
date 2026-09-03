@@ -34,7 +34,8 @@ The ordinary Races baseline fixes the reveal five seconds after Home. That is
 outside the friends repository's one-second duplicate-read reuse window but
 inside its 60-second freshness window, so zero-friends users make the same
 conditional friends request as the shipped app. The report records this cache
-age, the fixture's measured zero-friends share, and request counts by endpoint.
+age, the fixture's measured zero-friends share, request counts by endpoint, and
+discovery/friends latency from endpoint-tagged measurement HTTP metrics.
 
 The environment is prepared once. PostgreSQL, Redis, the two HTTP workers, the
 resolution worker, and cron worker stay alive across every ladder level. Test
@@ -55,6 +56,13 @@ stabilization warmup at each rate. Initial prewarm never calls step sync or
 feeds resolution queues. Cold scans perform non-cache-filling health checks, clear
 only the performance-owned Redis prefix, verify it is empty, reset metrics,
 and immediately measure.
+
+Race-list source evidence counts logical reads rather than every cache fragment
+or write. The compact bounded route therefore reports one PostgreSQL `bounded`
+read per core request in validated capacity mode; Redis fragment hits are
+collapsed to one logical hit. Ordinary production samples successful bounded
+reads at 1 in 100 so this diagnostic does not create material hot-path log
+pressure.
 
 The scan uses 60-second discovery measurements, confirms the first failure,
 narrows the pass/fail boundary, and explicitly measures the rounded 80%

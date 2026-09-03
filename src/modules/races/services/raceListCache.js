@@ -149,17 +149,42 @@ function metric(logger, fields) {
   } catch {}
 }
 
+function createRaceListReadRecorder({
+  logger = console,
+  env = process.env,
+  successEvery = 100,
+} = {}) {
+  const interval = Math.max(1, Number(successEvery) || 100);
+  let readCount = 0;
+  return function recordRaceListRead(fields) {
+    const capacityMode = env.CAPACITY_MODE === "true" || env.CAPACITY_MODE === "1";
+    const shouldLog = capacityMode || readCount % interval === 0;
+    readCount += 1;
+    if (shouldLog) metric(logger, fields);
+  };
+}
+
+const recordRead = createRaceListReadRecorder();
+
 function buildRaceListCache({
   redisCache = defaultRedisCache,
   derivedCache = defaultDerivedCache,
   logger = console,
+  env = process.env,
+  readSuccessEvery = 100,
+  readRecorder = null,
 } = {}) {
+  const recordLogicalRead = readRecorder || createRaceListReadRecorder({
+    logger,
+    env,
+    successEvery: readSuccessEvery,
+  });
   async function getStableMembership({ userId, variant, load }) {
     const fallback = async (source = "postgres") => {
       const races = projectStableRaces(await load());
-      metric(logger, {
+      recordLogicalRead({
         fragment: "all",
-        source,
+        source: "postgres",
         outcome: source === "postgres" ? "miss" : source,
         variant: typeof variant === "string" ? variant : "legacy",
         raceCount: races.length,
@@ -226,15 +251,13 @@ function buildRaceListCache({
           Buffer.byteLength(JSON.stringify({ version: CACHE_VERSION, races }), "utf8") > MAX_PAYLOAD_BYTES) {
           return fallback("malformed");
         }
-        for (const fragment of ["membership", "completed", "pending"]) {
-          metric(logger, {
-            fragment,
-            source: "redis",
-            outcome: "hit",
-            variant: safeVariant,
-            raceCount: races.length,
-          });
-        }
+        recordLogicalRead({
+          fragment: "membership",
+          source: "redis",
+          outcome: "hit",
+          variant: safeVariant,
+          raceCount: races.length,
+        });
         return { races, source: "redis" };
       }
       return fallback("generation_changed");
@@ -286,7 +309,7 @@ function buildRaceListCache({
         });
       }
     }
-    metric(logger, {
+    recordLogicalRead({
       fragment: "all",
       source: "postgres",
       outcome: read?.disabled === true ? "disabled" : "miss",
@@ -296,7 +319,7 @@ function buildRaceListCache({
     return { races, source: "postgres" };
   }
 
-  return { getStableMembership };
+  return { getStableMembership, recordRead: recordLogicalRead };
 }
 
 function buildRaceListInvalidator({
@@ -419,7 +442,7 @@ function registerRaceListCacheInvalidation({
   }
 }
 
-const defaultCache = buildRaceListCache();
+const defaultCache = buildRaceListCache({ readRecorder: recordRead });
 const defaultInvalidator = buildRaceListInvalidator();
 
 module.exports = {
@@ -432,6 +455,8 @@ module.exports = {
   classifyRaceListFields,
   projectStableRace,
   projectStableRaces,
+  createRaceListReadRecorder,
+  recordRead,
   buildRaceListCache,
   buildRaceListInvalidator,
   registerRaceListCacheInvalidation,

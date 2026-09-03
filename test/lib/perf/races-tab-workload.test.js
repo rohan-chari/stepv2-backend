@@ -40,10 +40,14 @@ test("Races summary normalizes core, background, endpoint, scheduler, and deadli
     "races_tab_discovery_completed{phase:measurement}": metric({ count: 598 }),
     "races_tab_discovery_errors{phase:measurement}": metric({ count: 2 }),
     "races_tab_discovery_ms{phase:measurement}": metric({ "p(95)": 190, "p(99)": 400 }),
+    "http_req_duration{endpoint:discovery-summary,phase:measurement,telemetry:sut}":
+      metric({ "p(95)": 91, "p(99)": 141 }),
     "races_tab_friends_started{phase:measurement}": metric({ count: 180 }),
     "races_tab_friends_completed{phase:measurement}": metric({ count: 179 }),
     "races_tab_friends_errors{phase:measurement}": metric({ count: 1 }),
     "races_tab_friends_ms{phase:measurement}": metric({ "p(95)": 90, "p(99)": 160 }),
+    "http_req_duration{endpoint:friends-summary,phase:measurement,telemetry:sut}":
+      metric({ "p(95)": 42, "p(99)": 72 }),
     "races_tab_network_errors{phase:measurement}": metric({ count: 0 }),
     "races_tab_contract_errors{phase:measurement}": metric({ count: 3 }),
     "races_tab_iteration_deadline_timeouts{phase:measurement}": metric({ count: 0 }),
@@ -73,19 +77,25 @@ test("Races summary normalizes core, background, endpoint, scheduler, and deadli
   assert.equal(result.racesTabOpen.observedEndpointRps["GET /friends"], 3);
   assert.equal(result.racesTabOpen.scheduler.quotaDrift, 0);
   assert.equal(result.racesTabOpen.coreResponseBytes.p95, 1800);
+  assert.deepEqual(result.racesTabOpen.discovery.latencyMs, { p95: 91, p99: 141 });
+  assert.deepEqual(result.racesTabOpen.friends.latencyMs, { p95: 42, p99: 72 });
 });
 
 test("cache evidence is grouped without user identifiers", () => {
   const log = [
     '2026-09-03T00:00:00Z {"event":"race_list_cache_v1","source":"redis","outcome":"hit","fragment":"membership"}',
+    '2026-09-03T00:00:00Z {"event":"race_list_cache_v1","source":"redis","outcome":"hit","fragment":"completed"}',
+    '2026-09-03T00:00:00Z {"event":"race_list_cache_v1","source":"redis","outcome":"hit","fragment":"pending"}',
+    '2026-09-03T00:00:00Z {"event":"race_list_cache_v1","source":"redis","outcome":"write","fragment":"membership"}',
     '2026-09-03T00:00:01Z {"event":"race_list_cache_v1","source":"postgres","outcome":"miss","fragment":"all"}',
+    '2026-09-03T00:00:02Z {"event":"race_list_cache_v1","source":"postgres","outcome":"bounded","fragment":"all"}',
     'ignore me',
   ].join("\n");
   assert.deepEqual(raceListCacheEvidenceFromLog(log), {
     schema: "races-tab-race-list-cache-evidence-v1",
-    eventCount: 2,
-    sources: { redis: 1, postgres: 1 },
-    outcomes: { hit: 1, miss: 1 },
+    eventCount: 3,
+    sources: { redis: 1, postgres: 2 },
+    outcomes: { hit: 1, miss: 1, bounded: 1 },
   });
 });
 

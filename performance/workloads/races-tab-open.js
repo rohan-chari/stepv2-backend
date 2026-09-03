@@ -79,8 +79,10 @@ function normalizeRacesTabEvidence({ summary, rate, measurementSeconds, fixture,
   };
   const endpointRps = Object.fromEntries(Object.entries(endpointCounts)
     .map(([name, count]) => [name, count / Math.max(1, Number(measurementSeconds))]));
+  const requestLatency = (endpoint, key) => metric(summary, "http_req_duration", key,
+    { ...phase, endpoint, telemetry: "sut" });
   const friendsLatency = (key) => friendsStartedCount === 0 ? 0 :
-    metric(summary, "races_tab_friends_ms", key, phase);
+    requestLatency("friends-summary", key);
   const endpointReconciliationErrors = [
     endpointCounts["GET /races"] - started,
     endpointCounts["GET /races/discovery-summary"] - discoveryStartedCount,
@@ -108,8 +110,8 @@ function normalizeRacesTabEvidence({ summary, rate, measurementSeconds, fixture,
       completed: discoveryCompletedCount,
       errors: discoveryErrorCount,
       latencyMs: {
-        p95: metric(summary, "races_tab_discovery_ms", "p(95)", phase),
-        p99: metric(summary, "races_tab_discovery_ms", "p(99)", phase),
+        p95: requestLatency("discovery-summary", "p(95)"),
+        p99: requestLatency("discovery-summary", "p(99)"),
       },
       responseBytes: {
         average: metric(summary, "races_tab_endpoint_response_bytes", "avg",
@@ -190,6 +192,8 @@ function raceListCacheEvidenceFromLog(log = "") {
     let row;
     try { row = JSON.parse(line.slice(start)); } catch { continue; }
     if (row?.event !== "race_list_cache_v1") continue;
+    if (row.outcome === "hit" && row.fragment !== "membership") continue;
+    if (["write", "write_error", "invalidated", "invalidate_error"].includes(row.outcome)) continue;
     result.eventCount += 1;
     const source = String(row.source || "other");
     const outcome = String(row.outcome || "other");

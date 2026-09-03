@@ -71,7 +71,9 @@ test("v3 summary and report retain Home compatibility and lead with Races-tab se
       primaryBottleneck: "postgres" },
     levels: [{ rate: 20, racesCoreP95Ms: 811, racesCoreP99Ms: 1400,
       httpErrorRate: 0, racesTabOpen: { discovery: { started: 1200, completed: 1200,
-        errors: 0 }, friends: { started: 360, completed: 360, errors: 0 },
+        errors: 0, latencyMs: { p95: 91, p99: 141 } },
+        friends: { started: 360, completed: 360, errors: 0,
+          latencyMs: { p95: 42, p99: 72 } },
         requestCountsByEndpoint: { "GET /races": 1200,
           "GET /races/discovery-summary": 1200, "GET /friends": 360 } } }],
   });
@@ -86,6 +88,8 @@ test("v3 summary and report retain Home compatibility and lead with Races-tab se
   assert.match(report, /1,480 ms/);
   assert.match(report, /PostgreSQL/);
   assert.match(report, /GET \/friends/);
+  assert.match(report, /1200\/1200\/0 \| 91\/141/);
+  assert.match(report, /360\/360\/0 \| 42\/72/);
   assert.match(report, /Deferred states: pending, completed, invited, tournament, team-race, review-opportunity, payout-double/);
 });
 

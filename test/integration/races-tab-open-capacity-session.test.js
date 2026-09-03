@@ -5,7 +5,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { before, beforeEach, describe, it } = require("node:test");
 
-const { buildRacesTabFixtureFile } = require("../../performance/workloads/races-tab-open");
+const { buildRacesTabFixtureFile, normalizeRacesTabEvidence } =
+  require("../../performance/workloads/races-tab-open");
 const { runRacesTabOpenSession } = require("../../src/modules/loadTesting/racesTabOpenSession");
 const { cleanupRacesTabOpenFixtures, createRacesTabOpenFixtures } =
   require("../../src/modules/loadTesting/racesTabOpenFixtures");
@@ -145,6 +146,13 @@ describe("Races-tab capacity session public HTTP contract", () => {
       assert.equal(Number.isFinite(summary.metrics[
         "races_tab_endpoint_response_bytes{endpoint:compact-races,phase:measurement}"
       ]?.values?.["p(95)"]), true);
+      const normalized = normalizeRacesTabEvidence({ summary, rate: 2,
+        measurementSeconds: 1, fixture: { users: fixture.users,
+          topology: { zeroFriendsShare: 0.5 } } });
+      assert.equal(Number.isFinite(normalized.racesTabOpen.discovery.latencyMs.p95), true);
+      assert.equal(Number.isFinite(normalized.racesTabOpen.discovery.latencyMs.p99), true);
+      assert.equal(Number.isFinite(normalized.racesTabOpen.friends.latencyMs.p95), true);
+      assert.equal(Number.isFinite(normalized.racesTabOpen.friends.latencyMs.p99), true);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

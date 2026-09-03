@@ -6,8 +6,50 @@ const {
   buildRaceListInvalidator,
   canonicalRaceListVariant,
   classifyRaceListFields,
+  createRaceListReadRecorder,
   TTL_SECONDS,
 } = require("../../src/modules/races/services/raceListCache");
+
+test("bounded read telemetry uses the same identifier-free cache event schema", () => {
+  const events = [];
+  const recordRead = createRaceListReadRecorder({
+    logger: { log: (event) => events.push(event) },
+    env: { CAPACITY_MODE: "true" },
+  });
+  recordRead({ fragment: "all", source: "postgres", outcome: "bounded",
+    variant: "compact", raceCount: 3 });
+  assert.deepEqual(events, [{ event: "race_list_cache_v1", surface: "races",
+    fragment: "all", source: "postgres", outcome: "bounded",
+    variant: "compact", raceCount: 3 }]);
+  assert.equal(JSON.stringify(events).includes("userId"), false);
+});
+
+test("bounded read telemetry is sampled in production and complete in capacity mode", () => {
+  const productionEvents = [];
+  const productionRecord = createRaceListReadRecorder({
+    logger: { log: (event) => productionEvents.push(event) },
+    env: {},
+    successEvery: 3,
+  });
+  for (let index = 0; index < 7; index += 1) {
+    productionRecord({ source: index % 2 ? "redis" : "postgres",
+      outcome: index % 2 ? "hit" : "bounded", raceCount: index });
+  }
+  assert.deepEqual(productionEvents.map((event) => event.raceCount), [0, 3, 6]);
+  assert.deepEqual(productionEvents.map((event) => event.source),
+    ["postgres", "redis", "postgres"]);
+
+  const capacityEvents = [];
+  const capacityRecord = createRaceListReadRecorder({
+    logger: { log: (event) => capacityEvents.push(event) },
+    env: { CAPACITY_MODE: "true" },
+    successEvery: 100,
+  });
+  for (let index = 0; index < 4; index += 1) {
+    capacityRecord({ source: "postgres", outcome: "bounded", raceCount: index });
+  }
+  assert.deepEqual(capacityEvents.map((event) => event.raceCount), [0, 1, 2, 3]);
+});
 
 function fakeRedis({ enabled = true, values = null, responses = null, throwOnRead = false } = {}) {
   const writes = [];
@@ -39,6 +81,59 @@ function fakeDerivedCache() {
     invalidate: async ({ run }) => (run ? Boolean((await run()).ok) : true),
   };
 }
+
+test("legacy cache hits and misses use the same logical read recorder", async () => {
+  const stable = (id, status) => ({ id, status, name: id });
+  const hitEvents = [];
+  const hitCache = buildRaceListCache({
+    redisCache: fakeRedis({ responses: [
+      [7],
+      [
+        { version: 1, races: [stable("active", "ACTIVE")] },
+        { version: 1, races: [stable("done", "COMPLETED")] },
+        { version: 1, races: [stable("waiting", "PENDING")] },
+      ],
+      [7],
+    ] }),
+    derivedCache: fakeDerivedCache(),
+    logger: { log() {} },
+    readRecorder: (event) => hitEvents.push(event),
+  });
+  await hitCache.getStableMembership({ userId: "u1", variant: "legacy",
+    load: async () => { throw new Error("postgres should not run on a hit"); } });
+  hitCache.recordRead({ fragment: "all", source: "postgres", outcome: "bounded",
+    variant: "compact", raceCount: 2 });
+  assert.deepEqual(hitEvents, [
+    { fragment: "membership", source: "redis", outcome: "hit",
+      variant: "legacy", raceCount: 3 },
+    { fragment: "all", source: "postgres", outcome: "bounded",
+      variant: "compact", raceCount: 2 },
+  ]);
+
+  const missEvents = [];
+  const missCache = buildRaceListCache({
+    redisCache: fakeRedis(),
+    derivedCache: fakeDerivedCache(),
+    logger: { log() {} },
+    readRecorder: (event) => missEvents.push(event),
+  });
+  await missCache.getStableMembership({ userId: "u1", variant: "legacy",
+    load: async () => [stable("fresh", "ACTIVE")] });
+  assert.deepEqual(missEvents, [{ fragment: "all", source: "postgres",
+    outcome: "miss", variant: "legacy", raceCount: 1 }]);
+
+  const bypassEvents = [];
+  const bypassCache = buildRaceListCache({
+    redisCache: fakeRedis({ enabled: false }),
+    derivedCache: fakeDerivedCache(),
+    logger: { log() {} },
+    readRecorder: (event) => bypassEvents.push(event),
+  });
+  await bypassCache.getStableMembership({ userId: "u1", variant: "legacy",
+    load: async () => [stable("direct", "ACTIVE")] });
+  assert.deepEqual(bypassEvents, [{ fragment: "all", source: "postgres",
+    outcome: "bypass", variant: "legacy", raceCount: 1 }]);
+});
 
 test("race list variants canonicalize supported dimensions and ignore unknown tokens", () => {
   assert.equal(

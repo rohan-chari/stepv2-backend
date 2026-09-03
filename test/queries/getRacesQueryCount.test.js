@@ -181,3 +181,63 @@ test("legacy mixed lists keep projected active races out of the SQL ranker", asy
     delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
   }
 });
+
+test("compact bounded lists emit one identifier-free PostgreSQL source event", async () => {
+  const raceModule = require("../../src/modules/races/models/race");
+  const participantModule = require("../../src/modules/races/models/raceParticipant");
+  const originals = { Race: raceModule.Race, RaceParticipant: participantModule.RaceParticipant };
+  const active = {
+    ...activePowerupRace("active-large"),
+    powerupsEnabled: false,
+    _viewerParticipant: activePowerupRace("active-large").participants[0],
+  };
+  active._viewerParticipant.raceId = active.id;
+  const completed = {
+    ...activePowerupRace("completed-small"),
+    status: "COMPLETED",
+    powerupsEnabled: false,
+    completedAt: new Date(),
+  };
+  const cacheReads = [];
+  Object.assign(raceModule, { Race: {
+    async findBoundedRaceListForUser() { return [active, completed]; },
+    async findRaceListStableForUser() { throw new Error("bounded list should be used"); },
+    async findSqlSummariesForUser(_userId, _extraIds, { stableRaces }) {
+      return { ambiguousFinisherOrder: false, races: stableRaces };
+    },
+  } });
+  Object.assign(participantModule, { RaceParticipant: {
+    async findViewerRowsForRaces() { throw new Error("embedded viewer should be used"); },
+  } });
+  try {
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+    const { getRaces } = require("../../src/modules/races/queries/getRaces");
+    await getRaces("viewer", false, {
+      raceListCacheEnabled: true,
+      compactRaceList: true,
+      raceListCache: {
+        isEnabled: () => true,
+        recordRead(fields) { cacheReads.push(fields); },
+        async getStableMembership() {
+          throw new Error("compact bounded list should bypass fragment fetch");
+        },
+      },
+      raceProgressPageProjection: {
+        async readRaceProgressPageProjection({ raceId }) {
+          return {
+            total: 2, asOf: new Date().toISOString(), requesterRow: { placement: 2 },
+            rows: [{ participantId: `${raceId}-p2`, userId: "rival", placement: 1,
+              totalSteps: 200 }],
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(cacheReads, [{ fragment: "all", source: "postgres",
+      outcome: "bounded", variant: "legacy", raceCount: 2 }]);
+  } finally {
+    Object.assign(raceModule, { Race: originals.Race });
+    Object.assign(participantModule, { RaceParticipant: originals.RaceParticipant });
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+  }
+});

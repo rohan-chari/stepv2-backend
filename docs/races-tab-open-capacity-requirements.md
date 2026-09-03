@@ -175,9 +175,14 @@ hit. Initial prewarm uses the same representative identity pool and warms only
 the core route needed to represent Home's preceding race-list load; it does not
 warm discovery. Per-level warmup uses the upcoming level's bounded identity
 pool only to maintain the declared natural 15/30/300-second fragment TTL state;
-it never clears Redis or rebuilds data. The report records observed race-list
-cache sources (Redis hit, PostgreSQL miss/bypass, and other outcomes) against a
-centrally configured, versioned target mix calibrated from identifier-free
+it never clears Redis or rebuilds data. The report records observed logical
+race-list reads rather than cache-fragment writes: Redis hits are collapsed to
+one read and the compact bounded query is recorded as a PostgreSQL `bounded`
+read. Validated capacity mode records every bounded read; ordinary production
+samples successful bounded-read telemetry at the existing 1-in-100 cadence to
+avoid adding material log pressure to the hot path. Those sources/outcomes are
+compared against a centrally configured,
+versioned target mix calibrated from identifier-free
 production telemetry. Until that calibration exists, smoke and diagnostic
 scans may run but safe capacity is unavailable. Cold cache is separate.
 
@@ -188,8 +193,10 @@ The existing versioned summary receives workload-neutral screen fields plus a
 
 - started and core-refresh-complete sessions;
 - core p50/p95/p99 latency and response bytes;
-- discovery started/completed/error counts and p95/p99 latency;
-- conditional friends started/completed/error counts and p95/p99 latency;
+- discovery started/completed/error counts and p95/p99 latency from the
+  endpoint-tagged measurement-phase HTTP duration metric;
+- conditional friends started/completed/error counts and p95/p99 latency from
+  the endpoint-tagged measurement-phase HTTP duration metric;
 - the fixture zero-friends share that selected the branch;
 - the fixed fresh-client cache age (>1 second and <60 seconds) that makes the
   zero-friends branch observable rather than hidden by one-second read reuse;
@@ -279,6 +286,12 @@ version update rather than silently changing historical comparisons.
 - Core refresh completion and background completion are distinct metrics.
 - Generated endpoint counts reconcile with iteration counts and fixture branch
   membership.
+- Discovery and conditional-friends p95/p99 values come from endpoint-tagged,
+  measurement-phase HTTP metrics and are finite when those requests run.
+- Race-list cache evidence counts logical reads (including compact bounded
+  PostgreSQL reads), not per-fragment cache events or writes.
+- Capacity mode captures every compact bounded read while ordinary production
+  telemetry is deterministically sampled at 1 in 100.
 - Fixture evidence claims only the measured Home-derived active/zero-race
   topology and zero-friends branch; deferred Races-card states are named as a
   limitation.
@@ -293,7 +306,9 @@ version update rather than silently changing historical comparisons.
   fixture stability, and cache-profile evidence.
 - Relevant unit and `_test` integration suites pass; smoke is healthy before a
   ladder begins.
-- No frontend or backend application behavior, API, or schema changes.
+- No frontend behavior or client-visible backend behavior, API, or schema
+  changes; the only backend addition is identifier-free source telemetry for
+  the existing compact bounded race-list read.
 
 ## Revision log
 
