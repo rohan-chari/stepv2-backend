@@ -212,13 +212,13 @@ test("funded cohort finalization releases over-limit elected users instead of ab
   );
 });
 
-test("staging-shaped funded finalization uses real C0 and exposure helpers within the 5s transaction budget", async () => {
+test("production-shaped funded finalization uses real C0 helpers with an explicit transaction budget", async () => {
   // Staging exposed P2028 after roughly five seconds with a 450-person field:
   // the old finalizer issued three writes per person, in addition to its lock
   // work. This deterministic fake gives the transaction the equivalent of 240
   // database round trips before expiring. A production-sized plan must stay
   // below that budget and must never fall back to per-person durable writes.
-  const elected = candidates(450).map(({ userId }) => ({ userId }));
+  const elected = candidates(900).map(({ userId }) => ({ userId }));
   const participants = [];
   const calls = new Map();
   let inTransaction = false;
@@ -226,6 +226,7 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
   let raceSequence = 0;
   let bucketSequence = 0;
   let participantSequence = 0;
+  let transactionOptions;
 
   function record(name) {
     calls.set(name, (calls.get(name) || 0) + 1);
@@ -259,7 +260,10 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
     seededRaceWindowMembership: {
       async findMany() { record("membership.findMany"); return elected; },
       async update() { record("membership.update"); },
-      async updateMany() { record("membership.updateMany"); return { count: 15 }; },
+      async updateMany({ where }) {
+        record("membership.updateMany");
+        return { count: where.userId.in.length };
+      },
     },
     seededRaceBucket: {
       async findMany() { record("bucket.findMany"); return []; },
@@ -311,7 +315,8 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
   };
   const prisma = {
     ...tx,
-    async $transaction(callback) {
+    async $transaction(callback, options) {
+      transactionOptions = options;
       inTransaction = true;
       try {
         return await callback(tx);
@@ -329,6 +334,7 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
   });
   const seed = {
     id: "daily-seed",
+    kind: "DAILY_10K",
     cadence: "DAILY",
     name: "Daily 10K",
     targetSteps: 10_000,
@@ -349,4 +355,9 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
   assert.equal(calls.get("assignment.createMany"), 1);
   assert.equal(calls.get("guard.createMany"), 1, "seeded finalization locks the user guards once");
   assert.ok((calls.get("$queryRawUnsafe") || 0) >= 62, "all 30 real C0 fences ran");
+  assert.deepEqual(
+    transactionOptions,
+    { maxWait: 10_000, timeout: 30_000 },
+    "Daily and Weekly share an explicit production-sized finalization budget",
+  );
 });

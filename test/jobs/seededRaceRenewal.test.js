@@ -238,6 +238,42 @@ test("promotes a due PENDING to ACTIVE, emits RACE_STARTED, and creates the next
   );
 });
 
+test("a failed current-window bucket recovery does not block due legacy promotion", async () => {
+  const ctx = makeCtx({
+    seeds: [dailySeed],
+    races: [{
+      id: "legacy-due-after-recovery-error",
+      seedId: dailySeed.id,
+      status: "PENDING",
+      name: dailySeed.name,
+      scheduledStartAt: new Date("2026-06-25T04:00:00Z"),
+      endsAt: new Date("2026-06-26T04:00:00Z"),
+      powerupsEnabled: false,
+      powerupStepInterval: null,
+    }],
+  });
+  const errors = [];
+  const renew = buildRenewSeededRaces({
+    prisma: ctx.prisma,
+    appSettings: { async getFlag() { return false; } },
+    now: () => NOW,
+    logger: { log() {}, error(...args) { errors.push(args); } },
+    eventBus: ctx.eventBus,
+    enqueueRaceResolution: async (value) => ctx.enqueued.push(value),
+    seededRaceBuckets: {
+      async finalise() { throw new Error("simulated finalization timeout"); },
+    },
+  });
+
+  await renew();
+
+  assert.equal(
+    ctx.races.find((race) => race.id === "legacy-due-after-recovery-error").status,
+    "ACTIVE",
+  );
+  assert.ok(errors.some(([message]) => /bucket recovery failed/i.test(message)));
+});
+
 test("promotion initializes nextBoxAtSteps for opt-ins when powerups are enabled", async () => {
   const ctx = makeCtx({
     seeds: [{ ...dailySeed, powerupsEnabled: true, powerupStepInterval: 2000 }],

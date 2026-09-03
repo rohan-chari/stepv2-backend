@@ -38,6 +38,15 @@ const DAILY_COHORT_MAXIMUM = 35;
 const WEEKLY_COHORT_MINIMUM = 75;
 const WEEKLY_COHORT_MAXIMUM = 100;
 const BUCKET_FEATURE = "seeded_race_buckets";
+// Finalizing a production Daily can create roughly thirty private races and
+// must take every race/user/competition lock before publishing membership.
+// Prisma's 5s interactive-transaction default is too small for that bounded
+// batch under ordinary production load. Weekly uses this same path, so keep
+// one explicit budget for both cadences rather than relying on client defaults.
+const FINALIZATION_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+};
 
 function cohortMinimumForSeed(seed) {
   if (seed?.kind === "DAILY_10K") return DAILY_COHORT_MINIMUM;
@@ -626,7 +635,16 @@ function buildSeededRaceBuckets(dependencies = {}) {
   }
 
   async function finalise({ seed, windowStart, windowEnd }) {
-    if (now() >= windowStart) return [];
+    // Elections close at windowStart, but materialization may safely recover
+    // later in the same window: it consumes only durable BUCKET memberships
+    // elected before the boundary. This prevents a missed cron tick or rolled-
+    // back transaction from stranding the cohort for the entire day/week.
+    const recovering = now() >= windowStart;
+    if (now() >= windowEnd) return [];
+    if (
+      (await readWindowMode({ prisma, seedId: seed.id, windowStart })) !==
+      "BUCKET"
+    ) return [];
     const seededChallenge = ["DAILY_10K", "WEEKLY_50K"].includes(seed.kind);
     // These values are stamped exactly as the legacy renewal path stamps
     // them. Bucket matching must never silently alter a seeded race's payout
@@ -643,7 +661,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
     const alreadyFinalized = await prisma.seededRaceBucket.findMany({
       where: { seedId: seed.id, windowStart },
     });
-    if (alreadyFinalized.length) return alreadyFinalized;
+    if (alreadyFinalized.length) return recovering ? [] : alreadyFinalized;
 
     // Matching history and friendship reads are immutable inputs for this
     // window but can be large. Build the plan outside the lock-holding write
@@ -776,6 +794,11 @@ function buildSeededRaceBuckets(dependencies = {}) {
           // uncommitted until this recheck passes. A stale/existing outcome is
           // signalled by throwing so the whole transaction rolls back.
           await acquireSeededWindowLock(tx, seed.id, windowStart);
+          if (now() >= windowEnd) {
+            const error = new Error("Seeded bucket window ended");
+            error.seededFinalizationOutcome = "WINDOW_ENDED";
+            throw error;
+          }
           if (
             (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart })) !==
             "BUCKET"
@@ -879,7 +902,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
           return {
             rows: rows.map(({ group: _group, ...row }) => row),
           };
-        });
+        }, FINALIZATION_TRANSACTION_OPTIONS);
         const finalizedRows = outcome.rows;
         // This worker writes race and participant rows inside its own
         // transaction, so no command event is emitted for the new members.
@@ -894,9 +917,10 @@ function buildSeededRaceBuckets(dependencies = {}) {
       } catch (error) {
         if (error?.seededFinalizationOutcome === "EXISTING") return error.rows;
         if (error?.seededFinalizationOutcome === "MODE_CHANGED") return [];
+        if (error?.seededFinalizationOutcome === "WINDOW_ENDED") return [];
         if (error?.code === "FUNDED_EXPOSURE_LIMIT") continue;
         if (error?.seededFinalizationOutcome !== "RETRY") throw error;
-        if (now() >= windowStart) return [];
+        if (now() >= windowEnd) return [];
       }
     }
     return [];

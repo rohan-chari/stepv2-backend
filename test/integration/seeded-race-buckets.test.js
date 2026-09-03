@@ -336,6 +336,69 @@ describe("private seeded race buckets (integration)", () => {
     );
   });
 
+  for (const kind of ["DAILY_10K", "WEEKLY_50K"]) {
+    it(`recovers an elected ${kind} window after the boundary and stays idempotent`, async () => {
+      const seed = await prisma.raceSeed.findUnique({ where: { kind } });
+      const boundary = kind === "DAILY_10K"
+        ? new Date("2026-10-07T04:00:00.000Z")
+        : new Date("2026-10-05T04:00:00.000Z");
+      const { windowStart, windowEnd } = upcomingWindowFor(
+        seed,
+        new Date(boundary.getTime() - 2 * 60 * 1000),
+      );
+      const now = new Date(windowStart.getTime() + 2 * 60 * 1000);
+      await prisma.seededRaceWindowModeRecord.upsert({
+        where: { seedId_windowStart: { seedId: seed.id, windowStart } },
+        create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+        update: {},
+      });
+      const users = await Promise.all(Array.from({ length: 4 }, () => createTestUser()));
+      await prisma.seededRaceWindowMembership.createMany({
+        data: users.map(({ user }) => ({
+          seedId: seed.id,
+          windowStart,
+          userId: user.id,
+          stream: "BUCKET",
+        })),
+      });
+
+      const scopedRaceSeed = new Proxy(prisma.raceSeed, {
+        get(target, property) {
+          if (property === "findMany") return async () => [seed];
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const scopedPrisma = new Proxy(prisma, {
+        get(target, property) {
+          if (property === "raceSeed") return scopedRaceSeed;
+          return Reflect.get(target, property, target);
+        },
+      });
+      const renew = buildRenewSeededRaces({
+        prisma: scopedPrisma,
+        now: () => now,
+        appSettings,
+        logger: { log() {}, error(_message, error) { throw error; } },
+      });
+      await renew();
+      const recovered = await prisma.seededRaceBucket.findMany({
+        where: { seedId: seed.id, windowStart },
+        include: { race: true, assignments: true },
+      });
+      assert.equal(recovered.length, 1);
+      assert.equal(recovered[0].status, "ACTIVE");
+      assert.equal(recovered[0].race.status, "ACTIVE");
+      assert.equal(recovered[0].assignments.length, users.length);
+
+      await renew();
+      assert.equal(
+        await prisma.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),
+        1,
+      );
+    });
+  }
+
   it("gives a 16-person Daily cohort bounded onboarding headroom up to 35", async () => {
     const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
     const beforeBoundary = new Date("2026-08-12T03:58:00.000Z");
@@ -560,7 +623,7 @@ describe("private seeded race buckets (integration)", () => {
       create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
       update: {},
     });
-    const users = await Promise.all(Array.from({ length: 151 }, () => createTestUser()));
+    const users = await Promise.all(Array.from({ length: 901 }, () => createTestUser()));
     await prisma.seededRaceWindowMembership.createMany({
       data: users.map(({ user }) => ({
         seedId: seed.id,
@@ -584,22 +647,22 @@ describe("private seeded race buckets (integration)", () => {
       where: { seedId: seed.id, windowStart },
       select: { id: true },
     });
-    assert.equal(buckets.length, 2);
+    assert.equal(buckets.length, 12);
     const persisted = await prisma.seededRaceBucket.findMany({
       where: { id: { in: buckets.map(({ id }) => id) } },
       include: { race: true, assignments: true },
       orderBy: { race: { createdAt: "asc" } },
     });
-    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), [100, 100]);
-    assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [76, 75]);
+    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), Array(12).fill(100));
+    assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [76, ...Array(11).fill(75)]);
     await renew();
     assert.equal(
       await prisma.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),
-      2
+      12
     );
   });
 
-  it("finalizes a production-sized 450-user funded cohort inside the 5s budget without concurrent-query warnings", async () => {
+  it("finalizes a production-sized 900-user funded cohort inside its explicit budget without concurrent-query warnings", async () => {
     const warnings = [];
     const onWarning = (warning) => warnings.push(warning);
     process.on("warning", onWarning);
@@ -609,7 +672,7 @@ describe("private seeded race buckets (integration)", () => {
         where: { kind: "DAILY_10K" },
       });
       const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
-      const userIds = Array.from({ length: 450 }, () => randomUUID());
+      const userIds = Array.from({ length: 900 }, () => randomUUID());
       await prisma.user.createMany({
         data: userIds.map((id, index) => ({
           id,
@@ -637,12 +700,12 @@ describe("private seeded race buckets (integration)", () => {
       const durationMs = performance.now() - startedAt;
       await new Promise((resolve) => setImmediate(resolve));
 
-      assert.equal(buckets.length, 15);
+      assert.equal(buckets.length, 30);
       assert.equal(
         await prisma.raceParticipant.count({
           where: { raceId: { in: buckets.map((bucket) => bucket.raceId) } },
         }),
-        450,
+        900,
       );
       assert.ok(
         durationMs < 5_000,

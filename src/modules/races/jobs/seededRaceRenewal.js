@@ -65,7 +65,8 @@ function buildRenewSeededRaces(dependencies = {}) {
   // (hook 1), and its inactivity/auto-enroll-flip logging belongs in the same
   // stream as this job's, not on the default console.
   const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma, logger });
-  const seededBuckets = buildSeededRaceBuckets({ prisma, now });
+  const seededBuckets =
+    dependencies.seededRaceBuckets || buildSeededRaceBuckets({ prisma, now });
   const acquireWriteFence =
     dependencies.acquireRaceWriteFence || (async (tx, raceId) => (
       typeof tx.$queryRawUnsafe === "function"
@@ -557,6 +558,24 @@ function buildRenewSeededRaces(dependencies = {}) {
     // short deterministic pre-boundary window. This never affects historical
     // legacy/global rows and fails closed if matching cannot complete.
     if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
+      // Recovery path: elections are already closed for the current window,
+      // so this can only materialize its durable pre-boundary BUCKET roster.
+      // Re-run every tick until the idempotent finalizer succeeds; this covers
+      // a timeout, lock stall, or cron outage at the normal cutoff.
+      try {
+        await seededBuckets.finalise({
+          seed,
+          windowStart: current.startedAt,
+          windowEnd: current.endsAt,
+        });
+      } catch (error) {
+        // Recovery must not block legacy compatibility or already-materialized
+        // bucket races from being promoted. The next minute retries recovery.
+        logger.error(
+          `[CRON] Seeded bucket recovery failed for ${seed.kind}:`,
+          error,
+        );
+      }
       const next = windowFor(seed, current.endsAt);
       if (next.startedAt.getTime() - nowMs <= 5 * 60 * 1000) {
         const buckets = await seededBuckets.finalise({
