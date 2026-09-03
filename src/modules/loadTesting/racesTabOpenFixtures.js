@@ -358,8 +358,8 @@ function packOrdinaryGraphSlots({ slots, sourceEntries, ownerOnly, needsExternal
         Number(shape.participants) - (needsExternal ? 1 : 0)),
       remainingInventory: Number(shape.inventory), remainingEffects: Number(shape.effects) }));
     if (instances.reduce((sum, row) => sum + row.remainingUsers, 0) < slots.length ||
-        instances.reduce((sum, row) => sum + row.remainingInventory, 0) !== totalRequired.inventory ||
-        instances.reduce((sum, row) => sum + row.remainingEffects, 0) !== totalRequired.effects) continue;
+        instances.reduce((sum, row) => sum + row.remainingInventory, 0) < totalRequired.inventory ||
+        instances.reduce((sum, row) => sum + row.remainingEffects, 0) < totalRequired.effects) continue;
     let fits = true;
     for (const slot of orderedSlots) {
       const required = requiredGraphFeatures(slot.variantGroup);
@@ -374,8 +374,7 @@ function packOrdinaryGraphSlots({ slots, sourceEntries, ownerOnly, needsExternal
       instance.remainingInventory -= required.inventory;
       instance.remainingEffects -= required.effects;
     }
-    if (fits && instances.every((instance) => instance.slots.length > 0 &&
-        instance.remainingInventory === 0 && instance.remainingEffects === 0)) return instances;
+    if (fits && instances.every((instance) => instance.slots.length > 0)) return instances;
   }
   throw new Error("Races-tab generated graph inventoryPerRace escaped or effectsPerRace escaped the scaled per-user ownership profile");
 }
@@ -401,8 +400,8 @@ function packTournamentMatchGraphSlots({ slots, tournamentEntries, matchEntries 
       remainingInventory: Number(matches[index].inventory),
       remainingEffects: Number(matches[index].effects) }));
     if (instances.reduce((sum, row) => sum + row.remainingUsers, 0) < slots.length ||
-        instances.reduce((sum, row) => sum + row.remainingInventory, 0) !== totalRequired.inventory ||
-        instances.reduce((sum, row) => sum + row.remainingEffects, 0) !== totalRequired.effects) continue;
+        instances.reduce((sum, row) => sum + row.remainingInventory, 0) < totalRequired.inventory ||
+        instances.reduce((sum, row) => sum + row.remainingEffects, 0) < totalRequired.effects) continue;
     let fits = true;
     for (const slot of orderedSlots) {
       const required = requiredGraphFeatures(slot.variantGroup);
@@ -417,8 +416,7 @@ function packTournamentMatchGraphSlots({ slots, tournamentEntries, matchEntries 
       instance.remainingInventory -= required.inventory;
       instance.remainingEffects -= required.effects;
     }
-    if (fits && instances.every((instance) => instance.slots.length > 0 &&
-        instance.remainingInventory === 0 && instance.remainingEffects === 0)) return instances;
+    if (fits && instances.every((instance) => instance.slots.length > 0)) return instances;
   }
   throw new Error("Races-tab matchup inventory/effect ownership escaped paired scaled graphs");
 }
@@ -675,7 +673,7 @@ function ownershipEvidence({ assignments, baseUsers, powerups, activeEffects }) 
   const enforce = assignments.some((assignment) => assignment.provenance === "natural" &&
     (assignment.jointShape || assignment.matchShape));
   const mismatchUsers = enforce ? [...expected.keys()].filter((userId) =>
-    fields.some((field) => expected.get(userId)[field] !== generated.get(userId)[field])).length
+    fields.some((field) => generated.get(userId)[field] < expected.get(userId)[field])).length
     : 0;
   return { expectedTotals: totals(expected), generatedTotals: totals(generated), mismatchUsers,
     enforced: enforce, matchesAssignedProfiles: mismatchUsers === 0 };

@@ -261,6 +261,27 @@ test("joint graph scaling preserves tournament matchup inventory and effect card
   assert.equal(plan.graphEvidence.jointReconciliation.generatedWithinSourceSupport, true);
 });
 
+test("paired tournament graphs retain source filler inventory beyond visible variant ownership", () => {
+  const users = [{ id: "u0" }, { id: "u1" }];
+  const coverage = { byUser: [
+    ["tournament_live_match", "tournament_match_inventory_held_typed"],
+    ["tournament_live_match"],
+  ], augmentedByUser: [[], []] };
+  const sourceCensus = { graphJointHistogram: {
+    ordinary: [], tournaments: [{ graphs: 1, dimensions: {
+      status: "active", bracketSize: 2, participants: 2, accepted: 2,
+    } }], matches: [{ graphs: 1, dimensions: {
+      status: "active", participants: 2, inventory: 4, effects: 0,
+    } }],
+  } };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "match-filler-inventory" });
+  const match = plan.graphEvidence.graphRows.find((row) => row.family === "match");
+  assert.equal(match.inventoryCount, 4);
+  assert.equal(plan.powerups.length, 4);
+  assert.equal(plan.graphEvidence.ownershipReconciliation.mismatchUsers, 0);
+});
+
 test("graph-first scaling assigns heterogeneous users to one paired tournament match", () => {
   const users = [{ id: "u0" }, { id: "u1" }];
   const coverage = { byUser: [
