@@ -17,28 +17,23 @@ const PINNED_SETTINGS = Object.freeze([
   ["raceListSqlSummaryV1Enabled", true],
 ]);
 
-async function pinRacesTabSettings({ prisma, settings = buildAppSettings({ prisma }) } = {}) {
-  const prior = [];
+async function pinRacesTabSettings({
+  prisma,
+  settings = buildAppSettings({ prisma, allowPermanentOverrides: false }),
+} = {}) {
   for (const [key] of PINNED_SETTINGS) {
-    const state = await settings.getRawFlagState(key);
-    if (state.available !== true) throw new Error(`Races-tab setting ${key} is unavailable`);
-    prior.push({ key, present: state.present === true, value: state.value });
+    if (await settings.getFlag(key) !== true) {
+      throw new Error(`Races-tab permanent setting ${key} must be enabled`);
+    }
   }
-  await settings.setFlagsAtomically(PINNED_SETTINGS);
-  return { schema: "races-tab-pinned-settings-v1", intended: Object.fromEntries(PINNED_SETTINGS),
-    prior, restored: false };
+  return { schema: "races-tab-permanent-settings-v1",
+    intended: Object.fromEntries(PINNED_SETTINGS) };
 }
 
 async function restoreRacesTabSettings({ prisma, evidence,
   settings = buildAppSettings({ prisma }) } = {}) {
   if (evidence?.schema !== "races-tab-pinned-settings-v1") return null;
-  await settings.setFlagsAtomically(evidence.prior.map((row) => [row.key,
-    row.present ? row.value : false]));
-  const absent = evidence.prior.filter((row) => !row.present).map((row) => row.key);
-  if (absent.length) await prisma.appSetting.deleteMany({ where: { key: { in: absent } } });
-  settings.bustCache();
-  evidence.restored = true;
-  return evidence;
+  throw new Error("Legacy mutable Races-tab setting evidence requires its original cleanup version");
 }
 
 function buildCoverageAssignments({ users, prefixSize = 300,
@@ -1681,7 +1676,7 @@ async function createRacesTabOpenFixtures({
   const sourceCensus = await readSourceCensus(prisma);
   const base = await createBaseFixtures({ prisma, runId, users, arrivalRate,
     scoreShape, env, now });
-  const settings = settingsManager || buildAppSettings({ prisma });
+  const settings = settingsManager || buildAppSettings({ prisma, allowPermanentOverrides: false });
   let pinnedSettings = null;
   try {
     pinnedSettings = await pinRacesTabSettings({ prisma, settings });

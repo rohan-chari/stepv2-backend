@@ -446,23 +446,25 @@ test("production aggregate normalizes to an identifier-free versioned distributi
     /distribution/i);
 });
 
-test("fixture settings are pinned atomically and exact absent values are restored", async () => {
-  const writes = [];
-  const deleted = [];
-  const settings = { getRawFlagState: async (key) => ({ available: true,
-    present: key === "raceListSqlSummaryV1Enabled",
-    value: key === "raceListSqlSummaryV1Enabled" ? false : undefined }),
-  setFlagsAtomically: async (entries) => writes.push(entries), bustCache() {} };
-  const prisma = { appSetting: { deleteMany: async ({ where }) => deleted.push(where.key.in) } };
+test("fixture verifies permanent Races settings without mutating AppSetting rows", async () => {
+  const reads = [];
+  const settings = { getFlag: async (key) => { reads.push(key); return true; } };
+  const prisma = { appSetting: { deleteMany: async () => {
+    throw new Error("permanent settings must not be deleted");
+  } } };
   const evidence = await pinRacesTabSettings({ prisma, settings });
   assert.deepEqual(evidence.intended, { apiRaceListCompactV1Enabled: true,
     redisCacheRaceListEnabled: true, raceListSqlSummaryV1Enabled: true });
-  await restoreRacesTabSettings({ prisma, settings, evidence });
-  assert.deepEqual(writes[0], Object.entries(evidence.intended));
-  assert.deepEqual(writes[1], [["apiRaceListCompactV1Enabled", false],
-    ["redisCacheRaceListEnabled", false], ["raceListSqlSummaryV1Enabled", false]]);
-  assert.deepEqual(deleted[0], ["apiRaceListCompactV1Enabled", "redisCacheRaceListEnabled"]);
-  assert.equal(evidence.restored, true);
+  assert.equal(evidence.schema, "races-tab-permanent-settings-v1");
+  assert.deepEqual(reads.sort(), Object.keys(evidence.intended).sort());
+  assert.equal(await restoreRacesTabSettings({ prisma, settings, evidence }), null);
+  assert.equal(evidence.restored, undefined);
+});
+
+test("fixture rejects a Races setting whose permanent effective value is not enabled", async () => {
+  const settings = { getFlag: async (key) => key !== "redisCacheRaceListEnabled" };
+  await assert.rejects(pinRacesTabSettings({ prisma: {}, settings }),
+    /redisCacheRaceListEnabled.*enabled/i);
 });
 
 test("fixture materializes the measured branch share and authenticated identities", async () => {
@@ -491,8 +493,7 @@ test("fixture materializes the measured branch share and authenticated identitie
     minimumMeasuredSessions: 4,
     maximumCoverageAugmentationShare: 1,
     requiredCoverageVariants: ["ordinary_classic_active"],
-    settingsManager: { getRawFlagState: async () => ({ available: true, present: false }),
-      setFlagsAtomically: async () => {}, bustCache() {} },
+    settingsManager: { getFlag: async () => true },
     readSourceCensus: async () => ({ schema: "races-tab-source-census-v2",
       sourceTimestamp: "2026-09-03T10:00:00.000Z", counts: {}, sourceHash: "b".repeat(64) }),
     materializeFullPageFixtures: async () => ({
