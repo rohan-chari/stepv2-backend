@@ -141,6 +141,39 @@ test("TR-706 a persistence failure never breaks the request", async () => {
   assert.equal(ctx.res.statusCode, null);
 });
 
+test("TR-706 sticky capability persistence remains durable before the request proceeds", async () => {
+  const ctx = makeCtx({ storedFeatures: [], headerFeatures: ["team_races"] });
+  let release;
+  ctx.deps.User.updateClientFeatures = () => new Promise((resolve) => { release = resolve; });
+  const requireAuth = buildRequireAuth(ctx.deps);
+  let nexted = false;
+  requireAuth(ctx.req, ctx.res, () => { nexted = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(nexted, false, "request waits until sticky capabilities are durable");
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(nexted, true);
+});
+
+test("last-seen metadata is write-behind and retries remain possible after failure", async () => {
+  const ctx = makeCtx({ storedFeatures: [], headerFeatures: [] });
+  const oldSeen = new Date("2026-09-01T12:00:00Z");
+  const user = await ctx.deps.User.findById();
+  user.lastSeenAt = oldSeen;
+  user.lastAppVersion = "2.3.10";
+  let rejectWrite;
+  ctx.deps.User.touchLastSeen = () => new Promise((resolve, reject) => { rejectWrite = reject; });
+  ctx.req.headers["x-app-version"] = "2.3.11";
+  let nexted = false;
+  buildRequireAuth(ctx.deps)(ctx.req, ctx.res, () => { nexted = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(nexted, true);
+  assert.equal(user.lastSeenAt, oldSeen, "local durable marker must not advance before success");
+  rejectWrite(new Error("db down"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(user.lastSeenAt, oldSeen, "a failed write remains eligible for retry");
+});
+
 test("admin metrics eligibility is stamped only once across a cached launch burst", async () => {
   const ctx = makeCtx({
     storedFeatures: ["admin_metrics_v2"],

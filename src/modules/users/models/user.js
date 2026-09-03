@@ -200,7 +200,7 @@ const User = {
   // not throw a P2025 into the auth middleware.
   async touchLastSeen(id, fields) {
     if (!id || !fields || Object.keys(fields).length === 0) return;
-    await require("../services/lastSeenWriteBatch").lastSeenWriteBatch.write({
+    return require("../services/lastSeenWriteBatch").lastSeenWriteBatch.write({
       prisma,
       id,
       fields,

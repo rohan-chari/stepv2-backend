@@ -136,9 +136,8 @@ function buildRequireAuth(dependencies = {}) {
       if (!hasNewToken) return; // union already covered — nothing to write
       const union = [...new Set([...stored, ...req.clientFeatures])].sort();
       await userModel.updateClientFeatures(user.id, union);
-      // `user` may be the shared launch-burst cache object. Advance it after
-      // the durable write so the next request does not repeat the same UPDATE
-      // until an asynchronous invalidation reaches this process.
+      // `user` may be the shared launch-burst cache object. Advance it only
+      // after the sticky capability union is durable.
       user.clientFeatures = union;
     } catch {
       // Never let feature bookkeeping fail the request.
@@ -264,12 +263,22 @@ function buildRequireAuth(dependencies = {}) {
       // Only overwrite lastAppVersion when this request actually carried a
       // valid one. A header-less internal call or retry must not wipe a real
       // recorded version (the same flicker guard TR-706/§7 use).
-      await userModel.touchLastSeen(user.id, {
+      const fields = {
         lastSeenAt: now,
         ...(version !== null ? { lastAppVersion: version } : {}),
-      });
-      user.lastSeenAt = now;
-      if (version !== null) user.lastAppVersion = version;
+      };
+      void Promise.resolve(userModel.touchLastSeen(user.id, fields))
+        .then((persistedHere) => {
+          // A false result means another worker owns the Redis admission lease.
+          // Keep this worker's cached marker stale: only the DB-writing worker
+          // may claim local durability, and this worker can retry after expiry.
+          if (persistedHere === false) return;
+          user.lastSeenAt = now;
+          if (version !== null) user.lastAppVersion = version;
+        })
+        .catch((error) => {
+          console.warn("recordAppVersion failed (ignored):", error?.message);
+        });
     } catch (error) {
       // Never let version bookkeeping fail the request.
       console.warn("recordAppVersion failed (ignored):", error?.message);

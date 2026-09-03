@@ -64,11 +64,29 @@ function me(token, appVersion) {
   });
 }
 
+function meWithFeatures(token, features) {
+  return request(server.baseUrl, "GET", "/auth/me", {
+    token,
+    headers: { "X-Client-Features": features },
+  });
+}
+
 function readRow(userId) {
   return prisma.user.findUnique({
     where: { id: userId },
     select: { lastAppVersion: true, lastSeenAt: true },
   });
+}
+
+async function waitForRow(userId, predicate, description, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  let row;
+  do {
+    row = await readRow(userId);
+    if (predicate(row)) return row;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
+  assert.fail(`${description}; last row: ${JSON.stringify(row)}`);
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -94,7 +112,11 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
     const res = await me(user.token, "2.1.2");
     assert.equal(res.status, 200);
 
-    const after = await readRow(user.userId);
+    const after = await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.1.2" && row.lastSeenAt instanceof Date,
+      "deferred first-sighting write should become durable"
+    );
     assert.equal(after.lastAppVersion, "2.1.2");
     assert.ok(after.lastSeenAt instanceof Date, "lastSeenAt is stamped");
     assert.ok(
@@ -103,11 +125,29 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
     );
   });
 
+  it("atomically preserves divergent capability headers from concurrent authenticated requests", async () => {
+    const user = await signUp();
+    const responses = await Promise.all([
+      meWithFeatures(user.token, "from_left"),
+      meWithFeatures(user.token, "from_right"),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+    const stored = await prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { clientFeatures: true },
+    });
+    assert.deepEqual(stored.clientFeatures, ["from_left", "from_right"]);
+  });
+
   it("performs NO write on a second same-day request with the SAME version", async () => {
     const user = await signUp();
 
     assert.equal((await me(user.token, "2.1.2")).status, 200);
-    const first = await readRow(user.userId);
+    const first = await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.1.2" && row.lastSeenAt instanceof Date,
+      "deferred first-sighting write should become durable"
+    );
 
     // Enough wall-clock that a per-request write would move the timestamp.
     await new Promise((r) => setTimeout(r, 25));
@@ -129,16 +169,24 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
     assert.equal(third.lastSeenAt.getTime(), first.lastSeenAt.getTime());
   });
 
-  it("writes immediately when the version CHANGES within the same day", async () => {
+  it("writes when the version CHANGES within the same day", async () => {
     const user = await signUp();
 
     assert.equal((await me(user.token, "2.1.2")).status, 200);
-    const first = await readRow(user.userId);
+    const first = await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.1.2" && row.lastSeenAt instanceof Date,
+      "initial app-version write should become durable"
+    );
 
     await new Promise((r) => setTimeout(r, 25));
 
     assert.equal((await me(user.token, "2.2.0")).status, 200);
-    const second = await readRow(user.userId);
+    const second = await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.2.0",
+      "changed app version should become durable"
+    );
 
     assert.equal(second.lastAppVersion, "2.2.0", "upgrade lands at once");
     assert.ok(
@@ -151,6 +199,11 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
     const user = await signUp();
 
     assert.equal((await me(user.token, "2.1.2")).status, 200);
+    await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.1.2" && row.lastSeenAt instanceof Date,
+      "initial app-version write should become durable before backdating"
+    );
 
     // Back-date 36h so the stored value is unambiguously an earlier UTC date
     // no matter what time of day the suite runs.
@@ -159,9 +212,14 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
       where: { id: user.userId },
       data: { lastSeenAt: yesterday },
     });
+    require("../../src/modules/users/services/authSessionUserCache").clear();
 
     assert.equal((await me(user.token, "2.1.2")).status, 200);
-    const after = await readRow(user.userId);
+    const after = await waitForRow(
+      user.userId,
+      (row) => row.lastSeenAt?.getTime() > yesterday.getTime() + DAY_MS,
+      "new-day sighting should become durable"
+    );
 
     assert.ok(
       after.lastSeenAt.getTime() > yesterday.getTime() + DAY_MS,
@@ -175,7 +233,11 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
 
     // Establish a known-good stored value first.
     assert.equal((await me(user.token, "2.1.2")).status, 200);
-    const good = await readRow(user.userId);
+    const good = await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.1.2" && row.lastSeenAt instanceof Date,
+      "known-good version should become durable"
+    );
 
     const junk = [
       "'; DROP TABLE users; --",
@@ -209,7 +271,11 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
     const res = await me(user.token, undefined);
     assert.equal(res.status, 200);
 
-    const row = await readRow(user.userId);
+    const row = await waitForRow(
+      user.userId,
+      (stored) => stored.lastSeenAt instanceof Date,
+      "header-less sighting should become durable"
+    );
     assert.equal(row.lastAppVersion, null, "no header => nothing stored");
     assert.ok(
       row.lastSeenAt instanceof Date,
@@ -224,6 +290,11 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
     // from a row that definitely HAS both columns populated. The handler
     // spreads `...req.user`, so this is the real leak surface.
     assert.equal((await me(user.token, "2.1.2")).status, 200);
+    await waitForRow(
+      user.userId,
+      (row) => row.lastAppVersion === "2.1.2" && row.lastSeenAt instanceof Date,
+      "sticky fields should be durable before leak check"
+    );
     const res = await me(user.token, "2.1.2");
     assert.equal(res.status, 200);
     const body = await res.json();
@@ -395,8 +466,15 @@ describe("batch 2026-08-08 item 9 — GET /admin/stats versions + races", () => 
       },
     });
 
-    // The admin's own request stamps them at 9.9.9/ios via the sticky write
-    // BEFORE the handler runs, so they are a deterministic extra bucket.
+    // Establish the admin's deferred sticky write before reading the report,
+    // so the deterministic extra bucket is present without coupling the
+    // request latency to analytics persistence.
+    assert.equal((await me(admin.token, "9.9.9")).status, 200);
+    await waitForRow(
+      admin.userId,
+      (row) => row.lastAppVersion === "9.9.9" && row.lastSeenAt instanceof Date,
+      "admin version should become durable before stats are read"
+    );
     const res = await fetchStats(admin.token, "9.9.9");
     assert.equal(res.status, 200);
     const { stats } = await res.json();
@@ -444,6 +522,11 @@ describe("batch 2026-08-08 item 9 — GET /admin/stats versions + races", () => 
 
     // Real authenticated request with NO version header.
     assert.equal((await me(headerless.token, undefined)).status, 200);
+    await waitForRow(
+      headerless.userId,
+      (row) => row.lastSeenAt instanceof Date,
+      "header-less user should be durable before stats are read"
+    );
 
     const res = await fetchStats(admin.token, "9.9.9");
     assert.equal(res.status, 200);
@@ -457,6 +540,11 @@ describe("batch 2026-08-08 item 9 — GET /admin/stats versions + races", () => 
 
     // ...and once that same user sends a version, they move out of it.
     assert.equal((await me(headerless.token, "2.1.2")).status, 200);
+    await waitForRow(
+      headerless.userId,
+      (row) => row.lastAppVersion === "2.1.2",
+      "reported version should be durable before stats are read"
+    );
     const after = await (await fetchStats(admin.token, "9.9.9")).json();
     assert.equal(
       after.stats.versions.find(
@@ -505,6 +593,13 @@ describe("batch 2026-08-08 item 9 — GET /admin/stats versions + races", () => 
 
   it("returns zeroed sections rather than omitting them when there is no data", async () => {
     const admin = await signUpAdmin();
+
+    assert.equal((await me(admin.token, "9.9.9")).status, 200);
+    await waitForRow(
+      admin.userId,
+      (row) => row.lastAppVersion === "9.9.9" && row.lastSeenAt instanceof Date,
+      "admin version should become durable before stats are read"
+    );
 
     const res = await fetchStats(admin.token, "9.9.9");
     assert.equal(res.status, 200);
