@@ -159,7 +159,10 @@ describe("home-open capacity session public HTTP contract", () => {
       });
       await targetedReset({ prisma,
         fixture: { runId, ...fixture.manifest },
-        plan: { schema: "bara-perf-reset-plan-v1", tables: [] },
+        plan: { schema: "bara-perf-reset-plan-v1", tables: [{
+          table: "user_scoring_input_versions", userColumn: true, raceColumn: false,
+          userColumns: ["user_id"], raceColumns: [],
+        }] },
         verifyMarker: async () => true });
       const resetParticipants = await prisma.raceParticipant.findMany({
         where: { id: { in: fixture.manifest.ids.raceParticipants } },

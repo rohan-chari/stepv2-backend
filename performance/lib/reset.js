@@ -170,9 +170,23 @@ async function targetedReset({ prisma, fixture, plan, env = process.env,
         ...row, generation: BigInt(row.generation),
         sourceQueueSemanticsGeneration: BigInt(row.sourceQueueSemanticsGeneration),
       })) });
+      const restored = await tx.userScoringInputVersion.findMany({
+        where: { userId: { in: users } }, orderBy: { userId: "asc" },
+        select: { userId: true, generation: true, sourceQueueSemanticsGeneration: true },
+      });
+      const normalized = restored.map((row) => ({ userId: row.userId,
+        generation: String(row.generation),
+        sourceQueueSemanticsGeneration: String(row.sourceQueueSemanticsGeneration) }));
+      const expected = [...fixture.baselineScoringInputRows]
+        .sort((left, right) => left.userId.localeCompare(right.userId));
+      if (JSON.stringify(normalized) !== JSON.stringify(expected)) {
+        throw new Error("targeted reset did not restore scoring-input baselines exactly");
+      }
     }
     let remainingRunOwnedRows = 0;
     for (const row of plan.tables) {
+      if (row.table === "user_scoring_input_versions" &&
+          Array.isArray(fixture.baselineScoringInputRows)) continue;
       const scoped = scopedPredicate(row, users, races);
       const [result] = await tx.$queryRawUnsafe(
         `SELECT count(*)::int AS remaining FROM "${row.table}" WHERE ${scoped.sql}`,
