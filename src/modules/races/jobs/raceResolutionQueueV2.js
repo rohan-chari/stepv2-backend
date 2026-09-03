@@ -96,6 +96,7 @@ const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgr
 const redisCache = require("../../../shared/cache/redisCache");
 
 const POLL_INTERVAL_MS = 5_000;
+const FULL_TRIGGER_WAKE_COALESCE_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
 const QUEUE_LAG_ALARM_MS = 30 * 1000;
 const RACE_RESOLUTION_SLOW_PHASE_MS = 10_000;
@@ -3205,6 +3206,47 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
     Number(dependencies.adaptiveDrainErrorBackoffMs) ||
       ADAPTIVE_DRAIN_ERROR_BACKOFF_MS
   );
+  const fullTriggerWakeCoalesceMs = Math.max(
+    0,
+    Math.min(
+      1_000,
+      Number.isFinite(Number(dependencies.fullTriggerWakeCoalesceMs))
+        ? Number(dependencies.fullTriggerWakeCoalesceMs)
+        : FULL_TRIGGER_WAKE_COALESCE_MS,
+    ),
+  );
+  const setWakeTimer = dependencies.setWakeTimer || setTimeout;
+  const clearWakeTimer = dependencies.clearWakeTimer || clearTimeout;
+  const baseSubscribeWake = dependencies.subscribeWake ||
+    redisCache.subscribeDurableQueueWakeup;
+  const subscribeWake = async (handler) => {
+    let pendingFullWake = null;
+    let fullWakeTimer = null;
+    const unsubscribe = await baseSubscribeWake((message) => {
+      if (message?.queue === "resolution" &&
+          message.workKind === "full-trigger" &&
+          fullTriggerWakeCoalesceMs > 0) {
+        pendingFullWake = message;
+        if (!fullWakeTimer) {
+          fullWakeTimer = setWakeTimer(() => {
+            fullWakeTimer = null;
+            const wake = pendingFullWake;
+            pendingFullWake = null;
+            handler(wake);
+          }, fullTriggerWakeCoalesceMs);
+          fullWakeTimer?.unref?.();
+        }
+        return;
+      }
+      handler(message);
+    });
+    return async () => {
+      if (fullWakeTimer) clearWakeTimer(fullWakeTimer);
+      fullWakeTimer = null;
+      pendingFullWake = null;
+      await unsubscribe();
+    };
+  };
 
   let running = false;
   let backoffUntilMs = 0;
@@ -3269,7 +3311,7 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
       }
       return (dependencies.RaceResolutionJobV2 || defaultJobModel).nextDueAt?.();
     },
-    subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
+    subscribeWake,
     logger,
     onSignal: (reason, signal) => {
       // Only a new, explicitly classified ordinary wake can prove that there
@@ -3337,6 +3379,7 @@ module.exports = {
   quietPeriodMs,
   effectiveResolutionConcurrency,
   POLL_INTERVAL_MS,
+  FULL_TRIGGER_WAKE_COALESCE_MS,
   participantTotalWriteChangesRow,
   retainTeamAsOfHeartbeat,
   normalizeParticipantWrites,
