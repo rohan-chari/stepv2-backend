@@ -49,6 +49,7 @@ const PREFIX = {
   HOME_GIVEAWAY_BANNER: "v1:home:giveaway-banner",
   HOME_ACTIVE_GLOBAL_EVENT: "v1:user",
   RACE_LIST: "v1:user:races",
+  COMPLETED_RACE_SUMMARY: "v1:race:completed-summary",
   DATABASE_POOL_TELEMETRY: "v1:ops:db-pool",
   STEP_INGESTION_HOUR: "v1:ops:step-ingestion-hour",
   STEP_INGESTION_HISTORY_START: "v1:ops:step-ingestion-history-start",
@@ -257,6 +258,16 @@ function raceListFragment(kind, userId, generation, variant) {
     throw new TypeError("invalid race list fragment kind");
   }
   return `${PREFIX.RACE_LIST}:${kind}:${userId}:${generation}:${variant}`;
+}
+
+function completedRaceSummary(raceId, resultVersion) {
+  if (typeof raceId !== "string" || raceId.length === 0) {
+    throw new TypeError("invalid completed race summary id");
+  }
+  if (typeof resultVersion !== "string" || resultVersion.length === 0) {
+    throw new TypeError("invalid completed race summary version");
+  }
+  return `${PREFIX.COMPLETED_RACE_SUMMARY}:${raceId}:${encodeURIComponent(resultVersion)}`;
 }
 
 // ── C2: race chat lists + their durable version marker ──────────────────────
@@ -505,6 +516,7 @@ module.exports = {
   raceListGeneration,
   raceListMembership,
   raceListFragment,
+  completedRaceSummary,
   raceMessages,
   raceMessagesVersion,
   raceMessageWatermark,

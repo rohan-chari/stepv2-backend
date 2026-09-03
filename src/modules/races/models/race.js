@@ -1,7 +1,12 @@
 const { Prisma } = require("@prisma/client");
 const {
   raceSqlSummaryReadBatch,
+  raceSqlSummaryBatchKey,
 } = require("../services/raceSqlSummaryReadBatch");
+const {
+  completedRaceSummaryCache: defaultCompletedRaceSummaryCache,
+  CACHE_VERSION: COMPLETED_SUMMARY_CACHE_VERSION,
+} = require("../services/completedRaceSummaryCache");
 const { prisma } = require("../../../db");
 const { raceListReadBatch } = require("../services/raceListReadBatch");
 const userPresentationCache = require("../../social/services/userPresentationCache");
@@ -974,7 +979,11 @@ const Race = {
   async findSqlSummariesForUser(
     userId,
     extraCompletedRaceIds = [],
-    { stableRaces = null, stableSource = null } = {},
+    {
+      stableRaces = null,
+      stableSource = null,
+      completedSummaryCache = defaultCompletedRaceSummaryCache,
+    } = {},
   ) {
     const participantFilter = {
       participants: { some: { userId, status: { not: "DECLINED" } } },
@@ -992,18 +1001,26 @@ const Race = {
     const stableMembership = Array.isArray(stableRaces) && stableSource !== "postgres"
       ? await prisma.race.findMany({
           where: { ...participantFilter, ...stableWhere },
-          select: { id: true, status: true },
+          // The completed-summary cache key is versioned by the authoritative
+          // race-row timestamp. Refresh it alongside status whenever stable
+          // membership came from Redis; a cached user fragment must never keep
+          // an older completed-result version reachable after a repair.
+          select: { id: true, status: true, updatedAt: true },
         })
       : null;
-    const stableStatusById = new Map(
-      (stableMembership || []).map((race) => [race.id, race.status]),
+    const stableMembershipById = new Map(
+      (stableMembership || []).map((race) => [race.id, race]),
     );
     const [current, completed, injectedCompleted] = await Promise.all([
       Array.isArray(stableRaces)
         ? Promise.resolve(stableRaces.filter((race) =>
-            (stableMembership == null || stableStatusById.get(race?.id) != null) &&
-            (stableMembership == null || stableStatusById.get(race.id) !== "COMPLETED")
-          ))
+            (stableMembership == null || stableMembershipById.get(race?.id) != null) &&
+            (stableMembership == null || stableMembershipById.get(race.id)?.status !== "COMPLETED")
+          ).map((race) => stableMembership == null ? race : ({
+            ...race,
+            status: stableMembershipById.get(race.id).status,
+            updatedAt: stableMembershipById.get(race.id).updatedAt,
+          })))
         : prisma.race.findMany({
         where: { ...participantFilter, ...stableWhere, status: { not: "COMPLETED" } },
         include: relations,
@@ -1013,8 +1030,12 @@ const Race = {
         ? Promise.resolve(stableRaces.filter((race) =>
             stableMembership == null
               ? race?.status === "COMPLETED"
-              : stableStatusById.get(race?.id) === "COMPLETED"
-          ))
+              : stableMembershipById.get(race?.id)?.status === "COMPLETED"
+          ).map((race) => stableMembership == null ? race : ({
+            ...race,
+            status: stableMembershipById.get(race.id).status,
+            updatedAt: stableMembershipById.get(race.id).updatedAt,
+          })))
         : prisma.race.findMany({
         where: { ...participantFilter, ...stableWhere, status: "COMPLETED" },
         include: relations,
@@ -1044,16 +1065,15 @@ const Race = {
     }
     const ids = races.map((race) => race.id);
 
-    const raceSetKey = [...ids].sort().join("\u0000");
+    const raceSetKey = raceSqlSummaryBatchKey(races);
     const rows = await raceSqlSummaryReadBatch.load({
       prisma,
       raceSetKey,
       userId,
       execute: async (viewerUserIds) => {
-        // Rank the shared roster once for this race set. Viewer-specific
-        // participant rows are fetched separately below so Postgres does not
-        // send the (potentially 10k-entry) rankRoster once per viewer.
-        const sharedRows = await prisma.$queryRaw`
+        const loadSharedRows = async (queryIds) => {
+          if (queryIds.length === 0) return [];
+          return prisma.$queryRaw`
       WITH accepted AS (
         SELECT
           rp.*,
@@ -1074,7 +1094,7 @@ const Race = {
           race_scope.powerups_enabled
         FROM race_participants rp
         JOIN races race_scope ON race_scope.id = rp.race_id
-        WHERE rp.race_id IN (${Prisma.join(ids)})
+        WHERE rp.race_id IN (${Prisma.join(queryIds)})
           AND rp.status = 'accepted'::"RaceParticipantStatus"
       ), aggregates AS (
         SELECT
@@ -1143,9 +1163,24 @@ const Race = {
       LEFT JOIN aggregates a ON a.race_id = r.id
       LEFT JOIN accepted leader
         ON leader.race_id = r.id AND leader.persisted_position = 1
-      WHERE r.id IN (${Prisma.join(ids)})
+      WHERE r.id IN (${Prisma.join(queryIds)})
     `;
-        const viewerRows = await prisma.raceParticipant.findMany({
+        };
+        const activeIds = current.map((race) => race.id);
+        const completedRaces = [...completedById.values()];
+        const [activeSharedRows, completedSharedById, viewerRows] = await Promise.all([
+          loadSharedRows(activeIds),
+          completedSummaryCache.getMany({
+            races: completedRaces,
+            load: async (missIds) => {
+              const missRows = await loadSharedRows(missIds);
+              return new Map(missRows.map((row) => [row.raceId, {
+                ...row,
+                version: COMPLETED_SUMMARY_CACHE_VERSION,
+              }]));
+            },
+          }),
+          prisma.raceParticipant.findMany({
           where: {
             raceId: { in: ids },
             userId: { in: viewerUserIds },
@@ -1165,7 +1200,12 @@ const Race = {
             team: true,
             forfeitedAt: true,
           },
-        });
+          }),
+        ]);
+        const sharedRows = [
+          ...activeSharedRows,
+          ...completedRaces.map((race) => completedSharedById.get(race.id)).filter(Boolean),
+        ];
         const viewersByRaceAndUser = new Map(viewerRows.map((viewer) => [
           `${viewer.raceId}\u0000${viewer.userId}`,
           viewer,
@@ -1174,7 +1214,9 @@ const Race = {
           const viewer = viewersByRaceAndUser.get(
             `${shared.raceId}\u0000${viewerUserId}`,
           );
-          const viewerPosition = shared.viewerPositions?.[viewerUserId] ?? null;
+          const viewerPosition = completedById.has(shared.raceId)
+            ? viewer?.placement ?? null
+            : shared.viewerPositions?.[viewerUserId] ?? null;
           return {
             ...shared,
             viewerUserId,
@@ -1235,7 +1277,9 @@ const Race = {
           ),
           _listSummary: {
             acceptedCount: Number(row.acceptedCount || 0),
-            rankRoster: Array.isArray(row.rankRoster) ? row.rankRoster : [],
+            rankRoster: race.powerupsEnabled === true && Array.isArray(row.rankRoster)
+              ? row.rankRoster
+              : [],
             viewerPosition: row.viewerPosition == null
               ? null
               : Number(row.viewerPosition),

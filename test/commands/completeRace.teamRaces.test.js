@@ -27,6 +27,7 @@ function makeDeps({ race }) {
     payouts: [],
     awards: [],
     participantUpdates: [],
+    resultVersionTouches: 0,
   };
   return {
     state,
@@ -41,6 +42,9 @@ function makeDeps({ race }) {
           return race;
         },
         async update(id, fields) {
+          if (Object.keys(fields).length === 1 && fields.updatedAt instanceof Date) {
+            state.resultVersionTouches += 1;
+          }
           Object.assign(race, fields);
           return race;
         },
@@ -105,6 +109,34 @@ test("TR-402 completeRace records winnerTeam and keeps winnerUserId null", async
   });
   assert.equal(ctx.state.raceUpdate.winnerTeam, "TEAM_A");
   assert.equal(ctx.state.raceUpdate.winnerUserId, null);
+  assert.equal(ctx.state.resultVersionTouches, 1);
+});
+
+test("completed-result touch uses an injected Prisma connection before Race.update", async () => {
+  const race = teamRace([
+    member("a1", "TEAM_A", { totalSteps: 100 }),
+    member("b1", "TEAM_B", { totalSteps: 50 }),
+  ]);
+  const ctx = makeDeps({ race });
+  let rawTouches = 0;
+  ctx.deps.prisma = {
+    async $executeRaw() {
+      rawTouches += 1;
+      return 1;
+    },
+  };
+  ctx.deps.Race.update = async () => {
+    throw new Error("global/model update must not be used for the result-version touch");
+  };
+  const completeRace = buildCompleteRace(ctx.deps);
+
+  await completeRace({
+    raceId: "race-1",
+    winnerTeam: "TEAM_A",
+    participantUserIds: ["a1", "b1"],
+  });
+
+  assert.equal(rawTouches, 1);
 });
 
 // ── TR-403: placements 1 for winners, 2 for losers (forfeiters included) ────

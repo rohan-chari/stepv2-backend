@@ -73,6 +73,20 @@ function buildCompleteRace(dependencies = {}) {
     dependencies.advanceTournament || defaultAdvanceTournament;
   const createReviewOpportunity =
     dependencies.createReviewOpportunity || defaultCreateReviewOpportunity;
+  const touchCompletedResult = dependencies.touchCompletedResult ||
+    ((usesDefaultPersistence || dependencies.prisma) &&
+     typeof db?.$executeRaw === "function"
+      ? async (raceId) => db.$executeRaw`
+          UPDATE races
+          SET updated_at = GREATEST(
+            CURRENT_TIMESTAMP,
+            updated_at + INTERVAL '1 millisecond'
+          )
+          WHERE id = ${raceId}
+        `
+      : typeof raceModel.update === "function"
+        ? async (raceId) => raceModel.update(raceId, { updatedAt: now() })
+        : async () => null);
 
   // A race status is a settlement *claim*, not a durable proof that each
   // idempotent ledger credit made it into its result row.  This reconciler is
@@ -382,6 +396,7 @@ function buildCompleteRace(dependencies = {}) {
 
       // No pot/finish/referral, no RACE_COMPLETED emit. Drive advancement.
       await advanceTournamentFn({ tournamentId: race.tournamentId });
+      await touchCompletedResult(raceId);
       return race;
     }
 
@@ -582,6 +597,7 @@ function buildCompleteRace(dependencies = {}) {
       for (const payload of teamReferralEvents) compatibilityEvents?.emit("REFERRAL_REWARDED", payload);
 
       await reconcileDurablePayoutArtifact(race);
+      await touchCompletedResult(raceId);
 
       return race;
     }
@@ -863,6 +879,7 @@ function buildCompleteRace(dependencies = {}) {
     for (const payload of referralEvents) compatibilityEvents?.emit("REFERRAL_REWARDED", payload);
 
     await reconcileDurablePayoutArtifact(race);
+    await touchCompletedResult(raceId);
 
     return race;
   };

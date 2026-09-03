@@ -200,6 +200,19 @@ function buildDeleteUserAccount(dependencies = {}) {
               data: { userId: sentinelId },
             });
           }
+          if (raceStatus === "COMPLETED") {
+            // Completed-list summaries share participant rank/payout aggregates
+            // across viewers. Advance the authoritative cache version in the
+            // same transaction as historical anonymization/de-duplication.
+            await tx.$executeRaw`
+              UPDATE races
+              SET updated_at = GREATEST(
+                CURRENT_TIMESTAMP,
+                updated_at + INTERVAL '1 millisecond'
+              )
+              WHERE id = ${participant.raceId}
+            `;
+          }
         }
       }
 

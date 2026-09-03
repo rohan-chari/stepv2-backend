@@ -224,7 +224,11 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
           ? await Race.findSqlSummariesForUser(
               userId,
               options.extraCompletedRaceIds || [],
-              { stableRaces: residualRaces, stableSource: stable.source },
+              {
+                stableRaces: residualRaces,
+                stableSource: stable.source,
+                completedSummaryCache: options.completedRaceSummaryCache,
+              },
             )
           : { ambiguousFinisherOrder: false, races: [] };
         if (residual.ambiguousFinisherOrder !== true) {
@@ -244,7 +248,11 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       sqlResult = await Race.findSqlSummariesForUser(
         userId,
         options.extraCompletedRaceIds || [],
-        { stableRaces: stable.races, stableSource: stable.source },
+        {
+          stableRaces: stable.races,
+          stableSource: stable.source,
+          completedSummaryCache: options.completedRaceSummaryCache,
+        },
       );
     }
     // The legacy comparator has one anomalous duplicate-finisher case that no
@@ -259,7 +267,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   ) {
     const sqlResult = await Race.findSqlSummariesForUser(
       userId,
-      options.extraCompletedRaceIds || []
+      options.extraCompletedRaceIds || [],
+      { completedSummaryCache: options.completedRaceSummaryCache },
     );
     // The legacy comparator has one anomalous duplicate-finisher case that no
     // total SQL order can reproduce. This is the sole deliberate dual-read

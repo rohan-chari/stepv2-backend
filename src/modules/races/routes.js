@@ -838,6 +838,7 @@ function createRacesRouter(dependencies = {}) {
             ? pendingPayoutDoubleOffer.items.map((item) => item.raceIdSnapshot)
             : [],
           sqlSummaryEnabled,
+          completedRaceSummaryCache: dependencies.completedRaceSummaryCache,
           raceListCacheEnabled,
           raceListCache,
           compactRaceList: compactRaceListEnabled,

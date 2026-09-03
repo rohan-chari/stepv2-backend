@@ -4,6 +4,26 @@ const {
 
 const BATCH_SIZE = 64;
 
+function normalizedResultVersion(race) {
+  if (race?.status !== "COMPLETED") return "";
+  const parsed = race.updatedAt instanceof Date
+    ? race.updatedAt
+    : new Date(race?.updatedAt);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : "invalid";
+}
+
+// A batch shares the SQL result computed by its first request. Completed
+// summaries are versioned by races.updated_at, so status and result version
+// are part of the identity: a repair that lands between two concurrent reads
+// must never let the newer read join the older result's queue.
+function raceSqlSummaryBatchKey(races = []) {
+  return races
+    .filter((race) => race?.id)
+    .map((race) => [race.id, race.status || "", normalizedResultVersion(race)].join("\u001f"))
+    .sort()
+    .join("\u0000");
+}
+
 function createRaceSqlSummaryReadBatch() {
   const states = new WeakMap();
   function load({ prisma, raceSetKey, userId, execute }) {
@@ -44,5 +64,6 @@ const raceSqlSummaryReadBatch = createRaceSqlSummaryReadBatch();
 module.exports = {
   BATCH_SIZE,
   createRaceSqlSummaryReadBatch,
+  raceSqlSummaryBatchKey,
   raceSqlSummaryReadBatch,
 };
