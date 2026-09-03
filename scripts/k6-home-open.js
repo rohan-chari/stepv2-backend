@@ -235,14 +235,29 @@ function resolutionEvidenceFromLog(log) {
         ? [row] : [];
     } catch { return []; }
   });
-  const claims = parsedRows.filter((row) => row.event === "race_resolution_v2_claim");
-  const rows = parsedRows.filter((row) => row.event === "race_resolution_v2");
-  for (const row of claims) {
-    if (row.schemaVersion !== 2 || !Number.isFinite(Date.parse(row.observedAt)) ||
-        !Number.isFinite(Number(row.queueLagMs)) || typeof row.queuePriority !== "string") {
+  const observedClaims = parsedRows.filter((row) => row.event === "race_resolution_v2_claim");
+  const observedTerminals = parsedRows.filter((row) => row.event === "race_resolution_v2");
+  for (const row of observedClaims) {
+    if (![2, 3].includes(row.schemaVersion) || !Number.isFinite(Date.parse(row.observedAt)) ||
+        !Number.isFinite(Number(row.queueLagMs)) || typeof row.queuePriority !== "string" ||
+        typeof row.attemptId !== "string" || !row.attemptId) {
       throw new Error("home-open resolution claim evidence is incomplete");
     }
   }
+  for (const row of observedTerminals) {
+    if (typeof row.attemptId !== "string" || !row.attemptId || row.schemaVersion !== 2 ||
+        !Number.isFinite(Date.parse(row.observedAt)) || !Number.isFinite(Number(row.coreMs)) ||
+        !Number.isFinite(Number(row.queueLagMs)) || typeof row.queuePriority !== "string" ||
+        !row.queuePriority) {
+      throw new Error("home-open resolution terminal evidence is incomplete");
+    }
+  }
+  const claimIds = new Set(observedClaims.map((row) => row.attemptId));
+  const terminalIds = new Set(observedTerminals.map((row) => row.attemptId));
+  const claims = observedClaims.filter((row) => terminalIds.has(row.attemptId));
+  const rows = observedTerminals.filter((row) => claimIds.has(row.attemptId));
+  const leftCensoredTerminals = observedTerminals.filter((row) => !claimIds.has(row.attemptId)).length;
+  const rightCensoredClaims = observedClaims.filter((row) => !terminalIds.has(row.attemptId)).length;
   const outcomes = {}; const plans = {}; const priorities = {}; const values = new Map();
   const add = (name, value) => {
     const number = Number(value);
@@ -261,6 +276,9 @@ function resolutionEvidenceFromLog(log) {
     priorities[row.queuePriority] = (priorities[row.queuePriority] || 0) + 1;
     if (row.resolutionPlan) plans[row.resolutionPlan] = (plans[row.resolutionPlan] || 0) + 1;
     add("coreMs", row.coreMs); add("queueLagMs", row.queueLagMs);
+    add("dirtyParticipantCount", row.dirtyParticipantCount);
+    add("fullParticipantCount", row.fullParticipantCount);
+    add("changedRows", row.changedRows);
     for (const [name, value] of Object.entries(row.phaseMs || {})) {
       if (!["transaction", "claimReadiness", "fullTriggerPromotion", "claim"].includes(name)) {
         add(name, value);
@@ -271,14 +289,18 @@ function resolutionEvidenceFromLog(log) {
   const trend = (name) => ({ p50: percentile(values.get(name) || [], 0.5),
     p95: percentile(values.get(name) || [], 0.95),
     p99: percentile(values.get(name) || [], 0.99) });
+  const nonPhaseMetrics = new Set([
+    "coreMs", "queueLagMs", "dirtyParticipantCount", "fullParticipantCount", "changedRows",
+  ]);
   const phases = Object.fromEntries([...values.keys()].filter((name) =>
-    name !== "coreMs" && name !== "queueLagMs").sort().map((name) => [name, trend(name)]));
+    !nonPhaseMetrics.has(name)).sort().map((name) => [name, trend(name)]));
   const terminalCount = Object.values(outcomes).reduce((sum, count) => sum + count, 0);
-  if (terminalCount !== claims.length) {
+  if (terminalCount !== claims.length || new Set(claims.map((row) => row.attemptId)).size !== claims.length ||
+      new Set(rows.map((row) => row.attemptId)).size !== rows.length) {
     throw new Error(`home-open resolution claims/terminals do not reconcile (${claims.length}/${terminalCount})`);
   }
   const topLevelPhaseNames = [...values.keys()].filter((name) =>
-    !name.startsWith("compute.") && name !== "coreMs" && name !== "queueLagMs");
+    !name.startsWith("compute.") && !nonPhaseMetrics.has(name));
   const cumulativeTopLevelMs = Object.fromEntries(topLevelPhaseNames.map((name) =>
     [name, (values.get(name) || []).reduce((sum, value) => sum + value, 0)]));
   const cumulativeCoreMs = (values.get("coreMs") || []).reduce((sum, value) => sum + value, 0);
@@ -287,23 +309,44 @@ function resolutionEvidenceFromLog(log) {
   if (attributedMs > cumulativeCoreMs + clockToleranceMs) {
     throw new Error("home-open resolution phases exceed claim-to-outcome duration");
   }
+  const scopeMetric = (name) => ({
+    samples: (values.get(name) || []).length,
+    total: (values.get(name) || []).reduce((sum, value) => sum + value, 0),
+    ...trend(name),
+  });
+  const matchedSubsetReconciled = terminalCount === claims.length;
   return { schema: "home-open-resolution-evidence-v2", jobs: rows.length,
-    claims: claims.length, terminalCount, terminalReconciled: terminalCount === claims.length,
+    claims: claims.length,
+    terminalReconciled: matchedSubsetReconciled && leftCensoredTerminals === 0 && rightCensoredClaims === 0,
+    matchedSubsetReconciled,
+    terminalCount,
+    windowCensorship: { leftCensoredTerminals, rightCensoredClaims },
     outcomes, plans, priorities, coreMs: trend("coreMs"), queueLagMs: trend("queueLagMs"),
+    scope: { dirtyParticipantCount: scopeMetric("dirtyParticipantCount"),
+      fullParticipantCount: scopeMetric("fullParticipantCount"),
+      changedRows: scopeMetric("changedRows") },
     phases, attribution: { excludesOverlappingTransactionAggregate: true,
       computeBreakdownIsNested: true, cumulativeTopLevelMs,
       cumulativeCoreMs, clockToleranceMs,
       unattributedMs: Math.max(0, cumulativeCoreMs - attributedMs) } };
 }
 
+function capacityBackendLogCommand(config, since, binding = {}) {
+  const instance = config.lima_instance || `step-capacity-${config.run_id}`;
+  const container = config.backend_container || `${instance}-backend`;
+  const logArgs = ["shell", instance, "docker", "logs", "--timestamps", "--since",
+    new Date(since).toISOString()];
+  if (binding.window?.endedAt) logArgs.push("--until", new Date(binding.window.endedAt).toISOString());
+  logArgs.push(container);
+  return logArgs;
+}
+
 function captureCapacityBackendLog(config, since, outputPath, evidencePath, binding = {}) {
   if (fs.existsSync(outputPath) || fs.existsSync(evidencePath)) {
     throw new Error("home-open resolution diagnostic artifact already exists");
   }
-  const instance = config.lima_instance || `step-capacity-${config.run_id}`;
-  const container = config.backend_container || `${instance}-backend`;
-  const result = spawnSync("limactl", ["shell", instance, "docker", "logs", "--timestamps", "--since",
-    new Date(since).toISOString(), container], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const logArgs = capacityBackendLogCommand(config, since, binding);
+  const result = spawnSync("limactl", logArgs, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const log = `${result.stdout || ""}${result.stderr || ""}`;
   if (result.error || result.status !== 0 || !log.trim()) {
     throw result.error || new Error(`capacity backend log capture failed (${result.status})`);
@@ -314,7 +357,9 @@ function captureCapacityBackendLog(config, since, outputPath, evidencePath, bind
     sourceTreeHash: binding.sourceTreeHash,
     snapshotHash: binding.snapshotHash,
     scrubAttestationHash: binding.scrubAttestationHash,
-    window: { startedAt: new Date(since).toISOString(), capturedAt: new Date().toISOString() },
+    window: { startedAt: new Date(since).toISOString(),
+      endedAt: binding.window?.endedAt ? new Date(binding.window.endedAt).toISOString() : null,
+      capturedAt: new Date().toISOString() },
   } });
 }
 
@@ -1284,7 +1329,7 @@ if (require.main === module) main().catch((error) => {
 });
 
 module.exports = { HOME_OPEN_EXECUTION_FILES, aggregateHomeOpenLadder, applyGuardedCapacityEnvironment, buildVerification,
-  captureCapacityBackendLog, createInFlightTracker, executionBundleHash, normalizeInfrastructure,
+  capacityBackendLogCommand, captureCapacityBackendLog, createInFlightTracker, executionBundleHash, normalizeInfrastructure,
   progressFromMetricsRows, resetCapacityDbPoolMeasurements, validateCapacity, waitFor,
   executeHomeOpenLevel, resolutionEvidenceFromLog, waitForResolutionQueueQuiescence,
   waitForResolutionWorkerReady, workflowLevelAuthorization };

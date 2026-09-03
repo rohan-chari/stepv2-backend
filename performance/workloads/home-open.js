@@ -8,6 +8,60 @@ const { PROFILES } = require("../../src/modules/loadTesting/contract");
 const { cleanupHomeOpenFixtures, createHomeOpenFixtures } = require("../../src/modules/loadTesting/homeOpenFixtures");
 const { discoverResetPlan, targetedReset } = require("../lib/reset");
 const { createCollector } = require("../../scripts/capacity-metrics");
+const { captureCapacityBackendLog } = require("../../scripts/k6-home-open");
+
+function domainEventEvidenceFromRows(rows = []) {
+  const groups = rows.map((row) => ({
+    eventType: String(row.eventType),
+    aggregateType: String(row.aggregateType),
+    eventCount: Number(row.eventCount || 0),
+    audienceRows: Number(row.audienceRows || 0),
+  }));
+  return {
+    schema: "home-open-domain-event-evidence-v1",
+    totalEvents: groups.reduce((sum, row) => sum + row.eventCount, 0),
+    totalAudienceRows: groups.reduce((sum, row) => sum + row.audienceRows, 0),
+    groups,
+  };
+}
+
+async function captureMeasurementDiagnostics({ config, outputDirectory, stem, runId,
+  startedAt, endedAt, pool, captureBackendLog = captureCapacityBackendLog } = {}) {
+  const backendLog = path.join(outputDirectory, `${stem}.backend.log`);
+  const resolutionEvidence = path.join(outputDirectory, `${stem}.resolution.json`);
+  const domainEventEvidence = path.join(outputDirectory, `${stem}.domain-events.json`);
+  captureBackendLog(config, startedAt, backendLog, resolutionEvidence, {
+    runId, window: { endedAt },
+  });
+  const result = await pool.query(`
+    SELECT event.event_type AS "eventType",
+           event.aggregate_type AS "aggregateType",
+           count(*)::bigint AS "eventCount",
+           COALESCE(sum(audience.rows), 0)::bigint AS "audienceRows"
+      FROM domain_event_outbox event
+      LEFT JOIN LATERAL (
+        SELECT count(*)::bigint AS rows
+          FROM domain_event_audiences audience
+         WHERE audience.domain_event_id = event.id
+      ) audience ON true
+     WHERE event.created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
+       AND event.created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
+     GROUP BY event.event_type, event.aggregate_type
+     ORDER BY count(*) DESC, event.event_type, event.aggregate_type`,
+  [startedAt, endedAt]);
+  const domainEvents = domainEventEvidenceFromRows(result.rows);
+  domainEvents.window = {
+    startedAt: new Date(startedAt).toISOString(),
+    endedAt: new Date(endedAt).toISOString(),
+  };
+  fs.writeFileSync(domainEventEvidence, `${JSON.stringify(domainEvents, null, 2)}\n`,
+    { flag: "wx", mode: 0o600 });
+  return {
+    paths: { backendLog, resolutionEvidence, domainEventEvidence },
+    resolution: JSON.parse(fs.readFileSync(resolutionEvidence, "utf8")),
+    domainEvents,
+  };
+}
 
 function metric(summary, name, key, fallback = Number.NaN) {
   const value = summary?.metrics?.[name]?.values?.[key];
@@ -121,7 +175,8 @@ function classifyK6Exit({ code, signal = null, summaryExists } = {}) {
 
 async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePath,
   baseUrl, outputDirectory, environment = process.env, metricsConfig, databaseUrl,
-  runId, metricEpoch, cacheOnly = false, expectedPids = null } = {}) {
+  runId, metricEpoch, cacheOnly = false, expectedPids = null,
+  captureBackendLog = captureCapacityBackendLog } = {}) {
   fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
   const summaryPath = path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.k6.json`);
   const variables = {
@@ -136,20 +191,27 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   const metricsPath = path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.metrics.json`);
   const collector = metricsConfig ? createCollector({ config: metricsConfig, output: metricsPath,
     databaseUrl, provenance: { runId, profile: "home-open", repeat: 1 } }) : null;
+  const startedAt = new Date();
   collector?.start();
   let exit;
+  let endedAt;
   try {
     exit = await wait(spawn("k6", ["run", ...(phase === "measurement" ? [] : ["--no-thresholds"]),
       ...args, path.join(repository, "scripts/k6/home-open.js")], {
       cwd: repository, env: { ...environment, ...variables }, stdio: "inherit",
     }));
+    endedAt = new Date();
   } finally { if (collector) await collector.finish(); }
   const k6Exit = classifyK6Exit({ ...exit, summaryExists: fs.existsSync(summaryPath) });
   let topSql = [];
+  let diagnostics = null;
   if (phase === "measurement" && databaseUrl) {
     const pool = new Pool({ connectionString: databaseUrl, max: 1,
       connectionTimeoutMillis: 2_000, statement_timeout: 3_000, query_timeout: 3_000 });
     try {
+      diagnostics = await captureMeasurementDiagnostics({ config: metricsConfig,
+        outputDirectory, stem: path.basename(summaryPath, ".k6.json"), runId,
+        startedAt, endedAt, pool, captureBackendLog });
       const result = await pool.query(`SELECT queryid::text AS "queryId", calls::float,
         total_exec_time::float AS "totalExecMs", mean_exec_time::float AS "meanExecMs", rows::float,
         shared_blks_hit::float AS "sharedBlocksHit", shared_blks_read::float AS "sharedBlocksRead",
@@ -162,6 +224,7 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
     expectedRunId: runId, expectedPids });
   runtime.resources.topSqlMaterial = topSql.length > 0;
   runtime.resources.topSql = topSql;
+  runtime.resources.diagnostics = diagnostics;
   return { summary: JSON.parse(fs.readFileSync(summaryPath, "utf8")), generator: { k6Exit },
     binding: metricEpoch ? { measurementId: metricEpoch.measurementId } : null,
     metrics: runtime, resources: runtime.resources, summaryPath, metricsPath };
@@ -244,5 +307,6 @@ function createHomeOpenWorkload(dependencies = {}) {
   };
 }
 
-module.exports = { buildFixtureFile, classifyK6Exit, createHomeOpenWorkload, normalizeK6Evidence,
+module.exports = { buildFixtureFile, captureMeasurementDiagnostics, classifyK6Exit,
+  createHomeOpenWorkload, domainEventEvidenceFromRows, normalizeK6Evidence,
   normalizeRuntimeMetrics, runRawK6 };

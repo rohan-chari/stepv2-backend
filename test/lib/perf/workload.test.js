@@ -2,7 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { normalizeK6Evidence, normalizeRuntimeMetrics,
-  classifyK6Exit, createHomeOpenWorkload } = require("../../../performance/workloads/home-open");
+  captureMeasurementDiagnostics, classifyK6Exit, createHomeOpenWorkload,
+  domainEventEvidenceFromRows } = require("../../../performance/workloads/home-open");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 function metric(values) { return { values }; }
 
@@ -75,6 +79,56 @@ test("k6 threshold exit remains classifiable while script/infrastructure exits f
   });
   assert.throws(() => classifyK6Exit({ code: 107, summaryExists: true }), /infrastructure|script/i);
   assert.throws(() => classifyK6Exit({ code: 99, summaryExists: false }), /summary/i);
+});
+
+test("domain-event diagnostics remain grouped and identifier-free", () => {
+  assert.deepEqual(domainEventEvidenceFromRows([
+    { eventType: "race.updated", aggregateType: "race", eventCount: "12", audienceRows: "48" },
+    { eventType: "steps.synced", aggregateType: "user", eventCount: 3, audienceRows: 3 },
+  ]), {
+    schema: "home-open-domain-event-evidence-v1",
+    totalEvents: 15,
+    totalAudienceRows: 51,
+    groups: [
+      { eventType: "race.updated", aggregateType: "race", eventCount: 12, audienceRows: 48 },
+      { eventType: "steps.synced", aggregateType: "user", eventCount: 3, audienceRows: 3 },
+    ],
+  });
+});
+
+test("measurement diagnostics preserve raw resolution logs and grouped domain-event evidence", async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "home-diagnostics-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const pool = { async query(sql, values) {
+    assert.match(sql, /domain_event_outbox/);
+    assert.equal(values.length, 2);
+    return { rows: [{ eventType: "race.updated", aggregateType: "race",
+      eventCount: "2", audienceRows: "5" }] };
+  } };
+  const result = await captureMeasurementDiagnostics({
+    config: { lima_instance: "owned", backend_container: "owned-backend" },
+    outputDirectory: directory, stem: "measurement-30", runId: "owned-run",
+    startedAt: new Date("2026-09-03T00:00:00Z"),
+    endedAt: new Date("2026-09-03T00:01:00Z"), pool,
+    captureBackendLog: (_config, _since, rawPath, evidencePath, binding) => {
+      fs.writeFileSync(rawPath, '{"event":"race_resolution_v2"}\n');
+      fs.writeFileSync(evidencePath, JSON.stringify({ schema: "home-open-resolution-evidence-v2",
+        binding }));
+    },
+  });
+  assert.equal(fs.existsSync(result.paths.backendLog), true);
+  assert.equal(fs.existsSync(result.paths.resolutionEvidence), true);
+  assert.equal(fs.existsSync(result.paths.domainEventEvidence), true);
+  assert.equal(result.resolution.schema, "home-open-resolution-evidence-v2");
+  assert.equal(result.domainEvents.totalEvents, 2);
+  assert.deepEqual(result.domainEvents.window, {
+    startedAt: "2026-09-03T00:00:00.000Z",
+    endedAt: "2026-09-03T00:01:00.000Z",
+  });
+  assert.deepEqual(result.resolution.binding, {
+    runId: "owned-run",
+    window: { endedAt: "2026-09-03T00:01:00.000Z" },
+  });
 });
 
 test("workload provisions fixtures once and executes warmup and measurement as separate k6 epochs", async () => {

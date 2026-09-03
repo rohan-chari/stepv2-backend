@@ -16,7 +16,7 @@ const { capacityResourcePlan, ensureVmResources } = require("../../../scripts/li
 const { HOME_OPEN_EXECUTION_FILES, aggregateHomeOpenLadder, executionBundleHash, normalizeInfrastructure,
   createInFlightTracker, progressFromMetricsRows, resolutionEvidenceFromLog, waitFor,
   resetCapacityDbPoolMeasurements, waitForResolutionQueueQuiescence,
-  waitForResolutionWorkerReady } = require("../../../scripts/k6-home-open");
+  waitForResolutionWorkerReady, capacityBackendLogCommand } = require("../../../scripts/k6-home-open");
 const { homeStepPayload, interleaveActiveRaceCounts,
   scaleHomeTopology } = require("../../../src/modules/loadTesting/homeOpenFixtures");
 const { baselineIntegrityDiff } = require("../../../src/modules/loadTesting/fixtures");
@@ -34,18 +34,20 @@ test("home-open fixture stamps the active metrics epoch before load begins", () 
 
 test("home-open aggregates identifier-free resolution phase evidence", () => {
   const log = [
-    { event: "race_resolution_v2_claim", schemaVersion: 2,
+    { event: "race_resolution_v2_claim", schemaVersion: 3, attemptId: "attempt-1",
       observedAt: "2026-09-01T11:59:59.000Z", queuePriority: "LIVE", queueLagMs: 5 },
     { event: "race_resolution_v2", outcome: "commit", resolutionPlan: "STEP_SYNC_INCREMENTAL",
       schemaVersion: 2, observedAt: "2026-09-01T12:00:00.000Z", queuePriority: "LIVE",
       coreMs: 20, queueLagMs: 5, phaseMs: { compute: 8, transaction: 4 },
-      computePhaseMs: { raceLoad: 6 } },
-    { event: "race_resolution_v2_claim", schemaVersion: 2,
+      computePhaseMs: { raceLoad: 6 }, dirtyParticipantCount: 1,
+      fullParticipantCount: 10, changedRows: 1, attemptId: "attempt-1" },
+    { event: "race_resolution_v2_claim", schemaVersion: 3, attemptId: "attempt-2",
       observedAt: "2026-09-01T12:00:00.500Z", queuePriority: "LIVE", queueLagMs: 15 },
     { event: "race_resolution_v2", outcome: "commit", resolutionPlan: "STEP_SYNC_INCREMENTAL",
       schemaVersion: 2, observedAt: "2026-09-01T12:00:01.000Z", queuePriority: "LIVE",
       coreMs: 40, queueLagMs: 15, phaseMs: { compute: 16, transaction: 8 },
-      computePhaseMs: { raceLoad: 12 } },
+      computePhaseMs: { raceLoad: 12 }, dirtyParticipantCount: 3,
+      fullParticipantCount: 20, changedRows: 2, attemptId: "attempt-2" },
   ].map(JSON.stringify).join("\n");
   assert.deepEqual(resolutionEvidenceFromLog(log), {
     schema: "home-open-resolution-evidence-v2",
@@ -53,11 +55,18 @@ test("home-open aggregates identifier-free resolution phase evidence", () => {
     claims: 2,
     terminalCount: 2,
     terminalReconciled: true,
+    matchedSubsetReconciled: true,
+    windowCensorship: { leftCensoredTerminals: 0, rightCensoredClaims: 0 },
     outcomes: { commit: 2 },
     plans: { STEP_SYNC_INCREMENTAL: 2 },
     priorities: { LIVE: 2 },
     coreMs: { p50: 20, p95: 40, p99: 40 },
     queueLagMs: { p50: 5, p95: 15, p99: 15 },
+    scope: {
+      dirtyParticipantCount: { samples: 2, total: 4, p50: 1, p95: 3, p99: 3 },
+      fullParticipantCount: { samples: 2, total: 30, p50: 10, p95: 20, p99: 20 },
+      changedRows: { samples: 2, total: 3, p50: 1, p95: 2, p99: 2 },
+    },
     phases: {
       compute: { p50: 8, p95: 16, p99: 16 },
       "compute.raceLoad": { p50: 6, p95: 12, p99: 12 },
@@ -68,20 +77,33 @@ test("home-open aggregates identifier-free resolution phase evidence", () => {
   });
   assert.equal(JSON.stringify(resolutionEvidenceFromLog(log)).includes("raceId"), false);
   assert.throws(() => resolutionEvidenceFromLog(JSON.stringify({
-    event: "race_resolution_v2", outcome: "failed",
+    event: "race_resolution_v2", outcome: "failed", attemptId: "broken",
   })), /incomplete/);
-  assert.throws(() => resolutionEvidenceFromLog(JSON.stringify({
-    event: "race_resolution_v2_claim", schemaVersion: 2,
+  const censored = resolutionEvidenceFromLog(JSON.stringify({
+    event: "race_resolution_v2_claim", schemaVersion: 2, attemptId: "right-censored",
     observedAt: "2026-09-01T12:00:00.000Z", queuePriority: "LIVE", queueLagMs: 1,
-  })), /do not reconcile/);
+  }));
+  assert.equal(censored.windowCensorship.rightCensoredClaims, 1);
+  assert.equal(censored.matchedSubsetReconciled, true);
+  assert.equal(censored.terminalReconciled, false);
   const overAttributed = [
-    { event: "race_resolution_v2_claim", schemaVersion: 2,
+    { event: "race_resolution_v2_claim", schemaVersion: 2, attemptId: "over",
       observedAt: "2026-09-01T12:00:00.000Z", queuePriority: "LIVE", queueLagMs: 1 },
     { event: "race_resolution_v2", schemaVersion: 2,
       observedAt: "2026-09-01T12:00:01.000Z", queuePriority: "LIVE", outcome: "commit",
-      coreMs: 10, queueLagMs: 1, phaseMs: { compute: 100 } },
+      coreMs: 10, queueLagMs: 1, phaseMs: { compute: 100 }, attemptId: "over" },
   ].map(JSON.stringify).join("\n");
   assert.throws(() => resolutionEvidenceFromLog(overAttributed), /exceed/);
+});
+
+test("capacity backend logs are bounded by the exact measurement window", () => {
+  assert.deepEqual(capacityBackendLogCommand(
+    { lima_instance: "owned-vm", backend_container: "owned-backend" },
+    new Date("2026-09-03T00:00:00Z"),
+    { window: { endedAt: new Date("2026-09-03T00:01:00Z") } },
+  ), ["shell", "owned-vm", "docker", "logs", "--timestamps", "--since",
+    "2026-09-03T00:00:00.000Z", "--until", "2026-09-03T00:01:00.000Z",
+    "owned-backend"]);
 });
 
 test("home-open locks the versioned coherent-session contract without changing home", () => {
