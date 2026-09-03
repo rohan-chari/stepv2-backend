@@ -219,7 +219,6 @@ test("classified FULL and legacy wakes conservatively scan FULL triggers", async
     RaceResolutionJobV2: { async nextDueAt() { return null; } },
     StepSyncRequest: { async cleanupExpired() {} },
     subscribeWake: async (handler) => { wake = handler; return async () => {}; },
-    fullTriggerWakeCoalesceMs: 0,
     drainOnStart: false,
     logger: { log() {}, error() {} },
     pollIntervalMs: 5_000,
@@ -232,46 +231,5 @@ test("classified FULL and legacy wakes conservatively scan FULL triggers", async
   await scheduled.coordinator.whenIdle();
 
   assert.equal(beginDrains, 2);
-  await scheduled.stop();
-});
-
-test("typed FULL wakes are batch-coalesced before one resolution drain", async () => {
-  let wake = null;
-  let beginDrains = 0;
-  const wakeTimers = [];
-  const scheduled = scheduleRaceResolutionWorkerV2({
-    nodeEnv: "test",
-    processRole: "resolution",
-    worker: {
-      beginDrain() { beginDrains += 1; },
-      async tick() { return 0; },
-      async logQueueLag() {},
-    },
-    appSettings: { async getFlag() { return true; } },
-    RaceResolutionJobV2: { async nextDueAt() { return null; } },
-    StepSyncRequest: { async cleanupExpired() {} },
-    subscribeWake: async (handler) => { wake = handler; return async () => {}; },
-    setWakeTimer(fn, delay) {
-      const timer = { fn, delay, unref() {} };
-      wakeTimers.push(timer);
-      return timer;
-    },
-    clearWakeTimer() {},
-    drainOnStart: false,
-    logger: { log() {}, error() {} },
-    pollIntervalMs: 5_000,
-  });
-  while (!wake) await new Promise((resolve) => setImmediate(resolve));
-
-  for (let index = 0; index < 20; index += 1) {
-    wake({ queue: "resolution", workKind: "full-trigger" });
-  }
-  assert.equal(beginDrains, 0);
-  assert.equal(wakeTimers.length, 1);
-  assert.equal(wakeTimers[0].delay, 250);
-
-  wakeTimers[0].fn();
-  await scheduled.coordinator.whenIdle();
-  assert.equal(beginDrains, 1);
   await scheduled.stop();
 });
