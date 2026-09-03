@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { createLimaProvider } = require("../../../performance/providers/lima");
 
 const {
   buildRacesTabFixtureFile,
@@ -250,6 +251,7 @@ test("oversized fixture output fails before k6 and cleans the owned graph", asyn
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "races-size-"));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   let cleaned = false;
+  let cacheCleanup = null;
   const fixture = { manifest: { ids: {} }, topology: {}, users: [{ id: "viewer",
     token: "token", zeroFriends: false,
     expectedProjectionVersion: "races-tab-open-projection-v2",
@@ -259,11 +261,19 @@ test("oversized fixture output fails before k6 and cleans the owned graph", asyn
     captureExpectedProjections: async () => {},
     conditionMeasurementCache: async () => ({ schema: "races-tab-cache-conditioning-v1" }),
     cleanupFixtures: async () => { cleaned = true; } });
+  const provider = createLimaProvider({ adapter: {
+    deleteExactRaceListCache: async (options) => { cacheCleanup = options; },
+  } });
   await assert.rejects(workload.prepareFixtures({ runId: "races-size", environment: {
     prisma: {}, baseUrl: "http://127.0.0.1", credentialDirectory: directory,
-    processEnvironment: {} }, config: { workload: { maximumFixtureBytes: 10 },
+    processEnvironment: {}, deleteExactRaceListCache: (options) =>
+      provider.deleteExactRaceListCache(options) },
+  config: { workload: { maximumFixtureBytes: 10 },
     scan: { rates: [1] } } }), /exceeds 10 bytes/);
   assert.equal(cleaned, true);
+  assert.ok(Number.isFinite(cacheCleanup.deadlineMillis));
+  assert.ok(cacheCleanup.timeoutMs > 0 && cacheCleanup.timeoutMs <= 30_000);
+  assert.equal(cacheCleanup.signal.aborted, false);
 });
 
 test("workload cleanup settles Redis, graph, and credential-file cleanup", async (context) => {
@@ -272,15 +282,23 @@ test("workload cleanup settles Redis, graph, and credential-file cleanup", async
   const fixturePath = path.join(directory, "fixture.json");
   fs.writeFileSync(fixturePath, "{}\n");
   const calls = [];
+  let cacheCleanup = null;
   const workload = createRacesTabOpenWorkload({ cleanupFixtures: async () => {
     calls.push("graph"); throw new Error("graph cleanup failed");
   } });
+  const provider = createLimaProvider({ adapter: {
+    deleteExactRaceListCache: async (options) => { cacheCleanup = options;
+      calls.push("redis"); throw new Error("redis cleanup failed"); },
+  } });
   await assert.rejects(workload.cleanup({ environment: {
-    deleteExactRaceListCache: async () => { calls.push("redis"); throw new Error("redis cleanup failed"); },
+    deleteExactRaceListCache: (options) => provider.deleteExactRaceListCache(options),
     prisma: {},
   }, fixtures: { fixturePath, users: [{ id: "u" }], manifest: {} } }),
   (error) => error instanceof AggregateError && error.errors.length === 2);
   assert.deepEqual(calls, ["redis", "graph"]);
+  assert.ok(Number.isFinite(cacheCleanup.deadlineMillis));
+  assert.ok(cacheCleanup.timeoutMs > 0 && cacheCleanup.timeoutMs <= 30_000);
+  assert.equal(cacheCleanup.signal.aborted, false);
   assert.equal(fs.existsSync(fixturePath), false);
 });
 

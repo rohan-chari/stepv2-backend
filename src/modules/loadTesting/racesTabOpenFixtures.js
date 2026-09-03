@@ -385,6 +385,49 @@ function packOrdinaryGraphSlots({ slots, sourceEntries, ownerOnly, needsExternal
   throw new Error("Races-tab generated graph inventoryPerRace escaped or effectsPerRace escaped the scaled per-user ownership profile");
 }
 
+function packTournamentMatchGraphSlots({ slots, tournamentEntries, matchEntries }) {
+  const orderedSlots = [...slots].sort((left, right) => {
+    const leftRequired = requiredGraphFeatures(left.variantGroup);
+    const rightRequired = requiredGraphFeatures(right.variantGroup);
+    return rightRequired.effects - leftRequired.effects ||
+      rightRequired.inventory - leftRequired.inventory || left.userIndex - right.userIndex;
+  });
+  const totalRequired = orderedSlots.reduce((totals, slot) => {
+    const required = requiredGraphFeatures(slot.variantGroup);
+    totals.inventory += required.inventory; totals.effects += required.effects;
+    return totals;
+  }, { inventory: 0, effects: 0 });
+  for (let graphCount = 1; graphCount <= slots.length; graphCount += 1) {
+    const tournaments = scaledShapeSequence(tournamentEntries, graphCount);
+    const matches = scaledShapeSequence(matchEntries, graphCount);
+    const instances = tournaments.map((shape, index) => ({ index, shape,
+      matchShape: matches[index], slots: [], remainingUsers: Math.max(1, Math.min(2,
+        Number(shape.accepted), Number(matches[index].participants))),
+      remainingInventory: Number(matches[index].inventory),
+      remainingEffects: Number(matches[index].effects) }));
+    if (instances.reduce((sum, row) => sum + row.remainingUsers, 0) < slots.length ||
+        instances.reduce((sum, row) => sum + row.remainingInventory, 0) !== totalRequired.inventory ||
+        instances.reduce((sum, row) => sum + row.remainingEffects, 0) !== totalRequired.effects) continue;
+    let fits = true;
+    for (const slot of orderedSlots) {
+      const required = requiredGraphFeatures(slot.variantGroup);
+      const instance = instances.filter((candidate) => candidate.remainingUsers > 0 &&
+          candidate.remainingInventory >= required.inventory &&
+          candidate.remainingEffects >= required.effects)
+        .sort((left, right) => Number(left.slots.length > 0) - Number(right.slots.length > 0) ||
+          left.remainingInventory - right.remainingInventory ||
+          left.remainingEffects - right.remainingEffects || left.index - right.index)[0];
+      if (!instance) { fits = false; break; }
+      instance.slots.push(slot); instance.remainingUsers -= 1;
+      instance.remainingInventory -= required.inventory;
+      instance.remainingEffects -= required.effects;
+    }
+    if (fits && instances.every((instance) => instance.slots.length > 0 &&
+        instance.remainingInventory === 0 && instance.remainingEffects === 0)) return instances;
+  }
+  throw new Error("Races-tab matchup inventory/effect ownership escaped paired scaled graphs");
+}
+
 function graphAssignments({ coverage, sourceCensus }) {
   const grouped = new Map();
   coverage.byUser.forEach((variants, userIndex) => {
@@ -396,6 +439,8 @@ function graphAssignments({ coverage, sourceCensus }) {
       const team = variantGroup.includes("ordinary_team_active") || variantGroup.includes("pinned_team");
       const compatibleFamily = group.family === "ordinary_active"
         ? `${group.family}:${team ? "team" : "classic"}`
+        : group.family === "tournament_active" && variantGroup[0] === "tournament_live_match"
+          ? `${group.family}:live_match`
         : `${group.family}:${[...variantGroup].sort().join("|")}`;
       const key = `${compatibleFamily}:${group.occurrence}:${provenance}`;
       if (!grouped.has(key)) grouped.set(key, { family: group.family, provenance, slots: [] });
@@ -432,6 +477,24 @@ function graphAssignments({ coverage, sourceCensus }) {
         const instanceVariants = [...new Set(instance.slots.flatMap((slot) => slot.variantGroup))];
         assignments.push({ variantGroup: instanceVariants, provenance: entry.provenance,
           jointShape: instance.shape, matchShape: null, userSlots: instance.slots,
+          userIndexes: instance.slots.map((slot) => slot.userIndex), scaledShape: true });
+        ordinal += 1;
+      }
+      continue;
+    }
+    const sourceTournamentEntries = (sourceCensus?.graphJointHistogram?.tournaments || [])
+      .filter((row) => String(row.dimensions?.status || "").toUpperCase() === "ACTIVE");
+    const sourceMatchEntries = (sourceCensus?.graphJointHistogram?.matches || [])
+      .filter((row) => String(row.dimensions?.status || "").toUpperCase() === "ACTIVE");
+    if (tournament && entry.family === "tournament_active" && entry.provenance === "natural" &&
+        entry.slots.every((slot) => slot.variantGroup[0] === "tournament_live_match") &&
+        sourceTournamentEntries.length > 0 && sourceMatchEntries.length > 0) {
+      for (const instance of packTournamentMatchGraphSlots({ slots: entry.slots,
+        tournamentEntries: sourceTournamentEntries, matchEntries: sourceMatchEntries })) {
+        const instanceVariants = [...new Set(instance.slots.flatMap((slot) => slot.variantGroup))];
+        assignments.push({ variantGroup: instanceVariants, provenance: entry.provenance,
+          jointShape: instance.shape, matchShape: instance.matchShape,
+          userSlots: instance.slots,
           userIndexes: instance.slots.map((slot) => slot.userIndex), scaledShape: true });
         ordinal += 1;
       }
@@ -475,7 +538,8 @@ function graphAssignments({ coverage, sourceCensus }) {
       const capacity = ownerOnly ? 1 : Math.max(1,
         Math.min(hasMatch ? 2 : 64, inviteCapacity, featureCapacity));
       const batchSlots = entry.slots.slice(index, index + capacity);
-      assignments.push({ variantGroup,
+      const batchVariantGroup = [...new Set(batchSlots.flatMap((slot) => slot.variantGroup))];
+      assignments.push({ variantGroup: batchVariantGroup,
         provenance: entry.provenance,
         jointShape, matchShape,
         userSlots: batchSlots,
@@ -698,6 +762,7 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
   const startedAt = new Date(now.getTime() - 60 * 60_000);
   const endsAt = new Date(now.getTime() + 14 * 24 * 60 * 60_000);
   const completedAt = new Date(now.getTime() - 24 * 60 * 60_000);
+  const powerupEarnedKeys = new Set();
   const addParticipant = ({ raceId, userId, status = "ACCEPTED", index,
     favorite = false, team = null, placement = null }) => {
     const row = { id: crypto.randomUUID(), raceId, userId, status,
@@ -710,10 +775,13 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
   };
   const addPowerup = ({ raceId, participant, userId, type = "SHORTCUT",
     status = "HELD", index }) => {
+    let earnedAtSteps = 20_000 + index;
+    while (powerupEarnedKeys.has(`${participant.id}:${earnedAtSteps}`)) earnedAtSteps += 1;
+    powerupEarnedKeys.add(`${participant.id}:${earnedAtSteps}`);
     const row = { id: crypto.randomUUID(), raceId, participantId: participant.id,
       userId, type: status === "MYSTERY_BOX" ? "MYSTERY_BOX" : type,
       rarity: status === "MYSTERY_BOX" ? null : "COMMON", status,
-      earnedAtSteps: 20_000 + index };
+      earnedAtSteps };
     powerups.push(row); ids.racePowerups.push(row.id); return row;
   };
   const plannedGraphAssignments = graphAssignments({ coverage, sourceCensus });
@@ -885,18 +953,20 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
       championUserId: render === "champion" ? caller.id :
         render === "completed_non_champion" ? support.id : null };
     tournaments.push(tournament); ids.tournaments.push(tournamentId);
+    const callerTournamentVariants = userSlots[0]?.variantGroup || variantGroup;
     const callerTournament = { id: crypto.randomUUID(), tournamentId, userId: caller.id,
       status: render === "invite" ? "INVITED" : "ACCEPTED", seed: render === "invite" ? null : 0,
       eliminatedInRound: render === "eliminated" ? 1 : null,
-      favoritedAt: hasVariant("pinned_tournament") ? now : null };
+      favoritedAt: callerTournamentVariants.includes("pinned_tournament") ? now : null };
     tournamentParticipants.push(callerTournament);
     ids.tournamentParticipants.push(callerTournament.id);
-    for (const [sharedOrdinal, sharedIndex] of userIndexes.slice(1).entries()) {
+    for (const [sharedOrdinal, slot] of userSlots.slice(1).entries()) {
+      const sharedIndex = slot.userIndex;
       const row = { id: crypto.randomUUID(), tournamentId, userId: base.users[sharedIndex].id,
         status: render === "invite" ? "INVITED" : "ACCEPTED",
         seed: render === "invite" ? null : sharedOrdinal + 1,
         eliminatedInRound: render === "eliminated" ? 1 : null,
-        favoritedAt: hasVariant("pinned_tournament") ? now : null };
+        favoritedAt: slot.variantGroup.includes("pinned_tournament") ? now : null };
       tournamentParticipants.push(row); ids.tournamentParticipants.push(row.id);
     }
     let tournamentSupportOrdinal = userIndexes.length;
@@ -941,9 +1011,9 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
         maxParticipants: Math.max(2, sampledMatchParticipants),
         tournamentId, tournamentRound: tournament.currentRound, tournamentMatchIndex: 0 });
       ids.races.push(raceId);
-      const matchEntries = userIndexes.map((sharedIndex) => ({ user: base.users[sharedIndex],
-        participant: addParticipant({ raceId, userId: base.users[sharedIndex].id,
-          index: sharedIndex }) }));
+      const matchEntries = userSlots.map((slot) => ({ user: base.users[slot.userIndex],
+        participant: addParticipant({ raceId, userId: base.users[slot.userIndex].id,
+          index: slot.userIndex }), variants: slot.variantGroup }));
       if (matchEntries.length < 2) matchEntries.push({ user: support,
         participant: addParticipant({ raceId, userId: support.id, index: userIndex + 50_000 }) });
       let matchSupportOrdinal = matchEntries.length;
@@ -956,15 +1026,16 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
       }
       const supportMatch = matchEntries[1].participant;
       for (const entry of matchEntries.slice(0, userIndexes.length)) {
-        if (hasVariant("tournament_match_inventory_held_typed")) addPowerup({ raceId,
+        const entryHas = (name) => entry.variants.includes(name);
+        if (entryHas("tournament_match_inventory_held_typed")) addPowerup({ raceId,
           participant: entry.participant, userId: entry.user.id, index: userIndex });
-        if (hasVariant("tournament_match_inventory_mystery_box")) addPowerup({ raceId,
+        if (entryHas("tournament_match_inventory_mystery_box")) addPowerup({ raceId,
           participant: entry.participant, userId: entry.user.id,
           status: "MYSTERY_BOX", index: userIndex });
-        if (hasVariant("tournament_match_inventory_queued_box")) addPowerup({ raceId,
+        if (entryHas("tournament_match_inventory_queued_box")) addPowerup({ raceId,
           participant: entry.participant, userId: entry.user.id,
           status: "QUEUED", index: userIndex });
-        if (hasVariant("tournament_match_placement_hidden")) {
+        if (entryHas("tournament_match_placement_hidden")) {
           const powerup = addPowerup({ raceId, participant: supportMatch,
             userId: supportMatch.userId, type: "DETOUR_SIGN", status: "USED", index: userIndex });
           const effect = { id: crypto.randomUUID(), raceId,

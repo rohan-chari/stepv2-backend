@@ -228,6 +228,25 @@ async function awaitDeadlineSettlement(operation, { signal, deadlineError }) {
   }
 }
 
+async function boundedCacheCleanup(deleteExact, input, maximumMs = 30_000) {
+  const deadlineMillis = Date.now() + maximumMs;
+  const controller = new AbortController();
+  const deadlineError = () => {
+    const error = new Error(`Races-tab owned-cache cleanup exceeded ${maximumMs}ms`);
+    error.cacheCleanup = { budgetMillis: maximumMs, budgetExceeded: true };
+    return error;
+  };
+  const timer = setTimeout(() => controller.abort(deadlineError()), maximumMs);
+  timer.unref?.();
+  try {
+    const operation = Promise.resolve().then(() => deleteExact({ ...input, deadlineMillis,
+      timeoutMs: Math.max(1, deadlineMillis - Date.now()), signal: controller.signal }));
+    return await awaitDeadlineSettlement(operation, { signal: controller.signal, deadlineError });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function conditionMeasurementCache({ rate, purpose, attempt, environment, fixtures, config,
   deleteExact, fetchImpl = fetch, sleep = abortableSleep,
   nowMillis = Date.now }) {
@@ -651,8 +670,8 @@ function createRacesTabOpenWorkload(dependencies = {}) {
         if (typeof environment.deleteExactRaceListCache === "function") {
           const variant = canonicalRaceListVariant({ clientFeatures: new Set(
             PROFILES["races-tab-open"].racesTabOpen.clientFeatures), compact: true });
-          try { await environment.deleteExactRaceListCache({ environment,
-            userIds: fixture.users.map((user) => user.id), variant }); }
+          try { await boundedCacheCleanup(environment.deleteExactRaceListCache,
+            { environment, userIds: fixture.users.map((user) => user.id), variant }); }
           catch (cleanupError) { cleanupErrors.push(cleanupError); }
         }
         try { await cleanupFixtures({ prisma: environment.prisma, manifest: fixture.manifest }); }
@@ -733,8 +752,8 @@ function createRacesTabOpenWorkload(dependencies = {}) {
         const variant = canonicalRaceListVariant({ clientFeatures: new Set(
           PROFILES["races-tab-open"].racesTabOpen.clientFeatures), compact: true,
         });
-        try { await environment.deleteExactRaceListCache({ environment,
-          userIds: fixtures.users.map((user) => user.id), variant }); }
+        try { await boundedCacheCleanup(environment.deleteExactRaceListCache,
+          { environment, userIds: fixtures.users.map((user) => user.id), variant }); }
         catch (error) { errors.push(error); }
       }
       try { await cleanupFixtures({ prisma: environment.prisma, manifest: fixtures?.manifest }); }

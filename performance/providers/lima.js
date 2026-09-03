@@ -59,6 +59,9 @@ function createLimaProvider({ adapter } = {}) {
   if (typeof adapter?.resetEnvironment === "function") {
     provider.resetEnvironment = (input) => adapter.resetEnvironment(input);
   }
+  for (const name of ["deleteExactRaceListCache", "verifyRacesTabSettings"]) {
+    if (typeof adapter?.[name] === "function") provider[name] = call(name);
+  }
   return provider;
 }
 

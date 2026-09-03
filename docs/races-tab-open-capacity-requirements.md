@@ -310,8 +310,11 @@ targets first, then assigning heterogeneous user profiles to participant,
 inventory-owner, and effect-target slots. Evidence reconciles the materialized
 graph frequencies and every generated user's inventory/effect ownership against
 those assignments; it does not create one private race per user merely to match
-marginal counts. Source, naturally generated, and augmented histograms and p50/p95
-response bytes are reported separately for each core fixture family.
+marginal counts. Active tournament parents and their live-match graphs are
+scaled and packed as a pair, so heterogeneous matchup inventory/effect profiles
+share the same source-shaped match. Source, naturally generated, and augmented
+histograms and p50/p95 response bytes are reported separately for each core
+fixture family.
 Generated-response capture is keyed by independently observed projection
 variant, total core row count, and natural-versus-coverage-floor provenance;
 fixture-assigned labels are not accepted as response-size evidence. Per-user
@@ -431,6 +434,9 @@ namespace. Automated tests inject failures after each preparation phase and
 prove cleanup after partial preparation, success, workload failure, timeout,
 and SIGINT/SIGTERM interruption; baseline row counts and owned-key absence must
 match after each path.
+Exact Redis deletion during both partial preparation cleanup and normal cleanup
+uses a bounded abort controller and finite remaining deadline; neither cleanup
+path may call the provider without those deadline arguments.
 
 ## Result contract and report
 

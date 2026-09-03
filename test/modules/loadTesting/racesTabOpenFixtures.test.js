@@ -242,6 +242,66 @@ test("joint graph scaling preserves tournament matchup inventory and effect card
   assert.equal(plan.graphEvidence.jointReconciliation.generatedWithinSourceSupport, true);
 });
 
+test("graph-first scaling assigns heterogeneous users to one paired tournament match", () => {
+  const users = [{ id: "u0" }, { id: "u1" }];
+  const coverage = { byUser: [
+    ["tournament_live_match", "tournament_match_inventory_held_typed"],
+    ["tournament_live_match"],
+  ], augmentedByUser: [[], []] };
+  const sourceCensus = { graphJointHistogram: {
+    ordinary: [], tournaments: [{ graphs: 1, dimensions: {
+      status: "active", bracketSize: 2, participants: 2, accepted: 2,
+    } }], matches: [{ graphs: 1, dimensions: {
+      status: "active", participants: 2, inventory: 1, effects: 0,
+    } }],
+  } };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "heterogeneous-match" });
+  assert.equal(plan.tournaments.length, 1);
+  assert.equal(plan.races.filter((row) => row.tournamentId === plan.tournaments[0].id).length, 1);
+  assert.equal(plan.powerups.length, 1);
+  assert.equal(plan.powerups[0].userId, "u0");
+  assert.equal(plan.graphEvidence.frequencyReconciliation.generatedMatchesScaledTargets, true);
+  assert.equal(plan.graphEvidence.ownershipReconciliation.matchesAssignedProfiles, true);
+});
+
+test("paired match effects and held inventory use distinct durable uniqueness keys", () => {
+  const users = [{ id: "u0" }, { id: "u1" }];
+  const coverage = { byUser: [
+    ["tournament_live_match", "tournament_match_placement_hidden"],
+    ["tournament_live_match", "tournament_match_inventory_held_typed"],
+  ], augmentedByUser: [[], []] };
+  const sourceCensus = { graphJointHistogram: {
+    ordinary: [], tournaments: [{ graphs: 1, dimensions: {
+      status: "active", bracketSize: 2, participants: 2, accepted: 2,
+    } }], matches: [{ graphs: 1, dimensions: {
+      status: "active", participants: 2, inventory: 2, effects: 1,
+    } }],
+  } };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "match-unique-items" });
+  assert.equal(plan.tournaments.length, 1);
+  assert.equal(plan.races.filter((row) => row.tournamentId === plan.tournaments[0].id).length, 1);
+  assert.deepEqual(plan.powerups.map((row) => [row.userId, row.status]).sort(),
+    [["u1", "HELD"], ["u1", "USED"]]);
+  assert.equal(new Set(plan.powerups.map((row) =>
+    `${row.participantId}:${row.earnedAtSteps}`)).size, plan.powerups.length);
+});
+
+test("augmented tournament match batches enable inventory only for the owning batch", () => {
+  const users = Array.from({ length: 4 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: [
+    ["tournament_live_match", "tournament_match_inventory_held_typed"],
+    ["tournament_live_match"], ["tournament_live_match"], ["tournament_live_match"],
+  ], augmentedByUser: users.map((_, index) => index === 0
+    ? ["tournament_match_inventory_held_typed"] : ["tournament_live_match"]) };
+  const plan = materializationPlan({ base: { users }, coverage,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "match-batch-features" });
+  const matchRaces = plan.races.filter((row) => row.tournamentId != null);
+  assert.equal(matchRaces.length, 2);
+  assert.equal(matchRaces.filter((row) => row.powerupsEnabled).length, 1);
+});
+
 test("graph materialization rejects malformed source census rows instead of silently falling back", () => {
   const users = Array.from({ length: 2 }, (_, index) => ({ id: `u${index}` }));
   const coverage = { byUser: users.map(() => ["ordinary_classic_active"]) };
