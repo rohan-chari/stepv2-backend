@@ -166,25 +166,33 @@ function measurementIdentityOffset(config) {
 }
 
 async function fetchCoreCohort({ users, baseUrl, runId, attemptId, fetchImpl, concurrency = 24,
-  deadlineMillis, nowMillis = Date.now, deadlineError = () =>
+  deadlineMillis, signal, nowMillis = Date.now, deadlineError = () =>
     new Error("Races-tab cache conditioning exceeded wall-clock budget") }) {
   let cursor = 0;
+  let stopped = false;
   const workers = Array.from({ length: Math.min(concurrency, Math.max(1, users.length)) },
     async () => {
-      while (cursor < users.length) {
-        const remaining = deadlineMillis - nowMillis();
-        if (remaining <= 0) throw deadlineError();
-        const user = users[cursor++];
-        const headers = { ...racesHeaders({ token: user.token, runId }),
-          "X-Capacity-Attempt-Id": attemptId, "X-Capacity-Phase": "cache-conditioning" };
-        const response = await fetchImpl(`${baseUrl}/races?view=compact-v1`, {
-          headers, redirect: "error", signal: AbortSignal.timeout(Math.max(1,
-            Math.min(15_000, remaining))),
-        });
-        await responseJson(response, `cache conditioning ${attemptId}`);
-        if (nowMillis() > deadlineMillis) {
-          throw deadlineError();
+      try {
+        while (!stopped && cursor < users.length) {
+          const remaining = deadlineMillis - nowMillis();
+          if (remaining <= 0 || signal?.aborted) throw signal?.reason || deadlineError();
+          const user = users[cursor++];
+          const headers = { ...racesHeaders({ token: user.token, runId }),
+            "X-Capacity-Attempt-Id": attemptId, "X-Capacity-Phase": "cache-conditioning" };
+          const requestSignal = signal ? AbortSignal.any([signal,
+            AbortSignal.timeout(Math.max(1, Math.min(15_000, remaining)))])
+            : AbortSignal.timeout(Math.max(1, Math.min(15_000, remaining)));
+          const response = await fetchImpl(`${baseUrl}/races?view=compact-v1`, {
+            headers, redirect: "error", signal: requestSignal,
+          });
+          await responseJson(response, `cache conditioning ${attemptId}`);
+          if (nowMillis() > deadlineMillis || signal?.aborted) {
+            throw signal?.reason || deadlineError();
+          }
         }
+      } catch (error) {
+        stopped = true;
+        throw error;
       }
     });
   const results = await Promise.allSettled(workers);
@@ -192,8 +200,36 @@ async function fetchCoreCohort({ users, baseUrl, runId, attemptId, fetchImpl, co
   if (failure) throw failure.reason;
 }
 
+function abortableSleep(ms, { signal } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const timer = setTimeout(done, Math.max(0, ms));
+    function done() { signal?.removeEventListener("abort", aborted); resolve(); }
+    function aborted() { clearTimeout(timer); reject(signal.reason); }
+    signal?.addEventListener("abort", aborted, { once: true });
+  });
+}
+
+async function awaitDeadlineSettlement(operation, { signal, deadlineError }) {
+  let abort;
+  const aborted = new Promise((_, reject) => {
+    abort = () => reject(signal.reason || deadlineError());
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([operation, aborted]);
+  } catch (error) {
+    if (!signal.aborted) throw error;
+    await Promise.allSettled([operation]);
+    throw signal.reason || deadlineError();
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 async function conditionMeasurementCache({ rate, purpose, attempt, environment, fixtures, config,
-  deleteExact, fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  deleteExact, fetchImpl = fetch, sleep = abortableSleep,
   nowMillis = Date.now }) {
   if (typeof deleteExact !== "function") {
     throw new Error("Races-tab cache conditioning requires exact-key Redis cleanup");
@@ -224,35 +260,55 @@ async function conditionMeasurementCache({ rate, purpose, attempt, environment, 
     }
   };
   assertBudget();
-  const variant = canonicalRaceListVariant({
-    clientFeatures: new Set(PROFILES["races-tab-open"].racesTabOpen.clientFeatures),
-    compact: true, releaseChannel: "prod",
-  });
-  const deletedKeys = await deleteExact({ environment, userIds: users.map((user) => user.id),
-    variant, initializeGeneration: true });
-  assertBudget();
-  const bucket = (index) => (index * 37) % 100;
-  const hot30 = users.filter((_, index) => bucket(index) < profile.hot30Share * 100);
-  const hot15 = users.filter((_, index) => bucket(index) >= profile.hot30Share * 100 &&
-    bucket(index) < (profile.hot30Share + profile.hot15Share) * 100);
-  const expired300 = users.filter((_, index) =>
-    bucket(index) >= (profile.hot30Share + profile.hot15Share) * 100);
-  const workloadRunId = fixtures.manifest?.runId || environment.runId;
-  await fetchCoreCohort({ users: hot30, baseUrl: environment.baseUrl, runId: workloadRunId,
-    attemptId, fetchImpl, deadlineMillis, nowMillis, deadlineError });
-  // Stay inside the 30-second membership TTL rather than racing its expiry.
-  await sleep(Math.max(0, startedAtMillis + 14_000 - nowMillis()));
-  assertBudget();
-  await fetchCoreCohort({ users: hot15, baseUrl: environment.baseUrl, runId: workloadRunId,
-    attemptId, fetchImpl, deadlineMillis, nowMillis, deadlineError });
-  await sleep(Math.max(0, startedAtMillis + 29_000 - nowMillis()));
-  assertBudget();
-  const durationSeconds = (nowMillis() - startedAtMillis) / 1000;
-  return { schema: "races-tab-cache-conditioning-v1", attemptId, deletedKeys,
-    profile: profile.profile, cohorts: { hot30Seconds: hot30.length, hot15Seconds: hot15.length,
-    expired300Seconds: expired300.length }, durationSeconds, budgetSeconds: profile.maximumSeconds,
-    budgetExceeded: durationSeconds > Number(profile.maximumSeconds),
-    expiredDisposition: "exact-keys-absent-equivalent-to-expired" };
+  const deadlineController = new AbortController();
+  const deadlineTimer = setTimeout(() => deadlineController.abort(deadlineError()),
+    Math.max(1, deadlineMillis - nowMillis()));
+  deadlineTimer.unref?.();
+  try {
+    const variant = canonicalRaceListVariant({
+      clientFeatures: new Set(PROFILES["races-tab-open"].racesTabOpen.clientFeatures),
+      compact: true, releaseChannel: "prod",
+    });
+    const deleteOperation = Promise.resolve().then(() => deleteExact({ environment,
+      userIds: users.map((user) => user.id), variant, initializeGeneration: true,
+      deadlineMillis, timeoutMs: Math.max(1, deadlineMillis - nowMillis()),
+      signal: deadlineController.signal }));
+    const deletedKeys = await awaitDeadlineSettlement(deleteOperation,
+      { signal: deadlineController.signal, deadlineError });
+    assertBudget();
+    const bucket = (index) => (index * 37) % 100;
+    const hot30 = users.filter((_, index) => bucket(index) < profile.hot30Share * 100);
+    const hot15 = users.filter((_, index) => bucket(index) >= profile.hot30Share * 100 &&
+      bucket(index) < (profile.hot30Share + profile.hot15Share) * 100);
+    const expired300 = users.filter((_, index) =>
+      bucket(index) >= (profile.hot30Share + profile.hot15Share) * 100);
+    const workloadRunId = fixtures.manifest?.runId || environment.runId;
+    await fetchCoreCohort({ users: hot30, baseUrl: environment.baseUrl, runId: workloadRunId,
+      attemptId, fetchImpl, deadlineMillis, signal: deadlineController.signal,
+      nowMillis, deadlineError });
+    // Stay inside the 30-second membership TTL rather than racing its expiry.
+    await awaitDeadlineSettlement(Promise.resolve().then(() => sleep(
+      Math.max(0, startedAtMillis + 14_000 - nowMillis()),
+      { signal: deadlineController.signal, deadlineMillis })),
+    { signal: deadlineController.signal, deadlineError });
+    assertBudget();
+    await fetchCoreCohort({ users: hot15, baseUrl: environment.baseUrl, runId: workloadRunId,
+      attemptId, fetchImpl, deadlineMillis, signal: deadlineController.signal,
+      nowMillis, deadlineError });
+    await awaitDeadlineSettlement(Promise.resolve().then(() => sleep(
+      Math.max(0, startedAtMillis + 29_000 - nowMillis()),
+      { signal: deadlineController.signal, deadlineMillis })),
+    { signal: deadlineController.signal, deadlineError });
+    assertBudget();
+    const durationSeconds = (nowMillis() - startedAtMillis) / 1000;
+    return { schema: "races-tab-cache-conditioning-v1", attemptId, deletedKeys,
+      profile: profile.profile, cohorts: { hot30Seconds: hot30.length, hot15Seconds: hot15.length,
+      expired300Seconds: expired300.length }, durationSeconds, budgetSeconds: profile.maximumSeconds,
+      budgetExceeded: durationSeconds > Number(profile.maximumSeconds),
+      expiredDisposition: "exact-keys-absent-equivalent-to-expired" };
+  } finally {
+    clearTimeout(deadlineTimer);
+  }
 }
 
 function normalizeRacesTabEvidence({ summary, rate, measurementSeconds, fixture,

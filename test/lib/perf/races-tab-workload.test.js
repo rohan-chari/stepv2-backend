@@ -171,6 +171,50 @@ test("cache conditioning validates its deadline policy before deleting owned key
   assert.equal(deleteCalls, 0);
 });
 
+test("cache conditioning actively aborts Redis deletion at the shared deadline and settles it", async () => {
+  const users = Array.from({ length: 2 }, (_, index) => ({ id: `u${index}`, token: `t${index}` }));
+  let settled = false;
+  let received = null;
+  const started = Date.now();
+  await assert.rejects(conditionMeasurementCache({ rate: 1, purpose: "discovery", attempt: 1,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 1, identitySafetyFactor: 1 },
+      scan: { rates: [1] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "deadline", hot30Share: 1,
+        hot15Share: 0, expired300Share: 0, maximumSeconds: 0.02 } } },
+    deleteExact: async (options) => {
+      received = options;
+      await new Promise((resolve, reject) => options.signal.addEventListener("abort", () => {
+        settled = true; reject(options.signal.reason);
+      }, { once: true }));
+    },
+  }), (error) => error.cacheConditioning?.budgetExceeded === true);
+  assert.equal(received.signal.aborted, true);
+  assert.ok(received.timeoutMs <= 20);
+  assert.equal(settled, true);
+  assert.ok(Date.now() - started < 500);
+});
+
+test("cache conditioning uses a deadline-aware cancellable sleep and awaits settlement", async () => {
+  const users = Array.from({ length: 2 }, (_, index) => ({ id: `u${index}`, token: `t${index}` }));
+  let sleepSettled = false;
+  const started = Date.now();
+  await assert.rejects(conditionMeasurementCache({ rate: 1, purpose: "discovery", attempt: 1,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 1, identitySafetyFactor: 1 },
+      scan: { rates: [1] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "deadline", hot30Share: 1,
+        hot15Share: 0, expired300Share: 0, maximumSeconds: 0.02 } } },
+    deleteExact: async () => 1,
+    fetchImpl: async () => ({ status: 200, json: async () => ({}) }),
+    sleep: async (_ms, { signal }) => new Promise((resolve, reject) =>
+      signal.addEventListener("abort", () => { sleepSettled = true; reject(signal.reason); },
+        { once: true })),
+  }), (error) => error.cacheConditioning?.budgetExceeded === true);
+  assert.equal(sleepSettled, true);
+  assert.ok(Date.now() - started < 500);
+});
+
 function metric(values) { return { values }; }
 
 test("Races k6 fixture is versioned, authenticated, deterministic, and identifier-free outside credentials", () => {

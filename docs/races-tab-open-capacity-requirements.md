@@ -305,9 +305,12 @@ per ordinary race, fixture users sharing a race, tournament bracket size,
 tournament total-participant and accepted-participant counts, live-match
 participant count, ordinary and matchup inventory counts, effect
 counts, core response bytes, and their correlations. The deterministic scaler
-preserves shared membership by scaling race graphs first and assigning users
-second; it does not create one private race per user merely to match marginal
-counts. Source, naturally generated, and augmented histograms and p50/p95
+preserves shared membership by scaling concrete race graphs and their frequency
+targets first, then assigning heterogeneous user profiles to participant,
+inventory-owner, and effect-target slots. Evidence reconciles the materialized
+graph frequencies and every generated user's inventory/effect ownership against
+those assignments; it does not create one private race per user merely to match
+marginal counts. Source, naturally generated, and augmented histograms and p50/p95
 response bytes are reported separately for each core fixture family.
 Generated-response capture is keyed by independently observed projection
 variant, total core row count, and natural-versus-coverage-floor provenance;
@@ -394,7 +397,10 @@ the harness deletes only that attempt's exact run-owned measurement identity
 cache keys and calls only the core route at scheduled offsets needed to
 establish those ages; it never calls discovery or friends. This bounded
 schedule has one wall-clock deadline, including Redis deletion, HTTP requests,
-and sleeps. Each attempt records actual duration, configured budget, and an
+and sleeps. The remaining deadline and one shared abort signal are passed into
+the asynchronous Redis deletion, HTTP requests, and deadline-aware sleeps; on
+expiry the work is cancelled and every started operation settles before the
+workflow advances. Each attempt records actual duration, configured budget, and an
 explicit overrun state; an overrun fails the harness rather than silently
 extending level ceremony. Concurrent conditioning requests use settled cleanup
 semantics: after any rejection or timeout, every already-started request must

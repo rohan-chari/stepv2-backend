@@ -319,6 +319,72 @@ function graphShapeMatchesFeatures(dimensions, variantGroup) {
     Number(dimensions.effects || 0) >= required.effects;
 }
 
+function scaledShapeSequence(entries, count) {
+  const total = entries.reduce((sum, entry) => sum + Number(entry.graphs), 0);
+  const scaled = entries.map((entry, index) => {
+    const exact = count * Number(entry.graphs) / total;
+    return { entry, index, count: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+  let unassigned = count - scaled.reduce((sum, row) => sum + row.count, 0);
+  for (const row of [...scaled].sort((left, right) =>
+    right.remainder - left.remainder || left.index - right.index)) {
+    if (unassigned <= 0) break;
+    row.count += 1; unassigned -= 1;
+  }
+  const assigned = scaled.map(() => 0);
+  return Array.from({ length: count }, (_, ordinal) => {
+    const row = scaled.filter((candidate) => assigned[candidate.index] < candidate.count)
+      .sort((left, right) => {
+        const leftDeficit = (ordinal + 1) * left.count / count - assigned[left.index];
+        const rightDeficit = (ordinal + 1) * right.count / count - assigned[right.index];
+        return rightDeficit - leftDeficit || left.index - right.index;
+      })[0];
+    assigned[row.index] += 1;
+    return row.entry.dimensions;
+  });
+}
+
+function packOrdinaryGraphSlots({ slots, sourceEntries, ownerOnly, needsExternal }) {
+  const orderedSlots = [...slots].sort((left, right) => {
+    const leftRequired = requiredGraphFeatures(left.variantGroup);
+    const rightRequired = requiredGraphFeatures(right.variantGroup);
+    return rightRequired.effects - leftRequired.effects ||
+      rightRequired.inventory - leftRequired.inventory || left.userIndex - right.userIndex;
+  });
+  const totalRequired = orderedSlots.reduce((totals, slot) => {
+    const required = requiredGraphFeatures(slot.variantGroup);
+    totals.inventory += required.inventory; totals.effects += required.effects;
+    return totals;
+  }, { inventory: 0, effects: 0 });
+  for (let graphCount = 1; graphCount <= slots.length; graphCount += 1) {
+    const shapes = scaledShapeSequence(sourceEntries, graphCount);
+    const instances = shapes.map((shape, index) => ({ index, shape, slots: [],
+      remainingUsers: ownerOnly ? 1 : Math.max(1,
+        Number(shape.participants) - (needsExternal ? 1 : 0)),
+      remainingInventory: Number(shape.inventory), remainingEffects: Number(shape.effects) }));
+    if (instances.reduce((sum, row) => sum + row.remainingUsers, 0) < slots.length ||
+        instances.reduce((sum, row) => sum + row.remainingInventory, 0) !== totalRequired.inventory ||
+        instances.reduce((sum, row) => sum + row.remainingEffects, 0) !== totalRequired.effects) continue;
+    let fits = true;
+    for (const slot of orderedSlots) {
+      const required = requiredGraphFeatures(slot.variantGroup);
+      const instance = instances.filter((candidate) => candidate.remainingUsers > 0 &&
+          candidate.remainingInventory >= required.inventory &&
+          candidate.remainingEffects >= required.effects)
+        .sort((left, right) => Number(left.slots.length > 0) - Number(right.slots.length > 0) ||
+          left.remainingInventory - right.remainingInventory ||
+          left.remainingEffects - right.remainingEffects || left.index - right.index)[0];
+      if (!instance) { fits = false; break; }
+      instance.slots.push(slot); instance.remainingUsers -= 1;
+      instance.remainingInventory -= required.inventory;
+      instance.remainingEffects -= required.effects;
+    }
+    if (fits && instances.every((instance) => instance.slots.length > 0 &&
+        instance.remainingInventory === 0 && instance.remainingEffects === 0)) return instances;
+  }
+  throw new Error("Races-tab generated graph inventoryPerRace escaped or effectsPerRace escaped the scaled per-user ownership profile");
+}
+
 function graphAssignments({ coverage, sourceCensus }) {
   const grouped = new Map();
   coverage.byUser.forEach((variants, userIndex) => {
@@ -327,44 +393,65 @@ function graphAssignments({ coverage, sourceCensus }) {
       const augmented = variantGroup.some((variant) =>
         coverage.augmentedByUser?.[userIndex]?.includes(variant));
       const provenance = augmented ? "augmented" : "natural";
-      const key = `${[...variantGroup].sort().join("|")}#${group.family}:${group.occurrence}:${provenance}`;
-      if (!grouped.has(key)) grouped.set(key, { variantGroup, provenance, userIndexes: [] });
-      grouped.get(key).userIndexes.push(userIndex);
+      const team = variantGroup.includes("ordinary_team_active") || variantGroup.includes("pinned_team");
+      const compatibleFamily = group.family === "ordinary_active"
+        ? `${group.family}:${team ? "team" : "classic"}`
+        : `${group.family}:${[...variantGroup].sort().join("|")}`;
+      const key = `${compatibleFamily}:${group.occurrence}:${provenance}`;
+      if (!grouped.has(key)) grouped.set(key, { family: group.family, provenance, slots: [] });
+      grouped.get(key).slots.push({ userIndex, variantGroup });
     }
   });
   const assignments = [];
   let ordinal = 0;
   for (const entry of grouped.values()) {
-    const tournament = entry.variantGroup.some((variant) =>
+    const variantGroup = [...new Set(entry.slots.flatMap((slot) => slot.variantGroup))];
+    const userIndexes = entry.slots.map((slot) => slot.userIndex);
+    const tournament = variantGroup.some((variant) =>
       variant.startsWith("tournament_") || variant === "pinned_tournament");
-    const ownerOnly = entry.variantGroup.includes("ordinary_pending_owner") ||
-      entry.variantGroup.includes("tournament_champion");
-    const needsExternal = entry.variantGroup.includes("ordinary_invite") ||
-      entry.variantGroup.includes("tournament_invite");
-    const ordinaryStatus = entry.variantGroup.includes("ordinary_completed") ? "COMPLETED" :
-      entry.variantGroup.some((variant) => ["ordinary_pending_owner", "ordinary_pending_accepted",
+    const ownerOnly = variantGroup.includes("ordinary_pending_owner") ||
+      variantGroup.includes("tournament_champion");
+    const needsExternal = variantGroup.includes("ordinary_invite") ||
+      variantGroup.includes("tournament_invite");
+    const ordinaryStatus = variantGroup.includes("ordinary_completed") ? "COMPLETED" :
+      variantGroup.some((variant) => ["ordinary_pending_owner", "ordinary_pending_accepted",
         "ordinary_invite"].includes(variant)) ? "PENDING" : "ACTIVE";
-    const ordinaryTeam = entry.variantGroup.some((variant) =>
+    const ordinaryTeam = variantGroup.some((variant) =>
       ["ordinary_team_active", "pinned_team"].includes(variant));
-    const tournamentStatus = entry.variantGroup.some((variant) => ["tournament_invite",
+    const tournamentStatus = variantGroup.some((variant) => ["tournament_invite",
       "tournament_lobby", "pinned_tournament"].includes(variant)) ? "PENDING" :
-      entry.variantGroup.some((variant) => ["tournament_champion",
+      variantGroup.some((variant) => ["tournament_champion",
         "tournament_completed_non_champion"].includes(variant)) ? "COMPLETED" : "ACTIVE";
+    const sourceEntries = (sourceCensus?.graphJointHistogram?.ordinary || []).filter((row) =>
+      String(row.dimensions?.status || "").toUpperCase() === ordinaryStatus &&
+      Boolean(row.dimensions?.team) === ordinaryTeam);
+    if (!tournament && entry.family === "ordinary_active" && entry.provenance === "natural" &&
+        sourceEntries.length > 0) {
+      for (const instance of packOrdinaryGraphSlots({ slots: entry.slots, sourceEntries,
+        ownerOnly, needsExternal })) {
+        const instanceVariants = [...new Set(instance.slots.flatMap((slot) => slot.variantGroup))];
+        assignments.push({ variantGroup: instanceVariants, provenance: entry.provenance,
+          jointShape: instance.shape, matchShape: null, userSlots: instance.slots,
+          userIndexes: instance.slots.map((slot) => slot.userIndex), scaledShape: true });
+        ordinal += 1;
+      }
+      continue;
+    }
     let index = 0;
-    while (index < entry.userIndexes.length) {
+    while (index < userIndexes.length) {
       const jointShape = tournament
         ? jointGraphShape(sourceCensus?.graphJointHistogram?.tournaments, ordinal,
           (dimensions) => String(dimensions.status || "").toUpperCase() === tournamentStatus)
         : jointGraphShape(sourceCensus?.graphJointHistogram?.ordinary, ordinal,
           (dimensions) => String(dimensions.status || "").toUpperCase() === ordinaryStatus &&
             Boolean(dimensions.team) === ordinaryTeam &&
-            graphShapeMatchesFeatures(dimensions, entry.variantGroup));
-      const hasMatch = tournament && entry.variantGroup.some((variant) =>
+            graphShapeMatchesFeatures(dimensions, variantGroup));
+      const hasMatch = tournament && variantGroup.some((variant) =>
         variant === "tournament_live_match" || variant.startsWith("tournament_match_"));
       const matchShape = hasMatch
         ? jointGraphShape(sourceCensus?.graphJointHistogram?.matches, ordinal,
           (dimensions) => String(dimensions.status || "").toUpperCase() === "ACTIVE" &&
-            graphShapeMatchesFeatures(dimensions, entry.variantGroup))
+            graphShapeMatchesFeatures(dimensions, variantGroup))
         : null;
       const sampled = tournament
         ? Number(jointShape?.accepted) || histogramValue(
@@ -374,7 +461,7 @@ function graphAssignments({ coverage, sourceCensus }) {
         : Number(jointShape?.participants) || histogramValue(
           sourceCensus?.graphHistograms?.ordinaryParticipantsPerRace,
           ordinal, 2, { minimum: 2, maximum: 32 });
-      const required = requiredGraphFeatures(entry.variantGroup);
+      const required = requiredGraphFeatures(variantGroup);
       const featureShape = tournament ? matchShape : jointShape;
       const featureCapacity = featureShape ? Math.min(
         required.inventory > 0
@@ -382,15 +469,17 @@ function graphAssignments({ coverage, sourceCensus }) {
         required.effects > 0
           ? Math.floor(Number(featureShape.effects || 0) / required.effects) : 64,
       ) : 64;
-      const inviteCapacity = tournament && entry.variantGroup.includes("tournament_invite")
+      const inviteCapacity = tournament && variantGroup.includes("tournament_invite")
         ? Math.max(1, Number(jointShape?.participants || 0) - Number(jointShape?.accepted || 0))
         : sampled - (needsExternal ? 1 : 0);
       const capacity = ownerOnly ? 1 : Math.max(1,
         Math.min(hasMatch ? 2 : 64, inviteCapacity, featureCapacity));
-      assignments.push({ variantGroup: entry.variantGroup,
+      const batchSlots = entry.slots.slice(index, index + capacity);
+      assignments.push({ variantGroup,
         provenance: entry.provenance,
         jointShape, matchShape,
-        userIndexes: entry.userIndexes.slice(index, index + capacity) });
+        userSlots: batchSlots,
+        userIndexes: batchSlots.map((slot) => slot.userIndex) });
       index += capacity;
       ordinal += 1;
     }
@@ -447,6 +536,92 @@ function sourceGraphHistograms(sourceCensus) {
       ? sourceCensus.graphHistograms[name] : histogram]));
 }
 
+function countSignatures(rows) {
+  return rows.reduce((counts, row) => {
+    const signature = JSON.stringify(row);
+    counts[signature] = (counts[signature] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function graphShapeFromRow(row) {
+  return row.family === "ordinary" ? {
+    family: "ordinary", status: row.bucket, team: row.team, teamSize: row.teamSize || 0,
+    participants: row.participantCount, inventory: row.inventoryCount, effects: row.effectCount,
+  } : row.family === "match" ? {
+    family: "matches", status: row.bucket, participants: row.participantCount,
+    inventory: row.inventoryCount, effects: row.effectCount,
+  } : {
+    family: "tournament", status: ["invite", "lobby"].includes(row.bucket) ? "pending" :
+      ["champion", "completed_non_champion"].includes(row.bucket) ? "completed" : "active",
+    bracketSize: row.bracketSize, participants: row.participantCount,
+    accepted: row.acceptedCount,
+  };
+}
+
+function plannedGraphShapes(assignments) {
+  return assignments.filter((assignment) => assignment.provenance === "natural")
+    .flatMap((assignment) => {
+      const tournament = assignment.variantGroup.some((variant) =>
+        variant.startsWith("tournament_") || variant === "pinned_tournament");
+      const rows = [];
+      if (assignment.jointShape) rows.push(tournament ? {
+        family: "tournament", status: String(assignment.jointShape.status).toLowerCase(),
+        bracketSize: Number(assignment.jointShape.bracketSize),
+        participants: Number(assignment.jointShape.participants),
+        accepted: Number(assignment.jointShape.accepted),
+      } : {
+        family: "ordinary", status: String(assignment.jointShape.status).toLowerCase(),
+        team: Boolean(assignment.jointShape.team), teamSize: Number(assignment.jointShape.teamSize || 0),
+        participants: Number(assignment.jointShape.participants),
+        inventory: Number(assignment.jointShape.inventory), effects: Number(assignment.jointShape.effects),
+      });
+      if (assignment.matchShape) rows.push({ family: "matches",
+        status: String(assignment.matchShape.status).toLowerCase(),
+        participants: Number(assignment.matchShape.participants),
+        inventory: Number(assignment.matchShape.inventory),
+        effects: Number(assignment.matchShape.effects) });
+      return rows;
+    });
+}
+
+function ownershipEvidence({ assignments, baseUsers, powerups, activeEffects }) {
+  const empty = () => ({ held: 0, mystery: 0, queued: 0, effects: 0 });
+  const expected = new Map(baseUsers.map((user) => [user.id, empty()]));
+  for (const assignment of assignments) for (const slot of assignment.userSlots || []) {
+    const values = expected.get(baseUsers[slot.userIndex].id);
+    values.held += slot.variantGroup.filter((variant) =>
+      variant.endsWith("inventory_held_typed")).length;
+    values.mystery += slot.variantGroup.filter((variant) =>
+      variant.endsWith("inventory_mystery_box")).length;
+    values.queued += slot.variantGroup.filter((variant) =>
+      variant.endsWith("inventory_queued_box")).length;
+    values.effects += requiredGraphFeatures(slot.variantGroup).effects;
+  }
+  const generated = new Map(baseUsers.map((user) => [user.id, empty()]));
+  for (const powerup of powerups) {
+    const values = generated.get(powerup.userId);
+    if (!values) continue;
+    if (powerup.status === "HELD") values.held += 1;
+    if (powerup.status === "MYSTERY_BOX") values.mystery += 1;
+    if (powerup.status === "QUEUED") values.queued += 1;
+  }
+  for (const effect of activeEffects) {
+    const values = generated.get(effect.targetUserId);
+    if (values) values.effects += 1;
+  }
+  const fields = ["held", "mystery", "queued", "effects"];
+  const totals = (values) => Object.fromEntries(fields.map((field) => [field,
+    [...values.values()].reduce((sum, row) => sum + row[field], 0)]));
+  const enforce = assignments.some((assignment) => assignment.provenance === "natural" &&
+    (assignment.jointShape || assignment.matchShape));
+  const mismatchUsers = enforce ? [...expected.keys()].filter((userId) =>
+    fields.some((field) => expected.get(userId)[field] !== generated.get(userId)[field])).length
+    : 0;
+  return { expectedTotals: totals(expected), generatedTotals: totals(generated), mismatchUsers,
+    enforced: enforce, matchesAssignedProfiles: mismatchUsers === 0 };
+}
+
 function reconcileGraphEvidence(evidence) {
   const dimensions = ["ordinaryParticipantsPerRace", "tournamentBracketSize",
     "tournamentParticipants", "tournamentAcceptedParticipants", "inventoryPerRace",
@@ -469,18 +644,7 @@ function reconcileGraphEvidence(evidence) {
   }
   const sourceJoint = new Set((evidence.sourceJoint || []).map((row) => JSON.stringify(row)));
   const naturalJointRows = (evidence.graphRows || []).filter((row) => row.provenance === "natural")
-    .map((row) => row.family === "ordinary" ? {
-      family: "ordinary", status: row.bucket, team: row.team, teamSize: row.teamSize || 0,
-      participants: row.participantCount, inventory: row.inventoryCount, effects: row.effectCount,
-    } : row.family === "match" ? {
-      family: "matches", status: row.bucket, participants: row.participantCount,
-      inventory: row.inventoryCount, effects: row.effectCount,
-    } : {
-      family: "tournament", status: ["invite", "lobby"].includes(row.bucket) ? "pending" :
-        ["champion", "completed_non_champion"].includes(row.bucket) ? "completed" : "active",
-      bracketSize: row.bracketSize, participants: row.participantCount,
-      accepted: row.acceptedCount,
-    });
+    .map(graphShapeFromRow);
   const unsupported = naturalJointRows.filter((row) => sourceJoint.size > 0 &&
     !sourceJoint.has(JSON.stringify(row)));
   const jointReconciliation = { sourceShapeCount: sourceJoint.size,
@@ -489,7 +653,28 @@ function reconcileGraphEvidence(evidence) {
   if (!jointReconciliation.generatedWithinSourceSupport) {
     throw new Error("Races-tab generated graph joint shape escaped the production census support");
   }
-  return { ...evidence, reconciliation, jointReconciliation };
+  const scaledTargets = countSignatures(plannedGraphShapes(evidence.plannedGraphAssignments || []));
+  const scaledGenerated = countSignatures((evidence.graphRows || [])
+    .filter((row) => row.provenance === "natural" && row.sourceScaled).map(graphShapeFromRow));
+  const normalizedCounts = (counts) => Object.entries(counts).sort(([left], [right]) =>
+    left.localeCompare(right));
+  const frequencyReconciliation = { scaledTargets, generated: scaledGenerated,
+    generatedMatchesScaledTargets: JSON.stringify(normalizedCounts(scaledTargets)) ===
+      JSON.stringify(normalizedCounts(scaledGenerated)) };
+  if (!frequencyReconciliation.generatedMatchesScaledTargets) {
+    throw new Error("Races-tab generated graph frequencies differ from scaled graph targets");
+  }
+  const ownershipReconciliation = ownershipEvidence({
+    assignments: evidence.plannedGraphAssignments || [], baseUsers: evidence.baseUsers || [],
+    powerups: evidence.generatedOwnership?.powerups || [],
+    activeEffects: evidence.generatedOwnership?.activeEffects || [],
+  });
+  if (!ownershipReconciliation.matchesAssignedProfiles) {
+    throw new Error("Races-tab generated per-user inventory/effect ownership differs from assigned profiles");
+  }
+  const { plannedGraphAssignments, baseUsers, generatedOwnership, ...publicEvidence } = evidence;
+  return { ...publicEvidence, reconciliation, jointReconciliation,
+    frequencyReconciliation, ownershipReconciliation };
 }
 
 function materializationPlan({ base, coverage, now = new Date(), runId,
@@ -531,8 +716,12 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
       earnedAtSteps: 20_000 + index };
     powerups.push(row); ids.racePowerups.push(row.id); return row;
   };
-  for (const assignment of graphAssignments({ coverage, sourceCensus })) {
+  const plannedGraphAssignments = graphAssignments({ coverage, sourceCensus });
+  for (const assignment of plannedGraphAssignments) {
     const { variantGroup, userIndexes, provenance } = assignment;
+    const userSlots = assignment.userSlots || userIndexes.map((userIndex) => ({
+      userIndex, variantGroup,
+    }));
     const userIndex = userIndexes[0];
     const variant = variantGroup[0];
     const hasVariant = (name) => variantGroup.includes(name);
@@ -582,18 +771,25 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
         teamAName: teamRace ? "Trail Blazers" : null,
         teamBName: teamRace ? "Peak Pacers" : null });
       ids.races.push(raceId);
+      const callerVariants = userSlots[0]?.variantGroup || variantGroup;
+      const callerHas = (name) => callerVariants.includes(name);
       const callerParticipant = addParticipant({ raceId, userId: caller.id,
         status: hasVariant("ordinary_invite") ? "INVITED" : "ACCEPTED", index: userIndex,
-        favorite: hasVariant("pinned_classic") || hasVariant("pinned_team"), team: teamRace ? "TEAM_A" : null,
+        favorite: callerHas("pinned_classic") || callerHas("pinned_team"), team: teamRace ? "TEAM_A" : null,
         placement: status === "COMPLETED" ? 1 : null });
-      const callerParticipants = [{ user: caller, participant: callerParticipant }];
-      for (const [sharedOrdinal, sharedIndex] of userIndexes.slice(1).entries()) {
+      const callerParticipants = [{ user: caller, participant: callerParticipant,
+        variants: callerVariants }];
+      for (const [sharedOrdinal, slot] of userSlots.slice(1).entries()) {
+        const sharedIndex = slot.userIndex;
         const sharedUser = base.users[sharedIndex];
         callerParticipants.push({ user: sharedUser, participant: addParticipant({ raceId,
           userId: sharedUser.id, status: hasVariant("ordinary_invite") ? "INVITED" : "ACCEPTED",
-          index: sharedIndex, favorite: hasVariant("pinned_classic") || hasVariant("pinned_team"),
+          index: sharedIndex,
+          favorite: slot.variantGroup.includes("pinned_classic") ||
+            slot.variantGroup.includes("pinned_team"),
           team: teamRace ? (sharedOrdinal % 2 ? "TEAM_A" : "TEAM_B") : null,
-          placement: status === "COMPLETED" ? sharedOrdinal + 2 : null }) });
+          placement: status === "COMPLETED" ? sharedOrdinal + 2 : null }),
+        variants: slot.variantGroup });
       }
       let supportParticipant = callerParticipants[1]?.participant || null;
       let supportOrdinal = callerParticipants.length;
@@ -609,18 +805,19 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
       }
       supportParticipant ||= callerParticipant;
       for (const entry of callerParticipants) {
-        if (hasVariant("ordinary_inventory_held_typed")) addPowerup({ raceId,
+        const entryHas = (name) => entry.variants.includes(name);
+        if (entryHas("ordinary_inventory_held_typed")) addPowerup({ raceId,
           participant: entry.participant, userId: entry.user.id, index: userIndex });
-        if (hasVariant("ordinary_inventory_mystery_box")) addPowerup({ raceId,
+        if (entryHas("ordinary_inventory_mystery_box")) addPowerup({ raceId,
           participant: entry.participant, userId: entry.user.id,
           status: "MYSTERY_BOX", index: userIndex });
-        if (hasVariant("ordinary_inventory_queued_box")) addPowerup({ raceId,
+        if (entryHas("ordinary_inventory_queued_box")) addPowerup({ raceId,
           participant: entry.participant, userId: entry.user.id,
           status: "QUEUED", index: userIndex });
         const effectTypes = [
-          hasVariant("ordinary_effect_positive") ? "RUNNERS_HIGH" : null,
-          hasVariant("ordinary_effect_negative") || hasVariant("ordinary_placement_hidden")
-            ? hasVariant("ordinary_placement_hidden") ? "DETOUR_SIGN" : "LEG_CRAMP"
+          entryHas("ordinary_effect_positive") ? "RUNNERS_HIGH" : null,
+          entryHas("ordinary_effect_negative") || entryHas("ordinary_placement_hidden")
+            ? entryHas("ordinary_placement_hidden") ? "DETOUR_SIGN" : "LEG_CRAMP"
             : null,
         ].filter(Boolean);
         for (const type of effectTypes) {
@@ -649,6 +846,7 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
       }
       graphRows.push({ family: "ordinary", bucket: status.toLowerCase(),
         provenance,
+        sourceScaled: Boolean(assignment.jointShape),
         team: teamRace, teamSize: teamRace ? races.at(-1).teamSize : 0,
         participantCount: participants.filter((row) => row.raceId === raceId).length,
         inventoryCount: powerups.filter((row) => row.raceId === raceId).length,
@@ -792,12 +990,14 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
           userId: matchEntries[0].user.id, index: userIndex + powerups.length });
       }
       graphRows.push({ family: "match", bucket: "active", provenance,
+        sourceScaled: Boolean(assignment.matchShape),
         participantCount: participants.filter((row) => row.raceId === raceId).length,
         inventoryCount: powerups.filter((row) => row.raceId === raceId).length,
         effectCount: activeEffects.filter((row) => row.raceId === raceId).length });
     }
     graphRows.push({ family: "tournament", bucket: render,
       provenance,
+      sourceScaled: Boolean(assignment.jointShape),
       bracketSize: tournament.bracketSize,
       participantCount: tournamentParticipants.filter((row) => row.tournamentId === tournamentId).length,
       acceptedCount: tournamentParticipants.filter((row) => row.tournamentId === tournamentId &&
@@ -843,7 +1043,8 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
       generated: graphHistogramsForRows(graphRows),
       generatedNatural: graphHistogramsForRows(graphRows.filter((row) => row.provenance === "natural")),
       generatedAugmented: graphHistogramsForRows(graphRows.filter((row) => row.provenance === "augmented")),
-      graphRows }) };
+      graphRows, plannedGraphAssignments, baseUsers: base.users,
+      generatedOwnership: { powerups, activeEffects } }) };
 }
 
 function sourceCountForVariant(variant, counts = {}) {

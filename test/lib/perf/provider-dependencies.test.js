@@ -62,6 +62,18 @@ test("Lima runtime flushes guest state and stops gracefully after mutations", ()
   assert.match(source, /Lima environment reset cleanup failed/);
 });
 
+test("Races Redis conditioning uses the caller deadline and abort signal instead of a fixed sync timeout", () => {
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../../performance/providers/lima-runtime.js"), "utf8");
+  const operation = source.slice(source.indexOf("async deleteExactRaceListCache"),
+    source.indexOf("async clearOwnedCache"));
+  assert.match(operation, /timeoutMs/);
+  assert.match(operation, /signal/);
+  assert.match(operation, /execFileAbortable\(/);
+  assert.match(source, /function execFileAbortable[\s\S]*execFile\(/);
+  assert.doesNotMatch(operation, /execFileSync|timeout:\s*30_000/);
+});
+
 test("configured and inspected VM/backend/Postgres caps match production-shaped allocations", () => {
   const plan = capacityResourcePlan({
     vps_specs: { vcpu: 4, ram_gb: 8 },

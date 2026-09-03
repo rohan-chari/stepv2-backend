@@ -105,6 +105,25 @@ test("graph-first scaling reapportions complete source shapes before assigning e
     { 2: 2, 4: 2 });
 });
 
+test("graph-first scaling assigns heterogeneous user profiles to one shared source graph", () => {
+  const users = Array.from({ length: 4 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: [
+    ["ordinary_classic_active", "ordinary_inventory_held_typed"],
+    ["ordinary_classic_active"], ["ordinary_classic_active"], ["ordinary_classic_active"],
+  ], augmentedByUser: users.map(() => []) };
+  const sourceCensus = { graphJointHistogram: { ordinary: [{ graphs: 1, dimensions: {
+    status: "active", team: false, participants: 4, inventory: 1, effects: 0,
+  } }], tournaments: [], matches: [] } };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "heterogeneous-shared" });
+  assert.equal(plan.races.length, 1);
+  assert.equal(plan.participants.filter((row) => row.raceId === plan.races[0].id).length, 4);
+  assert.equal(plan.powerups.length, 1);
+  assert.equal(plan.powerups[0].userId, "u0");
+  assert.equal(plan.graphEvidence.frequencyReconciliation.generatedMatchesScaledTargets, true);
+  assert.equal(plan.graphEvidence.ownershipReconciliation.matchesAssignedProfiles, true);
+});
+
 test("graph materialization samples production graph histograms deterministically", () => {
   const users = Array.from({ length: 300 }, (_, index) => ({ id: `u${index}` }));
   const coverage = buildCoverageAssignments({ users: 300 });
@@ -125,7 +144,9 @@ test("graph materialization samples production graph histograms deterministicall
 
 test("joint graph census keeps participant, inventory, and effect cardinalities correlated", () => {
   const users = Array.from({ length: 8 }, (_, index) => ({ id: `u${index}` }));
-  const coverage = { byUser: users.map(() => ["ordinary_classic_active"]) };
+  const coverage = { byUser: users.map((_, index) => ["ordinary_classic_active",
+    ...(index % 4 === 0 ? ["ordinary_effect_positive"] : []),
+    ...(index % 4 === 1 ? ["ordinary_inventory_held_typed"] : [])]) };
   const sourceCensus = { graphJointHistogram: { ordinary: [{ graphs: 1, dimensions: {
     status: "active", team: false, participants: 4, inventory: 2, effects: 1,
   } }], tournaments: [] }, graphHistograms: {} };

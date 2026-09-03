@@ -2,7 +2,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const dotenv = require("dotenv");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
@@ -122,6 +122,17 @@ function racesTabSettingsReadiness(census) {
 }
 
 function sha(bytes) { return crypto.createHash("sha256").update(bytes).digest("hex"); }
+
+function execFileAbortable(file, args, { timeoutMs, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: "utf8", timeout: timeoutMs, signal,
+      stdio: ["ignore", "pipe", "inherit"] }, (error, stdout) => {
+      if (error) { reject(error); return; }
+      resolve(stdout);
+    });
+  });
+}
+
 function readJson(file) { return JSON.parse(fs.readFileSync(file, "utf8")); }
 function sourceSubsetHash(bundle, prefix) {
   const rows = bundle.entries.filter((row) => row.name.startsWith(`${prefix}/`))
@@ -457,14 +468,20 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
       return environment.metricEpoch;
     },
     async collectMetrics({ environment }) { return environment.lastMeasurementMetrics || {}; },
-    async deleteExactRaceListCache({ environment, userIds, variant, initializeGeneration = false }) {
-      return Number(execFileSync("limactl", exactRaceListRedisCommand({
+    async deleteExactRaceListCache({ environment, userIds, variant, initializeGeneration = false,
+      deadlineMillis, timeoutMs, signal }) {
+      const remaining = Math.min(Number(timeoutMs), Number(deadlineMillis) - Date.now());
+      if (!Number.isFinite(remaining) || remaining <= 0 || signal?.aborted) {
+        throw signal?.reason || new Error("Races-tab Redis deletion deadline expired");
+      }
+      const output = await execFileAbortable("limactl", exactRaceListRedisCommand({
         instance: environment.state.config.lima_instance,
         container: environment.state.reset.names.redisContainer,
         password: environment.processEnvironment.CAPACITY_REDIS_PASSWORD,
         prefix: environment.processEnvironment.CACHE_ENV_PREFIX, userIds, variant,
         initializeGeneration,
-      }), { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], timeout: 30_000 }).trim());
+      }), { timeoutMs: Math.max(1, remaining), signal });
+      return Number(output.trim());
     },
     async clearOwnedCache({ environment }) {
       execFileSync("limactl", ownedRedisCommand({ instance: environment.state.config.lima_instance,
