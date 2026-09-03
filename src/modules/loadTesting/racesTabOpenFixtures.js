@@ -1408,17 +1408,25 @@ async function readRacesTabSourceCensus(prisma) {
         LEFT JOIN race_active_effects rae ON rae.race_id=r.id WHERE r.tournament_id IS NOT NULL
         GROUP BY r.id) z GROUP BY x) q), '{}'::jsonb)
   ) AS "histograms"`);
-  const [graphJoint] = await prisma.$queryRawUnsafe(`WITH ordinary_graph AS (
+  const [graphJoint] = await prisma.$queryRawUnsafe(`WITH race_participant_counts AS (
+    SELECT race_id,count(*)::int AS participants
+    FROM race_participants GROUP BY race_id
+  ), race_powerup_counts AS (
+    SELECT race_id,count(*)::int AS inventory
+    FROM race_powerups GROUP BY race_id
+  ), race_effect_counts AS (
+    SELECT race_id,count(*)::int AS effects
+    FROM race_active_effects GROUP BY race_id
+  ), ordinary_graph AS (
     SELECT r.status::text AS status, COALESCE(r.is_team_race,false) AS team,
       COALESCE(r.team_size,0)::int AS team_size,
-      count(DISTINCT rp.id)::int AS participants,
-      count(DISTINCT powerup.id)::int AS inventory,
-      count(DISTINCT effect.id)::int AS effects
-    FROM races r LEFT JOIN race_participants rp ON rp.race_id=r.id
-      LEFT JOIN race_powerups powerup ON powerup.race_id=r.id
-      LEFT JOIN race_active_effects effect ON effect.race_id=r.id
+      COALESCE(rp.participants,0)::int AS participants,
+      COALESCE(powerup.inventory,0)::int AS inventory,
+      COALESCE(effect.effects,0)::int AS effects
+    FROM races r LEFT JOIN race_participant_counts rp ON rp.race_id=r.id
+      LEFT JOIN race_powerup_counts powerup ON powerup.race_id=r.id
+      LEFT JOIN race_effect_counts effect ON effect.race_id=r.id
     WHERE r.tournament_id IS NULL
-    GROUP BY r.id,r.status,r.is_team_race,r.team_size
   ), ordinary_grouped AS (
     SELECT status,team,team_size,participants,inventory,effects,count(*)::int AS graphs
     FROM ordinary_graph GROUP BY status,team,team_size,participants,inventory,effects
@@ -1432,14 +1440,13 @@ async function readRacesTabSourceCensus(prisma) {
     SELECT status,bracket_size,participants,accepted,count(*)::int AS graphs
     FROM tournament_graph GROUP BY status,bracket_size,participants,accepted
   ), match_graph AS (
-    SELECT r.status::text AS status,count(DISTINCT rp.id)::int AS participants,
-      count(DISTINCT powerup.id)::int AS inventory,
-      count(DISTINCT effect.id)::int AS effects
-    FROM races r LEFT JOIN race_participants rp ON rp.race_id=r.id
-      LEFT JOIN race_powerups powerup ON powerup.race_id=r.id
-      LEFT JOIN race_active_effects effect ON effect.race_id=r.id
+    SELECT r.status::text AS status,COALESCE(rp.participants,0)::int AS participants,
+      COALESCE(powerup.inventory,0)::int AS inventory,
+      COALESCE(effect.effects,0)::int AS effects
+    FROM races r LEFT JOIN race_participant_counts rp ON rp.race_id=r.id
+      LEFT JOIN race_powerup_counts powerup ON powerup.race_id=r.id
+      LEFT JOIN race_effect_counts effect ON effect.race_id=r.id
     WHERE r.tournament_id IS NOT NULL
-    GROUP BY r.id,r.status
   ), match_grouped AS (
     SELECT status,participants,inventory,effects,count(*)::int AS graphs
     FROM match_graph GROUP BY status,participants,inventory,effects

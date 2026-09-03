@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -15,6 +17,23 @@ const {
 } = require("../../../src/modules/loadTesting/racesTabOpenFixtures");
 const { REQUIRED_COVERAGE_VARIANTS } = require(
   "../../../src/modules/loadTesting/racesTabOpenProjection");
+
+test("joint graph census pre-aggregates child tables without multiplicative joins", () => {
+  const source = fs.readFileSync(path.join(__dirname,
+    "../../../src/modules/loadTesting/racesTabOpenFixtures.js"), "utf8");
+  const start = source.indexOf("const [graphJoint] = await prisma.$queryRawUnsafe");
+  const end = source.indexOf("const sourceTimestamp", start);
+  const query = source.slice(start, end);
+  assert.match(query, /race_participant_counts AS/);
+  assert.match(query, /race_powerup_counts AS/);
+  assert.match(query, /race_effect_counts AS/);
+  assert.equal((query.match(/FROM race_(?:participants|powerups|active_effects) GROUP BY race_id/g) ||
+    []).length, 3);
+  assert.equal((query.match(/LEFT JOIN race_(?:participant|powerup|effect)_counts/g) || []).length, 6);
+  assert.doesNotMatch(query, /count\(DISTINCT/i);
+  assert.doesNotMatch(query,
+    /race_participants[\s\S]*race_powerups[\s\S]*race_active_effects[\s\S]*GROUP BY r\.id/i);
+});
 
 test("every ordered 300-session window covers all variants within ten percent augmentation", () => {
   const assignments = buildCoverageAssignments({ users: 5000, prefixSize: 300,
