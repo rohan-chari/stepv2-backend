@@ -169,11 +169,15 @@ test("workload provisions fixtures once and executes warmup and measurement as s
     initialPrewarmMaxUsers: 6 }, scan: { measurementSeconds: 1 } };
   const fixture = await workload.prepareFixtures({ runId: "bara-perf-fixture", environment, config });
   await workload.initialPrewarm({ environment, fixtures: fixture, config, seconds: 30 });
-  await workload.warmup({ rate: 5, warmupSeconds: 15, environment, fixtures: fixture, config });
+  await workload.warmup({ rate: 5, warmupSeconds: 15, measurementSeconds: 1,
+    environment, fixtures: fixture, config });
+  await workload.warmup({ rate: 5, warmupSeconds: 30, measurementSeconds: 120,
+    environment, fixtures: fixture, config });
   const evidence = await workload.measure({ rate: 5, environment, fixtures: fixture, config });
   await workload.targetedReset({ environment, fixtures: fixture, config });
   assert.deepEqual(calls, ["fixtures", "discover", "k6:initial-prewarm:0:3:true:2:0",
-    "k6:level-warmup:0:15:false:5:5", "k6:measurement:0:1:false:5:0", "reset"]);
+    "k6:level-warmup:0:15:false:5:5", "k6:level-warmup:0:30:false:5:600",
+    "k6:measurement:0:1:false:5:0", "reset"]);
   assert.equal(evidence.safeCapacityGatesPassed, true);
   assert.deepEqual(evidence.binding, { id: "same" });
 });

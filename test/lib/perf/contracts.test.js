@@ -84,13 +84,15 @@ test("CLI accepts only the documented safe grammar", () => {
 
   assert.deepEqual(parseCli(["scan"]), {
     command: "scan", target: "lima", background: "normal", cache: "warm",
-    rates: null, keepRunning: false,
+    rates: null, scoreShape: null, keepRunning: false,
   });
   assert.deepEqual(parseCli(["smoke", "--cache=cold", "--background=off"]), {
     command: "smoke", target: "lima", background: "off", cache: "cold",
-    rates: null, keepRunning: false,
+    rates: null, scoreShape: null, keepRunning: false,
   });
   assert.equal(parseCli(["scan", "--rates=5,10,25"]).rates.join(","), "5,10,25");
+  assert.equal(parseCli(["scan", "--score-shape=placement-churn"]).scoreShape,
+    "placement-churn");
   assert.throws(() => parseCli(["scan", "--target=prod"]), /target/i);
   assert.throws(() => parseCli(["scan", "--base-url=https:\/\/steptracker-api.org"]), /unknown|option/i);
   assert.throws(() => parseCli(["wat"]), /usage/i);

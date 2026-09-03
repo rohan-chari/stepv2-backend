@@ -126,14 +126,7 @@ describe("home-open capacity session public HTTP contract", () => {
         wait: async () => {
           if (!processedResolution) {
             processedResolution = true;
-            await buildRaceResolutionWorkerV2({ bootAt: 0,
-              buildRaceResolutionInputFingerprint: async () => ({
-                digest: "integration-home-open-stable-input",
-                race: { timezone: "UTC", endsAt: new Date(Date.now() + 86_400_000) },
-                nextSampleBoundary: new Date(Date.now() + 600_000),
-                activeEffects: [], globalEvents: [],
-              }),
-            }).processRace({
+            await buildRaceResolutionWorkerV2({ bootAt: 0 }).processRace({
               raceId: fixture.races[0].id,
             });
           }

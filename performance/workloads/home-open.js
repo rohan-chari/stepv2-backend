@@ -279,10 +279,11 @@ function createHomeOpenWorkload(dependencies = {}) {
       return execute({ phase: "initial-prewarm", rate, seconds: boundedSeconds,
         environment, fixtures, config, cacheOnly: true, userOffset: 0 });
     },
-    async warmup({ rate, warmupSeconds, environment, fixtures, config }) {
+    async warmup({ rate, warmupSeconds, measurementSeconds, environment, fixtures, config }) {
+      measurementSeconds ??= config.scan.measurementSeconds;
       return execute({ phase: "level-warmup", rate, seconds: warmupSeconds,
         environment, fixtures, config,
-        userOffset: rate * Number(config.scan?.measurementSeconds || 60) });
+        userOffset: rate * Number(measurementSeconds) });
     },
     async measure({ rate, measurementSeconds,
       environment, fixtures, config }) {

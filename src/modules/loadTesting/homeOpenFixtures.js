@@ -95,7 +95,7 @@ function distributedHomeStepProfile({ userIndex, userCount, scores, increments }
   }
   // Coprime permutations spread every traffic prefix across the full shape.
   const scoreFraction = count === 1 ? 0.5 : ((index * 7919) % count) / (count - 1);
-  const incrementFraction = count === 1 ? 0.5 : ((index * 1543 + 17) % count) / (count - 1);
+  const incrementFraction = count === 1 ? 0.5 : ((index * 5003 + 17) % count) / (count - 1);
   const baselineSteps = scoreFraction < scores.zeroRate ? 0 : valueAtQuantile(scores, scoreFraction);
   const incrementSteps = incrementFraction < increments.zeroRate
     ? 0 : valueAtQuantile(increments, incrementFraction);
@@ -369,13 +369,18 @@ async function createHomeOpenFixtures({
     if (userRows.length !== users) throw new Error("home-open fixture user census mismatch");
     ids.users.push(...userRows.map((row) => row.id));
 
+    await createMany(prisma.userScoringInputVersion, userRows.map((user) => ({
+      userId: user.id, generation: 1n, sourceQueueSemanticsGeneration: 1n,
+    })));
     const startedAt = new Date(now.getTime() - 60 * 60_000);
     const endsAt = new Date(now.getTime() + 24 * 60 * 60_000);
+    const targetSteps = Math.max(1_000_000,
+      ...loadProfiles.map((profile) => profile.steps + 1_000_000));
     const races = [];
     for (let index = 0; index < scaled.raceCount; index += 1) {
       const race = await prisma.race.create({ data: {
         creatorId: userRows[0].id, name: `${marker}:race:${index}`,
-        targetSteps: 1_000_000, status: "ACTIVE", startedAt, endsAt,
+        targetSteps, status: "ACTIVE", startedAt, endsAt,
         maxDurationDays: 2, maxParticipants: users, isPublic: false,
       } });
       races.push(race); ids.races.push(race.id);
@@ -489,7 +494,9 @@ async function createHomeOpenFixtures({
           totalSteps: row.totalSteps, rawSteps: row.rawSteps,
           nextBoxAtSteps: row.nextBoxAtSteps,
           lastNotifiedPlacement: row.lastNotifiedPlacement })),
-        baselineStepRows, baselineSampleRows },
+        baselineStepRows, baselineSampleRows,
+        baselineScoringInputRows: userRows.map((user) => ({ userId: user.id,
+          generation: "1", sourceQueueSemanticsGeneration: "1" })) },
       users: userRows.map((user, userIndex) => ({ ...user,
         token: signHomeOpenFixtureToken({ userId: user.id, appleId: user.appleId, env }),
         loadProfile: loadProfiles[userIndex] })),

@@ -20,7 +20,10 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   const runWorkflow = dependencies.runWorkflow || require("./workflow").runPerformanceWorkflow;
   const output = dependencies.output || process.stdout;
   const signalSource = dependencies.signalSource || process;
-  const overrides = cli.rates ? { scan: { rates: cli.rates } } : {};
+  const overrides = {
+    ...(cli.rates ? { scan: { rates: cli.rates } } : {}),
+    ...(cli.scoreShape ? { workload: { scoreShape: cli.scoreShape } } : {}),
+  };
   const mode = cli.command === "reset" ? "scan" : cli.command;
   const config = loadConfig({ repository, mode, overrides });
   const adapter = createRuntime({ repository,

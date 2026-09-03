@@ -85,7 +85,8 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
           targetedReset: () => workload.targetedReset({ environment, fixtures, config }),
           liveness: () => provider.liveness({ environment, config }),
           warmup: ({ warmupSeconds }) => workload.warmup({ rate, warmupSeconds,
-            environment, fixtures, config }),
+            measurementSeconds: purpose === "smoke" ? config.smoke.measurementSeconds :
+              config.scan.measurementSeconds, purpose, environment, fixtures, config }),
           nonCacheFillingStabilize: () => provider.liveness({ environment, config }),
           clearOwnedCache: () => provider.clearOwnedCache({ environment, config }),
           verifyOwnedCacheEmpty: () => provider.verifyOwnedCacheEmpty({ environment, config }),

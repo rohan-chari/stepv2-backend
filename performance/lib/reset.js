@@ -164,6 +164,13 @@ async function targetedReset({ prisma, fixture, plan, env = process.env,
     if (Array.isArray(fixture.baselineSampleRows) && fixture.baselineSampleRows.length) {
       await tx.stepSample.createMany({ data: fixture.baselineSampleRows });
     }
+    if (Array.isArray(fixture.baselineScoringInputRows) && fixture.baselineScoringInputRows.length) {
+      await tx.userScoringInputVersion.deleteMany({ where: { userId: { in: users } } });
+      await tx.userScoringInputVersion.createMany({ data: fixture.baselineScoringInputRows.map((row) => ({
+        ...row, generation: BigInt(row.generation),
+        sourceQueueSemanticsGeneration: BigInt(row.sourceQueueSemanticsGeneration),
+      })) });
+    }
     let remainingRunOwnedRows = 0;
     for (const row of plan.tables) {
       const scoped = scopedPredicate(row, users, races);

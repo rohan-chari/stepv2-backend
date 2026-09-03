@@ -34,6 +34,9 @@ function validateConfig(config, mode) {
   if (config.workload?.name !== "authenticated-home-reveal-v1") {
     throw new Error("unsupported Home workload contract");
   }
+  if (!["production", "placement-churn"].includes(config.workload?.scoreShape)) {
+    throw new Error("Home workload score shape must be production or placement-churn");
+  }
   if (config.result?.summarySchema !== SUMMARY_SCHEMA) throw new Error("summary schema mismatch");
   positiveInteger(config.topology?.httpWorkers, "HTTP workers", { maximum: 16 });
   if (config.topology.httpWorkers !== 2) throw new Error("Home capacity requires exactly two HTTP workers");
@@ -47,6 +50,14 @@ function validateConfig(config, mode) {
     throw new Error("scan warmup exceeds maximum normal warmup");
   }
   positiveInteger(config.scan?.measurementSeconds, "scan measurement");
+  const cohortSize = config.workload.cohortSize || 5000;
+  positiveInteger(cohortSize, "Home workload cohort", { maximum: 5000 });
+  const maximumRate = mode === "smoke" ? config.smoke.rate : Math.max(...config.scan.rates);
+  const warmup = mode === "smoke" ? config.smoke.warmupSeconds : config.scan.warmupSeconds;
+  const measurement = mode === "smoke" ? config.smoke.measurementSeconds : config.scan.measurementSeconds;
+  if (maximumRate * (warmup + measurement) > cohortSize) {
+    throw new Error("Home workload cohort is too small to separate warmup and measurement users");
+  }
   if (config.scan.confirmBoundaryFailure !== true ||
       config.scan.classificationPolicy !== "majority" ||
       config.scan.maxAttemptsAtBoundaryRate !== 3) {
