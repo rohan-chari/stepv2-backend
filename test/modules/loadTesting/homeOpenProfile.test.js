@@ -17,12 +17,45 @@ const { HOME_OPEN_EXECUTION_FILES, aggregateHomeOpenLadder, executionBundleHash,
   createInFlightTracker, progressFromMetricsRows, resolutionEvidenceFromLog, waitFor,
   resetCapacityDbPoolMeasurements, waitForResolutionQueueQuiescence,
   waitForResolutionWorkerReady, capacityBackendLogCommand } = require("../../../scripts/k6-home-open");
-const { homeStepPayload, interleaveActiveRaceCounts,
-  scaleHomeTopology } = require("../../../src/modules/loadTesting/homeOpenFixtures");
+const { churnHomeStepProfile, distributedHomeStepProfile, homeStepPayload, interleaveActiveRaceCounts,
+  normalizeQuantileDistribution, scaleHomeTopology } = require("../../../src/modules/loadTesting/homeOpenFixtures");
 const { baselineIntegrityDiff } = require("../../../src/modules/loadTesting/fixtures");
 const { buildRaceResolutionWorkerV2 } = require("../../../src/modules/races/jobs/raceResolutionQueueV2");
 
 const root = path.resolve(__dirname, "../../..");
+
+test("home-open production-shaped scores are deterministic, differentiated, and incremental", () => {
+  const linear = (maximum) => Array.from({ length: 1001 }, (_, index) =>
+    Math.round(maximum * index / 1000));
+  assert.deepEqual(normalizeQuantileDistribution({ quantiles: Array(1001).fill(null),
+    zeroRate: null }, { quantiles: linear(1000), zeroRate: 0.2 }), {
+    sampleCount: 0, zeroRate: 0.2, quantiles: linear(1000),
+  });
+  const scores = normalizeQuantileDistribution({
+    sampleCount: 1000, zeroRate: 0.1, quantiles: linear(30000),
+  }, { quantiles: linear(18000), zeroRate: 0.1 });
+  const increments = normalizeQuantileDistribution({
+    sampleCount: 1000, zeroRate: 0.4,
+    quantiles: linear(1400).map((value, index) => index < 400 ? 0 : value),
+  }, { quantiles: linear(1000), zeroRate: 0.4 });
+  const rows = Array.from({ length: 100 }, (_, userIndex) =>
+    distributedHomeStepProfile({ userIndex, userCount: 100, scores, increments }));
+  assert.deepEqual(rows[17], distributedHomeStepProfile({
+    userIndex: 17, userCount: 100, scores, increments,
+  }));
+  assert.ok(new Set(rows.map((row) => row.baselineSteps)).size > 80);
+  assert.ok(rows.every((row) => row.steps >= row.baselineSteps));
+  assert.ok(rows.every((row) => row.sampleSteps === row.incrementSteps));
+  assert.ok(rows.some((row) => row.incrementSteps === 0));
+  assert.ok(rows.some((row) => row.incrementSteps > 0));
+});
+
+test("placement-churn remains an explicit tied-baseline stress shape", () => {
+  assert.deepEqual(churnHomeStepProfile(3), {
+    baselineSteps: 1000, incrementSteps: homeStepPayload({ userIndex: 3 }).steps - 1000,
+    ...homeStepPayload({ userIndex: 3 }),
+  });
+});
 
 test("home-open fixture stamps the active metrics epoch before load begins", () => {
   const source = fs.readFileSync(path.join(root,
@@ -111,7 +144,7 @@ test("home-open locks the versioned coherent-session contract without changing h
   assert.equal(PROFILES.home.version, "1.0.0");
   const profile = PROFILES["home-open"];
   assert.equal(profile.schema, "load-profile-v1");
-  assert.equal(profile.version, "2.2.0");
+  assert.equal(profile.version, "2.3.0");
   assert.deepEqual(profile.defaults, {
     users: 5000,
     duration: "600s",

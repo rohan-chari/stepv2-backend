@@ -200,7 +200,7 @@ function buildProfiles() {
         maxArrivalRatePerSecond: 500,
         queue: { workerServiceRatePerSecond: 500, lagThresholdMs: 30_000 },
       }),
-      version: "2.2.0",
+      version: "2.3.0",
       ladder: Object.freeze({
         smoke: Object.freeze({ rate: 1, seconds: 120 }),
         warmupSeconds: 120,
@@ -332,7 +332,7 @@ function validateProfileRegistry(registry = PROFILES) {
   const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "event-open-surge", "home-open", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
   for (const name of names) {
     const profile = registry[name];
-    const expectedVersion = name === "home-open" ? "2.2.0" : "1.0.0";
+    const expectedVersion = name === "home-open" ? "2.3.0" : "1.0.0";
     if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== expectedVersion || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);
     for (const item of profile.entries) {
       if (!/^(GET|POST|PUT|PATCH|DELETE)$/.test(item.method) || !item.path.startsWith("/")) throw new Error(`invalid load profile path: ${name}`);

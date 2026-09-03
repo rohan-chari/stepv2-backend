@@ -170,7 +170,15 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
     mode: cli.command, commit: commitFor(repository), effectiveConfig: config,
     dataset: environment?.datasetId || "unknown", backgroundMode: cli.background,
     cacheMode: cli.cache, workload: config.workload, environmentBinding: environment?.binding || null,
-    topology: config.topology, scan, runtime, levels,
+    topology: config.topology,
+    fixtureProfile: fixtures?.topology ? {
+      schema: fixtures.topology.schema,
+      scoreShape: fixtures.topology.scoreShape,
+      productionShapedScores: fixtures.topology.productionShapedScores,
+      snapshotReference: fixtures.topology.snapshotReference,
+      aggregateSourceHash: fixtures.topology.aggregateSourceHash,
+    } : null,
+    scan, runtime, levels,
     warnings: [cleanupError ? `Cleanup failed: ${cleanupError.message}` : null,
       ...levels.filter((row) => row.ceremonyBudgetWarning).map((row) =>
         `${row.rate}/sec ceremony exceeded ${config.runtime.perLevelCeremonyTargetSeconds}s`),

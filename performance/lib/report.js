@@ -21,6 +21,7 @@ function buildSummary(input = {}) {
     workload: input.workload || null,
     environmentBinding: input.environmentBinding || null,
     topology: input.topology || null,
+    fixtureProfile: input.fixtureProfile || null,
     backgroundMode: input.backgroundMode,
     cacheMode: input.cacheMode,
     highestPassingRate: scan.highestPassingRate ?? null,
@@ -55,6 +56,7 @@ function buildManifest(input = {}) {
     workload: input.workload || null,
     environmentBinding: input.environmentBinding || null,
     topology: input.topology || null,
+    fixtureProfile: input.fixtureProfile || null,
     backgroundMode: input.backgroundMode,
     cacheMode: input.cacheMode,
     effectiveConfig: input.effectiveConfig || null,
@@ -79,6 +81,7 @@ function failureSentence(summary) {
 }
 
 function renderReport(summary) {
+  const profile = summary.fixtureProfile?.productionShapedScores;
   const classifications = summary.rateClassifications.length
     ? summary.rateClassifications.map((row) =>
       `| ${row.rate}/sec | ${row.unstable ? "UNSTABLE → " : ""}${row.state} | ${row.failures} fail, ${row.passes} pass |`).join("\n")
@@ -105,6 +108,8 @@ function renderReport(summary) {
     `Status: ${summary.status}; mode: ${summary.mode}; cache: ${summary.cacheMode}; background: ${summary.backgroundMode}.\n\n` +
     `Workload: ${summary.workload?.name || "unknown"}@${summary.workload?.profileVersion || "unknown"}; ` +
     `dataset: ${summary.dataset || "unknown"}.\n\n` +
+    `Fixture score shape: ${summary.fixtureProfile?.scoreShape || "unknown"}; ` +
+    `aggregate source: ${profile?.source || "unknown"}; fallback used: ${profile?.fallbackUsed ?? "unknown"}.\n\n` +
     `- Highest passing rate: ${summary.highestPassingRate ?? "unavailable"}/sec\n` +
     `- First failing rate: ${summary.firstFailingRate ?? "unavailable"}/sec\n` +
     `- Headroom policy: ${summary.headroomPolicy == null ? "unavailable" : `${summary.headroomPolicy * 100}%`}\n` +
@@ -122,6 +127,7 @@ function renderReport(summary) {
     `## Top SQL\n\n| Rate | Query ID | Calls | Total exec ms | Mean exec ms | Shared hit/read/temp written | Normalized fingerprint |\n|---:|---|---:|---:|---:|---:|---|\n${topSql}\n\n` +
     `## Runtime breakdown\n\n| Phase | Seconds |\n|---|---:|\n${runtime}\n\n` +
     `## Environment binding\n\n\`\`\`json\n${JSON.stringify(summary.environmentBinding, null, 2)}\n\`\`\`\n\n` +
+    `## Fixture profile evidence\n\n\`\`\`json\n${JSON.stringify(summary.fixtureProfile, null, 2)}\n\`\`\`\n\n` +
     `## Warnings\n\n${warnings.length ? warnings.map((row) => `- ${row}`).join("\n") : "None."}\n\n` +
     `## Limitations\n\n${summary.limitations.length ? summary.limitations.map((row) => `- ${row}`).join("\n") : "None recorded."}\n`;
 }

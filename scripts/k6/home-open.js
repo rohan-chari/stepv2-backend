@@ -17,6 +17,7 @@ const warmupRate = Number(__ENV.K6_HOME_WARMUP_RATE || Math.max(1, Math.floor(ra
 const warmupSeconds = Number(__ENV.K6_HOME_WARMUP_SECONDS || 0);
 const measuredSeconds = Number(__ENV.K6_HOME_MEASUREMENT_SECONDS || 120);
 const cacheOnly = __ENV.K6_HOME_CACHE_ONLY === "1";
+const userOffset = Number(__ENV.K6_HOME_USER_OFFSET || 0);
 const trafficEpochHash = String(__ENV.K6_HOME_TRAFFIC_EPOCH_HASH || "");
 if (!/^[a-f0-9]{12}$/.test(trafficEpochHash)) throw new Error("K6_HOME_TRAFFIC_EPOCH_HASH is required");
 const ALL_SETTLED_DEADLINE_MS = 15000;
@@ -364,15 +365,17 @@ export async function homeOpen() {
   schedulerLagMs.add(schedulerLag);
   if (schedulerLag > 1000) lateSessions.add(1);
   const sequence = exec.scenario.iterationInTest;
-  const user = fixture.users[sequence % fixture.users.length];
+  const user = fixture.users[(sequence + userOffset) % fixture.users.length];
   const today = fixture.client.localDate;
   if (cacheOnly) {
     cacheOnlyHome(user, today);
     completed.add(1, { second });
     return;
   }
-  const stableSteps = 4000 + (user.userIndex * 7919 % 12000);
-  const stableSampleSteps = Math.min(stableSteps, 500 + (user.userIndex * 1543 % 3500));
+  const stableSteps = Number.isInteger(user.steps)
+    ? user.steps : 4000 + (user.userIndex * 7919 % 12000);
+  const stableSampleSteps = Number.isInteger(user.sampleSteps)
+    ? user.sampleSteps : Math.min(stableSteps, 500 + (user.userIndex * 1543 % 3500));
   const payload = {
     date: today, steps: stableSteps,
     samples: [{ periodStart: user.sampleStart, periodEnd: user.sampleEnd,

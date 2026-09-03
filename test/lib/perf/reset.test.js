@@ -64,7 +64,9 @@ test("targeted reset is bounded to fixture IDs, retries FK order, and never trun
   const result = await targetedReset({
     prisma: { $transaction: async (operation) => operation(tx) },
     fixture: { runId: "perf-fixture", ids: { users: ["user-1"], races: ["race-1"],
-      raceParticipants: ["participant-1"] }, participantBaselineAt: "2026-09-02T00:00:00.000Z" },
+      raceParticipants: ["participant-1"] }, participantBaselineAt: "2026-09-02T00:00:00.000Z",
+      participantBaselines: [{ id: "participant-1", totalSteps: 1234,
+        lastNotifiedPlacement: 1 }] },
     plan: { schema: "bara-perf-reset-plan-v1", tables: [
       { table: "step_sync_requests", userColumn: true, raceColumn: false },
       { table: "race_resolution_jobs_v2", userColumn: false, raceColumn: true },
@@ -76,7 +78,8 @@ test("targeted reset is bounded to fixture IDs, retries FK order, and never trun
   assert.equal(statements.some((sql) => /\bTRUNCATE\b/i.test(sql)), false);
   assert.equal(statements.every((sql) => !/DELETE FROM "users"|DELETE FROM "races"/i.test(sql)), true);
   assert.ok(statements.some((sql) => /DELETE FROM "step_sync_requests".*user_id/i.test(sql)));
-  assert.ok(statements.some((sql) => /UPDATE "race_participants"/i.test(sql)));
+  assert.ok(statements.some((sql) => /UPDATE\s+"?race_participants"?/i.test(sql)));
+  assert.ok(statements.some((sql) => /jsonb_to_recordset/i.test(sql)));
   assert.ok(statements.some((sql) => /UPDATE "users"[\s\S]*"last_step_sync_at" = NULL/i.test(sql)));
 });
 

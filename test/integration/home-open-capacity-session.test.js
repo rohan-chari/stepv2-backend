@@ -4,7 +4,10 @@ const { before, beforeEach, describe, it } = require("node:test");
 const { PROFILES } = require("../../src/modules/loadTesting/contract");
 const { cleanupHomeOpenFixtures, createHomeOpenFixtures } = require("../../src/modules/loadTesting/homeOpenFixtures");
 const { runHomeOpenSession } = require("../../src/modules/loadTesting/runner");
+const { buildRaceResolutionWorkerV2 } = require(
+  "../../src/modules/races/jobs/raceResolutionQueueV2");
 const { buildVerification } = require("../../scripts/k6-home-open");
+const { targetedReset } = require("../../performance/lib/reset");
 const { cleanDatabase, getSharedServer, prisma } = require("./setup");
 
 describe("home-open capacity session public HTTP contract", () => {
@@ -50,6 +53,24 @@ describe("home-open capacity session public HTTP contract", () => {
       appleId: `snapshot-${crypto.randomUUID()}`, email: `snapshot-${crypto.randomUUID()}@example.com`,
       displayName: "Snapshot Event User",
     } });
+    const snapshotPeer = await prisma.user.create({ data: {
+      appleId: `snapshot-${crypto.randomUUID()}`, email: `snapshot-${crypto.randomUUID()}@example.com`,
+      displayName: "Snapshot Race Peer",
+    } });
+    const snapshotRace = await prisma.race.create({ data: {
+      creatorId: snapshotUser.id, name: "Snapshot active race", targetSteps: 100000,
+      status: "ACTIVE", startedAt: new Date(Date.now() - 3_600_000),
+      endsAt: new Date(Date.now() + 86_400_000), maxDurationDays: 2,
+      maxParticipants: 100, isPublic: false,
+    } });
+    await prisma.raceParticipant.createMany({ data: [
+      { raceId: snapshotRace.id, userId: snapshotUser.id, status: "ACCEPTED",
+        joinedAt: new Date(Date.now() - 3_500_000), rawSteps: 12000, totalSteps: 12000,
+        lastNotifiedPlacement: 1 },
+      { raceId: snapshotRace.id, userId: snapshotPeer.id, status: "ACCEPTED",
+        joinedAt: new Date(Date.now() - 3_400_000), rawSteps: 7000, totalSteps: 7000,
+        lastNotifiedPlacement: 2 },
+    ] });
     const activeEvent = await prisma.globalStepEvent.create({ data: {
       startsAt: new Date(Date.now() - 60_000), endsAt: new Date(Date.now() + 60_000),
       multiplier: 2, label: "snapshot-active-event",
@@ -59,6 +80,23 @@ describe("home-open capacity session public HTTP contract", () => {
       expiresAt: new Date(Date.now() + 3_600_000),
     } });
     const fixture = await createHomeOpenFixtures({ prisma, runId, users: 10, arrivalRate: 1, env: process.env });
+    const fixtureParticipants = await prisma.raceParticipant.findMany({
+      where: { id: { in: fixture.manifest.ids.raceParticipants } },
+      select: { totalSteps: true, lastNotifiedPlacement: true },
+    });
+    assert.ok(fixtureParticipants.length > 0,
+      "the real-HTTP fixture must exercise active race resolution");
+    assert.ok(await prisma.raceParticipant.findFirst({ where: {
+      userId: fixture.users[0].id, raceId: { in: fixture.manifest.ids.races },
+    } }), "the uploaded fixture user must be an active race participant");
+    assert.ok(new Set(fixture.users.map((row) => row.loadProfile.baselineSteps)).size > 1);
+    assert.ok(fixtureParticipants.every((row) => Number.isInteger(row.lastNotifiedPlacement)));
+    assert.equal(await prisma.step.count({ where: { id: { in: fixture.manifest.ids.steps } } }), 10);
+    assert.equal(await prisma.stepSample.count({
+      where: { id: { in: fixture.manifest.ids.stepSamples } },
+    }), 10);
+    assert.equal(fixture.topology.productionShapedScores.source,
+      "sanitized-snapshot-aggregates");
     const fixtureUserBefore = await prisma.user.findUniqueOrThrow({
       where: { id: fixture.users[0].id },
       select: { metricsV2EligibleEpochId: true, metricsV2EligibleAt: true },
@@ -75,12 +113,36 @@ describe("home-open capacity session public HTTP contract", () => {
     let cleanup; let session;
     try {
       const now = new Date();
+      const profile = fixture.users[0].loadProfile;
+      const requestBodies = new Map([["/steps/sync-v2:0", JSON.stringify({
+        date: now.toISOString().slice(0, 10), steps: profile.steps,
+        samples: [{ periodStart: new Date(now.getTime() - 20 * 60_000).toISOString(),
+          periodEnd: new Date(now.getTime() - 10 * 60_000).toISOString(),
+          steps: profile.sampleSteps, recordingMethod: "automatic",
+          sourceName: "synthetic-health", sourceId: `capacity:${runId}:0` }],
+      })]]);
+      let processedResolution = false;
       session = await runHomeOpenSession({ baseUrl: server.baseUrl, fetchImpl: fetch, sequence: 0, timeoutMs: 5000,
-        wait: async () => {}, context: { runId, repeat: "1", userCount: fixture.users.length,
+        wait: async () => {
+          if (!processedResolution) {
+            processedResolution = true;
+            await buildRaceResolutionWorkerV2({ bootAt: 0,
+              buildRaceResolutionInputFingerprint: async () => ({
+                digest: "integration-home-open-stable-input",
+                race: { timezone: "UTC", endsAt: new Date(Date.now() + 86_400_000) },
+                nextSampleBoundary: new Date(Date.now() + 600_000),
+                activeEffects: [], globalEvents: [],
+              }),
+            }).processRace({
+              raceId: fixture.races[0].id,
+            });
+          }
+        },
+        context: { runId, repeat: "1", userCount: fixture.users.length,
           userIndex: 0, userId: fixture.users[0].id, token: fixture.users[0].token,
           raceId: fixture.races[0].id, today: now.toISOString().slice(0, 10),
           sampleStart: new Date(now.getTime() - 20 * 60_000).toISOString(),
-          sampleEnd: new Date(now.getTime() - 10 * 60_000).toISOString(), requestBodies: new Map() } });
+          sampleEnd: new Date(now.getTime() - 10 * 60_000).toISOString(), requestBodies } });
       assert.equal(session.criticalComplete, true);
       assert.equal(session.allSettled, true);
       assert.equal(session.samples[0].endpoint, "POST /steps/sync-v2");
@@ -90,6 +152,39 @@ describe("home-open capacity session public HTTP contract", () => {
       });
       assert.deepEqual(fixtureUserAfter, fixtureUserBefore,
         "Home traffic must not perform an artificial first-touch metrics stamp");
+      const writtenStep = await prisma.step.findFirstOrThrow({
+        where: { userId: fixture.users[0].id }, orderBy: { createdAt: "desc" },
+      });
+      assert.equal(writtenStep.steps, profile.steps);
+      const resolvedParticipant = await prisma.raceParticipant.findFirstOrThrow({ where: {
+        userId: fixture.users[0].id, raceId: { in: fixture.manifest.ids.races },
+      } });
+      assert.equal(resolvedParticipant.totalSteps, profile.steps);
+      await prisma.raceParticipant.updateMany({
+        where: { id: { in: fixture.manifest.ids.raceParticipants } },
+        data: { totalSteps: 999999, rawSteps: 999999, lastNotifiedPlacement: null },
+      });
+      await targetedReset({ prisma,
+        fixture: { runId, ...fixture.manifest },
+        plan: { schema: "bara-perf-reset-plan-v1", tables: [] },
+        verifyMarker: async () => true });
+      const resetParticipants = await prisma.raceParticipant.findMany({
+        where: { id: { in: fixture.manifest.ids.raceParticipants } },
+        orderBy: { id: "asc" }, select: { id: true, totalSteps: true,
+          rawSteps: true, lastNotifiedPlacement: true },
+      });
+      const expectedParticipants = [...fixture.manifest.participantBaselines]
+        .sort((left, right) => left.id.localeCompare(right.id));
+      assert.deepEqual(resetParticipants, expectedParticipants.map((row) => ({
+        id: row.id, totalSteps: row.totalSteps, rawSteps: row.rawSteps,
+        lastNotifiedPlacement: row.lastNotifiedPlacement,
+      })));
+      assert.equal(await prisma.step.count({
+        where: { id: { in: fixture.manifest.ids.steps } },
+      }), fixture.manifest.baselineStepRows.length);
+      assert.equal(await prisma.stepSample.count({
+        where: { id: { in: fixture.manifest.ids.stepSamples } },
+      }), fixture.manifest.baselineSampleRows.length);
     } finally {
       cleanup = await cleanupHomeOpenFixtures({ prisma, manifest: fixture.manifest });
     }

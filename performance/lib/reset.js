@@ -129,7 +129,22 @@ async function targetedReset({ prisma, fixture, plan, env = process.env,
         fixture.userBaselineLastSeenAt || new Date(0).toISOString());
     }
     if (participants.length) {
-      await tx.$executeRawUnsafe(`
+      if (Array.isArray(fixture.participantBaselines) && fixture.participantBaselines.length) {
+        await tx.$executeRawUnsafe(`WITH baseline AS (
+          SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(
+            id text, "totalSteps" integer, "rawSteps" integer,
+            "nextBoxAtSteps" integer, "lastNotifiedPlacement" integer)
+        ) UPDATE race_participants participant
+          SET total_steps=baseline."totalSteps", raw_steps=baseline."rawSteps",
+              totals_updated_at=$2::timestamptz,
+              next_box_at_steps=baseline."nextBoxAtSteps", bonus_steps=0,
+              max_bonus_steps=0, max_box_progress_steps=NULL,
+              last_notified_placement=baseline."lastNotifiedPlacement",
+              high_multiplier_notified_at=NULL
+          FROM baseline WHERE participant.id=baseline.id`,
+        JSON.stringify(fixture.participantBaselines),
+        fixture.participantBaselineAt || new Date(0).toISOString());
+      } else await tx.$executeRawUnsafe(`
         UPDATE "race_participants"
            SET "total_steps" = 1000,
                "raw_steps" = 1000,
@@ -142,6 +157,12 @@ async function targetedReset({ prisma, fixture, plan, env = process.env,
                "high_multiplier_notified_at" = NULL
          WHERE "id"::text = ANY($1::text[])
       `, participants, fixture.participantBaselineAt || new Date(0).toISOString());
+    }
+    if (Array.isArray(fixture.baselineStepRows) && fixture.baselineStepRows.length) {
+      await tx.step.createMany({ data: fixture.baselineStepRows });
+    }
+    if (Array.isArray(fixture.baselineSampleRows) && fixture.baselineSampleRows.length) {
+      await tx.stepSample.createMany({ data: fixture.baselineSampleRows });
     }
     let remainingRunOwnedRows = 0;
     for (const row of plan.tables) {

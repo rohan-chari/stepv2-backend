@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
+const { compareParticipantsForPlacement } = require("../races/placementOrder");
 const {
   assertFixtureDatabase,
   assertNoSyntheticRows,
@@ -24,6 +25,89 @@ const CURRENT_FEATURES = [
   "referral_contest_v1", "referral_contest_global_v1", "admin_metrics_v2",
   "race_payout_flat_50",
 ];
+const QUANTILE_POINTS = Array.from({ length: 1001 }, (_, index) => index / 1000);
+const FALLBACK_SCORE_DISTRIBUTION = Object.freeze({
+  quantiles: QUANTILE_POINTS.map((point) => Math.round(52000 * point ** 1.35)), zeroRate: 0.05,
+});
+const FALLBACK_INCREMENT_DISTRIBUTION = Object.freeze({
+  quantiles: QUANTILE_POINTS.map((point) => point < 0.35 ? 0 :
+    Math.round(1200 * ((point - 0.35) / 0.65) ** 2)), zeroRate: 0.35,
+});
+
+function normalizeQuantileDistribution(row, fallback) {
+  const rawValues = Array.isArray(row?.quantiles) ? row.quantiles : [];
+  const raw = rawValues.map(Number);
+  const quantiles = raw.length === QUANTILE_POINTS.length &&
+      rawValues.every((value) => value != null) && raw.every(Number.isFinite)
+    ? raw.map((value) => Math.max(0, Math.round(value)))
+    : [...fallback.quantiles];
+  const zeroRate = row?.zeroRate == null ? Number.NaN : Number(row.zeroRate);
+  return { sampleCount: Math.max(0, Number(row?.sampleCount) || 0),
+    zeroRate: Number.isFinite(zeroRate) ? Math.max(0, Math.min(1, zeroRate)) : fallback.zeroRate,
+    quantiles };
+}
+
+function valueAtQuantile(distribution, fraction) {
+  const f = Math.max(0, Math.min(1, fraction));
+  return distribution.quantiles[Math.round(f * (QUANTILE_POINTS.length - 1))];
+}
+
+function quantile(values, fraction) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.ceil(Math.max(0, Math.min(1, fraction)) * sorted.length) - 1] ?? sorted[0];
+}
+
+function placementShape(rows) {
+  const races = new Map();
+  for (const row of rows) {
+    const scores = races.get(row.raceId) || [];
+    scores.push(Number(row.totalSteps)); races.set(row.raceId, scores);
+  }
+  const gaps = [...races.values()].flatMap((scores) => scores.sort((a, b) => b - a)
+    .slice(1).map((score, index) => Math.max(0, scores[index] - score)));
+  return { sampleCount: gaps.length,
+    tieRate: gaps.length ? gaps.filter((gap) => gap === 0).length / gaps.length : 0,
+    gapQuantiles: [0.5, 0.9, 0.95, 0.99].map((point) => quantile(gaps, point)) };
+}
+
+function placementRepresentativeness(source, generated) {
+  if (!source.sampleCount) return { schema: "home-open-placement-representativeness-v1",
+    status: "unavailable", passed: false, reason: "snapshot_has_no_adjacent_placement_gaps" };
+  const tieTolerance = Math.max(0.05, 2 / Math.sqrt(source.sampleCount));
+  const checks = [{ metric: "tieRate", source: source.tieRate, generated: generated.tieRate,
+    tolerance: tieTolerance, passed: Math.abs(source.tieRate - generated.tieRate) <= tieTolerance }];
+  [0.5, 0.9, 0.95, 0.99].forEach((point, index) => {
+    const expected = source.gapQuantiles[index]; const actual = generated.gapQuantiles[index];
+    const tolerance = Math.max(250, expected * 2);
+    checks.push({ metric: `gapP${Math.round(point * 100)}`, source: expected,
+      generated: actual, tolerance, passed: Math.abs(expected - actual) <= tolerance });
+  });
+  return { schema: "home-open-placement-representativeness-v1",
+    status: checks.every((check) => check.passed) ? "matched" : "mismatch",
+    passed: checks.every((check) => check.passed), checks };
+}
+
+function distributedHomeStepProfile({ userIndex, userCount, scores, increments }) {
+  const index = Number(userIndex); const count = Number(userCount);
+  if (!Number.isInteger(index) || index < 0 || !Number.isInteger(count) || count < 1 || index >= count) {
+    throw new Error("home-open distributed step profile requires a valid user index/count");
+  }
+  // Coprime permutations spread every traffic prefix across the full shape.
+  const scoreFraction = count === 1 ? 0.5 : ((index * 7919) % count) / (count - 1);
+  const incrementFraction = count === 1 ? 0.5 : ((index * 1543 + 17) % count) / (count - 1);
+  const baselineSteps = scoreFraction < scores.zeroRate ? 0 : valueAtQuantile(scores, scoreFraction);
+  const incrementSteps = incrementFraction < increments.zeroRate
+    ? 0 : valueAtQuantile(increments, incrementFraction);
+  return { baselineSteps, incrementSteps, steps: baselineSteps + incrementSteps,
+    sampleSteps: incrementSteps };
+}
+
+function churnHomeStepProfile(userIndex) {
+  const payload = homeStepPayload({ userIndex });
+  return { baselineSteps: 1000, incrementSteps: payload.steps - 1000,
+    steps: payload.steps, sampleSteps: payload.sampleSteps };
+}
 
 function signHomeOpenFixtureToken({ userId, appleId, env = {} } = {}) {
   const secret = env.SESSION_TOKEN_SECRET;
@@ -142,7 +226,8 @@ function homeStepPayload({ userIndex } = {}) {
 }
 
 async function aggregateSnapshotTopology(prisma) {
-  const [activeCounts, bands, sampleWindow, activeEvents] = await Promise.all([
+  const [activeCounts, bands, sampleWindow, activeEvents, scoreRows, incrementRows,
+    placementRows] = await Promise.all([
     prisma.$queryRawUnsafe(`
       WITH counts AS (
         SELECT u.id, count(r.id)::int AS active_race_count
@@ -171,6 +256,43 @@ async function aggregateSnapshotTopology(prisma) {
       FROM step_samples`),
     prisma.$queryRawUnsafe(`SELECT count(*)::int AS count FROM global_step_events
       WHERE starts_at <= now() AND ends_at > now()`),
+    prisma.$queryRawUnsafe(`SELECT count(*)::int AS "sampleCount",
+      avg(CASE WHEN total_steps=0 THEN 1.0 ELSE 0.0 END)::float AS "zeroRate",
+      percentile_disc(ARRAY[${QUANTILE_POINTS.join(",")}])
+        WITHIN GROUP (ORDER BY total_steps)::float[] AS quantiles
+      FROM race_participants participant JOIN races race ON race.id=participant.race_id
+      WHERE participant.status='accepted' AND race.status='active' AND total_steps >= 0`),
+    prisma.$queryRawUnsafe(`WITH bounds AS (
+      SELECT max(period_end) AS latest FROM step_samples
+    ), recent AS (
+      SELECT round(steps * 600.0 /
+        NULLIF(extract(epoch FROM (period_end-period_start)), 0))::int AS steps
+      FROM step_samples, bounds
+      WHERE steps >= 0
+        AND period_end >= period_start + interval '5 minutes'
+        AND period_end <= period_start + interval '30 minutes'
+        AND period_end >= bounds.latest - interval '7 days'
+    ) SELECT count(*)::int AS "sampleCount",
+      avg(CASE WHEN steps=0 THEN 1.0 ELSE 0.0 END)::float AS "zeroRate",
+      percentile_disc(ARRAY[${QUANTILE_POINTS.join(",")}])
+        WITHIN GROUP (ORDER BY steps)::float[] AS quantiles FROM recent`),
+    prisma.$queryRawUnsafe(`WITH ranked AS (
+      SELECT participant.race_id,
+        participant.total_steps,
+        lag(participant.total_steps) OVER (
+          PARTITION BY participant.race_id
+          ORDER BY participant.total_steps DESC, participant.joined_at, participant.user_id
+        ) AS higher_steps
+      FROM race_participants participant
+      JOIN races race ON race.id=participant.race_id
+      WHERE participant.status='accepted' AND race.status='active' AND participant.total_steps >= 0
+    ), gaps AS (
+      SELECT greatest(higher_steps-total_steps, 0)::int AS gap
+      FROM ranked WHERE higher_steps IS NOT NULL
+    ) SELECT count(*)::int AS "sampleCount",
+      avg(CASE WHEN gap=0 THEN 1.0 ELSE 0.0 END)::float AS "tieRate",
+      percentile_disc(ARRAY[0.5,0.9,0.95,0.99])
+        WITHIN GROUP (ORDER BY gap)::float[] AS "gapQuantiles" FROM gaps`),
   ]);
   return {
     activeRaceCountDistribution: activeCounts.map((row) => ({
@@ -182,11 +304,18 @@ async function aggregateSnapshotTopology(prisma) {
     stepSampleCount: Number(sampleWindow[0]?.count || 0),
     stepSampleWindowSeconds: Number(sampleWindow[0]?.windowSeconds || 0),
     activeGlobalEventCount: Number(activeEvents[0]?.count || 0),
+    scoreDistribution: normalizeQuantileDistribution(scoreRows[0], FALLBACK_SCORE_DISTRIBUTION),
+    incrementDistribution: normalizeQuantileDistribution(
+      incrementRows[0], FALLBACK_INCREMENT_DISTRIBUTION),
+    placementShape: { sampleCount: Number(placementRows[0]?.sampleCount || 0),
+      tieRate: Number(placementRows[0]?.tieRate || 0),
+      gapQuantiles: (placementRows[0]?.gapQuantiles || [0, 0, 0, 0]).map(Number) },
   };
 }
 
 async function createHomeOpenFixtures({
-  prisma, runId, users = 5000, arrivalRate = 1, env = process.env, now = new Date(),
+  prisma, runId, users = 5000, arrivalRate = 1, scoreShape = "production",
+  env = process.env, now = new Date(),
 } = {}) {
   if (!/^[a-z0-9][a-z0-9._-]{5,63}$/.test(String(runId || ""))) {
     throw new Error("home-open fixture requires a safe run id");
@@ -194,6 +323,12 @@ async function createHomeOpenFixtures({
   assertFixtureDatabase(env);
   const aggregate = await aggregateSnapshotTopology(prisma);
   const scaled = scaleHomeTopology({ syntheticUsers: users, ...aggregate });
+  if (!["production", "placement-churn"].includes(scoreShape)) {
+    throw new Error("home-open score shape must be production or placement-churn");
+  }
+  const loadProfiles = scoreShape === "production"
+    ? userProfiles(users, aggregate)
+    : Array.from({ length: users }, (_, index) => churnHomeStepProfile(index));
   // A production snapshot may legitimately be captured during a live global
   // event. This profile excludes that request-graph variant, so remove the
   // complete derived domain only inside the guarded disposable clone/test DB.
@@ -259,22 +394,51 @@ async function createHomeOpenFixtures({
         if (candidates.length !== count) throw new Error("home-open participant topology is not materializable");
         for (const candidate of candidates) {
           const user = userRows[userIndex];
-          participantRows.push({ raceId: races[candidate.index].id,
-          userId: user.id, status: "ACCEPTED", joinedAt: startedAt,
-          rawSteps: 1000, totalSteps: 1000, totalsUpdatedAt: now, nextBoxAtSteps: 5000 });
+          const profile = loadProfiles[userIndex];
+          participantRows.push({ id: crypto.randomUUID(), raceId: races[candidate.index].id,
+          userId: user.id, status: "ACCEPTED",
+          joinedAt: new Date(startedAt.getTime() + userIndex),
+          rawSteps: profile.baselineSteps, totalSteps: profile.baselineSteps,
+          totalsUpdatedAt: now, nextBoxAtSteps: Math.max(5000, profile.baselineSteps + 5000) });
           candidate.remaining -= 1;
         }
       });
     if (capacities.some((row) => row.remaining !== 0)) {
       throw new Error("home-open participant topology census mismatch");
     }
+    for (const race of scoreShape === "production" ? races : []) {
+      const members = participantRows.filter((row) => row.raceId === race.id)
+        .sort(compareParticipantsForPlacement);
+      members.forEach((row, index) => { row.lastNotifiedPlacement = index + 1; });
+    }
     await createMany(prisma.raceParticipant, participantRows);
+    const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+    const initialSampleStart = new Date(startedAt.getTime() + 5 * 60_000);
+    const initialSampleEnd = new Date(now.getTime() - 20 * 60_000);
+    const baselineStepRows = (scoreShape === "production" ? userRows : []).map((user, userIndex) => ({ id: crypto.randomUUID(),
+      userId: user.id, date: new Date(`${localDate}T00:00:00.000Z`),
+      steps: loadProfiles[userIndex].baselineSteps }));
+    const baselineSampleRows = (scoreShape === "production" ? userRows : []).map((user, userIndex) => ({ id: crypto.randomUUID(),
+      userId: user.id, periodStart: initialSampleStart, periodEnd: initialSampleEnd,
+      steps: loadProfiles[userIndex].baselineSteps, recordingMethod: "automatic",
+      sourceName: `${marker}:baseline`, sourceId: `${marker}:baseline:${userIndex}` }));
+    await createMany(prisma.step, baselineStepRows);
+    await createMany(prisma.stepSample, baselineSampleRows);
+    ids.steps.push(...baselineStepRows.map((row) => row.id));
+    ids.stepSamples.push(...baselineSampleRows.map((row) => row.id));
     const storedParticipants = await prisma.raceParticipant.findMany({ where: { raceId: { in: ids.races } },
       select: { id: true, raceId: true } });
     ids.raceParticipants.push(...storedParticipants.map((row) => row.id));
     const sizes = new Map(ids.races.map((raceId) => [raceId, 0]));
     for (const row of storedParticipants) sizes.set(row.raceId, (sizes.get(row.raceId) || 0) + 1);
     const sortedSizes = [...sizes.values()].sort((a, b) => a - b);
+    const generatedPlacementShape = placementShape(participantRows);
+    const placementMatch = placementRepresentativeness(
+      aggregate.placementShape, generatedPlacementShape);
+    if (scoreShape === "production" && placementMatch.status === "mismatch") {
+      throw new Error(`home-open generated placement shape is not representative: ${JSON.stringify(placementMatch.checks)}`);
+    }
     const reuseSeconds = users / Math.max(1, Number(arrivalRate));
     const topology = {
       schema: "home-open-fixture-topology-v1",
@@ -290,8 +454,21 @@ async function createHomeOpenFixtures({
       maximumRaceSize: Math.max(0, ...sortedSizes),
       sharedRaceConcentration: users ? Math.max(0, ...sortedSizes) / users : 0,
       syntheticStepSampleTopology: {
-        samplesPerUser: 1, periodSeconds: 600, closedBeforeSessionSeconds: 600,
-        stepRange: { minimum: 500, maximum: 3999 }, stableAcrossUserReuse: true,
+        baselineSamplesPerUser: scoreShape === "production" ? 1 : 0,
+        uploadPeriodSeconds: 600, closedBeforeSessionSeconds: 600,
+        stableAcrossUserReuse: true,
+      },
+      scoreShape,
+      productionShapedScores: {
+        schema: "home-open-score-profile-v1",
+        source: "sanitized-snapshot-aggregates",
+        method: "percentile-disc-p0000-p1000; increments-normalized-to-600s-by-period-end",
+        fallbackUsed: aggregate.scoreDistribution.sampleCount === 0 ||
+          aggregate.incrementDistribution.sampleCount === 0,
+        scores: aggregate.scoreDistribution, increments: aggregate.incrementDistribution,
+        sourcePlacementShape: aggregate.placementShape,
+        generatedPlacementShape,
+        placementRepresentativeness: placementMatch,
       },
       snapshotReference: { stepSampleCount: aggregate.stepSampleCount,
         stepSampleWindowSeconds: aggregate.stepSampleWindowSeconds },
@@ -307,9 +484,15 @@ async function createHomeOpenFixtures({
       aggregateSourceHash: crypto.createHash("sha256").update(JSON.stringify(aggregate)).digest("hex"),
     };
     return {
-      manifest: { schema: "synthetic-load-manifest-v1", runId, baseline: before, ids },
-      users: userRows.map((user) => ({ ...user,
-        token: signHomeOpenFixtureToken({ userId: user.id, appleId: user.appleId, env }) })),
+      manifest: { schema: "synthetic-load-manifest-v1", runId, baseline: before, ids,
+        participantBaselines: participantRows.map((row) => ({ id: row.id,
+          totalSteps: row.totalSteps, rawSteps: row.rawSteps,
+          nextBoxAtSteps: row.nextBoxAtSteps,
+          lastNotifiedPlacement: row.lastNotifiedPlacement })),
+        baselineStepRows, baselineSampleRows },
+      users: userRows.map((user, userIndex) => ({ ...user,
+        token: signHomeOpenFixtureToken({ userId: user.id, appleId: user.appleId, env }),
+        loadProfile: loadProfiles[userIndex] })),
       races, topology,
     };
   } catch (error) {
@@ -317,6 +500,13 @@ async function createHomeOpenFixtures({
       manifest: { schema: "synthetic-load-manifest-v1", runId, baseline: before, ids } }).catch(() => {});
     throw error;
   }
+}
+
+function userProfiles(users, aggregate) {
+  return Array.from({ length: users }, (_, userIndex) => distributedHomeStepProfile({
+    userIndex, userCount: users, scores: aggregate.scoreDistribution,
+    increments: aggregate.incrementDistribution,
+  }));
 }
 
 async function cleanupHomeOpenFixtures({ prisma, manifest } = {}) {
@@ -349,6 +539,8 @@ async function readHomeOpenGlobalIsolationCensus(prisma) {
 }
 
 module.exports = { aggregateSnapshotTopology, cleanupHomeOpenFixtures,
-  createHomeOpenFixtures, homeStepPayload, interleaveActiveRaceCounts,
+  churnHomeStepProfile, createHomeOpenFixtures, distributedHomeStepProfile,
+  homeStepPayload, interleaveActiveRaceCounts,
+  normalizeQuantileDistribution,
   readHomeOpenGlobalIsolationCensus,
   scaleHomeTopology, signHomeOpenFixtureToken };

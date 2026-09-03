@@ -32,6 +32,13 @@ users are provisioned once and a guarded targeted reset restores only their
 run-owned mutable state between levels. No ladder level restores PostgreSQL,
 recreates Redis, rebuilds the backend, or rebuilds fixtures.
 
+The default `workload.scoreShape` is `production`. Fixture scores and ten-minute
+sync increments are deterministically sampled from identifier-free percentiles
+computed once from the sanitized snapshot, and placement baselines are seeded
+consistently with those scores. Use `placement-churn` only for the explicit
+worst-case scenario where racers begin tied and large syncs cause race-wide
+placement movement; it is not the normal Home capacity profile.
+
 Warm scans prewarm a bounded representative cohort once with GET-only Home
 reads (10 opens/sec, at most 300 users by default), then use a bounded
 stabilization warmup at each rate. Initial prewarm never calls step sync or

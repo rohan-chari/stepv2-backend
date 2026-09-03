@@ -2,13 +2,25 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { normalizeK6Evidence, normalizeRuntimeMetrics,
-  captureMeasurementDiagnostics, classifyK6Exit, createHomeOpenWorkload,
+  buildFixtureFile, captureMeasurementDiagnostics, classifyK6Exit, createHomeOpenWorkload,
   domainEventEvidenceFromRows } = require("../../../performance/workloads/home-open");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
 function metric(values) { return { values }; }
+
+test("k6 fixture consumes the production-shaped per-user totals", () => {
+  const output = buildFixtureFile({ runId: "bara-perf-fixture", now: new Date("2026-09-02T12:00:00Z"),
+    fixture: { users: [{ token: "token", loadProfile: {
+      baselineSteps: 12345, incrementSteps: 87, steps: 12432, sampleSteps: 12432,
+    } }] } });
+  assert.deepEqual(output.users[0], {
+    userIndex: 0, token: "token", baselineSteps: 12345, incrementSteps: 87,
+    steps: 12432, sampleSteps: 12432,
+    sampleStart: "2026-09-02T11:40:00.000Z", sampleEnd: "2026-09-02T11:50:00.000Z",
+  });
+});
 
 test("k6 Home summary normalizes the exact measured safe-capacity gates", () => {
   const summary = { metrics: {
@@ -140,8 +152,8 @@ test("workload provisions fixtures once and executes warmup and measurement as s
     }),
     discoverPlan: async () => (calls.push("discover"), { schema: "bara-perf-reset-plan-v1", tables: [] }),
     resetFixtures: async () => calls.push("reset"),
-    runK6: async ({ phase, warmupSeconds, measurementSeconds, cacheOnly, rate }) => {
-      calls.push(`k6:${phase}:${warmupSeconds}:${measurementSeconds}:${cacheOnly === true}:${rate}`);
+    runK6: async ({ phase, warmupSeconds, measurementSeconds, cacheOnly, rate, userOffset }) => {
+      calls.push(`k6:${phase}:${warmupSeconds}:${measurementSeconds}:${cacheOnly === true}:${rate}:${userOffset}`);
       return { summary: { metrics: {
         "home_open_critical_ms{phase:measurement}": metric({ "p(95)": 100, "p(99)": 200 }),
         "http_req_failed{phase:measurement,telemetry:sut}": metric({ rate: 0 }),
@@ -160,8 +172,8 @@ test("workload provisions fixtures once and executes warmup and measurement as s
   await workload.warmup({ rate: 5, warmupSeconds: 15, environment, fixtures: fixture, config });
   const evidence = await workload.measure({ rate: 5, environment, fixtures: fixture, config });
   await workload.targetedReset({ environment, fixtures: fixture, config });
-  assert.deepEqual(calls, ["fixtures", "discover", "k6:initial-prewarm:0:3:true:2",
-    "k6:level-warmup:0:15:false:5", "k6:measurement:0:1:false:5", "reset"]);
+  assert.deepEqual(calls, ["fixtures", "discover", "k6:initial-prewarm:0:3:true:2:0",
+    "k6:level-warmup:0:15:false:5:5", "k6:measurement:0:1:false:5:0", "reset"]);
   assert.equal(evidence.safeCapacityGatesPassed, true);
   assert.deepEqual(evidence.binding, { id: "same" });
 });

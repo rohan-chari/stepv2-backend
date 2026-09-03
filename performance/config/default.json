@@ -7,7 +7,8 @@
   },
   "workload": {
     "name": "authenticated-home-reveal-v1",
-    "profileVersion": "2.2.0",
+    "profileVersion": "2.3.0",
+    "scoreShape": "production",
     "cohortWeight": 1
   },
   "topology": {

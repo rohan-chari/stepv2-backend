@@ -153,7 +153,8 @@ function buildFixtureFile({ runId, fixture, now = new Date() } = {}) {
       headerProfile: PROFILES["home-open"].homeOpen.clientHeaderProfile,
       features: PROFILES["home-open"].homeOpen.clientFeatures },
     users: fixture.users.map((user, userIndex) => ({ userIndex, token: user.token,
-      sampleStart: sampleStart.toISOString(), sampleEnd: sampleEnd.toISOString() })),
+      ...(user.loadProfile || {}), sampleStart: user.sampleStart || sampleStart.toISOString(),
+      sampleEnd: user.sampleEnd || sampleEnd.toISOString() })),
   };
 }
 
@@ -176,6 +177,7 @@ function classifyK6Exit({ code, signal = null, summaryExists } = {}) {
 async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePath,
   baseUrl, outputDirectory, environment = process.env, metricsConfig, databaseUrl,
   runId, metricEpoch, cacheOnly = false, expectedPids = null,
+  userOffset = 0,
   captureBackendLog = captureCapacityBackendLog } = {}) {
   fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
   const summaryPath = path.join(outputDirectory, `${phase}-${rate}-${crypto.randomUUID()}.k6.json`);
@@ -184,6 +186,7 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
     K6_HOME_RATE: String(rate), K6_HOME_WARMUP_RATE: String(rate),
     K6_HOME_WARMUP_SECONDS: "0", K6_HOME_MEASUREMENT_SECONDS: String(measurementSeconds),
     K6_HOME_CACHE_ONLY: cacheOnly ? "1" : "0",
+    K6_HOME_USER_OFFSET: String(userOffset),
     K6_HOME_TRAFFIC_EPOCH_HASH: crypto.createHash("sha256")
       .update(`${runId}:${phase}:${rate}:${crypto.randomUUID()}`).digest("hex").slice(0, 12),
   };
@@ -236,11 +239,12 @@ function createHomeOpenWorkload(dependencies = {}) {
   const resetFixtures = dependencies.resetFixtures || targetedReset;
   const cleanupFixtures = dependencies.cleanupFixtures || cleanupHomeOpenFixtures;
   const runK6 = dependencies.runK6 || runRawK6;
-  const execute = ({ phase, rate, seconds, environment, fixtures, config, cacheOnly = false }) => runK6({
+  const execute = ({ phase, rate, seconds, environment, fixtures, config, cacheOnly = false,
+    userOffset = 0 }) => runK6({
     repository: environment.repository, phase, rate, warmupSeconds: 0,
     measurementSeconds: seconds, fixturePath: fixtures.fixturePath,
     baseUrl: environment.baseUrl, outputDirectory: environment.levelOutputDirectory,
-    environment: environment.processEnvironment, cacheOnly,
+    environment: environment.processEnvironment, cacheOnly, userOffset,
     ...(phase === "measurement" ? { metricsConfig: environment.metricsConfig,
       databaseUrl: environment.databaseUrl, runId: environment.runId,
       metricEpoch: environment.metricEpoch, expectedPids: environment.expectedPids } : {}),
@@ -250,6 +254,7 @@ function createHomeOpenWorkload(dependencies = {}) {
       const fixtureBaselineAt = new Date();
       const fixture = await createFixtures({ prisma: environment.prisma, runId,
         users: config.workload.cohortSize || 5000,
+        scoreShape: config.workload.scoreShape || "production",
         arrivalRate: Math.max(...(config.scan?.rates || [config.smoke?.rate || 1])),
         env: environment.processEnvironment || process.env, now: fixtureBaselineAt });
       fixture.manifest.participantBaselineAt = fixtureBaselineAt.toISOString();
@@ -272,17 +277,18 @@ function createHomeOpenWorkload(dependencies = {}) {
       );
       const boundedSeconds = Math.min(seconds, Math.max(1, Math.ceil(users / rate)));
       return execute({ phase: "initial-prewarm", rate, seconds: boundedSeconds,
-        environment, fixtures, config, cacheOnly: true });
+        environment, fixtures, config, cacheOnly: true, userOffset: 0 });
     },
     async warmup({ rate, warmupSeconds, environment, fixtures, config }) {
       return execute({ phase: "level-warmup", rate, seconds: warmupSeconds,
-        environment, fixtures, config });
+        environment, fixtures, config,
+        userOffset: rate * Number(config.scan?.measurementSeconds || 60) });
     },
     async measure({ rate, measurementSeconds,
       environment, fixtures, config }) {
       measurementSeconds ??= config.scan.measurementSeconds;
       const result = await execute({ phase: "measurement", rate, seconds: measurementSeconds,
-        environment, fixtures, config });
+        environment, fixtures, config, userOffset: 0 });
       const normalized = normalizeK6Evidence({ summary: result.summary, rate, measurementSeconds });
       environment.lastMeasurementMetrics = result.metrics || {};
       return { ...normalized, workerRestarts: Number(result.metrics?.workerRestarts || 0),
