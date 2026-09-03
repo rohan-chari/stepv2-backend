@@ -943,7 +943,7 @@ function materializationPlan({ base, coverage, now = new Date(), runId,
     const tournament = { id: tournamentId, creatorId: support.id,
       name: `${marker}:${variantGroup.join("+")}:${userIndex}`, status: completed ? "COMPLETED" :
         pending ? "PENDING" : "ACTIVE",
-      bracketSize: Math.max(sampledBracketSize, sampledTournamentParticipants), matchupDurationDays: 2,
+      bracketSize: sampledBracketSize, matchupDurationDays: 2,
       potCoins: 100, currentRound: pending ? 0 : completed ? 2 : render === "eliminated" ? 2 : 1,
       totalRounds: 2, startedAt: pending ? null : startedAt,
       completedAt: completed ? completedAt : null,

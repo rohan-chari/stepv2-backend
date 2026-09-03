@@ -235,6 +235,20 @@ test("joint graph scaling preserves team size and tournament total versus accept
   }
 });
 
+test("tournament graph preserves a production bracket smaller than accepted membership", () => {
+  const users = Array.from({ length: 4 }, (_, index) => ({ id: `u${index}` }));
+  const coverage = { byUser: users.map(() => ["tournament_live_match"]),
+    augmentedByUser: users.map(() => []) };
+  const sourceCensus = { graphJointHistogram: { ordinary: [], tournaments: [{ graphs: 1,
+    dimensions: { status: "active", bracketSize: 2, participants: 4, accepted: 4 } }],
+  matches: [{ graphs: 2,
+    dimensions: { status: "active", participants: 2, inventory: 0, effects: 0 } }] } };
+  const plan = materializationPlan({ base: { users }, coverage, sourceCensus,
+    now: new Date("2026-09-03T00:00:00Z"), runId: "source-bracket-cardinality" });
+  assert.ok(plan.tournaments.every((row) => row.bracketSize === 2));
+  assert.ok(plan.graphEvidence.reconciliation.tournamentBracketSize.generatedWithinSourceSupport);
+});
+
 test("joint graph scaling preserves tournament matchup inventory and effect cardinality", () => {
   const users = [{ id: "u0" }, { id: "u1" }, { id: "u2" }];
   const coverage = { byUser: [["tournament_live_match",
