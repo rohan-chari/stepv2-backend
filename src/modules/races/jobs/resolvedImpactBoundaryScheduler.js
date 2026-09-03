@@ -20,7 +20,9 @@ function buildResolvedImpactBoundaryScheduler(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const limit = Math.max(1, Math.min(200, Number(dependencies.limit) || DEFAULT_LIMIT));
   const publishResolutionWake = dependencies.publishResolutionWake ||
-    (() => redisCache.publishDurableQueueWakeup("resolution"));
+    (() => redisCache.publishDurableQueueWakeup(
+      "resolution", { workKind: "ordinary" },
+    ));
 
   return {
     async tick() {

@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   claimDisplayRefreshAdmission,
   normalizeResolutionPriority,
+  resolutionWakeOptions,
 } = require("../../src/modules/races/services/enqueueRaceResolution");
 
 test("display refresh work is always coalesced behind the interactive burst", () => {
@@ -15,6 +16,41 @@ test("display refresh work is always coalesced behind the interactive burst", ()
     normalizeResolutionPriority({ reason: "POWERUP_MUTATION", priority: "IMMEDIATE" }),
     { priority: "IMMEDIATE", queuePriority: null },
   );
+});
+
+test("resolution enqueue wakes identify append-only FULL trigger work", () => {
+  assert.deepEqual(resolutionWakeOptions({
+    queuedGenerationMerge: true,
+    dirtyEnvelope: { reason: "FULL" },
+  }), { workKind: "full-trigger" });
+  assert.deepEqual(resolutionWakeOptions({
+    queuedGenerationMerge: true,
+    dirtyEnvelope: {
+      reason: "STEP_INPUT_CHANGED",
+      dirtyUserIds: ["user-1"],
+      dirtyParticipantIds: ["participant-1"],
+      powerupTypes: [],
+      priority: "COALESCE",
+    },
+  }), { workKind: "ordinary" });
+  assert.deepEqual(resolutionWakeOptions({
+    queuedGenerationMerge: true,
+    dirtyEnvelope: null,
+  }), { workKind: "full-trigger" });
+  assert.deepEqual(resolutionWakeOptions({
+    queuedGenerationMerge: true,
+    dirtyEnvelope: {
+      reason: "FUTURE_REASON",
+      dirtyUserIds: [],
+      dirtyParticipantIds: [],
+      powerupTypes: [],
+      priority: "IMMEDIATE",
+    },
+  }), { workKind: "full-trigger" });
+  assert.deepEqual(resolutionWakeOptions({
+    queuedGenerationMerge: false,
+    dirtyEnvelope: { reason: "FULL" },
+  }), { workKind: "ordinary" });
 });
 
 test("display refresh admission coalesces a race across workers and fails open", async () => {

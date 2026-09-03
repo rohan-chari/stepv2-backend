@@ -92,7 +92,9 @@ async function enqueueWorkRaceIds(client, work, raceIds, current, participantIds
     queuePriority: "MAINTENANCE",
   }, client);
   if (jobs.length) {
-    const publish = () => redisCache.publishDurableQueueWakeup("resolution");
+    const publish = () => redisCache.publishDurableQueueWakeup(
+      "resolution", { workKind: "ordinary" },
+    );
     if (isInPrismaTransactionScope()) await deferUntilAfterCommit(publish);
     else await publish();
   }

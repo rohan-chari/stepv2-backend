@@ -480,8 +480,12 @@ function getSubscriber() {
           return;
         }
         if (!message || typeof message.queue !== "string") return;
+        const wake = { queue: message.queue };
+        if (["ordinary", "full-trigger"].includes(message.workKind)) {
+          wake.workKind = message.workKind;
+        }
         for (const handler of s.durableQueueWakeHandlers) {
-          try { handler({ queue: message.queue }); }
+          try { handler(wake); }
           catch (error) { logOnce("durable-queue-wake-handler", error); }
         }
         return;
@@ -617,7 +621,7 @@ async function subscribeNotificationWakeup(handler) {
   };
 }
 
-async function publishDurableQueueWakeup(queue) {
+async function publishDurableQueueWakeup(queue, options = {}) {
   try {
     if (typeof queue !== "string" || !/^[a-z0-9_-]{1,64}$/.test(queue)) return false;
     const client = await readyClient();
@@ -628,7 +632,11 @@ async function publishDurableQueueWakeup(queue) {
         );
       return false;
     }
-    await client.publish(durableQueueWakeChannelName(), JSON.stringify({ queue }));
+    const message = { queue };
+    if (["ordinary", "full-trigger"].includes(options?.workKind)) {
+      message.workKind = options.workKind;
+    }
+    await client.publish(durableQueueWakeChannelName(), JSON.stringify(message));
     return true;
   } catch (error) {
     if (typeof queue === "string" && /^[a-z0-9_-]{1,64}$/.test(queue)) {

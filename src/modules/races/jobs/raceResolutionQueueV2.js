@@ -3271,7 +3271,15 @@ function scheduleRaceResolutionWorkerV2(dependencies = {}) {
     },
     subscribeWake: dependencies.subscribeWake || redisCache.subscribeDurableQueueWakeup,
     logger,
-    onSignal: () => worker.beginDrain?.(),
+    onSignal: (reason, signal) => {
+      // Only a new, explicitly classified ordinary wake can prove that there
+      // is no append-only FULL-trigger work to promote. Legacy publishers,
+      // unknown classifications, startup, due, and fallback recovery retain
+      // the conservative scan so mixed-version deployments cannot strand work.
+      if (reason !== "wake" || signal?.workKind !== "ordinary") {
+        worker.beginDrain?.();
+      }
+    },
     setTimer: dependencies.setDueTimer,
     clearTimer: dependencies.clearDueTimer,
   });

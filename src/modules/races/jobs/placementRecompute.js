@@ -164,7 +164,9 @@ function buildRecomputePlacements(dependencies = {}) {
       async recoverSucceededGenerations() { return { placementJobs: 0, resolutionJobs: 0 }; },
     } : defaultRacePlacementTransitionJob);
   const publishResolutionWake = dependencies.publishResolutionWake ||
-    (() => redisCache.publishDurableQueueWakeup("resolution"));
+    (() => redisCache.publishDurableQueueWakeup(
+      "resolution", { workKind: "ordinary" },
+    ));
   const publishPlacementWake = dependencies.publishPlacementWake ||
     (() => redisCache.publishDurableQueueWakeup("placement"));
   const effectModel = dependencies.RaceActiveEffect || defaultRaceActiveEffect;

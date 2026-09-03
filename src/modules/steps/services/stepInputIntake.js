@@ -178,6 +178,7 @@ function buildStepInputIntake(dependencies = {}) {
 
     let jobs = [];
     let activeRaceCount = 0;
+    let hasFullScopeResolutionWork = false;
     if (scoringChanged || repairRequired) {
       const races = await measureStepTelemetryPhase("active_race", () => tx.$queryRawUnsafe(
         `SELECT race.id AS "raceId",participant.id AS "participantId",
@@ -192,11 +193,13 @@ function buildStepInputIntake(dependencies = {}) {
       const dirtyEnvelopeByRaceId = new Map();
       const largeRaceScopeByRaceId = new Map();
       for (const race of races) {
-        dirtyEnvelopeByRaceId.set(race.raceId, buildStepInputDirtyEnvelope({
+        const dirtyEnvelope = buildStepInputDirtyEnvelope({
           userId,
           participantId: race.participantId,
           maxParticipants: race.maxParticipants,
-        }));
+        });
+        dirtyEnvelopeByRaceId.set(race.raceId, dirtyEnvelope);
+        if (dirtyEnvelope.reason === "FULL") hasFullScopeResolutionWork = true;
         if (Number(race.maxParticipants) > PARTICIPANT_CAP && race.participantId) {
           largeRaceScopeByRaceId.set(race.raceId, {
             userId,
@@ -266,6 +269,7 @@ function buildStepInputIntake(dependencies = {}) {
       completedAt: canonicalInput.dbNow,
       jobs,
       activeRaceCount,
+      hasFullScopeResolutionWork,
       lastStepSyncStamped: true,
     };
   }

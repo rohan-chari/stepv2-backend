@@ -9,6 +9,9 @@ const {
 } = require("../../../shared/observability/capacityPhaseMetrics");
 const redisCache = require("../../../shared/cache/redisCache");
 const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
+const {
+  normalizeDirtyEnvelope,
+} = require("./raceResolutionReasonRegistry");
 
 const DISPLAY_REFRESH_ADMISSION_MS = 1000;
 const CLAIM_DISPLAY_REFRESH_LUA = `
@@ -36,6 +39,15 @@ function normalizeResolutionPriority({ reason, priority, queuePriority = null })
     return { priority: "COALESCE", queuePriority: "MAINTENANCE" };
   }
   return { priority, queuePriority };
+}
+
+function resolutionWakeOptions({ queuedGenerationMerge, dirtyEnvelope }) {
+  const normalized = normalizeDirtyEnvelope(dirtyEnvelope);
+  return {
+    workKind: queuedGenerationMerge === true && normalized.reasons.includes("FULL")
+      ? "full-trigger"
+      : "ordinary",
+  };
 }
 
 function enqueueCounts(rows, at, { queuedGenerationMerge = false } = {}) {
@@ -186,6 +198,10 @@ async function enqueueRaceResolution(
       priority: "IMMEDIATE",
     };
   }
+  const wakeOptions = resolutionWakeOptions({
+    queuedGenerationMerge,
+    dirtyEnvelope: rollout.dirtyEnvelope,
+  });
   if (tx) {
     result = await capacity.measurePhase("persist", () =>
       RaceResolutionJobV2.enqueue(
@@ -195,7 +211,8 @@ async function enqueueRaceResolution(
     );
     capacityOutcome = "success";
     if (result && isInPrismaTransactionScope()) {
-      await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("resolution"));
+      await deferUntilAfterCommit(() =>
+        redisCache.publishDurableQueueWakeup("resolution", wakeOptions));
     }
     return result;
   }
@@ -211,7 +228,7 @@ async function enqueueRaceResolution(
       })
     );
     capacityOutcome = "success";
-    if (result) await redisCache.publishDurableQueueWakeup("resolution");
+    if (result) await redisCache.publishDurableQueueWakeup("resolution", wakeOptions);
     return result;
   } catch (error) {
     console.error(`[RACE_RESOLUTION_V2] enqueue failed (race ${raceId}):`, error);
@@ -243,6 +260,7 @@ async function enqueueRaceResolutionForUser(
   let capacityOutcome = "error";
   let result = [];
   let queuedGenerationMerge = false;
+  let wakeOptions = { workKind: "ordinary" };
   try {
   const load = async () => {
     if (Array.isArray(reconciledRaces)) {
@@ -278,6 +296,10 @@ async function enqueueRaceResolutionForUser(
         });
       }
     }
+    wakeOptions = resolutionWakeOptions({
+      queuedGenerationMerge,
+      dirtyEnvelope: rollout.dirtyEnvelope,
+    });
     return {
       raceIds: races.map((race) => race.id),
       dirtyEnvelopeByRaceId,
@@ -301,7 +323,8 @@ async function enqueueRaceResolutionForUser(
     );
     capacityOutcome = "success";
     if (result.length && isInPrismaTransactionScope()) {
-      await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("resolution"));
+      await deferUntilAfterCommit(() =>
+        redisCache.publishDurableQueueWakeup("resolution", wakeOptions));
     }
     return result;
   }
@@ -320,7 +343,9 @@ async function enqueueRaceResolutionForUser(
       })
     );
     capacityOutcome = "success";
-    if (result.length) await redisCache.publishDurableQueueWakeup("resolution");
+    if (result.length) {
+      await redisCache.publishDurableQueueWakeup("resolution", wakeOptions);
+    }
     return result;
   } catch (error) {
     console.error(`[RACE_RESOLUTION_V2] enqueue failed (user ${userId}):`, error);
@@ -338,5 +363,6 @@ module.exports = {
   claimDisplayRefreshAdmission,
   normalizeResolutionPriority,
   enqueueRaceResolution,
+  resolutionWakeOptions,
   enqueueRaceResolutionForUser,
 };

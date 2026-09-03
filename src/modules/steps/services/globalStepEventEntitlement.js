@@ -1018,7 +1018,9 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
         queuePriority: "LIVE",
       }, tx);
       if (resolutionJobs.length) {
-        await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("resolution"));
+        await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup(
+          "resolution", { workKind: "ordinary" },
+        ));
       }
     }
     if (activeIds.length) await tx.globalStepEventEntitlement.updateMany({

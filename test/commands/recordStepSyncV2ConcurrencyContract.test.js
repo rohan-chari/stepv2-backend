@@ -2,6 +2,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {
+  resolutionWakeOptions,
+} = require("../../src/modules/steps/commands/recordStepSyncV2");
 
 test("step sync uses lock-and-revalidate semantics without broad repeatable-read snapshots", () => {
   const source = fs.readFileSync(
@@ -28,5 +31,20 @@ test("step sync uses lock-and-revalidate semantics without broad repeatable-read
     source,
     /const existing = await stepSyncRequestModel\.findByKey\(userId, idempotencyKey\)/,
     "a fresh unique idempotency key must not pay for a preflight read before its atomic insert",
+  );
+});
+
+test("step sync classifies durable resolution wakes from committed intake scope", () => {
+  assert.deepEqual(
+    resolutionWakeOptions({ hasFullScopeResolutionWork: false }),
+    { workKind: "ordinary" },
+  );
+  assert.deepEqual(
+    resolutionWakeOptions({ hasFullScopeResolutionWork: true }),
+    { workKind: "full-trigger" },
+  );
+  assert.deepEqual(
+    resolutionWakeOptions(null),
+    {},
   );
 });

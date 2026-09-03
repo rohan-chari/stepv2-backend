@@ -82,10 +82,10 @@ function createPostgresWakeCoordinator({
     dueTimer.unref?.();
   }
 
-  function requestDrain(_reason = "wake") {
+  function requestDrain(_reason = "wake", signal = null) {
     if (stopped) return Promise.resolve();
     try {
-      onSignal(_reason);
+      onSignal(_reason, signal);
     } catch (error) {
       logger.error(`[DURABLE_QUEUE:${queue}] signal hook failed`, error);
     }
@@ -163,7 +163,7 @@ function createPostgresWakeCoordinator({
       try {
         unsubscribe = await subscribeWake((message) => {
           if (!message || !message.queue || message.queue === queue) {
-            requestDrain("wake");
+            requestDrain("wake", message);
           }
         });
       } catch (error) {

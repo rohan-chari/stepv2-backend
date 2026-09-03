@@ -175,3 +175,61 @@ test("fallback recovery re-arms FULL-trigger promotion during a saturated drain"
   await scheduled.coordinator.whenIdle();
   await scheduled.stop();
 });
+
+test("classified ordinary wakes drain resolution work without scanning FULL triggers", async () => {
+  let wake = null;
+  let beginDrains = 0;
+  const scheduled = scheduleRaceResolutionWorkerV2({
+    nodeEnv: "test",
+    processRole: "resolution",
+    worker: {
+      beginDrain() { beginDrains += 1; },
+      async tick() { return 0; },
+      async logQueueLag() {},
+    },
+    appSettings: { async getFlag() { return true; } },
+    RaceResolutionJobV2: { async nextDueAt() { return null; } },
+    StepSyncRequest: { async cleanupExpired() {} },
+    subscribeWake: async (handler) => { wake = handler; return async () => {}; },
+    drainOnStart: false,
+    logger: { log() {}, error() {} },
+    pollIntervalMs: 5_000,
+  });
+  while (!wake) await new Promise((resolve) => setImmediate(resolve));
+
+  wake({ queue: "resolution", workKind: "ordinary" });
+  await scheduled.coordinator.whenIdle();
+
+  assert.equal(beginDrains, 0);
+  await scheduled.stop();
+});
+
+test("classified FULL and legacy wakes conservatively scan FULL triggers", async () => {
+  let wake = null;
+  let beginDrains = 0;
+  const scheduled = scheduleRaceResolutionWorkerV2({
+    nodeEnv: "test",
+    processRole: "resolution",
+    worker: {
+      beginDrain() { beginDrains += 1; },
+      async tick() { return 0; },
+      async logQueueLag() {},
+    },
+    appSettings: { async getFlag() { return true; } },
+    RaceResolutionJobV2: { async nextDueAt() { return null; } },
+    StepSyncRequest: { async cleanupExpired() {} },
+    subscribeWake: async (handler) => { wake = handler; return async () => {}; },
+    drainOnStart: false,
+    logger: { log() {}, error() {} },
+    pollIntervalMs: 5_000,
+  });
+  while (!wake) await new Promise((resolve) => setImmediate(resolve));
+
+  wake({ queue: "resolution", workKind: "full-trigger" });
+  await scheduled.coordinator.whenIdle();
+  wake({ queue: "resolution" });
+  await scheduled.coordinator.whenIdle();
+
+  assert.equal(beginDrains, 2);
+  await scheduled.stop();
+});

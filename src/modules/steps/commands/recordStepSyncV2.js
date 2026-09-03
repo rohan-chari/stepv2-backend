@@ -91,11 +91,20 @@ function buildResponse({ record, sampleCount, jobs, requestedAt, globalEventSumm
   };
 }
 
+function resolutionWakeOptions(intake) {
+  if (typeof intake?.hasFullScopeResolutionWork !== "boolean") return {};
+  return {
+    workKind: intake.hasFullScopeResolutionWork
+      ? "full-trigger"
+      : "ordinary",
+  };
+}
+
 function buildRecordStepSyncV2(dependencies = {}) {
   const publishSummaryWake = dependencies.publishSummaryWake ||
     (() => redisCache.publishDurableQueueWakeup("summary"));
   const publishResolutionWake = dependencies.publishResolutionWake ||
-    (() => redisCache.publishDurableQueueWakeup("resolution"));
+    ((options) => redisCache.publishDurableQueueWakeup("resolution", options));
   const prisma = dependencies.prisma || defaultPrisma;
   const stepSyncRequestModel = dependencies.StepSyncRequest || defaultStepSyncRequestModel;
   const stepInputIntake = dependencies.stepInputIntake || defaultStepInputIntake;
@@ -243,13 +252,16 @@ function buildRecordStepSyncV2(dependencies = {}) {
       response,
       reservationId: reservation.id,
       dailyExisted: intake.dailyExisted,
+      resolutionWakeOptions: resolutionWakeOptions(intake),
       lastStepSyncStamped: intake.lastStepSyncStamped === true,
     };
   }
 
   async function afterCommit(result, { userId, canonical }) {
     await measureStepTelemetryPhase("post_commit", async () => {
-      if (result.response?.raceResolution?.jobId) await publishResolutionWake();
+      if (result.response?.raceResolution?.jobId) {
+        await publishResolutionWake(result.resolutionWakeOptions);
+      }
       if (result.response?.globalEventSummaryWork) await publishSummaryWake();
       await stampAfterCommit({
         userId,
@@ -434,4 +446,5 @@ module.exports = {
   StepSyncCooldownError,
   STEP_INTAKE_SEMANTICS,
   HOME_PULL_COOLDOWN_SECONDS,
+  resolutionWakeOptions,
 };
