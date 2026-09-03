@@ -12,12 +12,16 @@ function classifyAttempt(evidence = {}, config = {}) {
   const thresholds = config.thresholds || {};
   const failures = [];
   const races = config.workload?.name === "authenticated-races-tab-reveal-v1";
+  const racesV2 = races && config.workload?.profileVersion === "2.0.0";
   if (evidence.timedOut === true) failures.push(failure("timeout", true, false, "boolean"));
   const screenEvidenceValid = races
     ? finite(evidence.racesCoreP95Ms) && finite(evidence.racesCoreP99Ms) &&
       finite(evidence.incompleteRacesCoreTransactions) &&
       finite(evidence.incompleteRacesDiscovery) && finite(evidence.incompleteRacesFriends) &&
-      finite(evidence.racesContractErrors)
+      finite(evidence.racesContractErrors) &&
+      (!racesV2 || finite(evidence.racesPayloadContentMismatches) &&
+        finite(evidence.fixtureStateCoverageMissing) &&
+        evidence.generatorCapacityValid === true)
     : finite(evidence.homeP95Ms) && finite(evidence.homeP99Ms) &&
       finite(evidence.incompleteHomeTransactions);
   if (!screenEvidenceValid ||
@@ -65,6 +69,14 @@ function classifyAttempt(evidence = {}, config = {}) {
       }
       if (evidence.racesContractErrors > 0) {
         failures.push(failure("races_contract_error", evidence.racesContractErrors, 0, "count"));
+      }
+      if (racesV2 && evidence.racesPayloadContentMismatches > 0) {
+        failures.push(failure("races_payload_content_mismatch",
+          evidence.racesPayloadContentMismatches, 0, "count"));
+      }
+      if (racesV2 && evidence.fixtureStateCoverageMissing > 0) {
+        failures.push(failure("fixture_state_coverage_missing",
+          evidence.fixtureStateCoverageMissing, 0, "count"));
       }
       const quotaDrift = Number(evidence.racesTabOpen?.scheduler?.quotaDrift);
       const offeredQuotaDrift = Number(evidence.racesTabOpen?.scheduler?.offeredQuotaDrift);

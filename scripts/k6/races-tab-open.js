@@ -2,18 +2,35 @@ import http from "k6/http";
 import exec from "k6/execution";
 import { Counter, Rate, Trend } from "k6/metrics";
 import { SharedArray } from "k6/data";
+import { compareRacesTabProjection, projectRacesTabPayload, PROJECTION_VERSION,
+  REQUIRED_COVERAGE_VARIANTS } from "./races-tab-projection.js";
 
 const fixture = new SharedArray("races-tab-open-fixture", () =>
   [JSON.parse(open(__ENV.K6_FIXTURE_PATH))])[0];
-if (fixture.schema !== "races-tab-open-k6-fixture-v1" ||
+if (fixture.schema !== "races-tab-open-k6-fixture-v2" ||
     fixture.client?.headerProfile !== "current-races-2.3.11-ios-v1") {
   throw new Error("races-tab-open fixture does not match the locked client contract");
+}
+if (!Array.isArray(fixture.users) || fixture.users.length === 0 || fixture.users.some((user) =>
+  typeof user.viewerUserId !== "string" ||
+  user.expectedProjectionVersion !== PROJECTION_VERSION ||
+  !isMap(user.expectedProjection) || !Array.isArray(user.coverageVariants))) {
+  throw new Error("races-tab-open fixture does not contain the v2 expected projection");
 }
 
 const rate = Number(__ENV.K6_RACES_TAB_RATE || 5);
 const measuredSeconds = Number(__ENV.K6_RACES_TAB_MEASUREMENT_SECONDS || 60);
 const cacheOnly = __ENV.K6_RACES_TAB_CACHE_ONLY === "1";
 const userOffset = Number(__ENV.K6_RACES_TAB_USER_OFFSET || 0);
+const identityPoolSize = Number(__ENV.K6_RACES_TAB_IDENTITY_POOL_SIZE || fixture.users.length);
+const attemptId = String(__ENV.K6_RACES_TAB_ATTEMPT_ID || "measurement-1");
+const trafficPhase = String(__ENV.K6_RACES_TAB_PHASE || "measurement");
+if (!Number.isInteger(identityPoolSize) || identityPoolSize < 1 ||
+    userOffset < 0 || userOffset + identityPoolSize > fixture.users.length ||
+    !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(attemptId) ||
+    !["initial-prewarm", "level-warmup", "measurement"].includes(trafficPhase)) {
+  throw new Error("races-tab identity pool or attempt dimensions are invalid");
+}
 const coreP95ThresholdMs = Number(__ENV.K6_RACES_TAB_CORE_P95_MS || 1000);
 const coreP99ThresholdMs = Number(__ENV.K6_RACES_TAB_CORE_P99_MS || 2000);
 const httpErrorRateThreshold = Number(__ENV.K6_RACES_TAB_HTTP_ERROR_RATE || 0.001);
@@ -24,7 +41,7 @@ const vus = Math.max(1, Math.ceil(rate * boundedSessionSeconds * 1.05));
 const expectedSessions = rate * measuredSeconds;
 const expectedBackground = cacheOnly ? 0 : expectedSessions;
 const expectedFriends = cacheOnly ? 0 : Array.from({ length: expectedSessions }, (_, index) =>
-  fixture.users[(index + userOffset) % fixture.users.length].zeroFriends === true)
+  fixture.users[(index % identityPoolSize) + userOffset].zeroFriends === true)
   .filter(Boolean).length;
 
 const started = new Counter("races_tab_sessions_started");
@@ -47,12 +64,19 @@ const schedulerLagMs = new Trend("races_tab_scheduler_lag_ms", true);
 const quotaRejected = new Counter("races_tab_sessions_quota_rejected");
 const endpointResponseBytes = new Trend("races_tab_endpoint_response_bytes", true);
 const sessionFailed = new Rate("races_tab_sessions_failed");
+const contentMismatches = new Counter("races_tab_payload_content_mismatches");
+const mismatchReasons = new Counter("races_tab_payload_mismatch_reasons");
+const coverageVariantSeen = new Counter("races_tab_coverage_variant_seen");
+const contentRows = new Counter("races_tab_content_rows");
 
 const perEndpoint = ["compact-races", "discovery-summary", "friends-summary"];
 const endpointThresholds = Object.fromEntries(perEndpoint.flatMap((endpoint) => [
   [`http_reqs{endpoint:${endpoint},phase:measurement,telemetry:sut}`, ["count>=0"]],
   [`http_req_duration{endpoint:${endpoint},phase:measurement,telemetry:sut}`, ["p(99)<60000"]],
   [`races_tab_endpoint_response_bytes{endpoint:${endpoint},phase:measurement}`, ["max>=0"]],
+]));
+const coverageThresholds = cacheOnly ? {} : Object.fromEntries(REQUIRED_COVERAGE_VARIANTS.map((variant) => [
+  `races_tab_coverage_variant_seen{phase:measurement,variant:${variant}}`, ["count>=1"],
 ]));
 
 export const options = {
@@ -68,6 +92,7 @@ export const options = {
   },
   thresholds: {
     ...endpointThresholds,
+    ...coverageThresholds,
     "races_tab_sessions_started{phase:measurement}": [`count==${expectedSessions}`],
     "races_tab_sessions_offered{phase:measurement}": [`count==${expectedSessions}`],
     "races_tab_sessions_core_refresh_complete{phase:measurement}": ["count>=0"],
@@ -83,6 +108,7 @@ export const options = {
     "races_tab_friends_errors{phase:measurement}": ["count==0"],
     "races_tab_network_errors{phase:measurement}": ["count==0"],
     "races_tab_contract_errors{phase:measurement}": ["count==0"],
+    "races_tab_payload_content_mismatches{phase:measurement}": ["count==0"],
     "races_tab_iteration_deadline_timeouts{phase:measurement}": ["count==0"],
     "races_tab_scheduler_lag_ms{phase:measurement}": ["max<=1000"],
     "races_tab_sessions_failed{phase:measurement}": ["rate<0.0000001"],
@@ -124,6 +150,41 @@ function validFriends(response) {
     Array.isArray(body.pending.incoming) && Array.isArray(body.pending.outgoing));
 }
 
+function coreProjection(value = {}) {
+  return { expectedProjectionVersion: value.expectedProjectionVersion,
+    ordinary: value.ordinary, ordinaryInventoryByRace: value.ordinaryInventoryByRace,
+    ordinaryEffectsByRace: value.ordinaryEffectsByRace,
+    tournaments: value.tournaments,
+    tournamentMatchByTournament: value.tournamentMatchByTournament };
+}
+
+function recordContentComparison(comparison) {
+  if (comparison.matches) return;
+  contentMismatches.add(comparison.mismatchCount);
+  for (const [reason, count] of Object.entries(comparison.mismatchCounts)) {
+    mismatchReasons.add(count, { reason });
+  }
+}
+
+function recordProjectionTotals(projection) {
+  for (const [bucket, rows] of Object.entries(projection.ordinary || {})) {
+    contentRows.add(rows.length, { family: "ordinary", state: bucket });
+  }
+  for (const [bucket, rows] of Object.entries(projection.tournaments || {})) {
+    contentRows.add(rows.length, { family: "tournament", state: bucket });
+    for (const row of rows) contentRows.add(1,
+      { family: "tournament_render", state: row.renderState || "unknown" });
+  }
+  contentRows.add((projection.ordinaryInventoryByRace || []).length,
+    { family: "ordinary_inventory", state: "rows" });
+  contentRows.add((projection.ordinaryEffectsByRace || []).length,
+    { family: "ordinary_effect", state: "rows" });
+  contentRows.add((projection.tournamentMatchByTournament || []).length,
+    { family: "tournament_match", state: "rows" });
+  contentRows.add(Number(projection.discovery?.publicRaceCount || 0),
+    { family: "discovery", state: "public_races" });
+}
+
 function headers(user) {
   return {
     Accept: "application/json", Authorization: `Bearer ${user.token}`,
@@ -133,6 +194,8 @@ function headers(user) {
     "X-Release-Channel": fixture.client.releaseChannel,
     "X-Platform": fixture.client.platform,
     "X-Capacity-Run-Id": fixture.runId,
+    "X-Capacity-Attempt-Id": attemptId,
+    "X-Capacity-Phase": trafficPhase,
   };
 }
 
@@ -167,13 +230,20 @@ export async function racesTabOpen() {
   const intendedAt = Number(exec.scenario.startTime) + iteration * (1000 / rate);
   schedulerLagMs.add(Math.max(0, Date.now() - intendedAt));
   const began = Date.now();
-  const user = fixture.users[(exec.scenario.iterationInTest + userOffset) % fixture.users.length];
+  // The pool is sized for the full 31-second deadline. Reuse after one complete
+  // pool traversal is therefore non-overlapping even at the configured rate.
+  const user = fixture.users[(exec.scenario.iterationInTest % identityPoolSize) + userOffset];
   offered.add(1);
   started.add(1);
 
   const core = http.request(...request("/races?view=compact-v1", "compact-races", user));
   observe(core, "compact-races");
-  const coreValid = validCompactRaces(core);
+  const coreBody = parseMap(core) || {};
+  const observedCore = projectRacesTabPayload({ core: coreBody,
+    friendsShouldRequest: user.zeroFriends === true, viewerUserId: user.viewerUserId });
+  const coreComparison = compareRacesTabProjection(coreProjection(user.expectedProjection),
+    coreProjection(observedCore));
+  const coreValid = validCompactRaces(core) && coreComparison.matches;
   coreMs.add(Date.now() - began);
   if (coreValid) coreComplete.add(1);
   if (cacheOnly) {
@@ -206,8 +276,10 @@ export async function racesTabOpen() {
   }
 
   let friendsValid = true;
+  let friendsBody = null;
   if (friendsPromise) {
     const friends = rows[1];
+    friendsBody = parseMap(friends);
     observe(friends, "friends-summary");
     friendsMs.add(Date.now() - friendsBegan);
     friendsValid = validFriends(friends);
@@ -217,10 +289,18 @@ export async function racesTabOpen() {
       if (friends?.status !== 0) contractErrors.add(1, { endpoint: "friends-summary" });
     }
   }
+  const observedProjection = projectRacesTabPayload({ core: coreBody,
+    discovery: parseMap(discovery) || {}, friends: friendsBody,
+    friendsShouldRequest: user.zeroFriends === true, viewerUserId: user.viewerUserId });
+  const contentComparison = compareRacesTabProjection(user.expectedProjection, observedProjection);
+  recordContentComparison(contentComparison);
+  recordProjectionTotals(observedProjection);
+  for (const variant of user.coverageVariants) coverageVariantSeen.add(1, { variant });
   if (!coreValid && core?.status !== 0) contractErrors.add(1, { endpoint: "compact-races" });
   const deadlineExceeded = Date.now() - began > ITERATION_DEADLINE_MS;
   if (deadlineExceeded) deadlineTimeouts.add(1);
-  sessionFailed.add(!coreValid || !discoveryValid || !friendsValid || deadlineExceeded);
+  sessionFailed.add(!coreValid || !discoveryValid || !friendsValid ||
+    !contentComparison.matches || deadlineExceeded);
   completed.add(1);
 }
 

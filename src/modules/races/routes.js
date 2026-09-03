@@ -846,6 +846,17 @@ function createRacesRouter(dependencies = {}) {
             compact: compactRaceListEnabled,
             releaseChannel: req.releaseChannel,
           }),
+          cacheEvidenceDimensions: (() => {
+            const runId = req.get("X-Capacity-Run-Id");
+            const attemptId = req.get("X-Capacity-Attempt-Id");
+            const phase = req.get("X-Capacity-Phase");
+            if (!(process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1") ||
+                !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(runId || "") ||
+                !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(attemptId || "") ||
+                !["initial-prewarm", "level-warmup", "cache-conditioning", "measurement"]
+                  .includes(phase)) return {};
+            return { runId, attemptId, phase };
+          })(),
         }),
         supportsTournaments
           ? getTournamentsForUser(req.user.id, {

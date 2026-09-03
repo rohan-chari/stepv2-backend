@@ -179,7 +179,7 @@ function buildRaceListCache({
     env,
     successEvery: readSuccessEvery,
   });
-  async function getStableMembership({ userId, variant, load }) {
+  async function getStableMembership({ userId, variant, load, evidenceDimensions = null }) {
     const fallback = async (source = "postgres") => {
       const races = projectStableRaces(await load());
       recordLogicalRead({
@@ -188,6 +188,7 @@ function buildRaceListCache({
         outcome: source === "postgres" ? "miss" : source,
         variant: typeof variant === "string" ? variant : "legacy",
         raceCount: races.length,
+        ...(evidenceDimensions || {}),
       });
       return { races, source };
     };
@@ -257,6 +258,7 @@ function buildRaceListCache({
           outcome: "hit",
           variant: safeVariant,
           raceCount: races.length,
+          ...(evidenceDimensions || {}),
         });
         return { races, source: "redis" };
       }

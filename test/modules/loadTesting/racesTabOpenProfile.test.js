@@ -10,6 +10,8 @@ const {
   validDiscoverySummaryBody,
   validSummaryFriendsBody,
 } = require("../../../src/modules/loadTesting/racesTabOpenSession");
+const { projectRacesTabPayload } = require(
+  "../../../src/modules/loadTesting/racesTabOpenProjection");
 
 function response(status, body = {}) {
   return { status, body, timeout: false, unexpectedStatus: false, latencyMs: 1 };
@@ -17,8 +19,11 @@ function response(status, body = {}) {
 
 test("races-tab-open locks the current read-only endpoint and client contract", () => {
   const profile = PROFILES["races-tab-open"];
-  assert.equal(profile.version, "1.0.0");
-  assert.equal(profile.racesTabOpen.schema, "races-tab-open-session-v1");
+  assert.equal(profile.version, "2.0.0");
+  assert.equal(profile.racesTabOpen.schema, "races-tab-open-session-v2");
+  assert.equal(profile.racesTabOpen.expectedProjectionVersion,
+    "races-tab-open-projection-v2");
+  assert.equal(profile.racesTabOpen.requiredCoverageVariants.length, 28);
   assert.equal(profile.racesTabOpen.clientHeaderProfile, "current-races-2.3.11-ios-v1");
   assert.deepEqual(profile.entries.map(({ method, path, query, readOnly }) =>
     ({ method, path, query, readOnly })), [
@@ -166,6 +171,32 @@ test("iteration deadline is measured across core plus the background tail", asyn
         resolved: { publicRaceCount: true, featuredRaces: true, featuredTournaments: true } }) });
   assert.equal(result.coreRefreshMs, 15_000);
   assert.equal(result.deadlineTimedOut, true);
+});
+
+test("v2 session rejects content mismatches even when endpoint shapes are valid", async () => {
+  const expectedCore = { contract: "race-list-compact-v1", active: [{
+    name: "Expected", status: "ACTIVE", creator: { displayName: "Owner" },
+    isCreator: false, participantCount: 2, isTeamRace: false,
+    isFavorite: false, favoritedAt: null, myPlacement: 1, myPlacementHidden: false,
+    slotItems: [], queuedBoxCount: 0, mysteryBoxCount: 0, myActiveEffects: [],
+  }], pending: [], completed: [], tournaments: [] };
+  const discovery = { publicRaceCount: 2, featuredRaces: [], featuredTournaments: [],
+    resolved: { publicRaceCount: true, featuredRaces: true, featuredTournaments: true } };
+  const friends = { contract: "friends-summary-v1", friends: [],
+    pending: { incoming: [], outgoing: [] } };
+  const expectedProjection = projectRacesTabPayload({ core: expectedCore, discovery, friends,
+    friendsShouldRequest: true });
+  const result = await runRacesTabOpenSession({
+    context: { userIndex: 3, zeroFriends: true, expectedProjection,
+      expectedProjectionVersion: "races-tab-open-projection-v2" },
+    requestOne: async ({ entry }) => entry.path === "/races"
+      ? response(200, { ...expectedCore, active: [{ ...expectedCore.active[0], name: "Wrong" }] })
+      : entry.path === "/friends" ? response(200, friends) : response(200, discovery),
+  });
+  assert.equal(result.coreComplete, false);
+  assert.equal(result.content.matches, false);
+  assert.equal(result.content.mismatchCounts.ordinary_field, 1);
+  assert.equal(result.content.samples[0].path, "ordinary.active.0.name");
 });
 
 test("k6 session preserves core-first, parallel background, exact accounting, and bounded deadlines", () => {

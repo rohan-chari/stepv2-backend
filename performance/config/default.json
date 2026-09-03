@@ -20,13 +20,21 @@
     },
     "races-tab-open": {
       "name": "authenticated-races-tab-reveal-v1",
-      "profileVersion": "1.0.0",
+      "profileVersion": "2.0.0",
       "scoreShape": "production",
       "cohortWeight": 1,
       "cohortSize": 5000,
       "friendsCacheAgeSeconds": 5,
       "sessionDeadlineSeconds": 31,
-      "gracefulStopSeconds": 32
+      "gracefulStopSeconds": 32,
+      "minimumMeasuredSessions": 300,
+      "maximumCoverageAugmentationShare": 0.10,
+      "identitySafetyFactor": 1.05,
+      "maximumFixtureIdentities": 5000,
+      "maximumFixtureBytes": 67108864,
+      "maximumRatePerSecond": 76,
+      "generatorCpuPercent": 85,
+      "generatorSchedulerLagP99Ms": 1000
     }
   },
   "topology": {
@@ -41,6 +49,14 @@
     "initialPrewarmSeconds": 30,
     "initialPrewarmRate": 10,
     "initialPrewarmMaxUsers": 300,
+    "racesTabConditioning": {
+      "schema": "races-tab-cache-conditioning-v1",
+      "profile": "diagnostic-balanced-uncalibrated",
+      "hot30Share": 0.34,
+      "hot15Share": 0.33,
+      "expired300Share": 0.33,
+      "maximumSeconds": 30
+    },
     "raceListTargetMix": "calibration-required"
   },
   "background": { "mode": "normal" },

@@ -217,6 +217,11 @@ function createApp(dependencies = {}) {
     }
     const response = { status: "ok", redis };
     if (process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1") {
+      const capacitySettings = dependencies.appSettings || appSettings;
+      const racesTabSettings = Object.fromEntries(await Promise.all([
+        "apiRaceListCompactV1Enabled", "redisCacheRaceListEnabled",
+        "raceListSqlSummaryV1Enabled",
+      ].map(async (key) => [key, (await capacitySettings.getFlag(key)) === true])));
       const eventLoop = {
         p99Ms: capacityEventLoopDelay ? capacityEventLoopDelay.percentile(99) / 1e6 : 0,
         maxMs: capacityEventLoopDelay ? capacityEventLoopDelay.max / 1e6 : 0,
@@ -236,6 +241,7 @@ function createApp(dependencies = {}) {
         eventLoop,
         providerCensus: readCapacityProviderCensus(),
         resolutionWorker: readCapacityResolutionReadiness(),
+        racesTabSettings,
       };
     }
     res.json(response);

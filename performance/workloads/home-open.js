@@ -165,6 +165,37 @@ function wait(child) {
   });
 }
 
+function startProcessCpuSampler(pid, { intervalMs = 250 } = {}) {
+  const samples = [];
+  const pending = new Set();
+  const sample = () => {
+    const operation = new Promise((resolve) => {
+      const child = spawn("ps", ["-p", String(pid), "-o", "%cpu="]);
+      let output = "";
+      child.stdout.on("data", (chunk) => { output += chunk; });
+      child.once("error", () => resolve());
+      child.once("close", () => {
+        const value = Number(output.trim());
+        if (Number.isFinite(value) && value >= 0) samples.push(value);
+        resolve();
+      });
+    });
+    pending.add(operation); operation.finally(() => pending.delete(operation));
+  };
+  sample();
+  const timer = setInterval(sample, intervalMs);
+  timer.unref?.();
+  return async () => {
+    clearInterval(timer);
+    sample();
+    await Promise.all([...pending]);
+    return { sampleCount: samples.length,
+      cpuPercentAverage: samples.length
+        ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null,
+      cpuPercentMax: samples.length ? Math.max(...samples) : null };
+  };
+}
+
 function classifyK6Exit({ code, signal = null, summaryExists } = {}) {
   if (!summaryExists) throw new Error("k6 did not produce its summary");
   if (code === 0 && signal == null) return { thresholdsFailed: false, code: 0, signal: null };
@@ -202,11 +233,15 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   collector?.start();
   let exit;
   let endedAt;
+  let generatorCpu = { sampleCount: 0, cpuPercentAverage: null, cpuPercentMax: null };
   try {
-    exit = await wait(spawn("k6", ["run", ...(phase === "measurement" ? [] : ["--no-thresholds"]),
+    const k6 = spawn("k6", ["run", ...(phase === "measurement" ? [] : ["--no-thresholds"]),
       ...args, path.join(repository, scriptPath)], {
       cwd: repository, env: { ...environment, ...variables }, stdio: "inherit",
-    }));
+    });
+    const stopCpuSampler = startProcessCpuSampler(k6.pid);
+    exit = await wait(k6);
+    generatorCpu = await stopCpuSampler();
     endedAt = new Date();
   } finally { if (collector) await collector.finish(); }
   const k6Exit = classifyK6Exit({ ...exit, summaryExists: fs.existsSync(summaryPath) });
@@ -232,7 +267,9 @@ async function runRawK6({ repository, phase, rate, measurementSeconds, fixturePa
   runtime.resources.topSqlMaterial = topSql.length > 0;
   runtime.resources.topSql = topSql;
   runtime.resources.diagnostics = diagnostics;
-  return { summary: JSON.parse(fs.readFileSync(summaryPath, "utf8")), generator: { k6Exit },
+  runtime.resources.generatorCpuPercent = generatorCpu.cpuPercentMax;
+  return { summary: JSON.parse(fs.readFileSync(summaryPath, "utf8")),
+    generator: { k6Exit, cpu: generatorCpu },
     binding: metricEpoch ? { measurementId: metricEpoch.measurementId } : null,
     metrics: runtime, resources: runtime.resources, summaryPath, metricsPath };
 }

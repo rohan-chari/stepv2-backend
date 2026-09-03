@@ -120,6 +120,10 @@ test("tournament advancement guards every surviving user before the tournament r
 // production helpers so the guard cannot satisfy itself.
 const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
+  "src/modules/loadTesting/racesTabOpenFixtures.js": [
+    "raceParticipant.deleteMany",
+    "tournamentParticipant.deleteMany",
+  ],
   "src/modules/notifications/dailyMover.js": ["participantModel.update", "raw.race_participants.update"],
   "src/modules/powerups/commands/openMysteryBox.js": ["participantModel.update"],
   "src/modules/powerups/commands/expireEffects.js": ["raceParticipant.updateMany"],
@@ -413,6 +417,7 @@ const INDIRECT_MEMBERSHIP_LOCK_OWNERS = {
 
 const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/loadTesting/fixtures.js",
+  "src/modules/loadTesting/racesTabOpenFixtures.js",
   "src/modules/notifications/dailyMover.js",
   "src/modules/powerups/commands/openMysteryBox.js",
   "src/modules/powerups/commands/expireEffects.js",

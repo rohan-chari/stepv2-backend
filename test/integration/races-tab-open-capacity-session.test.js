@@ -5,12 +5,16 @@ const os = require("node:os");
 const path = require("node:path");
 const { before, beforeEach, describe, it } = require("node:test");
 
-const { buildRacesTabFixtureFile, normalizeRacesTabEvidence } =
+const { buildRacesTabFixtureFile, captureExpectedProjections, normalizeRacesTabEvidence } =
   require("../../performance/workloads/races-tab-open");
 const { runRacesTabOpenSession } = require("../../src/modules/loadTesting/racesTabOpenSession");
 const { cleanupRacesTabOpenFixtures, createRacesTabOpenFixtures } =
   require("../../src/modules/loadTesting/racesTabOpenFixtures");
 const { appSettings } = require("../../src/shared/config/appSettings");
+const { projectRacesTabPayload } = require(
+  "../../src/modules/loadTesting/racesTabOpenProjection");
+const { REQUIRED_COVERAGE_VARIANTS } = require(
+  "../../src/modules/loadTesting/racesTabOpenProjection");
 const { cleanDatabase, createTestUser, getSharedServer, prisma } = require("./setup");
 
 let server;
@@ -76,7 +80,11 @@ describe("Races-tab capacity session public HTTP contract", () => {
       addresseeId: source[1].user.id, status: "ACCEPTED" } });
     const fixture = await createRacesTabOpenFixtures({ prisma,
       runId: "races-fixture-integration", users: 12, arrivalRate: 5,
-      env: { ...process.env, DATABASE_URL: databaseUrl } });
+      env: { ...process.env, DATABASE_URL: databaseUrl }, minimumMeasuredSessions: 12,
+      maximumCoverageAugmentationShare: 1,
+      requiredCoverageVariants: ["ordinary_classic_active"],
+      materializeFullPageFixtures: async () => ({ manifestIds: {}, naturallyGenerated: {},
+        augmented: {}, sourceZeroVariants: [] }) });
     try {
       assert.equal(fixture.users.filter((user) => user.zeroFriends).length, 4);
       for (const zeroFriends of [true, false]) {
@@ -101,6 +109,55 @@ describe("Races-tab capacity session public HTTP contract", () => {
     assert.equal(await prisma.user.count(), 3);
   });
 
+  it("materializes and reconciles the complete v2 API-backed page graph", async () => {
+    const databaseUrl = process.env.DATABASE_URL;
+    assert.match(new URL(databaseUrl).pathname.slice(1), /_test$/);
+    const source = await Promise.all([0, 1, 2].map((index) =>
+      createTestUser({ displayName: `V2 source ${index}` })));
+    await prisma.friendship.create({ data: { requesterId: source[0].user.id,
+      addresseeId: source[1].user.id, status: "ACCEPTED" } });
+    const fixture = await createRacesTabOpenFixtures({ prisma,
+      runId: "races-v2-graph-integration", users: 28, arrivalRate: 5,
+      env: { ...process.env, DATABASE_URL: databaseUrl }, minimumMeasuredSessions: 28,
+      maximumCoverageAugmentationShare: 1 });
+    try {
+      await captureExpectedProjections({ fixture, baseUrl: server.baseUrl,
+        runId: "races-v2-graph-integration", concurrency: 8 });
+      assert.deepEqual(new Set(fixture.users.flatMap((row) => row.coverageVariants)),
+        new Set(REQUIRED_COVERAGE_VARIANTS));
+      const projections = fixture.users.map((row) => row.expectedProjection);
+      const tournamentStates = new Set(projections.flatMap((projection) =>
+        Object.values(projection.tournaments).flat().map((row) => row.renderState)));
+      assert.deepEqual(tournamentStates,
+        new Set(["invite", "lobby", "between_rounds", "live_match", "eliminated",
+          "champion", "completed_non_champion"]));
+      assert.ok(projections.some((projection) => Object.values(projection.ordinary).flat()
+        .some((row) => row.kind === "team" && row.maxDurationDays === 14)));
+      assert.ok(projections.some((projection) => projection.ordinaryInventoryByRace
+        .some((row) => row.heldTypedItems.length > 0)));
+      assert.ok(projections.some((projection) => projection.ordinaryEffectsByRace
+        .some((row) => Object.keys(row.positive).length > 0)));
+      assert.ok(projections.some((projection) => projection.ordinaryEffectsByRace
+        .some((row) => Object.keys(row.negative).length > 0)));
+      for (const [userIndex, user] of fixture.users.entries()) {
+        const result = await runRacesTabOpenSession({ baseUrl: server.baseUrl,
+          context: user, sequence: userIndex,
+          requestOne: async ({ baseUrl, entry }) => {
+            const response = await fetch(`${baseUrl}${entry.path}${entry.query ? `?${entry.query}` : ""}`, {
+              headers: { ...entry.headers, Authorization: `Bearer ${user.token}` },
+            });
+            return { status: response.status, body: await response.json(), timeout: false,
+              unexpectedStatus: response.status !== 200, latencyMs: 1 };
+          } });
+        assert.equal(result.content.matches, true,
+          `fixture projection mismatch for ${user.coverageVariants.join(",")}: ${JSON.stringify(result.content.samples)}`);
+      }
+    } finally {
+      await cleanupRacesTabOpenFixtures({ prisma, manifest: fixture.manifest });
+    }
+    assert.equal(await prisma.user.count(), 3);
+  });
+
   it("executes the real k6 session and emits exact endpoint/branch metrics", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "races-tab-k6-integration-"));
     const fixturePath = path.join(directory, "fixture.json");
@@ -109,11 +166,19 @@ describe("Races-tab capacity session public HTTP contract", () => {
       const users = await Promise.all([0, 1].map((index) =>
         createTestUser({ displayName: `k6 Viewer ${index}` })));
       const fixture = buildRacesTabFixtureFile({ runId: "races-tab-k6-integration", fixture: {
-        users: users.map((row, index) => ({ token: row.token, zeroFriends: index === 0 })),
+        users: users.map((row, index) => ({ id: row.user.id, token: row.token,
+          zeroFriends: index === 0,
+          expectedProjectionVersion: "races-tab-open-projection-v2",
+          expectedProjection: projectRacesTabPayload({
+            core: { active: [], pending: [], completed: [], tournaments: [] },
+            discovery: { publicRaceCount: 0 },
+            friends: index === 0 ? { contract: "friends-summary-v1", friends: [] } : null,
+            friendsShouldRequest: index === 0, viewerUserId: row.user.id,
+          }), coverageVariants: [] })),
         topology: { zeroFriendsShare: 0.5, friendDistributionSourceHash: "a".repeat(64) },
       } });
       fs.writeFileSync(fixturePath, JSON.stringify(fixture), { mode: 0o600 });
-      const args = ["run", "--quiet",
+      const args = ["run", "--quiet", "--no-thresholds",
         "-e", `K6_BASE_URL=${server.baseUrl}`,
         "-e", `K6_FIXTURE_PATH=${fixturePath}`,
         "-e", `K6_SUMMARY_PATH=${summaryPath}`,

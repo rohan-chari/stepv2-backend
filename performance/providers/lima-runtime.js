@@ -32,6 +32,27 @@ function ownedRedisCommand({ instance, container, password, prefix, operation } 
     container, "redis-cli", "--no-auth-warning", "--raw", "EVAL", script, "0", prefix];
 }
 
+function exactRaceListRedisCommand({ instance, container, password, prefix, userIds,
+  variant, initializeGeneration = false } = {}) {
+  if (!/^step-capacity[a-z0-9_.-]*$/.test(instance || "") || !SAFE_RESOURCE.test(container || "") ||
+      !String(password || "") || !/^capacity:[a-z0-9_.:-]+:$/.test(prefix || "") ||
+      !Array.isArray(userIds) || userIds.length > 5000 ||
+      userIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id)) ||
+      !/^[a-z0-9:._-]{1,128}$/i.test(variant || "")) {
+    throw new Error("exact race-list Redis cleanup requires bounded owned identities");
+  }
+  const script = "local ids=cjson.decode(ARGV[1]); local n=0; for _,id in ipairs(ids) do " +
+    "local gk=ARGV[2]..'v1:user:races:generation:'..id; local g=redis.call('GET',gk) or '0'; " +
+    "local keys={gk,ARGV[2]..'v1:user:races:membership:'..id," +
+    "ARGV[2]..'v1:user:races:completed:'..id..':'..g..':'..ARGV[3]," +
+    "ARGV[2]..'v1:user:races:pending:'..id..':'..g..':'..ARGV[3]}; " +
+    "for _,k in ipairs(keys) do n=n+redis.call('UNLINK',k) end " +
+    "if ARGV[4]=='1' then redis.call('SET',gk,'0') end end; return n";
+  return ["shell", instance, "--", "docker", "exec", "-e", `REDISCLI_AUTH=${password}`,
+    container, "redis-cli", "--no-auth-warning", "--raw", "EVAL", script, "0",
+    JSON.stringify(userIds), prefix, variant, initializeGeneration ? "1" : "0"];
+}
+
 function requestTargetIdentity(url, { timeoutMs = 2_000 } = {}) {
   const parsed = new URL(url);
   if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1") {
@@ -80,6 +101,24 @@ async function targetIdentityCensus(environment, { timeoutMs = 5_000 } = {}) {
     throw new Error("capacity target process identity census is incomplete");
   }
   return { targetResponses: responses, pids: Object.fromEntries(byIdentity) };
+}
+
+function racesTabSettingsReadiness(census) {
+  const latest = new Map();
+  for (const response of census?.targetResponses || []) {
+    const process = response.body?.capacity?.process;
+    if (process?.role === "http") latest.set(String(process.instance), response);
+  }
+  for (const instance of ["0", "1"]) {
+    const settings = latest.get(instance)?.body?.capacity?.racesTabSettings;
+    if (!settings || ["apiRaceListCompactV1Enabled", "redisCacheRaceListEnabled",
+      "raceListSqlSummaryV1Enabled"].some((key) => settings[key] !== true)) {
+      throw new Error(`Races-tab pinned settings are not visible on HTTP worker ${instance}`);
+    }
+  }
+  return { schema: "races-tab-worker-settings-readiness-v1", workers: ["http:0", "http:1"],
+    intended: { apiRaceListCompactV1Enabled: true, redisCacheRaceListEnabled: true,
+      raceListSqlSummaryV1Enabled: true } };
 }
 
 function sha(bytes) { return crypto.createHash("sha256").update(bytes).digest("hex"); }
@@ -400,6 +439,9 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
       }
       return census;
     },
+    async verifyRacesTabSettings({ environment }) {
+      return racesTabSettingsReadiness(await targetIdentityCensus(environment));
+    },
     async resetMetrics({ environment }) {
       const measurementId = `${Date.now()}-${crypto.randomUUID()}`;
       environment.metricEpoch = await resetCapacityDbPoolMeasurements(
@@ -408,6 +450,15 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
       return environment.metricEpoch;
     },
     async collectMetrics({ environment }) { return environment.lastMeasurementMetrics || {}; },
+    async deleteExactRaceListCache({ environment, userIds, variant, initializeGeneration = false }) {
+      return Number(execFileSync("limactl", exactRaceListRedisCommand({
+        instance: environment.state.config.lima_instance,
+        container: environment.state.reset.names.redisContainer,
+        password: environment.processEnvironment.CAPACITY_REDIS_PASSWORD,
+        prefix: environment.processEnvironment.CACHE_ENV_PREFIX, userIds, variant,
+        initializeGeneration,
+      }), { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], timeout: 30_000 }).trim());
+    },
     async clearOwnedCache({ environment }) {
       execFileSync("limactl", ownedRedisCommand({ instance: environment.state.config.lima_instance,
         container: environment.state.reset.names.redisContainer,
@@ -433,6 +484,6 @@ function createLegacyLimaRuntime({ repository, configPath } = {}) {
 }
 
 module.exports = { CHILD_ID, ENVIRONMENT_ID, createLegacyLimaRuntime,
-  environmentRelevantPerformanceConfig, ownedRedisCommand,
+  environmentRelevantPerformanceConfig, exactRaceListRedisCommand, ownedRedisCommand,
   preflightLima, readReusableSnapshotMarker, requestTargetIdentity, reusableBinding,
-  targetIdentityCensus };
+  racesTabSettingsReadiness, targetIdentityCensus };

@@ -16,6 +16,15 @@ function commitFor(repository) {
   catch { return "unknown"; }
 }
 
+function effectiveMeasurementSeconds(config, rate, purpose) {
+  const configured = purpose === "smoke"
+    ? config.smoke.measurementSeconds : config.scan.measurementSeconds;
+  if (config.workload?.name !== "authenticated-races-tab-reveal-v1" ||
+      config.workload?.profileVersion !== "2.0.0") return configured;
+  return Math.max(configured,
+    Math.ceil(Number(config.workload.minimumMeasuredSessions) / Number(rate)));
+}
+
 async function runPerformanceWorkflow({ repository, cli, config, provider, workload,
   writeResult = true, now = Date.now, output = process.stdout, insideProviderLock = false,
   workflowStartedAt = null, getInterruption = () => null } = {}) {
@@ -67,33 +76,43 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
   let workflowError = null;
   try {
     environment = await time("environmentPreparation", () => provider.prepare({ runId: id, cli, config }));
+    if (typeof provider.deleteExactRaceListCache === "function") {
+      environment.deleteExactRaceListCache = (input) => provider.deleteExactRaceListCache(input);
+    }
     await time("workflowValidation", () => provider.validate({ runId: id, cli, config, environment }));
     fixtures = await time("environmentPreparation", () =>
       workload.prepareFixtures({ runId: id, cli, config, environment }));
+    if (config.workload?.name === "authenticated-races-tab-reveal-v1") {
+      if (typeof provider.verifyRacesTabSettings !== "function") {
+        throw new Error("Races-tab workload requires both-worker pinned-setting verification");
+      }
+      fixtures.topology.workerSettingsReadiness = await time("workflowValidation", () =>
+        provider.verifyRacesTabSettings({ environment, config }));
+    }
     if (cli.cache === "warm") {
       await time("initialPrewarm", () => workload.initialPrewarm({ runId: id, cli, config,
         environment, fixtures, seconds: config.cache.initialPrewarmSeconds }));
     }
     const executeRate = async ({ rate, purpose, attempt }) => {
       output.write(`Testing ${rate}/sec${purpose === "failure_confirmation" ? " (confirmation)" : ""}...\n`);
+      const measurementSeconds = effectiveMeasurementSeconds(config, rate, purpose);
       const level = await runLevel({ rate, cacheMode: cli.cache,
         warmupSeconds: cli.cache === "warm" ?
           (purpose === "smoke" ? config.smoke.warmupSeconds : config.scan.warmupSeconds) : 0,
         ceremonyTargetSeconds: config.runtime.perLevelCeremonyTargetSeconds,
         operations: {
           settle: () => provider.settle({ environment, config }),
-          targetedReset: () => workload.targetedReset({ environment, fixtures, config }),
+          targetedReset: () => workload.targetedReset({ rate, purpose, attempt, environment,
+            fixtures, config, deleteExactRaceListCache: environment.deleteExactRaceListCache }),
           liveness: () => provider.liveness({ environment, config }),
           warmup: ({ warmupSeconds }) => workload.warmup({ rate, warmupSeconds,
-            measurementSeconds: purpose === "smoke" ? config.smoke.measurementSeconds :
-              config.scan.measurementSeconds, purpose, environment, fixtures, config }),
+            measurementSeconds, purpose, environment, fixtures, config }),
           nonCacheFillingStabilize: () => provider.liveness({ environment, config }),
           clearOwnedCache: () => provider.clearOwnedCache({ environment, config }),
           verifyOwnedCacheEmpty: () => provider.verifyOwnedCacheEmpty({ environment, config }),
           resetMetrics: () => provider.resetMetrics({ environment, config }),
           measure: () => workload.measure({ rate, purpose, attempt,
-            measurementSeconds: purpose === "smoke" ? config.smoke.measurementSeconds :
-              config.scan.measurementSeconds, environment, fixtures, config }),
+            measurementSeconds, environment, fixtures, config }),
           collectMetrics: () => provider.collectMetrics({ rate, purpose, attempt, environment, config }),
         }, now });
       breakdown.targetedResets += level.timings.targetedResetSeconds;
@@ -109,6 +128,9 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
       const classified = classifyAttempt({ ...level.measurement,
         resources: { ...(level.measurement?.resources || {}), ...(level.metrics?.resources || {}) } }, config);
       levels.push({ rate, purpose, attempt, configuredWarmupSeconds: level.configuredWarmupSeconds,
+        configuredMeasurementSeconds: purpose === "smoke"
+          ? config.smoke.measurementSeconds : config.scan.measurementSeconds,
+        effectiveMeasurementSeconds: measurementSeconds,
         actualWarmupSeconds: level.actualWarmupSeconds,
         warmupBudgetWarning: level.actualWarmupSeconds > level.configuredWarmupSeconds,
         ceremonySeconds: level.ceremonySeconds, ceremonyBudgetWarning: level.ceremonyBudgetWarning,
@@ -196,7 +218,12 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
       .filter(Boolean),
     limitations: ["Lima is regression evidence, not production certification.",
       ...(cli.workload === "races-tab-open" ? [
-        "The first Races-tab profile models active-race count, zero-race users, and the zero-friends branch; pending, completed, invited, tournament, team-race, review-opportunity, and payout-double states are deferred.",
+        ...(config.workload?.profileVersion === "2.0.0" ? [
+          "CANCELLED tournaments are excluded because the current GET /races query omits them; this profile does not claim API-backed coverage for that app render branch.",
+          "Review-opportunity and payout-double flows are off-screen and excluded from the Races-tab capacity gate.",
+        ] : [
+          "Historical profile 1.0.0 models only active-race count, zero-race users, and the zero-friends branch.",
+        ]),
       ] : [])], };
   let reports;
   if (writeResult) {
@@ -215,4 +242,4 @@ async function runPerformanceWorkflow({ repository, cli, config, provider, workl
   return { ...reports, environment, fixtures, failed: Boolean(workflowError), error: workflowError };
 }
 
-module.exports = { runId, runPerformanceWorkflow };
+module.exports = { effectiveMeasurementSeconds, runId, runPerformanceWorkflow };

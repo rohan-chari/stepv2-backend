@@ -187,9 +187,10 @@ contains:
 
 - `ordinary.active[]`, `ordinary.pending[]`, `ordinary.completed[]`, and
   `ordinary.invited[]`: row key, name, status, creator display value,
-  `isCreator`, participant count, classic/team kind, favorite state/order,
-  placement value and hidden state, and the time/status fields used to bucket
-  and render the row;
+  `isCreator`, participant count, caller `myStatus`, `maxDurationDays`,
+  classic/team kind, favorite state/order, raw placement value/hidden state,
+  `myDisplayPlacement`, `placementPrivacyActive`, and the time/status fields
+  used to bucket and render the row;
 - team rows: team size, caller team, both team names, both persisted totals,
   totals `asOf`, and winner team where applicable;
 - `ordinaryInventoryByRace[]`: held typed items, unopened mystery boxes,
@@ -202,6 +203,9 @@ contains:
   display/animal/accessory projection, and one explicit render state from
   `invite`, `lobby`, `between_rounds`, `live_match`, `eliminated`, `champion`,
   or `completed_non_champion`;
+  these rows use the app's action-first shelves: `live_match` is active;
+  `lobby` and `between_rounds` are pending; and `eliminated`, `champion`, and
+  `completed_non_champion` are completed;
 - `tournamentMatchByTournament[]`: current matchup race key, caller
   placement/hidden state, ends-at, round label, per-match inventory, and queued
   boxes. Opponent details and matchup effects are not in this endpoint contract.
@@ -222,6 +226,13 @@ placement, hidden tournament-match placement, tournament-match held typed item,
 tournament-match mystery box, and tournament-match queued box. There are 28
 variants. All API fields that drive these projections have exact type
 and nullability assertions; extra additive API fields remain allowed.
+
+`CANCELLED` is an app render branch but is not a 29th measured variant: the
+current `GET /races` tournament query explicitly excludes cancelled rows. The
+fixture, summary, and report therefore mark it API-unavailable/excluded and do
+not claim measured API-backed coverage for it. Adding cancelled rows to the
+fixture would not exercise that branch without an application API change,
+which is outside this workload.
 
 Every discovery, confirmation, deciding, narrowing, and safe-candidate attempt
 must compare every response to this projection. Exact bucket row keys and
@@ -354,7 +365,7 @@ production telemetry. Until that calibration exists, smoke and diagnostic
 scans may run but safe capacity is unavailable. Cold cache is separate.
 
 Cache construction is deterministic. The measurement pool is partitioned by
-the configured production-shaped logical source target into core-fragment
+the configured versioned conditioning profile into core-fragment
 `hot-15s`, `hot-30s`, and `expired-300s` cohorts. Before every measured attempt,
 the harness deletes only that attempt's exact run-owned measurement identity
 cache keys and calls only the core route at scheduled offsets needed to
@@ -367,6 +378,12 @@ metrics epoch and records worker-log byte offsets. Cache evidence accepts only e
 the current run ID, measurement attempt ID, phase `measurement`, and timestamps
 after that offset/epoch. Startup conditioning, warmup, prior attempts, and
 unrelated worker events cannot contribute to an attempt's cache mix.
+The checked-in first-run partition is labeled
+`diagnostic-balanced-uncalibrated`, not production-shaped. It permits smoke and
+diagnostic scans while `raceListTargetMix` remains `calibration-required`; it
+cannot produce safe capacity. Replacing it with a production-calibrated
+version requires identifier-free calibration evidence and an explicit profile
+version change.
 
 Cleanup deletes the run manifest's rows in dependency order: active effects,
 race powerups, matchup and ordinary race participants, friendships, tournament
@@ -516,6 +533,10 @@ version update rather than silently changing historical comparisons.
   inventory/placement and covers all 28 required variants, including every
   tournament render state, team semantic, identity/accessory/prize field, and
   positive/negative effect branch.
+- Ordinary rows validate `myStatus`, `maxDurationDays`,
+  `placementPrivacyActive`, and `myDisplayPlacement`; tournament rows use the
+  app's action-first shelves. CANCELLED remains explicitly excluded because it
+  is not returned by the current endpoint.
 - The identifier-free source census and generated fixture preserve the locked
   row, participant, shared-membership, bracket, inventory/effect, and response-
   byte joint distributions; source-zero variants are clearly coverage-only.
@@ -573,3 +594,6 @@ version update rather than silently changing historical comparisons.
 - Full-page expansion: replaced the limited active/zero-race profile with a
   versioned complete Races-tab fixture census, per-user payload reconciliation,
   content-distribution reporting, and an explicit no-smoke/no-ladder handoff.
+- Frontend parity pass: added the ordinary duration/status and privacy-display
+  inputs, aligned tournament buckets to action-first UI shelving, and recorded
+  CANCELLED as excluded/non-required because the existing query omits it.

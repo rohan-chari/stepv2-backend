@@ -18,13 +18,21 @@ test("Races-tab config locks the versioned workload and threshold contract", () 
   const config = loadConfig({ repository, mode: "scan", workload: "races-tab-open" });
   assert.deepEqual(config.workload, {
     name: "authenticated-races-tab-reveal-v1",
-    profileVersion: "1.0.0",
+    profileVersion: "2.0.0",
     scoreShape: "production",
     cohortWeight: 1,
     cohortSize: 5000,
     friendsCacheAgeSeconds: 5,
     sessionDeadlineSeconds: 31,
     gracefulStopSeconds: 32,
+    minimumMeasuredSessions: 300,
+    maximumCoverageAugmentationShare: 0.1,
+    identitySafetyFactor: 1.05,
+    maximumFixtureIdentities: 5000,
+    maximumFixtureBytes: 67108864,
+    maximumRatePerSecond: 76,
+    generatorCpuPercent: 85,
+    generatorSchedulerLagP99Ms: 1000,
   });
   assert.equal(config.thresholds.racesCoreP95Ms, 1000);
   assert.equal(config.thresholds.racesCoreP99Ms, 2000);
@@ -33,7 +41,7 @@ test("Races-tab config locks the versioned workload and threshold contract", () 
 });
 
 test("manifest binds the selected workload profile immutably", () => {
-  const workload = { name: "authenticated-races-tab-reveal-v1", profileVersion: "1.0.0" };
+  const workload = { name: "authenticated-races-tab-reveal-v1", profileVersion: "2.0.0" };
   const manifest = buildManifest({ runId: "races-run", mode: "scan", workload });
   assert.deepEqual(manifest.workload, workload);
   assert.equal(Object.prototype.hasOwnProperty.call(manifest, "workload"), true);

@@ -96,8 +96,8 @@ function renderReport(summary) {
       `| ${row.rate}/sec | ${row.unstable ? "UNSTABLE → " : ""}${row.state} | ${row.failures} fail, ${row.passes} pass |`).join("\n")
     : "| — | — | — |";
   const levels = summary.levels.length
-    ? summary.levels.map((row) => `| ${row.rate}/sec | ${isRaces ? row.racesCoreP95Ms ?? "—" : row.homeP95Ms ?? "—"} | ${isRaces ? row.racesCoreP99Ms ?? "—" : row.homeP99Ms ?? "—"} | ${row.httpErrorRate ?? "—"} | ${row.actualWarmupSeconds ?? "—"}/${row.configuredWarmupSeconds ?? "—"} sec |`).join("\n")
-    : "| — | — | — | — | — |";
+    ? summary.levels.map((row) => `| ${row.rate}/sec | ${isRaces ? row.racesCoreP95Ms ?? "—" : row.homeP95Ms ?? "—"} | ${isRaces ? row.racesCoreP99Ms ?? "—" : row.homeP99Ms ?? "—"} | ${row.httpErrorRate ?? "—"} | ${row.actualWarmupSeconds ?? "—"}/${row.configuredWarmupSeconds ?? "—"} sec | ${row.effectiveMeasurementSeconds ?? "—"}/${row.configuredMeasurementSeconds ?? "—"} sec |`).join("\n")
+    : "| — | — | — | — | — | — |";
   const runtime = Object.entries(summary.runtimeBreakdownSeconds)
     .map(([name, value]) => `| ${name} | ${value} |`).join("\n") || "| — | — |";
   const resources = summary.levels.length ? summary.levels.map((row) =>
@@ -122,6 +122,13 @@ function renderReport(summary) {
     `| ${row.rate}/sec | ${row.racesTabOpen?.fixtureZeroFriendsShare ?? "—"} | ${row.racesTabOpen?.fixtureFriendsCacheAgeMs ?? "—"} | ${row.racesTabOpen?.coreResponseBytes?.average ?? "—"}/${row.racesTabOpen?.coreResponseBytes?.p95 ?? "—"} | ${row.racesTabOpen?.scheduler?.lagMs?.p99 ?? "—"} | ${row.racesTabOpen?.scheduler?.offeredQuotaDrift ?? "—"}/${row.racesTabOpen?.scheduler?.quotaDrift ?? "—"}/${row.racesTabOpen?.scheduler?.completionQuotaDrift ?? "—"} | ${row.racesTabOpen?.iterationDeadlineTimeouts ?? "—"} |`).join("\n") : "";
   const racesCache = isRaces ? summary.levels.map((row) =>
     `| ${row.rate}/sec | ${row.racesTabOpen?.cacheSourceMix?.eventCount ?? "—"} | ${JSON.stringify(row.racesTabOpen?.cacheSourceMix?.sources || {})} | ${JSON.stringify(row.racesTabOpen?.cacheSourceMix?.outcomes || {})} | ${row.racesTabOpen?.cacheSourceMix?.unavailableReason || (row.racesTabOpen?.cacheSourceMix?.matchesTarget === true ? "match" : "observed") } |`).join("\n") : "";
+  const v2Races = isRaces && summary.workload?.profileVersion === "2.0.0";
+  const racesContent = v2Races ? summary.levels.map((row) => {
+    const content = row.racesTabOpen?.content || {};
+    const required = summary.fixtureProfile?.coverage?.requiredVariants?.length ?? 28;
+    return `| ${row.rate}/sec | ${content.mismatchCount ?? "—"} | ${content.coverageMissingCount ?? "—"} | ${content.coveredVariants ?? "—"}/${required} | ${JSON.stringify(content.mismatchCounts || {})} | ${JSON.stringify(content.totals || {})} |`;
+  }).join("\n") : "";
+  const modeledStates = summary.fixtureProfile?.modeledStateProfile || {};
   return `# Bara ${isRaces ? "Races Tab" : "Home"} Capacity — ${summary.runId}\n\n` +
     `Status: ${summary.status}; mode: ${summary.mode}; cache: ${summary.cacheMode}; background: ${summary.backgroundMode}.\n\n` +
     `Workload: ${summary.workload?.name || "unknown"}@${summary.workload?.profileVersion || "unknown"}; ` +
@@ -139,11 +146,13 @@ function renderReport(summary) {
     `## FIRST FAILURE\n\n${failureSentence(summary)}\n\n` +
     `## PRIMARY BOTTLENECK\n\n${displayBottleneck(summary.primaryBottleneck)}. This is an evidence-based subsystem inference, separate from the failed capacity criterion.\n\n` +
     `## Rate classifications\n\n| Rate | Classification | Votes |\n|---:|---|---|\n${classifications}\n\n` +
-    `## Level measurements\n\nRate unit: ${capacityLabel}. ${isRaces ? "A tab-open rate is not total HTTP RPS." : ""}\n\n| Rate | ${isRaces ? "Core refresh" : "Home"} p95 ms | ${isRaces ? "Core refresh" : "Home"} p99 ms | HTTP error rate | Warmup actual/configured |\n|---:|---:|---:|---:|---:|\n${levels}\n\n` +
+    `## Level measurements\n\nRate unit: ${capacityLabel}. ${isRaces ? "A tab-open rate is not total HTTP RPS." : ""}\n\n| Rate | ${isRaces ? "Core refresh" : "Home"} p95 ms | ${isRaces ? "Core refresh" : "Home"} p99 ms | HTTP error rate | Warmup actual/configured | Measurement effective/configured |\n|---:|---:|---:|---:|---:|---:|\n${levels}\n\n` +
     (isRaces ? `## Background completion\n\nThe baseline models a typical reveal more than 1 second and less than 60 seconds after Home. Zero-friends fixtures therefore perform the real conditional friends request. Latencies are authoritative tagged HTTP request durations.\n\n| Rate | Discovery start/complete/error | Discovery p95/p99 ms | Friends start/complete/error | Friends p95/p99 ms |\n|---:|---|---:|---|---:|\n${racesBackground || "| — | — | — | — | — |"}\n\n` +
       `## Endpoint fan-out\n\n| Rate | Endpoint | Requests | Observed RPS |\n|---:|---|---:|---:|\n${racesEndpoints || "| — | — | — | — |"}\n\n` : "") +
     (isRaces ? `## Session accounting and fixture branch\n\n| Rate | Zero-friends share | Friends cache age ms | Core bytes avg/p95 | Scheduler lag p99 ms | Offered/started/completed quota drift | Deadline timeouts |\n|---:|---:|---:|---|---:|---|---:|\n${racesAccounting || "| — | — | — | — | — | — | — |"}\n\n` +
-      `Modeled fixture states: ${(summary.fixtureProfile?.modeledStateProfile?.included || []).join(", ") || "unknown"}. Deferred states: ${(summary.fixtureProfile?.modeledStateProfile?.deferred || []).join(", ") || "none recorded"}.\n\n` +
+      `Modeled fixture states: ${(modeledStates.included || []).join(", ") || "unknown"}. ` +
+      `${modeledStates.deferred ? `Deferred states: ${modeledStates.deferred.join(", ") || "none recorded"}.` : `Excluded off-screen or API-unavailable states: ${(modeledStates.excludedOffScreen || []).join(", ") || "none recorded"}.`}\n\n` +
+      (v2Races ? `## Payload content and coverage\n\nContent mismatches and missing required fixture states are hard capacity failures. Additive API fields are tolerated.\n\nContent mismatches: ${summary.levels.reduce((total, row) => total + Number(row.racesTabOpen?.content?.mismatchCount || 0), 0)}. Coverage variants: ${Math.max(0, ...summary.levels.map((row) => Number(row.racesTabOpen?.content?.coveredVariants || 0)))}/${summary.fixtureProfile?.coverage?.requiredVariants?.length ?? 28}.\n\n| Rate | Content mismatches | Coverage missing | Coverage variants | Mismatch reasons | Content totals |\n|---:|---:|---:|---:|---|---|\n${racesContent || "| — | — | — | — | — | — |"}\n\nCANCELLED tournaments are explicitly excluded because the current GET /races query omits them; this profile does not claim API-backed measured coverage for that app render branch.\n\n` : "") +
       `## Race-list cache evidence\n\n| Rate | Events | Sources | Outcomes | Target status |\n|---:|---:|---|---|---|\n${racesCache || "| — | — | — | — | — |"}\n\n` : "") +
     `## Resource evidence\n\n| Rate | PostgreSQL CPU % | Node CPU % | Redis CPU % | DB pool wait p99 ms | Event-loop p99 ms |\n|---:|---:|---:|---:|---:|---:|\n${resources}\n\n` +
     `## Queue evidence\n\n| Rate | Growth items/sec | Insert rate | Process rate |\n|---:|---:|---:|---:|\n${queues}\n\n` +
@@ -167,15 +176,35 @@ function atomicWrite(file, contents) {
   }
 }
 
+function buildRacesMismatchArtifact(summary) {
+  const samples = [];
+  let total = 0;
+  for (const level of summary.levels || []) {
+    total += Number(level.racesTabOpen?.content?.mismatchCount || 0);
+    for (const [reason, count] of Object.entries(
+      level.racesTabOpen?.content?.mismatchCounts || {})) {
+      if (samples.length < 50) samples.push({ rate: level.rate, reason, count: Number(count) });
+    }
+  }
+  return { schema: "races-tab-mismatches-v1", totalMismatchCount: total,
+    samples, sampleLimit: 50, truncated: total > samples.reduce((sum, row) => sum + row.count, 0),
+    redaction: "aggregate-only-no-user-or-race-identifiers" };
+}
+
 function writeReports({ directory, input }) {
   const summary = buildSummary(input);
   const manifestPath = path.join(directory, "manifest.json");
   const summaryPath = path.join(directory, "summary.json");
   const reportPath = path.join(directory, "report.md");
+  const mismatchPath = summary.workload?.name === "authenticated-races-tab-reveal-v1"
+    ? path.join(directory, "races-tab-mismatches.json") : null;
   atomicWrite(manifestPath, `${JSON.stringify(buildManifest(input), null, 2)}\n`);
   atomicWrite(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   atomicWrite(reportPath, renderReport(summary));
-  return { summary, manifestPath, summaryPath, reportPath };
+  if (mismatchPath) atomicWrite(mismatchPath,
+    `${JSON.stringify(buildRacesMismatchArtifact(summary), null, 2)}\n`);
+  return { summary, manifestPath, summaryPath, reportPath, mismatchPath };
 }
 
-module.exports = { atomicWrite, buildManifest, buildSummary, renderReport, writeReports };
+module.exports = { atomicWrite, buildManifest, buildRacesMismatchArtifact, buildSummary,
+  renderReport, writeReports };

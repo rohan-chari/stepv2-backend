@@ -1,4 +1,8 @@
 const { PROFILES } = require("./contract");
+const {
+  compareRacesTabProjection,
+  projectRacesTabPayload,
+} = require("./racesTabOpenProjection");
 
 function isMap(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -26,6 +30,17 @@ function validSummaryFriendsBody(body) {
 function successful(sample) {
   return sample?.timeout !== true && Number(sample?.status) === 200 &&
     sample?.unexpectedStatus !== true;
+}
+
+function coreProjection(value = {}) {
+  return {
+    expectedProjectionVersion: value.expectedProjectionVersion,
+    ordinary: value.ordinary,
+    ordinaryInventoryByRace: value.ordinaryInventoryByRace,
+    ordinaryEffectsByRace: value.ordinaryEffectsByRace,
+    tournaments: value.tournaments,
+    tournamentMatchByTournament: value.tournamentMatchByTournament,
+  };
 }
 
 async function runRacesTabOpenSession({
@@ -58,7 +73,19 @@ async function runRacesTabOpenSession({
 
   const startedAt = clock();
   const coreSample = await request(byPath("/races"));
-  const coreComplete = successful(coreSample) && validCompactRacesBody(coreSample.body);
+  const expectedProjection = context.expectedProjection;
+  const viewerUserId = context.userId || context.id || context.viewerUserId || null;
+  const observedCoreProjection = projectRacesTabPayload({
+    core: coreSample.body,
+    friendsShouldRequest: context.zeroFriends === true,
+    viewerUserId,
+  });
+  const coreContent = expectedProjection
+    ? compareRacesTabProjection(coreProjection(expectedProjection),
+      coreProjection(observedCoreProjection))
+    : { matches: true, mismatchCount: 0, mismatchCounts: {}, samples: [], truncated: false };
+  const coreComplete = successful(coreSample) && validCompactRacesBody(coreSample.body) &&
+    coreContent.matches;
   const coreRefreshMs = Math.max(0, clock() - startedAt);
   if (coreComplete) onCoreComplete({ coreRefreshMs, sample: coreSample });
 
@@ -69,10 +96,22 @@ async function runRacesTabOpenSession({
     discoveryPromise,
     friendsPromise || Promise.resolve(null),
   ]);
+  const observedProjection = projectRacesTabPayload({
+    core: coreSample.body,
+    discovery: discoverySample.body,
+    friends: friendsSample?.body,
+    friendsShouldRequest: friendsSelected,
+    viewerUserId,
+  });
+  const content = expectedProjection
+    ? compareRacesTabProjection(expectedProjection, observedProjection)
+    : coreContent;
+  const discoveryMismatch = Number(content.mismatchCounts.discovery_count || 0) > 0;
+  const friendsMismatch = Number(content.mismatchCounts.friends || 0) > 0;
   const discoveryComplete = successful(discoverySample) &&
-    validDiscoverySummaryBody(discoverySample.body);
+    validDiscoverySummaryBody(discoverySample.body) && !discoveryMismatch;
   const friendsComplete = !friendsSelected || successful(friendsSample) &&
-    validSummaryFriendsBody(friendsSample.body);
+    validSummaryFriendsBody(friendsSample.body) && !friendsMismatch;
   const elapsedMs = Math.max(0, clock() - startedAt);
   return {
     coreComplete,
@@ -82,6 +121,9 @@ async function runRacesTabOpenSession({
       contractError: !discoveryComplete },
     friends: { sample: friendsSample, selected: friendsSelected,
       complete: friendsComplete, contractError: friendsSelected && !friendsComplete },
+    content: { ...content, observedProjection,
+      coverageVariants: Array.isArray(context.coverageVariants)
+        ? [...context.coverageVariants] : [] },
     endpointCounts,
     elapsedMs,
     deadlineTimedOut: elapsedMs > profile.racesTabOpen.iterationDeadlineMs,

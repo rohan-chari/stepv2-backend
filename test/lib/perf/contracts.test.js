@@ -28,6 +28,8 @@ test("Bara perf contracts are versioned and stable", () => {
     "races_contract_error",
     "scheduler_quota_drift",
     "cache_profile_mismatch",
+    "races_payload_content_mismatch",
+    "fixture_state_coverage_missing",
     "dropped_arrivals",
     "worker_restart",
     "db_connection_exhaustion",

@@ -163,12 +163,14 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         outcome: "bounded",
         variant: options.raceListVariant || "legacy",
         raceCount: boundedRaces.length,
+        ...(options.cacheEvidenceDimensions || {}),
       });
       stable = { races: boundedRaces, source: "bounded" };
     } else {
       stable = await cache.getStableMembership({
         userId,
         variant: options.raceListVariant || "legacy",
+        evidenceDimensions: options.cacheEvidenceDimensions,
         load: () => Race.findRaceListStableForUser(
           userId,
           options.extraCompletedRaceIds || [],

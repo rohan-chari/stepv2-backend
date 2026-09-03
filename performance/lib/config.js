@@ -54,7 +54,42 @@ function validateConfig(config, mode) {
   const maximumRate = mode === "smoke" ? config.smoke.rate : Math.max(...config.scan.rates);
   const warmup = mode === "smoke" ? config.smoke.warmupSeconds : config.scan.warmupSeconds;
   const measurement = mode === "smoke" ? config.smoke.measurementSeconds : config.scan.measurementSeconds;
-  if (maximumRate * (warmup + measurement) > cohortSize) {
+  if (config.workload.profileVersion === "2.0.0") {
+    positiveInteger(config.workload.minimumMeasuredSessions,
+      "Races-tab minimum measured sessions", { minimum: 300, maximum: 5000 });
+    if (config.workload.maximumCoverageAugmentationShare !== 0.1) {
+      throw new Error("Races-tab coverage augmentation share must be 0.10");
+    }
+    if (config.workload.identitySafetyFactor !== 1.05) {
+      throw new Error("Races-tab identity safety factor must be 1.05");
+    }
+    positiveInteger(config.workload.maximumFixtureIdentities,
+      "Races-tab maximum fixture identities", { minimum: 1, maximum: 5000 });
+    positiveInteger(config.workload.maximumFixtureBytes,
+      "Races-tab maximum fixture bytes", { minimum: 1, maximum: 67_108_864 });
+    positiveInteger(config.workload.maximumRatePerSecond,
+      "Races-tab maximum rate", { minimum: 1, maximum: 76 });
+    if (maximumRate > config.workload.maximumRatePerSecond) {
+      throw new Error("Races-tab rate exceeds the two-pool identity ceiling");
+    }
+    const poolSize = Math.ceil(maximumRate * config.workload.sessionDeadlineSeconds *
+      config.workload.identitySafetyFactor);
+    if (2 * poolSize > Math.min(cohortSize, config.workload.maximumFixtureIdentities)) {
+      throw new Error("Races-tab fixture is too small for disjoint stabilization and measurement pools");
+    }
+    if (!(config.workload.generatorCpuPercent > 0 && config.workload.generatorCpuPercent <= 85)) {
+      throw new Error("Races-tab generator CPU gate must be at most 85 percent");
+    }
+    positiveInteger(config.workload.generatorSchedulerLagP99Ms,
+      "Races-tab generator scheduler lag p99", { maximum: 1000 });
+    const conditioning = config.cache?.racesTabConditioning;
+    if (conditioning?.schema !== "races-tab-cache-conditioning-v1" ||
+        conditioning.maximumSeconds > 30 ||
+        Math.abs(Number(conditioning.hot30Share) + Number(conditioning.hot15Share) +
+          Number(conditioning.expired300Share) - 1) > 1e-9) {
+      throw new Error("Races-tab cache conditioning profile is invalid");
+    }
+  } else if (maximumRate * (warmup + measurement) > cohortSize) {
     throw new Error("screen workload cohort is too small to separate warmup and measurement users");
   }
   if (config.scan.confirmBoundaryFailure !== true ||

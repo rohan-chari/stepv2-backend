@@ -3,9 +3,19 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { loadConfig } = require("../../../performance/lib/config");
-const { runPerformanceWorkflow } = require("../../../performance/lib/workflow");
+const { effectiveMeasurementSeconds, runPerformanceWorkflow } = require(
+  "../../../performance/lib/workflow");
 
 const repository = path.resolve(__dirname, "../../..");
+
+test("Races v2 attempts extend only enough to measure 300 sessions", () => {
+  const config = loadConfig({ repository, mode: "scan", workload: "races-tab-open" });
+  assert.equal(effectiveMeasurementSeconds(config, 2, "discovery"), 150);
+  assert.equal(effectiveMeasurementSeconds(config, 5, "discovery"), 60);
+  assert.equal(effectiveMeasurementSeconds(config, 30, "discovery"), 60);
+  const home = loadConfig({ repository, mode: "scan" });
+  assert.equal(effectiveMeasurementSeconds(home, 2, "discovery"), 60);
+});
 
 test("scan prepares and validates once, prewarms once, and reuses one environment", async () => {
   const config = loadConfig({ repository, mode: "scan", overrides: {

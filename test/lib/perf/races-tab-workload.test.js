@@ -6,27 +6,118 @@ const test = require("node:test");
 
 const {
   buildRacesTabFixtureFile,
+  captureExpectedProjections,
+  conditionMeasurementCache,
   compareRaceListCacheTarget,
   createRacesTabOpenWorkload,
+  identityPoolSize,
+  measurementIdentityOffset,
   normalizeRacesTabEvidence,
   raceListCacheEvidenceFromLog,
 } = require("../../../performance/workloads/races-tab-open");
+
+test("v2 identity pools use the locked deadline factor and remain disjoint", () => {
+  const config = { workload: { sessionDeadlineSeconds: 31, identitySafetyFactor: 1.05 } };
+  assert.equal(identityPoolSize({ rate: 5, config }), 163);
+  assert.equal(identityPoolSize({ rate: 76, config }), 2474);
+  assert.ok(2 * identityPoolSize({ rate: 76, config }) <= 5000);
+  assert.equal(measurementIdentityOffset({ ...config, scan: { rates: [5, 30] } }), 977);
+});
+
+test("expected projections are captured once from the prepared target without IDs in content", async () => {
+  const fixture = { users: [{ id: "viewer-a", token: "token-a", zeroFriends: true },
+    { id: "viewer-b", token: "token-b", zeroFriends: false }] };
+  const calls = [];
+  await captureExpectedProjections({ fixture, baseUrl: "http://127.0.0.1:3000",
+    runId: "races-run", concurrency: 2, fetchImpl: async (url, options) => {
+      calls.push({ url, authorization: options.headers.Authorization });
+      return { status: 200, json: async () => url.includes("discovery-summary")
+        ? { publicRaceCount: 3 }
+        : { contract: "race-list-compact-v1", active: [], pending: [], completed: [],
+          tournaments: [] } };
+    } });
+  assert.equal(calls.length, 4);
+  assert.equal(fixture.users[0].expectedProjection.discovery.publicRaceCount, 3);
+  assert.equal(fixture.users[0].expectedProjection.friends.shouldRequest, true);
+  assert.equal(fixture.users[1].expectedProjection.friends.shouldRequest, false);
+  assert.doesNotMatch(JSON.stringify(fixture.users[0].expectedProjection), /viewer-a/);
+});
+
+test("per-attempt cache conditioning uses exact measurement identities and bounded ages", async () => {
+  const users = Array.from({ length: 400 }, (_, index) => ({
+    id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, token: `t${index}`,
+  }));
+  const deleted = [];
+  const requested = [];
+  const sleeps = [];
+  const result = await conditionMeasurementCache({ rate: 5, purpose: "discovery", attempt: 2,
+    environment: { baseUrl: "http://127.0.0.1", runId: "run-1" }, fixtures: { users },
+    config: { workload: { sessionDeadlineSeconds: 31, identitySafetyFactor: 1.05 },
+      scan: { rates: [5] }, cache: { racesTabConditioning: {
+        schema: "races-tab-cache-conditioning-v1", profile: "test",
+        hot30Share: 0.34, hot15Share: 0.33, expired300Share: 0.33, maximumSeconds: 30,
+      } } },
+    deleteExact: async (input) => (deleted.push(input), 12),
+    fetchImpl: async (url, options) => (requested.push({ url, headers: options.headers }),
+      { status: 200, json: async () => ({}) }),
+    sleep: async (ms) => sleeps.push(ms) });
+  assert.equal(deleted[0].userIds.length, 163);
+  assert.equal(requested.length,
+    result.cohorts.hot30Seconds + result.cohorts.hot15Seconds);
+  assert.deepEqual(sleeps, [14_000, 15_000]);
+  assert.equal(requested[0].headers["X-Capacity-Attempt-Id"], "discovery-2");
+  assert.equal(Object.values(result.cohorts).reduce((sum, value) => sum + value, 0), 163);
+});
 
 function metric(values) { return { values }; }
 
 test("Races k6 fixture is versioned, authenticated, deterministic, and identifier-free outside credentials", () => {
   const file = buildRacesTabFixtureFile({ runId: "races-run", fixture: {
-    users: [{ token: "token-a", zeroFriends: true }, { token: "token-b", zeroFriends: false }],
+    users: [{ id: "viewer-a", token: "token-a", zeroFriends: true,
+      expectedProjectionVersion: "races-tab-open-projection-v2",
+      expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2", marker: "a" },
+      coverageVariants: ["ordinary_classic_active"] },
+    { id: "viewer-b", token: "token-b", zeroFriends: false,
+      expectedProjectionVersion: "races-tab-open-projection-v2",
+      expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2", marker: "b" },
+      coverageVariants: ["tournament_lobby"] }],
     topology: { zeroFriendsShare: 0.5, friendDistributionSourceHash: "a".repeat(64) },
   } });
-  assert.equal(file.schema, "races-tab-open-k6-fixture-v1");
+  assert.equal(file.schema, "races-tab-open-k6-fixture-v2");
   assert.equal(file.client.headerProfile, "current-races-2.3.11-ios-v1");
   assert.deepEqual(file.users, [
-    { userIndex: 0, token: "token-a", zeroFriends: true },
-    { userIndex: 1, token: "token-b", zeroFriends: false },
+    { userIndex: 0, viewerUserId: "viewer-a", token: "token-a", zeroFriends: true,
+      expectedProjectionVersion: "races-tab-open-projection-v2",
+      expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2", marker: "a" }, coverageVariants: ["ordinary_classic_active"] },
+    { userIndex: 1, viewerUserId: "viewer-b", token: "token-b", zeroFriends: false,
+      expectedProjectionVersion: "races-tab-open-projection-v2",
+      expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2", marker: "b" }, coverageVariants: ["tournament_lobby"] },
   ]);
   assert.equal(file.cohort.zeroFriendsShare, 0.5);
   assert.equal(file.cohort.friendsCacheAgeMs, 5000);
+  assert.throws(() => buildRacesTabFixtureFile({ runId: "bad", fixture: {
+    users: [{ id: "viewer", token: "token", expectedProjection: null }], topology: {},
+  } }), /expected projection/i);
+});
+
+test("oversized fixture output fails before k6 and cleans the owned graph", async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "races-size-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let cleaned = false;
+  const fixture = { manifest: { ids: {} }, topology: {}, users: [{ id: "viewer",
+    token: "token", zeroFriends: false,
+    expectedProjectionVersion: "races-tab-open-projection-v2",
+    expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2",
+      padding: "x".repeat(100) }, coverageVariants: [] }] };
+  const workload = createRacesTabOpenWorkload({ createFixtures: async () => fixture,
+    captureExpectedProjections: async () => {},
+    conditionMeasurementCache: async () => ({ schema: "races-tab-cache-conditioning-v1" }),
+    cleanupFixtures: async () => { cleaned = true; } });
+  await assert.rejects(workload.prepareFixtures({ runId: "races-size", environment: {
+    prisma: {}, baseUrl: "http://127.0.0.1", credentialDirectory: directory,
+    processEnvironment: {} }, config: { workload: { maximumFixtureBytes: 10 },
+    scan: { rates: [1] } } }), /exceeds 10 bytes/);
+  assert.equal(cleaned, true);
 });
 
 test("Races summary normalizes core, background, endpoint, scheduler, and deadline evidence", () => {
@@ -50,6 +141,9 @@ test("Races summary normalizes core, background, endpoint, scheduler, and deadli
       metric({ "p(95)": 42, "p(99)": 72 }),
     "races_tab_network_errors{phase:measurement}": metric({ count: 0 }),
     "races_tab_contract_errors{phase:measurement}": metric({ count: 3 }),
+    "races_tab_payload_content_mismatches{phase:measurement}": metric({ count: 2 }),
+    "races_tab_payload_mismatch_reasons{phase:measurement,reason:ordinary_field}":
+      metric({ count: 2 }),
     "races_tab_iteration_deadline_timeouts{phase:measurement}": metric({ count: 0 }),
     "races_tab_scheduler_lag_ms{phase:measurement}": metric({ "p(95)": 2, "p(99)": 4, max: 8 }),
     "http_req_failed{phase:measurement,telemetry:sut}": metric({ rate: 0.0005 }),
@@ -69,6 +163,9 @@ test("Races summary normalizes core, background, endpoint, scheduler, and deadli
   assert.equal(result.incompleteRacesDiscovery, 2);
   assert.equal(result.incompleteRacesFriends, 1);
   assert.equal(result.racesContractErrors, 3);
+  assert.equal(result.racesPayloadContentMismatches, 2);
+  assert.equal(result.racesTabOpen.content.mismatchCounts.ordinary_field, 2);
+  assert.equal(result.fixtureStateCoverageMissing, 28);
   assert.equal(result.racesTabOpen.fixtureZeroFriendsShare, 0.3);
   assert.equal(result.racesTabOpen.fixtureFriendsCacheAgeMs, 5000);
   assert.equal(result.racesTabOpen.requestCountsByEndpoint["GET /friends"], 180);
@@ -97,6 +194,21 @@ test("cache evidence is grouped without user identifiers", () => {
     sources: { redis: 1, postgres: 2 },
     outcomes: { hit: 1, miss: 1, bounded: 1 },
   });
+});
+
+test("cache evidence accepts only the current measurement attempt", () => {
+  const current = { runId: "run-1", attemptId: "discovery-1", phase: "measurement" };
+  const log = [
+    JSON.stringify({ event: "race_list_cache_v1", source: "redis", outcome: "hit",
+      fragment: "membership", ...current }),
+    JSON.stringify({ event: "race_list_cache_v1", source: "postgres", outcome: "bounded",
+      fragment: "all", ...current, attemptId: "older-1" }),
+    JSON.stringify({ event: "race_list_cache_v1", source: "postgres", outcome: "bounded",
+      fragment: "all", ...current, phase: "cache-conditioning" }),
+  ].join("\n");
+  const evidence = raceListCacheEvidenceFromLog(log, current);
+  assert.equal(evidence.eventCount, 1);
+  assert.deepEqual(evidence.sources, { redis: 1 });
 });
 
 test("versioned cache targets compare observed source/outcome shares with tolerance", () => {
@@ -139,11 +251,15 @@ test("workload prepares once, prewarms only core, and uses separate bounded k6 e
   const calls = [];
   const k6Inputs = [];
   const fixture = { manifest: { ids: { friendships: [] } }, races: [],
-    users: Array.from({ length: 10 }, (_, index) => ({ token: `t${index}`, zeroFriends: index < 3 })),
+    users: Array.from({ length: 10 }, (_, index) => ({ token: `t${index}`, zeroFriends: index < 3,
+      expectedProjectionVersion: "races-tab-open-projection-v2",
+      expectedProjection: { expectedProjectionVersion: "races-tab-open-projection-v2" } })),
     topology: { zeroFriendsShare: 0.3 } };
   const workload = createRacesTabOpenWorkload({
     createFixtures: async () => (calls.push("fixtures"), fixture),
+    captureExpectedProjections: async () => calls.push("capture"),
     cleanupFixtures: async () => calls.push("cleanup"),
+    conditionMeasurementCache: async () => ({ schema: "races-tab-cache-conditioning-v1" }),
     runK6: async (input) => {
       k6Inputs.push(input);
       calls.push(`${input.phase}:${input.rate}:${input.measurementSeconds}:${input.cacheOnly}:${input.userOffset}:${input.scriptPath}`);
@@ -167,15 +283,18 @@ test("workload prepares once, prewarms only core, and uses separate bounded k6 e
         "races_tab_scheduler_lag_ms{phase:measurement}": metric({ "p(95)": 1, "p(99)": 1, max: 1 }),
         "http_req_failed{phase:measurement,telemetry:sut}": metric({ rate: 0 }),
         "dropped_iterations{phase:measurement}": metric({ count: 0 }),
-      } }, metrics: { targetIdentityValid: true }, resources: {}, binding: { id: "same" } };
+      } }, metrics: { targetIdentityValid: true }, resources: { generatorCpuPercent: 10 },
+      binding: { id: "same" } };
     },
   });
   const environment = { repository: "/repo", credentialDirectory: directory,
     processEnvironment: {}, prisma: {}, binding: { id: "same" } };
-  const config = { workload: { cohortSize: 10, scoreShape: "production" },
-    cache: { initialPrewarmRate: 2, initialPrewarmMaxUsers: 6 },
+  const config = { cache: { initialPrewarmRate: 2, initialPrewarmMaxUsers: 6 },
     scan: { rates: [5], measurementSeconds: 1 },
-    thresholds: { racesCoreP95Ms: 900, racesCoreP99Ms: 1800, httpErrorRate: 0.0005 } };
+    thresholds: { racesCoreP95Ms: 900, racesCoreP99Ms: 1800, httpErrorRate: 0.0005 },
+    workload: { cohortSize: 10, scoreShape: "production", generatorCpuPercent: 85,
+      generatorSchedulerLagP99Ms: 1000, sessionDeadlineSeconds: 31,
+      identitySafetyFactor: 1.05 } };
   const prepared = await workload.prepareFixtures({ runId: "races-run", environment, config });
   await workload.initialPrewarm({ environment, fixtures: prepared, config, seconds: 30 });
   await workload.warmup({ rate: 5, warmupSeconds: 2, measurementSeconds: 1,
@@ -183,17 +302,20 @@ test("workload prepares once, prewarms only core, and uses separate bounded k6 e
   const evidence = await workload.measure({ rate: 5, measurementSeconds: 1,
     environment, fixtures: prepared, config });
   await workload.cleanup({ environment, fixtures: prepared });
-  assert.deepEqual(calls, ["fixtures",
-    "initial-prewarm:2:3:true:0:scripts/k6/races-tab-open.js",
+  assert.deepEqual(calls, ["fixtures", "capture",
+    "initial-prewarm:2:3:true:163:scripts/k6/races-tab-open.js",
     "level-warmup:5:2:false:0:scripts/k6/races-tab-open.js",
-    "measurement:5:1:false:0:scripts/k6/races-tab-open.js", "cleanup"]);
+    "measurement:5:1:false:163:scripts/k6/races-tab-open.js", "cleanup"]);
   assert.equal(evidence.safeCapacityGatesPassed, false,
     "uncalibrated cache/resource baselines cannot certify a safe rate");
   assert.deepEqual(k6Inputs.at(-1).k6Variables, {
     K6_RACES_TAB_RATE: "5",
     K6_RACES_TAB_MEASUREMENT_SECONDS: "1",
     K6_RACES_TAB_CACHE_ONLY: "0",
-    K6_RACES_TAB_USER_OFFSET: "0",
+    K6_RACES_TAB_USER_OFFSET: "163",
+    K6_RACES_TAB_IDENTITY_POOL_SIZE: "163",
+    K6_RACES_TAB_ATTEMPT_ID: "measurement-1",
+    K6_RACES_TAB_PHASE: "measurement",
     K6_RACES_TAB_CORE_P95_MS: "900",
     K6_RACES_TAB_CORE_P99_MS: "1800",
     K6_RACES_TAB_HTTP_ERROR_RATE: "0.0005",

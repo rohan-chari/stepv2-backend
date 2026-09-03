@@ -6,9 +6,10 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createLimaProvider } = require("../../../performance/providers/lima");
-const { environmentRelevantPerformanceConfig, ownedRedisCommand,
+const { environmentRelevantPerformanceConfig, exactRaceListRedisCommand, ownedRedisCommand,
   readReusableSnapshotMarker,
-  requestTargetIdentity } = require("../../../performance/providers/lima-runtime");
+  racesTabSettingsReadiness, requestTargetIdentity } = require(
+  "../../../performance/providers/lima-runtime");
 
 test("prepared environment binding excludes per-run workload selection", () => {
   const shared = {
@@ -108,6 +109,30 @@ test("owned cache reset executes inside the labeled Lima Redis container", () =>
   assert.equal(args.includes("capacity:child:"), true);
   assert.throws(() => ownedRedisCommand({ instance: "step-capacity", container: "owned-redis",
     password: "secret", prefix: "other:", operation: "clear" }), /prefix/i);
+});
+
+test("Races conditioning deletes only exact bounded identity cache keys", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const args = exactRaceListRedisCommand({ instance: "step-capacity", container: "owned-redis",
+    password: "secret", prefix: "capacity:child:", userIds: [id],
+    variant: "tm1:to1:sb1:pu111:lv1:ch1:ra1:pd1:rv1:co1:rcprod" });
+  assert.equal(args.includes(JSON.stringify([id])), true);
+  assert.equal(args.some((value) => String(value).includes("KEYS")), false);
+  assert.throws(() => exactRaceListRedisCommand({ instance: "step-capacity",
+    container: "owned-redis", password: "secret", prefix: "capacity:child:",
+    userIds: ["not-an-id"], variant: "co1" }), /owned identities/i);
+});
+
+test("Races pinned settings must be observed by both HTTP workers", () => {
+  const response = (instance, value = true) => ({ body: { capacity: {
+    process: { role: "http", instance }, racesTabSettings: {
+      apiRaceListCompactV1Enabled: value, redisCacheRaceListEnabled: true,
+      raceListSqlSummaryV1Enabled: true,
+    } } } });
+  assert.deepEqual(racesTabSettingsReadiness({ targetResponses: [response("0"), response("1")] })
+    .workers, ["http:0", "http:1"]);
+  assert.throws(() => racesTabSettingsReadiness({ targetResponses: [response("0"),
+    response("1", false)] }), /worker 1/i);
 });
 
 test("target identity request exposes the actual socket address and never follows redirects", async (context) => {

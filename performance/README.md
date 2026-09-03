@@ -37,6 +37,13 @@ conditional friends request as the shipped app. The report records this cache
 age, the fixture's measured zero-friends share, request counts by endpoint, and
 discovery/friends latency from endpoint-tagged measurement HTTP metrics.
 
+Races profile `2.0.0` materializes and validates the complete API-backed page
+shape: ordinary active/pending/invited/completed and team rows, favorites,
+placements/privacy display, inventory/effects, and every reachable tournament
+render state. Each measured response is compared with its fixture identity's
+captured normalized projection. `CANCELLED` tournaments are explicitly not a
+measured variant because the current `GET /races` query excludes them.
+
 The environment is prepared once. PostgreSQL, Redis, the two HTTP workers, the
 resolution worker, and cron worker stay alive across every ladder level. Test
 users are provisioned once and a guarded targeted reset restores only their
@@ -57,6 +64,14 @@ feeds resolution queues. Cold scans perform non-cache-filling health checks, cle
 only the performance-owned Redis prefix, verify it is empty, reset metrics,
 and immediately measure.
 
+Before each Races measurement, the harness deletes only the exact race-list
+keys for that attempt's measurement identities and establishes the centrally
+configured hot-30/hot-15/expired-300 cohort. The shipped default is explicitly
+diagnostic and uncalibrated; a scan remains useful, but safe capacity stays
+unavailable until `raceListTargetMix` is replaced with measured calibration.
+Warmup identities are disjoint, and cache evidence is accepted only when its
+run, attempt, and measurement phase match.
+
 Race-list source evidence counts logical reads rather than every cache fragment
 or write. The compact bounded route therefore reports one PostgreSQL `bounded`
 read per core request in validated capacity mode; Redis fragment hits are
@@ -71,7 +86,14 @@ headroom candidate before calling it safe. Results are written to:
 ```text
 performance/results/<run-id>/summary.json
 performance/results/<run-id>/report.md
+performance/results/<run-id>/races-tab-mismatches.json
 ```
+
+For Races profile `2.0.0`, every attempt runs long enough to start at least 300
+tab reveals. Stabilization and measurement use disjoint identity pools sized
+from the 31-second deadline. Rates above the profile's 76/sec identity ceiling,
+fixture files above 64 MiB, incomplete 28-variant coverage, projection
+mismatches, or unhealthy generator evidence fail closed.
 
 ## Safety and local inputs
 

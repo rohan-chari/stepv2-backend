@@ -100,12 +100,14 @@ test("legacy cache hits and misses use the same logical read recorder", async ()
     readRecorder: (event) => hitEvents.push(event),
   });
   await hitCache.getStableMembership({ userId: "u1", variant: "legacy",
+    evidenceDimensions: { runId: "run-1", attemptId: "discovery-1", phase: "measurement" },
     load: async () => { throw new Error("postgres should not run on a hit"); } });
   hitCache.recordRead({ fragment: "all", source: "postgres", outcome: "bounded",
     variant: "compact", raceCount: 2 });
   assert.deepEqual(hitEvents, [
     { fragment: "membership", source: "redis", outcome: "hit",
-      variant: "legacy", raceCount: 3 },
+      variant: "legacy", raceCount: 3, runId: "run-1", attemptId: "discovery-1",
+      phase: "measurement" },
     { fragment: "all", source: "postgres", outcome: "bounded",
       variant: "compact", raceCount: 2 },
   ]);
