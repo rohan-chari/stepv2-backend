@@ -351,7 +351,10 @@ function packOrdinaryGraphSlots({ slots, sourceEntries, ownerOnly, needsExternal
     totals.inventory += required.inventory; totals.effects += required.effects;
     return totals;
   }, { inventory: 0, effects: 0 });
-  for (let graphCount = 1; graphCount <= slots.length; graphCount += 1) {
+  const maximumSlotsPerGraph = Math.max(1, ...sourceEntries.map((entry) => ownerOnly ? 1 :
+    Math.max(1, Number(entry.dimensions?.participants) - (needsExternal ? 1 : 0))));
+  const minimumGraphCount = Math.ceil(slots.length / maximumSlotsPerGraph);
+  for (let graphCount = minimumGraphCount; graphCount <= slots.length; graphCount += 1) {
     const shapes = scaledShapeSequence(sourceEntries, graphCount);
     const instances = shapes.map((shape, index) => ({ index, shape, slots: [],
       remainingUsers: ownerOnly ? 1 : Math.max(1,
@@ -391,7 +394,8 @@ function packTournamentMatchGraphSlots({ slots, tournamentEntries, matchEntries 
     totals.inventory += required.inventory; totals.effects += required.effects;
     return totals;
   }, { inventory: 0, effects: 0 });
-  for (let graphCount = 1; graphCount <= slots.length; graphCount += 1) {
+  const minimumGraphCount = Math.ceil(slots.length / 2);
+  for (let graphCount = minimumGraphCount; graphCount <= slots.length; graphCount += 1) {
     const tournaments = scaledShapeSequence(tournamentEntries, graphCount);
     const matches = scaledShapeSequence(matchEntries, graphCount);
     const instances = tournaments.map((shape, index) => ({ index, shape,
