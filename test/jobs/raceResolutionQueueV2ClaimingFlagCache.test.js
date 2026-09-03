@@ -269,6 +269,121 @@ test("a wake arriving during FULL-trigger promotion survives its stale result", 
   );
 });
 
+test("successive FULL-trigger drains share the bounded promoter cadence", async () => {
+  let clockMs = 0;
+  const promotionTimes = [];
+  const sleeps = [];
+  const worker = makeWorker(countingSettings([false]), {
+    bootAt: 0,
+    wallClockNow: () => clockMs,
+    sleep: async (delayMs) => {
+      sleeps.push(delayMs);
+      clockMs += delayMs;
+    },
+    fullTriggerPromotionMinIntervalMs: 250,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() {
+        promotionTimes.push(clockMs);
+        return { promoted: 0, races: 0 };
+      },
+      async claimNext() { return null; },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+
+  await worker.processOne();
+  clockMs = 50;
+  worker.beginDrain();
+  await worker.processOne();
+
+  assert.deepEqual(sleeps, [200]);
+  assert.deepEqual(promotionTimes, [0, 250]);
+});
+
+test("the promoter cadence can be disabled explicitly for deterministic callers", async () => {
+  let clockMs = 0;
+  const sleeps = [];
+  const worker = makeWorker(countingSettings([false]), {
+    bootAt: 0,
+    wallClockNow: () => clockMs,
+    sleep: async (delayMs) => { sleeps.push(delayMs); },
+    fullTriggerPromotionMinIntervalMs: 0,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() { return { promoted: 0, races: 0 }; },
+      async claimNext() { return null; },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+
+  await worker.processOne();
+  clockMs = 1;
+  worker.beginDrain();
+  await worker.processOne();
+
+  assert.deepEqual(sleeps, []);
+});
+
+test("a wake during the promoter cadence wait is covered by the pending scan", async () => {
+  let clockMs = 0;
+  let promotions = 0;
+  let releaseSleep;
+  const sleepGate = new Promise((resolve) => { releaseSleep = resolve; });
+  const worker = makeWorker(countingSettings([false]), {
+    bootAt: 0,
+    wallClockNow: () => clockMs,
+    sleep: async () => {
+      await sleepGate;
+      clockMs = 250;
+    },
+    fullTriggerPromotionMinIntervalMs: 250,
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error('relation "race_resolution_jobs" does not exist');
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async promoteFullScopeTriggers() {
+        promotions += 1;
+        return { promoted: 0, races: 0 };
+      },
+      async claimNext() { return null; },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+
+  await worker.processOne();
+  clockMs = 50;
+  worker.beginDrain();
+  const pendingScan = worker.processOne();
+  await new Promise((resolve) => setImmediate(resolve));
+  worker.beginDrain();
+  releaseSleep();
+  await pendingScan;
+  await worker.processOne();
+
+  assert.equal(
+    promotions,
+    2,
+    "the scan after the wait must absorb wakes received during that wait",
+  );
+});
+
 test("production HTTP and cron roles cannot claim or occupy a resolution lane", async () => {
   for (const processRole of ["http", "cron", "all", "migration"]) {
     let claims = 0;

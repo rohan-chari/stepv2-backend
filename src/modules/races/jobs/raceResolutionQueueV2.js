@@ -108,6 +108,7 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const ADAPTIVE_DRAIN_SLICE_MS = 100;
 const ADAPTIVE_DRAIN_SLICE_JOBS = 16;
 const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
+const FULL_TRIGGER_PROMOTION_MIN_INTERVAL_MS = 250;
 const TARGETED_CLAIM_DISABLED = Symbol("TARGETED_CLAIM_DISABLED");
 const POST_COMMIT_SLACK_MS = 30_000;
 const FENCE_DUE_EXPIRY_VETO_TYPES = Object.freeze(
@@ -1053,6 +1054,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     150,
     Math.min(250, Number(dependencies.compatibilityPollIntervalMs) || 250),
   );
+  const configuredFullTriggerPromotionMinIntervalMs =
+    Number(dependencies.fullTriggerPromotionMinIntervalMs);
+  const fullTriggerPromotionMinIntervalMs = Math.max(0, Math.min(
+    1000,
+    Number.isFinite(configuredFullTriggerPromotionMinIntervalMs)
+      ? configuredFullTriggerPromotionMinIntervalMs
+      : FULL_TRIGGER_PROMOTION_MIN_INTERVAL_MS,
+  ));
   const scheduleTimeout = dependencies.scheduleTimeout || setTimeout;
   const cancelTimeout = dependencies.clearTimeout || clearTimeout;
   const bootId = dependencies.bootId || PROCESS_BOOT_ID;
@@ -1093,27 +1102,42 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   let fullTriggerPromotionNeeded = true;
   let fullTriggerPromotionPromise = null;
   let fullTriggerPromotionSignal = 0;
+  let lastFullTriggerPromotionStartedAtMs = null;
 
   function beginDrain() {
     fullTriggerPromotionNeeded = true;
     fullTriggerPromotionSignal += 1;
   }
 
-  async function promoteFullScopeTriggersOnce(currentTime, phaseTimer) {
+  async function promoteFullScopeTriggersOnce(phaseTimer) {
     if (!fullTriggerPromotionNeeded ||
         typeof jobModel.promoteFullScopeTriggers !== "function") return;
     if (!fullTriggerPromotionPromise) {
-      const signalAtStart = fullTriggerPromotionSignal;
-      fullTriggerPromotionPromise = phaseTimer.measure(
-        "fullTriggerPromotion",
-        () => jobModel.promoteFullScopeTriggers({ now: currentTime }),
-      ).then((promotion) => {
+      fullTriggerPromotionPromise = (async () => {
+        if (lastFullTriggerPromotionStartedAtMs != null) {
+          // Clamp the wait so a backward system-clock adjustment cannot make
+          // this best-effort cadence exceed its configured upper bound.
+          const remainingMs = Math.min(
+            fullTriggerPromotionMinIntervalMs,
+            fullTriggerPromotionMinIntervalMs -
+              (wallClockNow() - lastFullTriggerPromotionStartedAtMs),
+          );
+          if (remainingMs > 0) await sleep(remainingMs);
+        }
+        // Capture after the bounded wait so wakes coalesced during the wait are
+        // covered by this scan instead of forcing an immediate follow-up scan.
+        const signalAtStart = fullTriggerPromotionSignal;
+        lastFullTriggerPromotionStartedAtMs = wallClockNow();
+        const promotion = await phaseTimer.measure(
+          "fullTriggerPromotion",
+          () => jobModel.promoteFullScopeTriggers({ now: now() }),
+        );
         // A saturated bounded page deliberately keeps the signal set so the
         // next worker tick continues the backlog within this same drain.
         fullTriggerPromotionNeeded =
           Number(promotion?.promoted || 0) >= FULL_TRIGGER_PROMOTION_BATCH_SIZE ||
           fullTriggerPromotionSignal !== signalAtStart;
-      }).finally(() => {
+      })().finally(() => {
         fullTriggerPromotionPromise = null;
       });
     }
@@ -1257,7 +1281,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // before claiming. The promotion is bounded and SKIP LOCKED, so parallel
     // worker lanes cooperate without making HTTP uploaders contend on the
     // race-keyed job row.
-    if (!raceId) await promoteFullScopeTriggersOnce(currentTime, phaseTimer);
+    if (!raceId) await promoteFullScopeTriggersOnce(phaseTimer);
 
     const job = await phaseTimer.measure("claim", () => jobModel.claimNext({
         now: currentTime,
