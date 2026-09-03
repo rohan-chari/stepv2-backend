@@ -125,8 +125,11 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     // second inline copy of its publication or intents.
     if (!task?.created) return { mode: "deduped", taskId: task?.id || null };
     await publishWake();
+    // Negative readiness results remain uncached and use an inline claim.
+    // A recent positive proof is safe to share briefly: the durable task is
+    // already recoverable even if worker health changes during this window.
     if (!(await measure("runnerReadiness", () => runner.isReady({
-      positiveCacheMs: fastHandoff ? 1000 : 0,
+      positiveCacheMs: 1000,
     })))) {
       await measure("inlineClaim", () => runner.processTaskId(task.id));
       return { mode: "inline_claim", taskId: task.id };
@@ -165,7 +168,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
       }
     };
     if (!(await measure("runnerReadiness", () => runner.isReady({
-      positiveCacheMs: fastHandoff ? 1000 : 0,
+      positiveCacheMs: 1000,
     })))) {
       await measure("inlineClaim", () => runner.processTaskId(taskId));
       return { mode: "inline_claim", taskId };

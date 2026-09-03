@@ -27,6 +27,31 @@ test("healthy handoff creates one generation task and leaves it for the runner",
   assert.equal(calls[0][1].sourceGeneration, 7);
 });
 
+test("durable handoffs reuse the runner's bounded positive readiness proof", async () => {
+  const readinessOptions = [];
+  const handoff = buildRaceResolutionPostTaskHandoff({
+    RaceResolutionPostTask: {
+      async create() { return { created: true, id: "t-ready" }; },
+    },
+    runner: {
+      async isReady(options) { readinessOptions.push(options); return true; },
+      async processTaskId() { assert.fail("healthy runner owns the task"); },
+    },
+  });
+
+  await handoff({
+    raceId: "r1",
+    sourceGeneration: 13,
+    snapshotCommand: { raceId: "r1", timeZone: "UTC" },
+  });
+  await handoff.resumeDurable("t-ready");
+
+  assert.deepEqual(readinessOptions, [
+    { positiveCacheMs: 1000 },
+    { positiveCacheMs: 1000 },
+  ]);
+});
+
 test("unhealthy runner atomically claims and executes the just-created task inline", async () => {
   const calls = [];
   const handoff = buildRaceResolutionPostTaskHandoff({

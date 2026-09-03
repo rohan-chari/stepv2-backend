@@ -261,6 +261,31 @@ test("readiness requires a recent DB claim probe, bounded lag, and no ambiguous 
   assert.equal(await runner.isReady(), false);
 });
 
+test("readiness reuses a bounded positive proof but never caches a failure", async () => {
+  let now = new Date("2026-08-13T12:00:00.000Z");
+  let snapshots = 0;
+  let health = { oldestPendingLagMs: 0, expiredAttemptCount: 0 };
+  const runner = buildRaceResolutionPostTaskRunner({
+    env: {},
+    now: () => now,
+    RaceResolutionPostTask: {
+      async claimNext() { return null; },
+      async readinessSnapshot() { snapshots += 1; return health; },
+    },
+  });
+
+  await runner.tick();
+  assert.equal(await runner.isReady({ positiveCacheMs: 1000 }), true);
+  assert.equal(await runner.isReady({ positiveCacheMs: 1000 }), true);
+  assert.equal(snapshots, 1);
+
+  now = new Date("2026-08-13T12:00:01.000Z");
+  health = { oldestPendingLagMs: 30_001, expiredAttemptCount: 0 };
+  assert.equal(await runner.isReady({ positiveCacheMs: 1000 }), false);
+  assert.equal(await runner.isReady({ positiveCacheMs: 1000 }), false);
+  assert.equal(snapshots, 3);
+});
+
 test("inline fallback claims exactly the created task without taking another budget lane", async () => {
   const calls = [];
   const runner = buildRaceResolutionPostTaskRunner({
