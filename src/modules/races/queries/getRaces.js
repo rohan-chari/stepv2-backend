@@ -153,30 +153,16 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     const cache = options.raceListCache || defaultRaceListCache;
     const boundedLaunch = options.compactRaceList === true &&
       typeof Race.findBoundedRaceListForUser === "function";
-    let stable;
-    if (boundedLaunch) {
-      const boundedRaces = await Race.findBoundedRaceListForUser(
-        userId, options.extraCompletedRaceIds || []);
-      cache.recordRead?.({
-        fragment: "all",
-        source: "postgres",
-        outcome: "bounded",
-        variant: options.raceListVariant || "legacy",
-        raceCount: boundedRaces.length,
-        ...(options.cacheEvidenceDimensions || {}),
-      });
-      stable = { races: boundedRaces, source: "bounded" };
-    } else {
-      stable = await cache.getStableMembership({
-        userId,
-        variant: options.raceListVariant || "legacy",
-        evidenceDimensions: options.cacheEvidenceDimensions,
-        load: () => Race.findRaceListStableForUser(
-          userId,
-          options.extraCompletedRaceIds || [],
-        ),
-      });
-    }
+    const stable = await cache.getStableMembership({
+      userId,
+      variant: options.raceListVariant || "legacy",
+      evidenceDimensions: options.cacheEvidenceDimensions,
+      load: () => boundedLaunch
+        ? Race.findBoundedRaceListForUser(
+            userId, options.extraCompletedRaceIds || [])
+        : Race.findRaceListStableForUser(
+            userId, options.extraCompletedRaceIds || []),
+    });
     let sqlResult = null;
     const pageProjection = options.raceProgressPageProjection ||
       defaultRaceProgressPageProjection;

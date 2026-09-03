@@ -182,9 +182,10 @@ test("legacy mixed lists keep projected active races out of the SQL ranker", asy
   }
 });
 
-test("compact bounded lists emit one identifier-free PostgreSQL source event", async () => {
+test("compact bounded lists reuse the stable membership cache", async () => {
   const raceModule = require("../../src/modules/races/models/race");
   const participantModule = require("../../src/modules/races/models/raceParticipant");
+  const { projectStableRaces } = require("../../src/modules/races/services/raceListCache");
   const originals = { Race: raceModule.Race, RaceParticipant: participantModule.RaceParticipant };
   const active = {
     ...activePowerupRace("active-large"),
@@ -198,28 +199,36 @@ test("compact bounded lists emit one identifier-free PostgreSQL source event", a
     powerupsEnabled: false,
     completedAt: new Date(),
   };
-  const cacheReads = [];
+  let boundedLoads = 0;
+  let cachedRaces = null;
   Object.assign(raceModule, { Race: {
-    async findBoundedRaceListForUser() { return [active, completed]; },
+    async findBoundedRaceListForUser() {
+      boundedLoads += 1;
+      return [active, completed];
+    },
     async findRaceListStableForUser() { throw new Error("bounded list should be used"); },
     async findSqlSummariesForUser(_userId, _extraIds, { stableRaces }) {
-      return { ambiguousFinisherOrder: false, races: stableRaces };
+      return {
+        ambiguousFinisherOrder: false,
+        races: stableRaces.map((race) => race.id === completed.id ? completed : race),
+      };
     },
   } });
   Object.assign(participantModule, { RaceParticipant: {
-    async findViewerRowsForRaces() { throw new Error("embedded viewer should be used"); },
+    async findViewerRowsForRaces() { return [active._viewerParticipant]; },
   } });
   try {
     delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
     const { getRaces } = require("../../src/modules/races/queries/getRaces");
-    await getRaces("viewer", false, {
+    const options = {
       raceListCacheEnabled: true,
       compactRaceList: true,
       raceListCache: {
         isEnabled: () => true,
-        recordRead(fields) { cacheReads.push(fields); },
-        async getStableMembership() {
-          throw new Error("compact bounded list should bypass fragment fetch");
+        async getStableMembership({ load }) {
+          if (cachedRaces) return { races: cachedRaces, source: "redis" };
+          cachedRaces = projectStableRaces(await load());
+          return { races: cachedRaces, source: "postgres" };
         },
       },
       raceProgressPageProjection: {
@@ -231,10 +240,12 @@ test("compact bounded lists emit one identifier-free PostgreSQL source event", a
           };
         },
       },
-    });
+    };
+    const cold = await getRaces("viewer", false, options);
+    const hit = await getRaces("viewer", false, options);
 
-    assert.deepEqual(cacheReads, [{ fragment: "all", source: "postgres",
-      outcome: "bounded", variant: "legacy", raceCount: 2 }]);
+    assert.equal(boundedLoads, 1);
+    assert.deepEqual(hit, cold);
   } finally {
     Object.assign(raceModule, { Race: originals.Race });
     Object.assign(participantModule, { RaceParticipant: originals.RaceParticipant });
