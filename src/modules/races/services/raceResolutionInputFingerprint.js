@@ -68,10 +68,21 @@ async function buildRaceResolutionInputFingerprint({
        )
        SELECT members.user_id AS "userId",
          version.generation::text AS generation,
-         EXISTS (SELECT 1 FROM steps source WHERE source.user_id=members.user_id) AS "hasSteps",
-         EXISTS (SELECT 1 FROM step_samples source WHERE source.user_id=members.user_id) AS "hasSamples",
-         (SELECT MIN(source.period_end) FROM step_samples source
-          WHERE source.user_id=members.user_id AND source.period_end > $2) AS "nextSampleBoundary"
+         CASE WHEN version.generation IS NULL THEN
+           EXISTS (SELECT 1 FROM steps source WHERE source.user_id=members.user_id)
+         ELSE false END AS "hasSteps",
+         CASE WHEN version.generation IS NULL THEN
+           EXISTS (SELECT 1 FROM step_samples source WHERE source.user_id=members.user_id)
+         ELSE false END AS "hasSamples",
+         CASE
+           WHEN version.scoring_watermark IS NOT NULL
+            AND version.source_queue_semantics_generation=version.generation
+            AND (version.next_sample_boundary_at IS NULL
+                 OR version.next_sample_boundary_at > $2)
+             THEN version.next_sample_boundary_at
+           ELSE (SELECT MIN(source.period_end) FROM step_samples source
+                  WHERE source.user_id=members.user_id AND source.period_end > $2)
+         END AS "nextSampleBoundary"
        FROM members
        LEFT JOIN user_scoring_input_versions version ON version.user_id=members.user_id
        ORDER BY members.user_id`,

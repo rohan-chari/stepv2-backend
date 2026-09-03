@@ -123,6 +123,39 @@ test("the fingerprint exposes the participant rows the trail-mine projection nee
   assert.equal(value.participantCount, 0);
 });
 
+test("the fingerprint uses a current maintained boundary and retains guarded source fallbacks", async () => {
+  const calls = [];
+  const results = [[{ race: { id: "r1" }, participants: [] }], [], [], []];
+  let index = 0;
+  const client = {
+    async $queryRawUnsafe(sql, ...params) {
+      calls.push({ sql, params });
+      return results[index++];
+    },
+  };
+
+  await buildRaceResolutionInputFingerprint({
+    raceId: "r1",
+    now: new Date("2026-09-03T00:00:00.000Z"),
+    client,
+  });
+
+  const inputQuery = calls.find((call) =>
+    call.sql.includes("user_scoring_input_versions"),
+  )?.sql;
+  assert.match(inputQuery, /THEN version\.next_sample_boundary_at/);
+  assert.match(
+    inputQuery,
+    /version\.scoring_watermark IS NOT NULL[\s\S]+source_queue_semantics_generation=version\.generation[\s\S]+next_sample_boundary_at > \$2[\s\S]+THEN version\.next_sample_boundary_at[\s\S]+ELSE \(SELECT MIN\(source\.period_end\)/,
+    "non-authoritative or expired metadata must fall back to scanning sample boundaries",
+  );
+  assert.match(
+    inputQuery,
+    /version\.generation IS NULL[\s\S]+EXISTS \(SELECT 1 FROM steps/,
+    "source existence probes remain only for the fail-closed missing-token check",
+  );
+});
+
 test("missing source token with existing steps/samples fails closed", async () => {
   const value = await buildRaceResolutionInputFingerprint({
     raceId: "r1",

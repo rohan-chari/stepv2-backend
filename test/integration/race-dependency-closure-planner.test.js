@@ -219,6 +219,73 @@ describe("race scoring dependency closure planner (real DB)", () => {
     assert.equal(after.participantIds.length, 2);
   });
 
+  it("falls forward to the next future sample boundary after a stored boundary expires", async () => {
+    const { race, users } = await seedRace();
+    const firstBoundary = new Date("2026-08-14T12:02:00.000Z");
+    const secondBoundary = new Date("2026-08-14T12:04:00.000Z");
+    await prisma.stepSample.createMany({
+      data: [firstBoundary, secondBoundary].map((periodEnd, index) => ({
+        userId: users[0].id,
+        periodStart: new Date(periodEnd.getTime() - 60_000),
+        periodEnd,
+        steps: 100 + index,
+      })),
+    });
+    await prisma.userScoringInputVersion.create({
+      data: {
+        userId: users[0].id,
+        generation: 7n,
+        sourceQueueSemanticsGeneration: 7n,
+        scoringWatermark: "a".repeat(64),
+        nextSampleBoundaryAt: firstBoundary,
+      },
+    });
+
+    const fingerprint = await buildRaceResolutionInputFingerprint({
+      raceId: race.id,
+      now: new Date("2026-08-14T12:03:00.000Z"),
+    });
+
+    assert.equal(
+      fingerprint.nextSampleBoundary.toISOString(),
+      secondBoundary.toISOString(),
+    );
+  });
+
+  it("does not trust a maintained boundary from an old writer generation", async () => {
+    const { race, users } = await seedRace();
+    const actualBoundary = new Date("2026-08-14T12:04:00.000Z");
+    await prisma.stepSample.create({
+      data: {
+        userId: users[0].id,
+        periodStart: new Date("2026-08-14T12:03:00.000Z"),
+        periodEnd: actualBoundary,
+        steps: 100,
+      },
+    });
+    await prisma.userScoringInputVersion.create({
+      data: {
+        userId: users[0].id,
+        generation: 8n,
+        // Simulates a mixed-version writer that advanced generation without
+        // refreshing the new source-queue ownership stamp or boundary.
+        sourceQueueSemanticsGeneration: 7n,
+        scoringWatermark: "b".repeat(64),
+        nextSampleBoundaryAt: new Date("2026-08-14T12:10:00.000Z"),
+      },
+    });
+
+    const fingerprint = await buildRaceResolutionInputFingerprint({
+      raceId: race.id,
+      now: NOW,
+    });
+
+    assert.equal(
+      fingerprint.nextSampleBoundary.toISOString(),
+      actualBoundary.toISOString(),
+    );
+  });
+
   it("a real RACE_WIDE row, a team race, and a non-STEP_SYNC envelope all select FULL", async () => {
     const { race, users, participants } = await seedRace();
     await addEffect({
