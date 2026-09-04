@@ -154,14 +154,21 @@ function mergeDirtyEnvelopes(left, right) {
   if (!isNormalized(left) || !isNormalized(right)) return fullEnvelope();
   if (left.reasons.includes("FULL") || right.reasons.includes("FULL")) {
     const merged = [...left.reasons, ...right.reasons];
-    if (!merged.includes("EFFECT_BOUNDARY")) return fullEnvelope();
+    const preservesEffectBoundary = merged.includes("EFFECT_BOUNDARY");
+    const preservesGlobalEventBoundary = merged.includes("GLOBAL_EVENT_BOUNDARY");
+    if (!preservesEffectBoundary && !preservesGlobalEventBoundary) return fullEnvelope();
     return {
       ...fullEnvelope(),
-      // FULL owns scoring scope; EFFECT_BOUNDARY and its Umbrella discriminator
-      // are orthogonal durable source-consumption signals.
-      reasons: ["FULL", "EFFECT_BOUNDARY"],
+      // FULL owns scoring scope; boundary reasons are orthogonal durable
+      // source-consumption signals and must survive scope escalation.
+      reasons: [
+        "FULL",
+        ...(preservesEffectBoundary ? ["EFFECT_BOUNDARY"] : []),
+        ...(preservesGlobalEventBoundary ? ["GLOBAL_EVENT_BOUNDARY"] : []),
+      ],
       powerupTypes:
-        left.powerupTypes.includes("UMBRELLA") || right.powerupTypes.includes("UMBRELLA")
+        preservesEffectBoundary &&
+        (left.powerupTypes.includes("UMBRELLA") || right.powerupTypes.includes("UMBRELLA"))
           ? ["UMBRELLA"]
           : [],
     };

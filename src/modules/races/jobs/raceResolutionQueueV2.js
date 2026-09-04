@@ -94,6 +94,9 @@ const {
 } = require("../../../shared/operationalAlerts/operationalAlertSpool");
 const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
 const redisCache = require("../../../shared/cache/redisCache");
+const {
+  coordinatedOptimizationMetrics,
+} = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
 const POLL_INTERVAL_MS = 5_000;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
@@ -119,6 +122,20 @@ const PROCESS_BOOT_TIMESTAMP = new Date().toISOString();
 
 function containsSourceInputWork(reasons) {
   return Array.isArray(reasons) && reasons.includes("STEP_INPUT_CHANGED");
+}
+
+function shouldPersistCapturedSummaryImpacts(reasons) {
+  // Missing/legacy metadata stays conservative. Current workers only skip
+  // when a valid reason vector proves this resolution is unrelated.
+  if (!Array.isArray(reasons) || reasons.length === 0) return true;
+  return reasons.includes("GLOBAL_EVENT_BOUNDARY") || reasons.includes("FULL");
+}
+
+function capturedSummaryGateOutcome(reasons) {
+  if (Array.isArray(reasons) && reasons.includes("GLOBAL_EVENT_BOUNDARY")) {
+    return "boundary";
+  }
+  return shouldPersistCapturedSummaryImpacts(reasons) ? "full_fallback" : "skipped";
 }
 
 function sourceInputTargetIsTerminal(fingerprint, triggeringUserIds, at) {
@@ -2365,11 +2382,41 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           impactContinuationNeeded =
             umbrella.hasMore ||
             result?.activeImpactCapture?.hasMoreTimedSources === true;
-          await persistCapturedSummaryImpactsForRace(tx, {
-            raceId: job.raceId,
-            sourceResolutionGeneration: job.processingGeneration,
-            now: currentTime,
-          });
+          const shouldPersistGlobalSummary = shouldPersistCapturedSummaryImpacts(
+            job.processingDirtyReasons,
+          );
+          coordinatedOptimizationMetrics.increment(
+            "global_summary_race_resolution_gate_total",
+            { outcome: capturedSummaryGateOutcome(job.processingDirtyReasons) },
+          );
+          if (shouldPersistGlobalSummary) {
+            const persistedSummary = await persistCapturedSummaryImpactsForRace(tx, {
+              raceId: job.raceId,
+              sourceResolutionGeneration: job.processingGeneration,
+              now: currentTime,
+            });
+            coordinatedOptimizationMetrics.increment(
+              "global_summary_race_resolution_artifacts_total",
+              {},
+              persistedSummary.artifactCount,
+            );
+            coordinatedOptimizationMetrics.increment(
+              "global_summary_race_resolution_impacts_total",
+              { outcome: "finalized" },
+              persistedSummary.finalized,
+            );
+            coordinatedOptimizationMetrics.increment(
+              "global_summary_race_resolution_impacts_total",
+              { outcome: "terminalized" },
+              persistedSummary.terminalized,
+            );
+            if (persistedSummary.artifactCount === 0 &&
+                persistedSummary.terminalCandidateCount === 0) {
+              coordinatedOptimizationMetrics.increment(
+                "global_summary_race_resolution_empty_total",
+              );
+            }
+          }
         } finally {
           activeImpactPersistMs += Math.max(
             0,

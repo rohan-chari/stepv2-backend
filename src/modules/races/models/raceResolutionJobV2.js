@@ -77,10 +77,12 @@ function mergeClaimDirty(locked, promotedProcessingReasons = null) {
     !dirtyUserIds || !dirtyParticipantIds || !powerupTypes ||
     powerupTypes.some((type) => !POWERUP_SCOPE_BY_TYPE[type]);
   if (invalid) {
+    const boundaryReasons = [
+      ...(reasons?.includes("EFFECT_BOUNDARY") ? ["EFFECT_BOUNDARY"] : []),
+      ...(reasons?.includes("GLOBAL_EVENT_BOUNDARY") ? ["GLOBAL_EVENT_BOUNDARY"] : []),
+    ];
     return {
-      reasons: reasons?.includes("EFFECT_BOUNDARY")
-        ? ["FULL", "EFFECT_BOUNDARY"]
-        : ["FULL"],
+      reasons: ["FULL", ...boundaryReasons],
       dirtyUserIds: [], dirtyParticipantIds: [], powerupTypes: [], priority: "IMMEDIATE",
     };
   }
@@ -483,14 +485,25 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                           SELECT value,MIN(ordinality) AS first_ordinal
                             FROM jsonb_array_elements(
                               (CASE WHEN job.full_trigger_seed_only
-                                THEN '[]'::jsonb
+                                THEN (
+                                  SELECT COALESCE(jsonb_agg(value ORDER BY ordinality),'[]'::jsonb)
+                                    FROM jsonb_array_elements(job.dirty_reasons)
+                                      WITH ORDINALITY AS preserved(value,ordinality)
+                                   WHERE value IN ('"EFFECT_BOUNDARY"'::jsonb,
+                                                   '"GLOBAL_EVENT_BOUNDARY"'::jsonb)
+                                )
                                 ELSE job.dirty_reasons END) ||
                               '["STEP_INPUT_CHANGED"]'::jsonb
                             ) WITH ORDINALITY AS merged(value,ordinality)
                            WHERE value <> '"STEP_SYNC"'::jsonb
                            GROUP BY value
                         ) stable
-                    ) ELSE '["FULL"]'::jsonb END,
+                    ) ELSE '["FULL"]'::jsonb
+                      || CASE WHEN job.dirty_reasons ? 'EFFECT_BOUNDARY'
+                           THEN '["EFFECT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb END
+                      || CASE WHEN job.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY'
+                           THEN '["GLOBAL_EVENT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb END
+                    END,
                     dirty_participant_ids=CASE WHEN scoped.can_scope THEN (
                       SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb)
                         FROM (
@@ -505,7 +518,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                         ) stable
                     ) ELSE '[]'::jsonb END,
                     dirty_powerup_types=CASE WHEN scoped.can_scope
-                      THEN job.dirty_powerup_types ELSE '[]'::jsonb END,
+                      THEN job.dirty_powerup_types
+                      WHEN job.dirty_reasons ? 'EFFECT_BOUNDARY'
+                           AND job.dirty_powerup_types ? 'UMBRELLA'
+                        THEN '["UMBRELLA"]'::jsonb
+                      ELSE '[]'::jsonb END,
                     dirty_priority='COALESCE',
                     queue_priority=CASE
                       WHEN job.state='queued' AND job.queue_priority='LIVE'
@@ -855,11 +872,15 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                         SELECT DISTINCT value
                         FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types)
                       ) scope_check) > 64)
-              THEN CASE
-                WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY'
-                  THEN '["FULL","EFFECT_BOUNDARY"]'::jsonb
-                ELSE '["FULL"]'::jsonb
-              END
+              THEN '["FULL"]'::jsonb
+                || CASE
+                     WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY'
+                       THEN '["EFFECT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb
+                   END
+                || CASE
+                     WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'GLOBAL_EVENT_BOUNDARY'
+                       THEN '["GLOBAL_EVENT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb
+                   END
             ELSE (
               SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
               FROM (
@@ -1085,11 +1106,15 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                     FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)) > 1000
                 OR (SELECT COUNT(DISTINCT value)
                     FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64
-                THEN CASE
-                  WHEN (j.processing_dirty_reasons || j.dirty_reasons) ? 'EFFECT_BOUNDARY'
-                    THEN '["FULL","EFFECT_BOUNDARY"]'::jsonb
-                  ELSE '["FULL"]'::jsonb
-                END
+                THEN '["FULL"]'::jsonb
+                  || CASE
+                       WHEN (j.processing_dirty_reasons || j.dirty_reasons) ? 'EFFECT_BOUNDARY'
+                         THEN '["EFFECT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb
+                     END
+                  || CASE
+                       WHEN (j.processing_dirty_reasons || j.dirty_reasons) ? 'GLOBAL_EVENT_BOUNDARY'
+                         THEN '["GLOBAL_EVENT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb
+                     END
               ELSE (
                 SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
                 FROM (
@@ -1286,11 +1311,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                WHEN merged.reasons ? 'FULL'
                  OR jsonb_array_length(merged.participants) > 1000
                  OR jsonb_array_length(merged.powerups) > 64
-                 THEN CASE
-                   WHEN merged.reasons ? 'EFFECT_BOUNDARY'
-                     THEN '["FULL","EFFECT_BOUNDARY"]'::jsonb
-                   ELSE '["FULL"]'::jsonb
-                 END
+                 THEN '["FULL"]'::jsonb
+                   || CASE WHEN merged.reasons ? 'EFFECT_BOUNDARY'
+                        THEN '["EFFECT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb END
+                   || CASE WHEN merged.reasons ? 'GLOBAL_EVENT_BOUNDARY'
+                        THEN '["GLOBAL_EVENT_BOUNDARY"]'::jsonb ELSE '[]'::jsonb END
                ELSE merged.reasons END,
              dirty_participant_ids = CASE
                WHEN merged.reasons ? 'FULL'

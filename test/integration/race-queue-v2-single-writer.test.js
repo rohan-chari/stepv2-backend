@@ -2274,6 +2274,77 @@ describe("5d — explicit debounce", () => {
     assert.equal(global.processingDirtyParticipantIds[0], participantByRace.get(globalRaceId));
   });
 
+  it("preserves global-event boundary work when a queued claim escalates to FULL", async () => {
+    const owner = await createUser("Global boundary fallback owner");
+    const raceId = await createActiveRace(owner, [], "Global boundary fallback");
+    await drain(makeWorker());
+
+    await RaceResolutionJobV2.enqueue({
+      raceId,
+      now: new Date(),
+      dirtyEnvelope: null,
+      bypassDebounce: true,
+    });
+    await RaceResolutionJobV2.enqueue({
+      raceId,
+      userId: owner.userId,
+      now: new Date(),
+      dirtyEnvelope: {
+        reason: "GLOBAL_EVENT_BOUNDARY",
+        dirtyUserIds: [owner.userId],
+        dirtyParticipantIds: [],
+        powerupTypes: [],
+        priority: "IMMEDIATE",
+      },
+      bypassDebounce: true,
+    });
+
+    const claim = await RaceResolutionJobV2.claimNext({ raceId, now: new Date() });
+    assert.deepEqual(claim.processingDirtyReasons, ["FULL", "GLOBAL_EVENT_BOUNDARY"]);
+  });
+
+  it("carries a boundary arriving during a crashed generation into the reclaim", async () => {
+    const owner = await createUser("Global boundary reclaim owner");
+    const raceId = await createActiveRace(owner, [], "Global boundary reclaim");
+    await drain(makeWorker());
+
+    await RaceResolutionJobV2.enqueue({
+      raceId,
+      userId: owner.userId,
+      now: new Date(),
+      bypassDebounce: true,
+      dirtyEnvelope: {
+        reason: "STEP_INPUT_CHANGED",
+        dirtyUserIds: [owner.userId],
+        dirtyParticipantIds: [],
+        powerupTypes: [],
+        priority: "IMMEDIATE",
+      },
+    });
+    const crashed = await RaceResolutionJobV2.claimNext({
+      raceId,
+      now: new Date(),
+      leaseMs: 0,
+    });
+    assert.ok(crashed);
+
+    await RaceResolutionJobV2.enqueue({
+      raceId,
+      userId: owner.userId,
+      now: new Date(),
+      bypassDebounce: true,
+      dirtyEnvelope: {
+        reason: "GLOBAL_EVENT_BOUNDARY",
+        dirtyUserIds: [owner.userId],
+        dirtyParticipantIds: [],
+        powerupTypes: [],
+        priority: "IMMEDIATE",
+      },
+    });
+    const reclaimed = await RaceResolutionJobV2.claimNext({ raceId, now: new Date() });
+    assert.ok(reclaimed.processingDirtyReasons.includes("GLOBAL_EVENT_BOUNDARY"));
+  });
+
   it("a crashed run's triggering users are UNIONed back in on re-claim, never dropped", async () => {
     const alice = await createUser("Alice");
     const bob = await createUser("Bob");

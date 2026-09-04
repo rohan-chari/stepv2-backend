@@ -88,6 +88,28 @@ test("malformed or over-cap scope atomically becomes FULL without truncation", (
   );
 });
 
+test("FULL fallback preserves orthogonal global-event and effect boundary work", () => {
+  const full = normalizeDirtyEnvelope(null);
+  const globalBoundary = normalizeDirtyEnvelope({
+    reason: "GLOBAL_EVENT_BOUNDARY",
+    priority: "IMMEDIATE",
+  });
+  const effectBoundary = normalizeDirtyEnvelope({
+    reason: "EFFECT_BOUNDARY",
+    powerupTypes: ["UMBRELLA"],
+    priority: "IMMEDIATE",
+  });
+
+  assert.deepEqual(
+    mergeDirtyEnvelopes(full, globalBoundary).reasons,
+    ["FULL", "GLOBAL_EVENT_BOUNDARY"],
+  );
+  assert.deepEqual(
+    mergeDirtyEnvelopes(mergeDirtyEnvelopes(full, globalBoundary), effectBoundary).reasons,
+    ["FULL", "EFFECT_BOUNDARY", "GLOBAL_EVENT_BOUNDARY"],
+  );
+});
+
 test("every currently named powerup has an explicit dependency scope", () => {
   const expected = [
     "BOUNTY", "CAMPFIRE_REST", "CLEANSE", "COIN_FLIP", "COMPRESSION_SOCKS",

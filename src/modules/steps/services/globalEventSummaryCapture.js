@@ -891,7 +891,7 @@ async function persistCapturedSummaryImpactsForRace(tx, {
   if (!tx?.globalEventCaptureArtifact?.findMany ||
       !tx?.globalEventRaceImpact?.updateMany ||
       typeof tx?.$queryRawUnsafe !== "function") {
-    return { finalized: 0, terminalized: 0 };
+    return { finalized: 0, terminalized: 0, artifactCount: 0, terminalCandidateCount: 0 };
   }
   const artifacts = await tx.globalEventCaptureArtifact.findMany({
     where: {
@@ -1033,7 +1033,12 @@ async function persistCapturedSummaryImpactsForRace(tx, {
     terminalized += updated.count;
   }
   await refreshSummaryReadinessForRace(tx, { raceId, now });
-  return { finalized, terminalized };
+  return {
+    finalized,
+    terminalized,
+    artifactCount: artifacts.length,
+    terminalCandidateCount: terminalRows.length,
+  };
 }
 
 module.exports = {

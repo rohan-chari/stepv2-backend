@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { before, beforeEach, describe, it } = require("node:test");
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 
 const {
   cleanDatabase,
@@ -21,6 +21,9 @@ const {
 const {
   buildRaceResolutionWorkerV2,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
+const {
+  RaceResolutionJobV2,
+} = require("../../src/modules/races/models/raceResolutionJobV2");
 const {
   resolveExpiredRaces,
 } = require("../../src/modules/races/jobs/raceExpiry");
@@ -639,6 +642,10 @@ describe("global event summary expiry v2 HTTP contract", () => {
     const localDate = startsAt.toISOString().slice(0, 10);
     const event = await createEvent({ startsAt, endsAt });
     const race = await createRace(user, "boundary");
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { maxParticipants: 100 },
+    });
     await prisma.globalStepEventEntitlement.create({
       data: {
         eventId: event.id,
@@ -682,6 +689,12 @@ describe("global event summary expiry v2 HTTP contract", () => {
     })).attributionVersion, 1,
     "boundary discovery must not promote outside capture");
 
+    const initialBoundaryWorker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      logger: { log() {}, error() {} },
+    });
+    assert.ok(await initialBoundaryWorker.processRace({ raceId: race.id }));
+
     const sync = await request(server.baseUrl, "POST", "/steps/sync-v2", {
       token: user.token,
       headers: {
@@ -710,6 +723,26 @@ describe("global event summary expiry v2 HTTP contract", () => {
     const firstArtifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
       where: { workId: waiting.id },
     });
+
+    const ordinaryRaceWorker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      logger: { log() {}, error() {} },
+    });
+    const ordinaryJob = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    assert.deepEqual(ordinaryJob.dirtyReasons, ["STEP_INPUT_CHANGED"]);
+    assert.ok(await ordinaryRaceWorker.processRace({ raceId: race.id }));
+    assert.equal((await prisma.globalEventRaceImpact.findUnique({
+      where: {
+        eventId_raceId_userId: {
+          eventId: event.id,
+          raceId: race.id,
+          userId: user.user.id,
+        },
+      },
+    })).status, "PENDING",
+    "ordinary step-sync resolution must leave capture finalization to its durable boundary job");
 
     const tick = buildGlobalEventSummaryTick({ prisma, now: () => new Date() });
     assert.deepEqual(await tick(), { upserts: 0 });
@@ -778,6 +811,105 @@ describe("global event summary expiry v2 HTTP contract", () => {
     const summary = (await response.json()).globalEventSummary;
     assert.equal(summary.extraRaceSteps, 600);
     assert.equal(summary.raceCount, 1);
+  });
+
+  it("preserves boundary finalization through large-race FULL-trigger promotion", async () => {
+    const user = await createTestUser();
+    const event = await createEvent();
+    const race = await createRace(user, "large-trigger-promotion");
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { maxParticipants: 2_000 },
+    });
+    const participant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId: race.id, userId: user.user.id },
+    });
+    const capturedAt = new Date();
+    const captureSyncRequestId = randomUUID();
+    const payload = { attributionDeltaSteps: 321 };
+    const payloadDigest = createHash("sha256")
+      .update(Buffer.from(JSON.stringify(payload), "utf8"))
+      .digest("hex");
+    await prisma.globalEventRaceImpact.create({
+      data: {
+        eventId: event.id,
+        raceId: race.id,
+        userId: user.user.id,
+        status: "PENDING",
+        attributionVersion: 2,
+      },
+    });
+    const work = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: event.id,
+        userId: user.user.id,
+        status: "WAITING_RACES",
+        expiresAt: new Date(capturedAt.getTime() + 60_000),
+        captureSyncRequestId,
+        captureCompletedAt: capturedAt,
+        captureCoverageThrough: capturedAt,
+        sourceScoringInputGeneration: 1n,
+        requiredRaceCount: 1,
+      },
+    });
+    await prisma.globalEventCaptureArtifact.create({
+      data: {
+        workId: work.id,
+        eventId: event.id,
+        raceId: race.id,
+        userId: user.user.id,
+        captureSyncRequestId,
+        captureCompletedAt: capturedAt,
+        captureCoverageThrough: capturedAt,
+        sourceScoringInputGeneration: 1n,
+        payload,
+        payloadDigest,
+      },
+    });
+
+    await RaceResolutionJobV2.enqueueFullScopeTrigger({
+      raceId: race.id,
+      now: capturedAt,
+      scope: { userId: user.user.id, participantId: participant.id },
+    });
+    await RaceResolutionJobV2.enqueue({
+      raceId: race.id,
+      userId: user.user.id,
+      now: capturedAt,
+      bypassDebounce: true,
+      dirtyEnvelope: {
+        reason: "GLOBAL_EVENT_BOUNDARY",
+        dirtyUserIds: [user.user.id],
+        dirtyParticipantIds: [participant.id],
+        powerupTypes: [],
+        priority: "IMMEDIATE",
+      },
+    });
+    await RaceResolutionJobV2.promoteFullScopeTriggers({ now: capturedAt });
+    const queued = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    assert.ok(queued.dirtyReasons.includes("GLOBAL_EVENT_BOUNDARY"));
+
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      logger: { log() {}, error() {} },
+    });
+    assert.ok(await worker.processRace({ raceId: race.id }));
+    const impact = await prisma.globalEventRaceImpact.findUniqueOrThrow({
+      where: {
+        eventId_raceId_userId: {
+          eventId: event.id,
+          raceId: race.id,
+          userId: user.user.id,
+        },
+      },
+    });
+    assert.equal(impact.status, "FINAL");
+    assert.equal(impact.deltaSteps, 321);
+    assert.ok((await prisma.globalEventSummaryWork.findUniqueOrThrow({
+      where: { id: work.id },
+    })).readyAt);
   });
 
   it("captures cross-user Leech/Hitchhike inputs and attributes the whole-race counterfactual", async () => {
