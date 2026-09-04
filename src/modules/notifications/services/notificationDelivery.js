@@ -259,7 +259,14 @@ function buildNotificationIntentService(dependencies = {}) {
           select: { id: true },
         });
         if (!existingSchedule) {
-          return { kind: "RECEIPT_ONLY", scheduleId: null, receiptOnly: true };
+          const exactUnterminatedGap = receipt.receipt?.sourceKind === "SOURCE_BACKED" &&
+            receipt.receipt?.sourceType === "GLOBAL_STEP_EVENT_ENTITLEMENT" &&
+            receipt.receipt?.schedulePresent === false &&
+            receipt.receipt?.terminalStatus == null &&
+            receipt.staleReplay !== true;
+          if (!exactUnterminatedGap) {
+            return { kind: "RECEIPT_ONLY", scheduleId: null, receiptOnly: true };
+          }
         }
       }
     }

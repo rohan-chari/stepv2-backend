@@ -726,6 +726,7 @@ model NotificationScheduleReceipt {
   terminalStatus    String?   @map("terminal_status") @db.VarChar(32)
   completedAt       DateTime? @map("completed_at")
   directRetainUntil DateTime? @map("direct_retain_until")
+  schedulePresent   Boolean   @default(false) @map("schedule_present")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 

@@ -40,18 +40,67 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       current,
     ));
     const projectionsRearmed = await prisma.$executeRawUnsafe(
-      `WITH candidates AS (
-         SELECT projection.id
+      `WITH receipt_gaps AS MATERIALIZED (
+         SELECT receipt.recipient_user_id,receipt.delivery_key,
+                receipt.source_id,receipt.source_revision
+           FROM notification_schedule_receipts receipt
+          WHERE receipt.source_kind='SOURCE_BACKED'
+            AND receipt.source_type='GLOBAL_STEP_EVENT_ENTITLEMENT'
+            AND receipt.terminal_status IS NULL
+            AND receipt.schedule_present=false
+          ORDER BY receipt.updated_at,receipt.recipient_user_id,receipt.delivery_key
+          LIMIT $1
+       ), receipt_candidates AS MATERIALIZED (
+         SELECT projection.id,projection.created_at
+           FROM receipt_gaps gap
+           CROSS JOIN LATERAL (
+             SELECT candidate.id,candidate.domain_event_id,candidate.created_at
+               FROM domain_event_notification_projections candidate
+              WHERE candidate.recipient_user_id=gap.recipient_user_id
+                AND candidate.delivery_key=gap.delivery_key
+                AND candidate.status IN ('COMPLETED','FAILED_TERMINAL')
+              OFFSET 0
+           ) projection
+           JOIN domain_event_outbox event
+             ON event.id=projection.domain_event_id
+            AND event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
+            AND event.aggregate_id=gap.source_id
+            AND event.payload->>'scheduleRevision'=gap.source_revision::text
+       ), failed_candidates AS MATERIALIZED (
+         SELECT projection.id,projection.created_at
            FROM domain_event_notification_projections projection
            JOIN domain_event_outbox event ON event.id=projection.domain_event_id
-          WHERE event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
-            AND projection.status IN ('COMPLETED','FAILED_TERMINAL')
+           LEFT JOIN notification_schedule_receipts receipt
+             ON receipt.recipient_user_id=projection.recipient_user_id
+            AND receipt.delivery_key=projection.delivery_key
+          WHERE projection.status='FAILED_TERMINAL'
+            AND event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
+            AND (
+              receipt.recipient_user_id IS NULL
+              OR (
+                receipt.source_kind='SOURCE_BACKED'
+                AND receipt.source_type='GLOBAL_STEP_EVENT_ENTITLEMENT'
+                AND receipt.source_id=event.aggregate_id
+                AND receipt.source_revision::text=event.payload->>'scheduleRevision'
+                AND receipt.terminal_status IS NULL
+              )
+            )
             AND NOT EXISTS (
               SELECT 1 FROM notification_schedules schedule
                WHERE schedule.recipient_user_id=projection.recipient_user_id
                  AND schedule.delivery_key=projection.delivery_key
             )
-          ORDER BY projection.created_at, projection.id LIMIT $1
+          ORDER BY projection.created_at,projection.id
+          LIMIT $1
+       ), candidates AS (
+         SELECT candidate.id
+           FROM (
+             SELECT id,created_at FROM receipt_candidates
+             UNION
+             SELECT id,created_at FROM failed_candidates
+           ) candidate
+          ORDER BY candidate.created_at,candidate.id
+          LIMIT $1
        )
        UPDATE domain_event_notification_projections projection
           SET status='RETRY', available_at=$2, completed_at=NULL,

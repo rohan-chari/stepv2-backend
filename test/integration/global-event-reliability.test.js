@@ -10,6 +10,7 @@ const {
   startServer,
 } = require("./setup");
 const { appendDomainEvent, buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
+const domainEventOutbox = require("../../src/modules/domainEvents/models/domainEventOutbox");
 const {
   buildNotificationProjector,
 } = require("../../src/modules/domainEvents/services/notificationProjector");
@@ -560,6 +561,65 @@ describe("global-event reliability v2 contract", () => {
     });
     assert.equal(schedule.sourceRevision, 1);
     assert.equal(schedule.availableAt.toISOString(), newStart.toISOString());
+  });
+
+  it("lets only the receipt's exact event revision close a batch-projection schedule gap", async () => {
+    const { user } = await createTestUser();
+    const current = new Date("2098-08-26T08:00:00.000Z");
+    const startsAt = new Date("2098-08-26T10:00:00.000Z");
+    const endsAt = new Date("2098-08-26T10:30:00.000Z");
+    const event = await prisma.globalStepEvent.create({ data: {
+      startsAt, endsAt, multiplier: 2, scheduleMode: "LOCAL_ENTITLEMENTS",
+      eventDay: "2098-08-26", localStartMinute: 600, durationMinutes: 30,
+    } });
+    const entitlement = await prisma.globalStepEventEntitlement.create({ data: {
+      eventId: event.id, userId: user.id, timezone: "UTC", localDate: "2098-08-26",
+      startsAt, endsAt, scheduleRevision: 2,
+    } });
+    const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`;
+    for (const revision of [1, 2]) {
+      await prisma.$transaction((tx) => appendDomainEvent(tx, {
+        eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlement.id}:${revision}:batch-gap`,
+        eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1",
+        schemaVersion: 1,
+        aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+        aggregateId: entitlement.id,
+        occurredAt: new Date(current.getTime() + revision),
+        availableAt: new Date(current.getTime() + revision),
+        payload: {
+          eventId: event.id, entitlementId: entitlement.id, userId: user.id,
+          startsAt, endsAt, scheduleRevision: revision, timezone: "UTC",
+        },
+        audience: [{ recipientId: user.id, facts: {} }],
+      }));
+    }
+    await prisma.notificationScheduleReceipt.create({ data: {
+      recipientUserId: user.id,
+      deliveryKey,
+      sourceKind: "SOURCE_BACKED",
+      sourceType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+      sourceId: entitlement.id,
+      sourceRevision: 2,
+    } });
+
+    assert.equal((await domainEventOutbox.projectScheduledEntitlementEventsBatch({
+      prisma, now: new Date(current.getTime() + 10), batchSize: 1,
+    })).processed, 1);
+    assert.equal(await prisma.notificationSchedule.count({ where: { deliveryKey } }), 0,
+      "stale revision one cannot close revision two's exact gap");
+    assert.equal((await prisma.notificationScheduleReceipt.findUniqueOrThrow({
+      where: { recipientUserId_deliveryKey: { recipientUserId: user.id, deliveryKey } },
+    })).schedulePresent, false);
+
+    assert.equal((await domainEventOutbox.projectScheduledEntitlementEventsBatch({
+      prisma, now: new Date(current.getTime() + 2_000), batchSize: 1,
+    })).processed, 1);
+    assert.equal((await prisma.notificationSchedule.findUniqueOrThrow({
+      where: { recipientUserId_deliveryKey: { recipientUserId: user.id, deliveryKey } },
+    })).sourceRevision, 2);
+    assert.equal((await prisma.notificationScheduleReceipt.findUniqueOrThrow({
+      where: { recipientUserId_deliveryKey: { recipientUserId: user.id, deliveryKey } },
+    })).schedulePresent, true);
   });
 
   it("materializes eligible schedules with outbox expiry and keeps no-race schedules dormant", async () => {
@@ -1369,6 +1429,7 @@ describe("global-event reliability v2 contract", () => {
       eventId: parent.id, userId: user.id, timezone: "UTC", localDate: "2098-08-26",
       startsAt: new Date(current.getTime() + 60 * 60_000),
       endsAt: new Date(current.getTime() + 90 * 60_000),
+      scheduleRevision: 2,
     } });
 
     const stepsRepair = buildGlobalEventEntitlementEventReconciler({
@@ -1379,15 +1440,93 @@ describe("global-event reliability v2 contract", () => {
     await project();
     await project();
     const schedule = await prisma.notificationSchedule.findFirstOrThrow({ where: { sourceRef: entitlement.id } });
+    const currentProjection = await prisma.domainEventNotificationProjection.findFirstOrThrow({
+      where: { recipientUserId: user.id, deliveryKey: schedule.deliveryKey },
+      orderBy: { createdAt: "desc" },
+    });
+    const staleEvent = await prisma.domainEventOutbox.create({ data: {
+      eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlement.id}:1:test-stale`,
+      eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1",
+      aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+      aggregateId: entitlement.id,
+      payload: {
+        eventId: parent.id,
+        entitlementId: entitlement.id,
+        userId: user.id,
+        startsAt: entitlement.startsAt.toISOString(),
+        endsAt: entitlement.endsAt.toISOString(),
+        scheduleRevision: 1,
+      },
+      occurredAt: new Date(current.getTime() - 1_000),
+      availableAt: current,
+      status: "COMPLETED",
+      expansionCompletedAt: current,
+      completedAt: current,
+    } });
+    const staleProjection = await prisma.domainEventNotificationProjection.create({ data: {
+      domainEventId: staleEvent.id,
+      recipientUserId: user.id,
+      deliveryKey: schedule.deliveryKey,
+      projectionKind: "VISIBLE",
+      status: "COMPLETED",
+      availableAt: current,
+      completedAt: current,
+      createdAt: new Date(current.getTime() - 1_000),
+      updatedAt: current,
+    } });
+
+    const [presentReceipt] = await prisma.$queryRawUnsafe(
+      `SELECT schedule_present AS "schedulePresent"
+         FROM notification_schedule_receipts
+        WHERE recipient_user_id=$1 AND delivery_key=$2`,
+      schedule.recipientUserId,
+      schedule.deliveryKey,
+    );
+    assert.equal(presentReceipt.schedulePresent, true,
+      "the database-maintained readiness bit records the committed schedule");
 
     await prisma.notificationSchedule.delete({ where: { id: schedule.id } });
+    const [missingReceipt] = await prisma.$queryRawUnsafe(
+      `SELECT schedule_present AS "schedulePresent"
+         FROM notification_schedule_receipts
+        WHERE recipient_user_id=$1 AND delivery_key=$2`,
+      schedule.recipientUserId,
+      schedule.deliveryKey,
+    );
+    assert.equal(missingReceipt.schedulePresent, false,
+      "deleting an unterminated schedule creates an exact reconciliation candidate");
     const notificationRepair = buildNotificationCompletenessReconciler({
       prisma, now: () => current, logger: { log() {}, error() {} },
     });
     const repaired = await notificationRepair();
     assert.equal(repaired.projectionsRearmed, 1);
+    assert.equal((await prisma.domainEventNotificationProjection.findUniqueOrThrow({
+      where: { id: currentProjection.id },
+    })).status, "RETRY");
+    assert.equal((await prisma.domainEventNotificationProjection.findUniqueOrThrow({
+      where: { id: staleProjection.id },
+    })).status, "COMPLETED", "a stale source revision cannot consume or replay the repair candidate");
     await project();
     assert.equal(await prisma.notificationSchedule.count({ where: { sourceRef: entitlement.id } }), 1);
+    assert.equal((await prisma.notificationScheduleReceipt.findUniqueOrThrow({
+      where: { recipientUserId_deliveryKey: {
+        recipientUserId: schedule.recipientUserId,
+        deliveryKey: schedule.deliveryKey,
+      } },
+    })).schedulePresent, true,
+    "reprojection closes the exact completeness candidate");
+
+    await prisma.notificationScheduleReceipt.update({
+      where: { recipientUserId_deliveryKey: {
+        recipientUserId: schedule.recipientUserId,
+        deliveryKey: schedule.deliveryKey,
+      } },
+      data: { terminalStatus: "EXPIRED", completedAt: current },
+    });
+    await prisma.notificationSchedule.deleteMany({ where: { sourceRef: entitlement.id } });
+    const terminalCleanup = await notificationRepair();
+    assert.equal(terminalCleanup.projectionsRearmed, 0,
+      "intentional terminal payload cleanup never becomes repair work");
   });
 
   it("repairs missing materialization, overdue outbox, snapshot, and terminal-target gaps independently", async () => {

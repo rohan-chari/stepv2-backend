@@ -617,6 +617,8 @@ async function projectScheduledEntitlementEventsBatch({
               receipt.source_type AS receipt_source_type,
               receipt.source_id AS receipt_source_id,
               receipt.source_revision AS receipt_source_revision,
+              receipt.terminal_status AS receipt_terminal_status,
+              receipt.schedule_present AS receipt_schedule_present,
               EXISTS (
                 SELECT 1 FROM notification_schedules schedule
                  WHERE schedule.recipient_user_id=record.recipient_id
@@ -702,6 +704,10 @@ async function projectScheduledEntitlementEventsBatch({
             record.receipt_source_kind IS NULL
             OR record.source_revision > record.receipt_source_revision
             OR record.live_schedule_exists
+            OR (record.receipt_terminal_status IS NULL AND
+                record.receipt_schedule_present=false AND
+                record.source_revision=record.receipt_source_revision AND
+                record.payload->>'scheduleRevision'=record.receipt_source_revision::text)
           )
        ON CONFLICT (recipient_user_id,delivery_key) DO UPDATE
          SET available_at=EXCLUDED.available_at,

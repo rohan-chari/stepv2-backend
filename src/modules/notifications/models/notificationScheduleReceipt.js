@@ -50,7 +50,8 @@ function buildNotificationScheduleReceiptModel(prisma = defaultPrisma) {
         ? (await tx.$queryRawUnsafe(
           `SELECT source_kind AS "sourceKind",source_type AS "sourceType",
                   source_id AS "sourceId",source_revision AS "sourceRevision",
-                  terminal_status AS "terminalStatus",completed_at AS "completedAt"
+                  terminal_status AS "terminalStatus",completed_at AS "completedAt",
+                  schedule_present AS "schedulePresent"
              FROM notification_schedule_receipts
             WHERE recipient_user_id=$1 AND delivery_key=$2
             FOR UPDATE`,
