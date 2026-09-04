@@ -48,3 +48,42 @@ test("step sync classifies durable resolution wakes from committed intake scope"
     {},
   );
 });
+
+test("summary capture snapshots mutable scoring facts without a broad dependency lock", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../../src/modules/steps/services/globalEventSummaryCapture.js"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    source,
+    /FROM user_scoring_input_versions[\s\S]{0,300}ORDER BY user_id ASC[\s\S]{0,80}FOR UPDATE/,
+    "captures in different races must not serialize on shared scoring-input rows",
+  );
+  assert.match(
+    source,
+    /WITH dependencies AS MATERIALIZED[\s\S]*FROM step_samples sample[\s\S]*UNION ALL[\s\S]*FROM steps daily[\s\S]*UNION ALL[\s\S]*FROM user_scoring_input_versions version/,
+    "samples, daily totals, and generation witnesses must share one statement snapshot",
+  );
+  assert.match(
+    source,
+    /inputVersions\.length !== dependencyUserIds\.length/,
+    "capture must reject an incomplete generation-witness snapshot",
+  );
+});
+
+test("summary capture keeps the uploader scoring fence before race C0 for rolling workers", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../../src/modules/steps/services/globalEventSummaryCapture.js"),
+    "utf8",
+  );
+  const captureStart = source.indexOf("async function lockEligibleSummaryCaptureDependencies");
+  const uploaderFence = source.indexOf(
+    'WHERE user_id=$1\n      FOR UPDATE`,\n    userId',
+    captureStart,
+  );
+  const raceFence = source.indexOf("await acquireRaceWriteFences(tx, raceIds)", captureStart);
+
+  assert.ok(uploaderFence > captureStart, "capture must retain the uploader's scoring-input fence");
+  assert.ok(raceFence > uploaderFence, "the uploader fence must precede race C0");
+});

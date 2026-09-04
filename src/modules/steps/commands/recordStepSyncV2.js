@@ -108,6 +108,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const stepSyncRequestModel = dependencies.StepSyncRequest || defaultStepSyncRequestModel;
   const stepInputIntake = dependencies.stepInputIntake || defaultStepInputIntake;
+  const lockEligibleSummaryCaptureDependencies =
+    dependencies.lockEligibleSummaryCaptureDependencies ||
+    ((tx, args) => require("../services/globalEventSummaryCapture")
+      .lockEligibleSummaryCaptureDependencies(tx, args));
   const events = dependencies.eventBus || defaultEventBus;
   const appSettings = dependencies.appSettings || defaultAppSettings;
   const now = dependencies.now || (() => new Date());
@@ -196,8 +200,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     const requestedAt = now();
     const summaryCaptureDependencies = await measureStepTelemetryPhase(
       "summary_finalization",
-      () => require("../services/globalEventSummaryCapture")
-        .lockEligibleSummaryCaptureDependencies(tx, {
+      () => lockEligibleSummaryCaptureDependencies(tx, {
           userId,
           at: requestedAt,
         }),

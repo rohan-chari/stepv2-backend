@@ -8,6 +8,7 @@ const {
   getSharedServer,
   prisma,
   request,
+  startServer,
 } = require("./setup");
 const { appSettings } = require("../../src/shared/config/appSettings");
 const {
@@ -30,6 +31,9 @@ const {
   lockEligibleSummaryCaptureDependencies,
   persistCapturedSummaryImpactsForRace,
 } = require("../../src/modules/steps/services/globalEventSummaryCapture");
+const {
+  buildRecordStepSyncV2,
+} = require("../../src/modules/steps/commands/recordStepSyncV2");
 
 const CAPABILITIES = "impact_summaries,impact_summary_expiry_v1";
 let server;
@@ -96,6 +100,22 @@ async function home(user, features = CAPABILITIES) {
     token: user.token,
     headers: { "X-Client-Features": features },
   });
+}
+
+async function waitForDatabaseBlock(blockedPid, blockerPid, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [row] = await prisma.$queryRawUnsafe(
+      `SELECT wait_event_type AS "waitEventType",
+              pg_blocking_pids($1::integer) AS "blockingPids"
+         FROM pg_stat_activity
+        WHERE pid=$1::integer`,
+      blockedPid,
+    );
+    if (row?.waitEventType === "Lock" && row.blockingPids.includes(blockerPid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`backend ${blockedPid} was not blocked by backend ${blockerPid}`);
 }
 
 describe("global event summary expiry v2 HTTP contract", () => {
@@ -1165,25 +1185,25 @@ describe("global event summary expiry v2 HTTP contract", () => {
         expiresAt,
       },
     });
-    let signalLocked;
-    const locked = new Promise((resolve) => { signalLocked = resolve; });
-    let releaseInputFence;
-    const released = new Promise((resolve) => { releaseInputFence = resolve; });
-    const blocker = prisma.$transaction(async (tx) => {
-      await tx.$queryRawUnsafe(
-        `SELECT user_id FROM user_scoring_input_versions
-          WHERE user_id = $1 FOR UPDATE`,
-        user.user.id,
-      );
-      signalLocked();
-      await released;
-    }, { timeout: 15_000, maxWait: 15_000 });
-    await locked;
+    let signalClosureComplete;
+    const closureComplete = new Promise((resolve) => { signalClosureComplete = resolve; });
+    let releaseClosure;
+    const released = new Promise((resolve) => { releaseClosure = resolve; });
+    const recordStepSyncV2 = buildRecordStepSyncV2({
+      prisma,
+      lockEligibleSummaryCaptureDependencies: async (tx, args) => {
+        const dependencies = await lockEligibleSummaryCaptureDependencies(tx, args);
+        signalClosureComplete();
+        await released;
+        return dependencies;
+      },
+    });
+    const isolatedServer = await startServer({ recordStepSyncV2 });
 
     let second;
     let secondPromise;
     try {
-      secondPromise = request(server.baseUrl, "POST", "/steps/sync-v2", {
+      secondPromise = request(isolatedServer.baseUrl, "POST", "/steps/sync-v2", {
         token: user.token,
         headers: {
           "Idempotency-Key": randomUUID(),
@@ -1192,23 +1212,7 @@ describe("global event summary expiry v2 HTTP contract", () => {
         },
         body,
       });
-      const deadline = Date.now() + 5_000;
-      let blocked = false;
-      while (Date.now() < deadline) {
-        const [{ n }] = await prisma.$queryRawUnsafe(
-          `SELECT COUNT(*)::int AS n FROM pg_stat_activity
-            WHERE datname = current_database()
-              AND backend_type = 'client backend'
-              AND wait_event_type = 'Lock'
-              AND query LIKE '%user_scoring_input_versions%'`,
-        );
-        if (n > 0) {
-          blocked = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      assert.equal(blocked, true, "sync never reached the dependency input fence");
+      await closureComplete;
       const lateWork = await prisma.globalEventSummaryWork.create({
         data: {
           eventId: lateEvent.id,
@@ -1217,21 +1221,611 @@ describe("global event summary expiry v2 HTTP contract", () => {
           expiresAt,
         },
       });
-      releaseInputFence();
-      await blocker;
+      releaseClosure();
       second = await secondPromise;
       assert.equal((await prisma.globalEventSummaryWork.findUniqueOrThrow({
         where: { id: lateWork.id },
       })).status, "WAITING_SYNC");
     } finally {
-      releaseInputFence();
-      await blocker;
+      releaseClosure();
       await secondPromise?.catch(() => {});
+      await isolatedServer.close();
     }
     assert.equal(second.status, 202);
     assert.equal((await prisma.globalEventSummaryWork.findUniqueOrThrow({
       where: { id: initialWork.id },
     })).status, "QUEUED");
+  });
+
+  it("allows cross-race captures with a shared scoring dependency to proceed concurrently", async () => {
+    const uploaderA = await createTestUser();
+    const uploaderB = await createTestUser();
+    const shared = await createTestUser();
+    const now = new Date();
+    const sampleStart = new Date(now.getTime() - 20 * 60_000);
+    const eventEndsAt = new Date(now.getTime() - 5 * 60_000);
+    const sampleEnd = new Date(now.getTime() - 60_000);
+    const event = await createEvent({ startsAt: sampleStart, endsAt: eventEndsAt });
+    const raceA = await createRace(uploaderA, "overlapping-lock-a");
+    const raceB = await createRace(uploaderB, "overlapping-lock-b");
+    await prisma.raceParticipant.createMany({
+      data: [raceA.id, raceB.id].map((raceId) => ({
+        raceId,
+        userId: shared.user.id,
+        status: "ACCEPTED",
+      })),
+    });
+
+    const expiresAt = new Date(now.getTime() + 60 * 60_000);
+    const localDate = sampleStart.toISOString().slice(0, 10);
+    const workIdsByUserId = new Map();
+    const raceByUserId = new Map([
+      [uploaderA.user.id, raceA.id],
+      [uploaderB.user.id, raceB.id],
+    ]);
+    for (const uploader of [uploaderA, uploaderB]) {
+      await prisma.globalStepEventEntitlement.create({
+        data: {
+          eventId: event.id,
+          userId: uploader.user.id,
+          timezone: "UTC",
+          localDate,
+          startsAt: sampleStart,
+          endsAt: eventEndsAt,
+          startOutcome: "ACTIVATED_ON_TIME",
+          startProcessedAt: sampleStart,
+        },
+      });
+      await prisma.globalEventRaceImpact.create({
+        data: {
+          eventId: event.id,
+          raceId: raceByUserId.get(uploader.user.id),
+          userId: uploader.user.id,
+          status: "PENDING",
+          attributionVersion: 2,
+        },
+      });
+      const work = await prisma.globalEventSummaryWork.create({
+        data: {
+          eventId: event.id,
+          userId: uploader.user.id,
+          status: "WAITING_SYNC",
+          expiresAt,
+          requiredRaceCount: 1,
+        },
+      });
+      workIdsByUserId.set(uploader.user.id, work.id);
+    }
+    await prisma.userScoringInputVersion.createMany({
+      data: [uploaderA.user.id, uploaderB.user.id, shared.user.id].map((userId) => ({
+        userId,
+        generation: 1n,
+      })),
+    });
+
+    let signalFirstCaptureReady;
+    const firstCaptureReady = new Promise((resolve) => { signalFirstCaptureReady = resolve; });
+    let signalSecondCaptureReady;
+    const secondCaptureReady = new Promise((resolve) => { signalSecondCaptureReady = resolve; });
+    let releaseCapture;
+    const released = new Promise((resolve) => { releaseCapture = resolve; });
+    const recordStepSyncV2 = buildRecordStepSyncV2({
+      prisma,
+      lockEligibleSummaryCaptureDependencies: async (tx, args) => {
+        const dependencies = await lockEligibleSummaryCaptureDependencies(tx, args);
+        if (args.userId === uploaderA.user.id) {
+          signalFirstCaptureReady();
+          await released;
+        } else if (args.userId === uploaderB.user.id) {
+          signalSecondCaptureReady();
+        }
+        return dependencies;
+      },
+    });
+    const isolatedServer = await startServer({ recordStepSyncV2 });
+    const sync = (uploader, steps) => request(
+      isolatedServer.baseUrl,
+      "POST",
+      "/steps/sync-v2",
+      {
+        token: uploader.token,
+        headers: {
+          "Idempotency-Key": randomUUID(),
+          "X-Timezone": "UTC",
+          "X-Client-Features": CAPABILITIES,
+        },
+        body: {
+          date: localDate,
+          steps,
+          samples: [{
+            periodStart: sampleStart.toISOString(),
+            periodEnd: sampleEnd.toISOString(),
+            steps,
+            recordingMethod: "automatic",
+          }],
+        },
+      },
+    );
+
+    let firstPromise;
+    let secondPromise;
+    try {
+      firstPromise = sync(uploaderA, 300);
+      let barrierTimeout;
+      try {
+        await Promise.race([
+          firstCaptureReady,
+          new Promise((_, reject) => {
+            barrierTimeout = setTimeout(
+              () => reject(new Error("first capture never reached the dependency-lock barrier")),
+              5_000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(barrierTimeout);
+      }
+      secondPromise = sync(uploaderB, 500);
+
+      let secondBarrierTimeout;
+      try {
+        await Promise.race([
+          secondCaptureReady,
+          new Promise((_, reject) => {
+            secondBarrierTimeout = setTimeout(
+              () => reject(new Error(
+                "second capture remained serialized behind the first capture's shared dependency",
+              )),
+              5_000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(secondBarrierTimeout);
+      }
+
+      releaseCapture();
+      const [first, second] = await Promise.all([firstPromise, secondPromise]);
+      assert.equal(first.status, 202);
+      assert.equal(second.status, 202);
+      const artifacts = await prisma.globalEventCaptureArtifact.findMany({
+        where: { eventId: event.id },
+        select: { workId: true, userId: true, raceId: true },
+        orderBy: { userId: "asc" },
+      });
+      assert.deepEqual(artifacts, [uploaderA, uploaderB]
+        .map((uploader) => ({
+          workId: workIdsByUserId.get(uploader.user.id),
+          userId: uploader.user.id,
+          raceId: raceByUserId.get(uploader.user.id),
+        }))
+        .sort((a, b) => a.userId.localeCompare(b.userId)));
+      const samples = await prisma.stepSample.findMany({
+        where: { userId: { in: [uploaderA.user.id, uploaderB.user.id] } },
+        select: { userId: true, steps: true },
+        orderBy: { userId: "asc" },
+      });
+      assert.deepEqual(samples, [
+        { userId: uploaderA.user.id, steps: 300 },
+        { userId: uploaderB.user.id, steps: 500 },
+      ].sort((a, b) => a.userId.localeCompare(b.userId)));
+      const works = await prisma.globalEventSummaryWork.findMany({
+        where: { eventId: event.id },
+        orderBy: { userId: "asc" },
+      });
+      assert.deepEqual(works.map((work) => work.status), ["QUEUED", "QUEUED"]);
+    } finally {
+      releaseCapture();
+      await Promise.allSettled([firstPromise, secondPromise].filter(Boolean));
+      await isolatedServer.close();
+    }
+  });
+
+  it("keeps uploader-before-C0 ordering with a rolling old capture", async () => {
+    const uploader = await createTestUser();
+    const now = new Date();
+    const sampleStart = new Date(now.getTime() - 20 * 60_000);
+    const eventEndsAt = new Date(now.getTime() - 5 * 60_000);
+    const sampleEnd = new Date(now.getTime() - 60_000);
+    const localDate = sampleStart.toISOString().slice(0, 10);
+    const event = await createEvent({ startsAt: sampleStart, endsAt: eventEndsAt });
+    const race = await createRace(uploader, "mixed-worker-lock-order");
+    await prisma.globalStepEventEntitlement.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        timezone: "UTC",
+        localDate,
+        startsAt: sampleStart,
+        endsAt: eventEndsAt,
+        startOutcome: "ACTIVATED_ON_TIME",
+        startProcessedAt: sampleStart,
+      },
+    });
+    await prisma.globalEventRaceImpact.create({
+      data: {
+        eventId: event.id,
+        raceId: race.id,
+        userId: uploader.user.id,
+        status: "PENDING",
+        attributionVersion: 2,
+      },
+    });
+    const work = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        status: "WAITING_SYNC",
+        expiresAt: new Date(now.getTime() + 60 * 60_000),
+        requiredRaceCount: 1,
+      },
+    });
+    await prisma.userScoringInputVersion.create({
+      data: { userId: uploader.user.id, generation: 1n },
+    });
+
+    let signalOldRowLocked;
+    const oldRowLocked = new Promise((resolve) => { signalOldRowLocked = resolve; });
+    let allowOldRaceFence;
+    const oldRaceFenceAllowed = new Promise((resolve) => { allowOldRaceFence = resolve; });
+    let oldPid;
+    const oldCapture = prisma.$transaction(async (tx) => {
+      const [{ pid }] = await tx.$queryRawUnsafe("SELECT pg_backend_pid() AS pid");
+      oldPid = pid;
+      await tx.$queryRawUnsafe(
+        `SELECT user_id FROM user_scoring_input_versions
+          WHERE user_id=$1 FOR UPDATE`,
+        uploader.user.id,
+      );
+      signalOldRowLocked();
+      await oldRaceFenceAllowed;
+      await acquireRaceWriteFence(tx, race.id);
+    }, { timeout: 15_000, maxWait: 15_000 });
+    await oldRowLocked;
+
+    let signalNewPid;
+    const newPidReady = new Promise((resolve) => { signalNewPid = resolve; });
+    const recordStepSyncV2 = buildRecordStepSyncV2({
+      prisma,
+      lockEligibleSummaryCaptureDependencies: async (tx, args) => {
+        const [{ pid }] = await tx.$queryRawUnsafe("SELECT pg_backend_pid() AS pid");
+        signalNewPid(pid);
+        return lockEligibleSummaryCaptureDependencies(tx, args);
+      },
+    });
+    const isolatedServer = await startServer({ recordStepSyncV2 });
+    let syncPromise;
+    try {
+      syncPromise = request(isolatedServer.baseUrl, "POST", "/steps/sync-v2", {
+        token: uploader.token,
+        headers: {
+          "Idempotency-Key": randomUUID(),
+          "X-Timezone": "UTC",
+          "X-Client-Features": CAPABILITIES,
+        },
+        body: {
+          date: localDate,
+          steps: 300,
+          samples: [{
+            periodStart: sampleStart.toISOString(),
+            periodEnd: sampleEnd.toISOString(),
+            steps: 300,
+            recordingMethod: "automatic",
+          }],
+        },
+      });
+      const newPid = await newPidReady;
+      await waitForDatabaseBlock(newPid, oldPid);
+
+      // An old worker/current writer already owns the scoring row. It must be
+      // able to take C0 and commit; the new capture cannot own C0 while it waits.
+      allowOldRaceFence();
+      await oldCapture;
+      const sync = await syncPromise;
+      assert.equal(sync.status, 202);
+      assert.equal((await prisma.globalEventSummaryWork.findUniqueOrThrow({
+        where: { id: work.id },
+      })).status, "QUEUED");
+    } finally {
+      allowOldRaceFence();
+      await oldCapture.catch(() => {});
+      await syncPromise?.catch(() => {});
+      await isolatedServer.close();
+    }
+  });
+
+  it("materializes and captures a missing dependency generation witness", async () => {
+    const uploader = await createTestUser();
+    const dependency = await createTestUser();
+    const now = new Date();
+    const sampleStart = new Date(now.getTime() - 20 * 60_000);
+    const eventEndsAt = new Date(now.getTime() - 5 * 60_000);
+    const sampleEnd = new Date(now.getTime() - 60_000);
+    const localDate = sampleStart.toISOString().slice(0, 10);
+    const event = await createEvent({ startsAt: sampleStart, endsAt: eventEndsAt });
+    const race = await createRace(uploader, "missing-generation-witness");
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: dependency.user.id, status: "ACCEPTED" },
+    });
+    await prisma.globalStepEventEntitlement.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        timezone: "UTC",
+        localDate,
+        startsAt: sampleStart,
+        endsAt: eventEndsAt,
+        startOutcome: "ACTIVATED_ON_TIME",
+        startProcessedAt: sampleStart,
+      },
+    });
+    await prisma.globalEventRaceImpact.create({
+      data: {
+        eventId: event.id,
+        raceId: race.id,
+        userId: uploader.user.id,
+        status: "PENDING",
+        attributionVersion: 2,
+      },
+    });
+    const work = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        status: "WAITING_SYNC",
+        expiresAt: new Date(now.getTime() + 60 * 60_000),
+        requiredRaceCount: 1,
+      },
+    });
+    assert.equal(await prisma.userScoringInputVersion.count({
+      where: { userId: { in: [uploader.user.id, dependency.user.id] } },
+    }), 0);
+
+    const sync = await request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token: uploader.token,
+      headers: {
+        "Idempotency-Key": randomUUID(),
+        "X-Timezone": "UTC",
+        "X-Client-Features": CAPABILITIES,
+      },
+      body: {
+        date: localDate,
+        steps: 300,
+        samples: [{
+          periodStart: sampleStart.toISOString(),
+          periodEnd: sampleEnd.toISOString(),
+          steps: 300,
+          recordingMethod: "automatic",
+        }],
+      },
+    });
+    assert.equal(sync.status, 202);
+    const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+      where: { workId: work.id, raceId: race.id, userId: uploader.user.id },
+    });
+    assert.deepEqual(artifact.payload.dependencyInputGenerations, [
+      { userId: uploader.user.id, generation: "2" },
+      { userId: dependency.user.id, generation: "1" },
+    ].sort((a, b) => a.userId.localeCompare(b.userId)));
+    const versions = await prisma.userScoringInputVersion.findMany({
+      where: { userId: { in: [uploader.user.id, dependency.user.id] } },
+      select: { userId: true, generation: true },
+      orderBy: { userId: "asc" },
+    });
+    assert.deepEqual(versions, [
+      { userId: uploader.user.id, generation: 2n },
+      { userId: dependency.user.id, generation: 1n },
+    ].sort((a, b) => a.userId.localeCompare(b.userId)));
+  });
+
+  it("terminalizes capture when the uploader is no longer an accepted participant", async () => {
+    const uploader = await createTestUser();
+    const survivor = await createTestUser();
+    const now = new Date();
+    const startsAt = new Date(now.getTime() - 20 * 60_000);
+    const endsAt = new Date(now.getTime() - 5 * 60_000);
+    const localDate = startsAt.toISOString().slice(0, 10);
+    const event = await createEvent({ startsAt, endsAt });
+    const race = await createRace(uploader, "departed-uploader");
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: survivor.user.id, status: "ACCEPTED" },
+    });
+    await prisma.raceParticipant.update({
+      where: { raceId_userId: { raceId: race.id, userId: uploader.user.id } },
+      data: { status: "DECLINED" },
+    });
+    await prisma.globalStepEventEntitlement.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        timezone: "UTC",
+        localDate,
+        startsAt,
+        endsAt,
+        startOutcome: "ACTIVATED_ON_TIME",
+        startProcessedAt: startsAt,
+      },
+    });
+    await prisma.globalEventRaceImpact.create({
+      data: {
+        eventId: event.id,
+        raceId: race.id,
+        userId: uploader.user.id,
+        status: "PENDING",
+        attributionVersion: 2,
+      },
+    });
+    const work = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        status: "WAITING_SYNC",
+        expiresAt: new Date(now.getTime() + 60 * 60_000),
+        requiredRaceCount: 1,
+      },
+    });
+
+    const sync = await request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token: uploader.token,
+      headers: {
+        "Idempotency-Key": randomUUID(),
+        "X-Timezone": "UTC",
+        "X-Client-Features": CAPABILITIES,
+      },
+      body: {
+        date: localDate,
+        steps: 300,
+        samples: [{
+          periodStart: startsAt.toISOString(),
+          periodEnd: endsAt.toISOString(),
+          steps: 300,
+          recordingMethod: "automatic",
+        }],
+      },
+    });
+    assert.equal(sync.status, 202);
+    const terminal = await prisma.globalEventSummaryWork.findUniqueOrThrow({
+      where: { id: work.id },
+    });
+    assert.equal(terminal.status, "UNSCORABLE");
+    assert.equal(terminal.lastErrorCode, "PARTICIPANT_STATE_UNREPLAYABLE");
+    assert.equal(await prisma.globalEventCaptureArtifact.count({
+      where: { workId: work.id },
+    }), 0);
+  });
+
+  it("captures one committed dependency snapshot without waiting for an uncommitted newer input", async () => {
+    const uploader = await createTestUser();
+    const dependency = await createTestUser();
+    const now = new Date();
+    const sampleStart = new Date(now.getTime() - 20 * 60_000);
+    const eventEndsAt = new Date(now.getTime() - 5 * 60_000);
+    const sampleEnd = new Date(now.getTime() - 60_000);
+    const localDate = sampleStart.toISOString().slice(0, 10);
+    const event = await createEvent({ startsAt: sampleStart, endsAt: eventEndsAt });
+    const race = await createRace(uploader, "dependency-snapshot");
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: dependency.user.id, status: "ACCEPTED" },
+    });
+    await prisma.globalStepEventEntitlement.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        timezone: "UTC",
+        localDate,
+        startsAt: sampleStart,
+        endsAt: eventEndsAt,
+        startOutcome: "ACTIVATED_ON_TIME",
+        startProcessedAt: sampleStart,
+      },
+    });
+    await prisma.globalEventRaceImpact.create({
+      data: {
+        eventId: event.id,
+        raceId: race.id,
+        userId: uploader.user.id,
+        status: "PENDING",
+        attributionVersion: 2,
+      },
+    });
+    const work = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        status: "WAITING_SYNC",
+        expiresAt: new Date(now.getTime() + 60 * 60_000),
+        requiredRaceCount: 1,
+      },
+    });
+    const dependencySample = await prisma.stepSample.create({
+      data: {
+        userId: dependency.user.id,
+        periodStart: sampleStart,
+        periodEnd: sampleEnd,
+        steps: 100,
+      },
+    });
+    await prisma.userScoringInputVersion.createMany({
+      data: [uploader.user.id, dependency.user.id].map((userId) => ({
+        userId,
+        generation: 1n,
+      })),
+    });
+
+    let signalWriterReady;
+    const writerReady = new Promise((resolve) => { signalWriterReady = resolve; });
+    let releaseWriter;
+    const writerReleased = new Promise((resolve) => { releaseWriter = resolve; });
+    const writer = prisma.$transaction(async (tx) => {
+      await tx.stepSample.update({
+        where: { id: dependencySample.id },
+        data: { steps: 900 },
+      });
+      await tx.userScoringInputVersion.update({
+        where: { userId: dependency.user.id },
+        data: { generation: { increment: 1 } },
+      });
+      signalWriterReady();
+      await writerReleased;
+    }, { timeout: 15_000, maxWait: 15_000 });
+    await writerReady;
+
+    let syncPromise;
+    try {
+      syncPromise = request(server.baseUrl, "POST", "/steps/sync-v2", {
+        token: uploader.token,
+        headers: {
+          "Idempotency-Key": randomUUID(),
+          "X-Timezone": "UTC",
+          "X-Client-Features": CAPABILITIES,
+        },
+        body: {
+          date: localDate,
+          steps: 300,
+          samples: [{
+            periodStart: sampleStart.toISOString(),
+            periodEnd: sampleEnd.toISOString(),
+            steps: 300,
+            recordingMethod: "automatic",
+          }],
+        },
+      });
+      let completionTimeout;
+      let sync;
+      try {
+        sync = await Promise.race([
+          syncPromise,
+          new Promise((_, reject) => {
+            completionTimeout = setTimeout(
+              () => reject(new Error("capture waited for an uncommitted dependency update")),
+              5_000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(completionTimeout);
+      }
+      assert.equal(sync.status, 202);
+      const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+        where: { workId: work.id, raceId: race.id, userId: uploader.user.id },
+      });
+      assert.equal(artifact.payload.samples.find(
+        (sample) => sample.userId === dependency.user.id,
+      ).steps, 100);
+      assert.equal(artifact.payload.dependencyInputGenerations.find(
+        (version) => version.userId === dependency.user.id,
+      ).generation, "1");
+    } finally {
+      releaseWriter();
+      await writer;
+      await syncPromise?.catch(() => {});
+    }
+    assert.equal((await prisma.stepSample.findUniqueOrThrow({
+      where: { id: dependencySample.id },
+    })).steps, 900);
+    assert.equal((await prisma.userScoringInputVersion.findUniqueOrThrow({
+      where: { userId: dependency.user.id },
+    })).generation, 2n);
   });
 
   it("deletes capture artifacts and work before deleting the owning account", async () => {

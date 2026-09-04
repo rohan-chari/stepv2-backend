@@ -202,6 +202,67 @@ function artifactCutoffAt(race, participant, entitlement) {
   return new Date(Math.min(...candidates.map((value) => value.getTime())));
 }
 
+async function loadMutableScoringFactsSnapshot(tx, {
+  dependencyUserIds,
+  earliest,
+  latest,
+}) {
+  const rows = await tx.$queryRawUnsafe(
+    `WITH dependencies AS MATERIALIZED (
+       SELECT dependency.user_id
+         FROM unnest($1::text[]) AS dependency(user_id)
+     ), facts AS (
+       SELECT 0 AS "kindOrder", 'sample'::text AS kind,
+              sample.user_id AS "userId", sample.period_start AS "periodStart",
+              sample.period_end AS "periodEnd", NULL::date AS date,
+              sample.steps, NULL::bigint AS generation, sample.id AS "rowId"
+         FROM step_samples sample
+         JOIN dependencies dependency ON dependency.user_id=sample.user_id
+        WHERE sample.period_end > $2::timestamp
+          AND sample.period_start < $3::timestamp
+       UNION ALL
+       SELECT 1 AS "kindOrder", 'daily'::text AS kind,
+              daily.user_id AS "userId", NULL::timestamp AS "periodStart",
+              NULL::timestamp AS "periodEnd", daily.date,
+              daily.steps, NULL::bigint AS generation, daily.id AS "rowId"
+         FROM steps daily
+         JOIN dependencies dependency ON dependency.user_id=daily.user_id
+        WHERE daily.date >= $2::date AND daily.date <= $3::date
+       UNION ALL
+       SELECT 2 AS "kindOrder", 'version'::text AS kind,
+              version.user_id AS "userId", NULL::timestamp AS "periodStart",
+              NULL::timestamp AS "periodEnd", NULL::date AS date,
+              NULL::integer AS steps, version.generation, version.user_id AS "rowId"
+         FROM user_scoring_input_versions version
+         JOIN dependencies dependency ON dependency.user_id=version.user_id
+     )
+     SELECT kind,"userId","periodStart","periodEnd",date,steps,generation
+       FROM facts
+      ORDER BY "kindOrder","userId","periodStart",date,"rowId"`,
+    dependencyUserIds,
+    earliest,
+    latest,
+  );
+  const samples = [];
+  const dailySteps = [];
+  const inputVersions = [];
+  for (const row of rows) {
+    if (row.kind === "sample") {
+      samples.push({
+        userId: row.userId,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        steps: row.steps,
+      });
+    } else if (row.kind === "daily") {
+      dailySteps.push({ userId: row.userId, date: row.date, steps: row.steps });
+    } else if (row.kind === "version") {
+      inputVersions.push({ userId: row.userId, generation: row.generation });
+    }
+  }
+  return { samples, dailySteps, inputVersions };
+}
+
 async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) {
   const raceIds = [...new Set(impacts.map((impact) => impact.raceId))].sort();
   if (raceIds.length === 0) return {
@@ -230,22 +291,14 @@ async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) 
     if (!earliest || rangeStart < earliest) earliest = rangeStart;
     if (!latest || rangeEnd > latest) latest = rangeEnd;
   }
-  const [samples, dailySteps, effects, inputVersions] = dependencyUserIds.length && earliest && latest
+  const shouldLoadMutableFacts = Boolean(dependencyUserIds.length && earliest && latest);
+  const [mutableFacts, effects] = shouldLoadMutableFacts
     ? await Promise.all([
-        tx.stepSample.findMany({
-          where: {
-            userId: { in: dependencyUserIds },
-            periodEnd: { gt: earliest },
-            periodStart: { lt: latest },
-          },
-          select: { userId: true, periodStart: true, periodEnd: true, steps: true },
-          orderBy: [{ userId: "asc" }, { periodStart: "asc" }, { id: "asc" }],
-        }),
-        tx.step.findMany({
-          where: { userId: { in: dependencyUserIds }, date: { gte: earliest, lte: latest } },
-          select: { userId: true, date: true, steps: true },
-          orderBy: [{ userId: "asc" }, { date: "asc" }],
-        }),
+        // Samples, daily totals, and their generation witnesses must come from
+        // one PostgreSQL statement snapshot. C0 already freezes race topology
+        // and effects; statement-level MVCC makes concurrent step writers land
+        // wholly before or wholly after this immutable capture input snapshot.
+        loadMutableScoringFactsSnapshot(tx, { dependencyUserIds, earliest, latest }),
         tx.raceActiveEffect.findMany({
           where: {
             raceId: { in: raceIds },
@@ -259,14 +312,22 @@ async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) 
           },
           orderBy: [{ startsAt: "asc" }, { id: "asc" }],
         }),
-        tx.userScoringInputVersion.findMany({
-          where: { userId: { in: dependencyUserIds } },
-          select: { userId: true, generation: true },
-          orderBy: { userId: "asc" },
-        }),
       ])
-    : [[], [], [], []];
-  return { racesById, samples, dailySteps, effects, inputVersions };
+    : [{ samples: [], dailySteps: [], inputVersions: [] }, []];
+  const capturedInputVersionUserIds = mutableFacts.inputVersions
+    .map((row) => row.userId)
+    .sort();
+  if (shouldLoadMutableFacts && (
+    mutableFacts.inputVersions.length !== dependencyUserIds.length ||
+    capturedInputVersionUserIds.some(
+      (userId, index) => userId !== dependencyUserIds[index],
+    )
+  )) {
+    const error = new Error("summary capture generation witness changed");
+    error.code = "SUMMARY_CAPTURE_CLOSURE_CHANGED";
+    throw error;
+  }
+  return { racesById, ...mutableFacts, effects };
 }
 
 async function buildArtifact(tx, {
@@ -513,30 +574,40 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
 
   const discovered = await discoverIds();
   await tx.$executeRawUnsafe(
-    `INSERT INTO user_scoring_input_versions (user_id, generation, updated_at)
+    `WITH dependencies AS MATERIALIZED (
+       SELECT dependency.user_id
+         FROM unnest($1::text[]) AS dependency(user_id)
+     )
+     INSERT INTO user_scoring_input_versions (user_id, generation, updated_at)
      SELECT dependency.user_id, 1, CURRENT_TIMESTAMP
-       FROM unnest($1::text[]) AS dependency(user_id)
+       FROM dependencies dependency
+       LEFT JOIN user_scoring_input_versions existing
+         ON existing.user_id=dependency.user_id
+      WHERE existing.user_id IS NULL
       ORDER BY dependency.user_id
      ON CONFLICT (user_id) DO NOTHING`,
     discovered,
   );
-  const locked = await tx.$queryRawUnsafe(
-    `SELECT user_id AS "userId", generation
+  // Preserve the established scoring-input -> race-C0 lock order used by
+  // intake and by rolling old workers. Lock only the uploader: shared race
+  // dependencies are read later from one MVCC statement snapshot and must not
+  // serialize captures for otherwise independent races.
+  const uploaderFence = await tx.$queryRawUnsafe(
+    `SELECT user_id
        FROM user_scoring_input_versions
-      WHERE user_id = ANY($1::text[])
-      ORDER BY user_id ASC
+      WHERE user_id=$1
       FOR UPDATE`,
-    discovered,
+    userId,
   );
-  if (locked.length !== discovered.length) {
-    const error = new Error("summary capture dependency input row missing");
+  if (uploaderFence.length !== 1) {
+    const error = new Error("summary capture uploader scoring fence changed");
     error.code = "SUMMARY_CAPTURE_CLOSURE_CHANGED";
     throw error;
   }
-  // Global capture order is scoring-input rows (ascending user id) before race
-  // C0 rows (ascending race id). Ordinary user syncs take only their own input
-  // row, so this order prevents A-capture/B-sync cycles while C0 still freezes
-  // membership/effect edges before the immutable copy is read.
+  // C0 freezes race topology and effects. Participant step inputs remain
+  // writable: loadArtifactFacts captures their samples, daily totals, and
+  // generation witnesses in one statement-level MVCC snapshot instead of
+  // serializing otherwise independent races on shared participant rows.
   await acquireRaceWriteFences(tx, raceIds);
   const verified = await discoverIds();
   if (verified.length !== discovered.length ||
