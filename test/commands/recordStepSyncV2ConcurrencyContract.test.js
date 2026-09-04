@@ -67,7 +67,7 @@ test("summary capture snapshots mutable scoring facts without a broad dependency
   );
   assert.match(
     source,
-    /inputVersions\.length !== dependencyUserIds\.length/,
+    /inputVersions\.length !== factUserIds\.length/,
     "capture must reject an incomplete generation-witness snapshot",
   );
 });

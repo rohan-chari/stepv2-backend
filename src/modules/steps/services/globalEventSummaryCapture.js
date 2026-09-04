@@ -202,6 +202,43 @@ function artifactCutoffAt(race, participant, entitlement) {
   return new Date(Math.min(...candidates.map((value) => value.getTime())));
 }
 
+function connectedScoringUserIds({ race, effects, uploaderUserId }) {
+  if (!race.powerupsEnabled) return new Set([uploaderUserId]);
+  const participantUserIdById = new Map(
+    race.participants.map((participant) => [participant.id, participant.userId]),
+  );
+  const adjacency = new Map();
+  const connect = (left, right) => {
+    if (!left || !right) return;
+    if (!adjacency.has(left)) adjacency.set(left, new Set());
+    if (!adjacency.has(right)) adjacency.set(right, new Set());
+    adjacency.get(left).add(right);
+    adjacency.get(right).add(left);
+  };
+  for (const effect of effects) {
+    if (effect.raceId !== race.id ||
+        (effect.type !== "LEECH" && effect.type !== "HITCHHIKE")) continue;
+    // Retained effects can still read a source/target's mutable samples after
+    // that user is no longer an accepted participant. Keep those historical
+    // endpoints in the component; participant identity is authoritative while
+    // the denormalized target remains the scorer's fallback for departed users.
+    const targetUserId = participantUserIdById.get(effect.targetParticipantId) ||
+      effect.targetUserId;
+    connect(effect.sourceUserId, targetUserId);
+  }
+  const connected = new Set([uploaderUserId]);
+  const pending = [uploaderUserId];
+  while (pending.length) {
+    const userId = pending.pop();
+    for (const adjacentUserId of adjacency.get(userId) || []) {
+      if (connected.has(adjacentUserId)) continue;
+      connected.add(adjacentUserId);
+      pending.push(adjacentUserId);
+    }
+  }
+  return connected;
+}
+
 async function loadMutableScoringFactsSnapshot(tx, {
   dependencyUserIds,
   earliest,
@@ -288,28 +325,33 @@ async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) 
     },
     orderBy: [{ startsAt: "asc" }, { id: "asc" }],
   });
-  const crossUserRaceIds = new Set(effects
-    .filter((effect) => effect.type === "LEECH" || effect.type === "HITCHHIKE")
-    .map((effect) => effect.raceId));
   const factUserIdsByRaceId = new Map();
   const recordedScopeRaceIds = new Set();
   for (const impact of impacts) {
     const race = racesById.get(impact.raceId);
     const work = workByEventId.get(impact.eventId);
     if (!race || !work) continue;
-    const needsWholeRace = race.powerupsEnabled && crossUserRaceIds.has(race.id);
+    const scoringUserIds = connectedScoringUserIds({
+      race,
+      effects,
+      uploaderUserId: work.userId,
+    });
     if (!recordedScopeRaceIds.has(race.id)) {
+      const participantUserIds = race.participants.map((row) => row.userId);
+      const coversWholeRace = scoringUserIds.size === participantUserIds.length &&
+        participantUserIds.every((userId) => scoringUserIds.has(userId));
+      const outcome = scoringUserIds.size === 1
+        ? "uploader_only"
+        : coversWholeRace
+          ? "whole_race"
+          : "dependency_component";
       coordinatedOptimizationMetrics.increment(
         "global_summary_capture_mutable_scope_total",
-        { outcome: needsWholeRace ? "whole_race" : "uploader_only" },
+        { outcome },
       );
       recordedScopeRaceIds.add(race.id);
     }
-    factUserIdsByRaceId.set(race.id, new Set(
-      needsWholeRace
-        ? race.participants.map((participant) => participant.userId)
-        : [work.userId],
-    ));
+    factUserIdsByRaceId.set(race.id, scoringUserIds);
   }
   const factUserIds = [...new Set([...factUserIdsByRaceId.values()]
     .flatMap((userIds) => [...userIds]))].sort();
@@ -394,7 +436,7 @@ async function buildArtifact(tx, {
       ? loaded.effects.filter((row) => row.raceId === race.id)
           .map(({ raceId: _raceId, ...row }) => row)
       : [],
-    loaded.inputVersions.filter((row) => dependencyUserIds.includes(row.userId)),
+    loaded.inputVersions.filter((row) => factUserIds.has(row.userId)),
   ] : await Promise.all([
     tx.stepSample.findMany({
       where: {

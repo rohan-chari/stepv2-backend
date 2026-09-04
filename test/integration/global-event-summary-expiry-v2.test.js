@@ -70,7 +70,14 @@ async function createRace(user, suffix = "expiry") {
   return race;
 }
 
-async function addLeechDependency({ raceId, uploaderId, dependencyId, startsAt, expiresAt }) {
+async function addLeechDependency({
+  raceId,
+  uploaderId,
+  dependencyId,
+  startsAt,
+  expiresAt,
+  status = "ACTIVE",
+}) {
   await prisma.race.update({
     where: { id: raceId },
     data: { powerupsEnabled: true },
@@ -101,10 +108,56 @@ async function addLeechDependency({ raceId, uploaderId, dependencyId, startsAt, 
       sourceUserId: dependencyId,
       powerupId: powerup.id,
       type: "LEECH",
-      status: "ACTIVE",
+      status,
       startsAt,
       expiresAt,
       metadata: { ratio: 2 },
+    },
+  });
+}
+
+async function addHitchhikeDependency({
+  raceId,
+  uploaderId,
+  dependencyId,
+  startsAt,
+  expiresAt,
+  status = "ACTIVE",
+}) {
+  await prisma.race.update({
+    where: { id: raceId },
+    data: { powerupsEnabled: true },
+  });
+  const [uploaderParticipant, dependencyParticipant] = await Promise.all([
+    prisma.raceParticipant.findUniqueOrThrow({
+      where: { raceId_userId: { raceId, userId: uploaderId } },
+    }),
+    prisma.raceParticipant.findUniqueOrThrow({
+      where: { raceId_userId: { raceId, userId: dependencyId } },
+    }),
+  ]);
+  const powerup = await prisma.racePowerup.create({
+    data: {
+      raceId,
+      participantId: uploaderParticipant.id,
+      userId: uploaderId,
+      targetUserId: dependencyId,
+      type: "HITCHHIKE",
+      status: "USED",
+    },
+  });
+  await prisma.raceActiveEffect.create({
+    data: {
+      raceId,
+      targetParticipantId: dependencyParticipant.id,
+      targetUserId: dependencyId,
+      sourceUserId: uploaderId,
+      powerupId: powerup.id,
+      type: "HITCHHIKE",
+      status,
+      startsAt,
+      expiresAt,
+      metadata: { copyRatio: 1, scoringVersion: 2 },
     },
   });
 }
@@ -1263,6 +1316,145 @@ describe("global event summary expiry v2 HTTP contract", () => {
       "unrelated participants' daily totals must not enter the immutable capture",
     );
     assert.equal(artifact.payload.attributionDeltaSteps, 1_000);
+  });
+
+  it("captures only the uploader's connected cross-user effect component", async () => {
+    const uploader = await createTestUser();
+    const linked = await createTestUser();
+    const transitivelyLinked = await createTestUser();
+    const historicalHitchTarget = await createTestUser();
+    const unrelatedSource = await createTestUser();
+    const unrelatedTarget = await createTestUser();
+    const now = new Date();
+    const startsAt = new Date(now.getTime() - 20 * 60 * 1000);
+    const endsAt = new Date(now.getTime() - 10 * 60 * 1000);
+    const event = await createEvent({ startsAt, endsAt });
+    const race = await createRace(uploader, "component-scoped-capture");
+    await prisma.raceParticipant.createMany({
+      data: [linked, transitivelyLinked, historicalHitchTarget,
+        unrelatedSource, unrelatedTarget].map((entry) => ({
+        raceId: race.id,
+        userId: entry.user.id,
+        status: "ACCEPTED",
+      })),
+    });
+    await addLeechDependency({
+      raceId: race.id,
+      uploaderId: uploader.user.id,
+      dependencyId: linked.user.id,
+      startsAt,
+      expiresAt: endsAt,
+    });
+    await addLeechDependency({
+      raceId: race.id,
+      uploaderId: linked.user.id,
+      dependencyId: transitivelyLinked.user.id,
+      startsAt,
+      expiresAt: endsAt,
+      status: "EXPIRED",
+    });
+    await addHitchhikeDependency({
+      raceId: race.id,
+      uploaderId: uploader.user.id,
+      dependencyId: historicalHitchTarget.user.id,
+      startsAt,
+      expiresAt: endsAt,
+      status: "EXPIRED",
+    });
+    await addLeechDependency({
+      raceId: race.id,
+      uploaderId: unrelatedTarget.user.id,
+      dependencyId: unrelatedSource.user.id,
+      startsAt,
+      expiresAt: endsAt,
+    });
+    await prisma.raceParticipant.updateMany({
+      where: {
+        raceId: race.id,
+        userId: { in: [linked.user.id, historicalHitchTarget.user.id] },
+      },
+      data: { status: "DECLINED" },
+    });
+    await prisma.stepSample.createMany({
+      data: [linked, transitivelyLinked, historicalHitchTarget,
+        unrelatedSource, unrelatedTarget]
+        .map((entry, index) => ({
+          userId: entry.user.id,
+          periodStart: startsAt,
+          periodEnd: endsAt,
+          steps: 100 * (index + 1),
+        })),
+    });
+    await prisma.userScoringInputVersion.createMany({
+      data: [linked, transitivelyLinked, historicalHitchTarget,
+        unrelatedSource, unrelatedTarget].map((entry) => ({
+        userId: entry.user.id,
+        generation: 1n,
+      })),
+    });
+    const localDate = startsAt.toISOString().slice(0, 10);
+    await prisma.globalStepEventEntitlement.create({
+      data: {
+        eventId: event.id,
+        userId: uploader.user.id,
+        timezone: "UTC",
+        localDate,
+        startsAt,
+        endsAt,
+        startOutcome: "ACTIVATED_ON_TIME",
+        startProcessedAt: startsAt,
+      },
+    });
+    await prisma.globalEventRaceImpact.create({
+      data: {
+        eventId: event.id,
+        raceId: race.id,
+        userId: uploader.user.id,
+        status: "PENDING",
+        attributionVersion: 2,
+      },
+    });
+    await processDueEntitlementBoundaries({ prisma, now, processStarts: false });
+
+    const sync = await request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token: uploader.token,
+      headers: {
+        "Idempotency-Key": randomUUID(),
+        "X-Timezone": "UTC",
+        "X-Client-Features": CAPABILITIES,
+      },
+      body: {
+        date: localDate,
+        steps: 1_000,
+        samples: [{
+          periodStart: startsAt.toISOString(),
+          periodEnd: endsAt.toISOString(),
+          steps: 1_000,
+          recordingMethod: "automatic",
+        }],
+      },
+    });
+    assert.equal(sync.status, 202);
+    const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+      where: { eventId: event.id, raceId: race.id, userId: uploader.user.id },
+    });
+    const expectedDependencies = [
+      uploader.user.id,
+      linked.user.id,
+      transitivelyLinked.user.id,
+      historicalHitchTarget.user.id,
+    ].sort();
+    assert.deepEqual(
+      [...new Set(artifact.payload.samples.map((row) => row.userId))].sort(),
+      expectedDependencies,
+    );
+    assert.deepEqual(
+      artifact.payload.dependencyInputGenerations.map((row) => row.userId).sort(),
+      expectedDependencies,
+      "a disconnected historical effect component must not force race-wide hydration",
+    );
+    assert.equal(artifact.payload.attributionDeltaSteps, 1_000,
+      "component-scoped mutable facts must preserve the uploader's event attribution");
   });
 
   it("uses the New York fallback deadline for version-2 legacy-global events", async () => {
