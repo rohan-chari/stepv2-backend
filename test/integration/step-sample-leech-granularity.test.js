@@ -9,6 +9,9 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const {
+  resolveExpiredRaces,
+} = require("../../src/modules/races/jobs/raceExpiry");
 
 let server;
 let nextAppleId = 0;
@@ -169,5 +172,51 @@ describe("leech granularity — closed-bucket generalization", () => {
     // Victim's total is non-increasing (the leech transfer is non-decreasing).
     assert.ok(second <= first, `transfer must not shrink: first drain->${first}, second->${second}`);
     assert.ok(second < first, "the now-closed bucket increases the transfer");
+  });
+
+  it("settles an expired race when a Leech reads a different participant's samples", async () => {
+    const alice = await createUser("LeechSettlementSource");
+    const bob = await createUser("LeechSettlementTarget");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, bob);
+
+    const now = Date.now();
+    const windowStart = new Date(now - 4 * 60 * MIN);
+    const windowEnd = new Date(now - 2 * 60 * MIN);
+    await seedLeech(raceId, alice, bob, windowStart, windowEnd);
+    await seedSample(
+      alice.userId,
+      now - 4 * 60 * MIN,
+      now - 3 * 60 * MIN,
+      2000,
+    );
+    await seedSample(
+      bob.userId,
+      now - 5 * 60 * MIN,
+      now - 4 * 60 * MIN,
+      10000,
+    );
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { endsAt: new Date(now - MIN) },
+    });
+
+    await resolveExpiredRaces();
+
+    const settled = await getProgress(bob.token, raceId);
+    assert.equal(
+      settled.status,
+      "COMPLETED",
+      "settlement must prepare the Leech source while scoring its target",
+    );
+    assert.equal(findUser(settled, bob.userId).totalSteps, 9000);
+    const impact = await prisma.raceEffectImpact.findFirst({
+      where: { raceId, userId: bob.userId, powerupType: "LEECH" },
+    });
+    assert.equal(
+      impact?.deltaSteps,
+      -1000,
+      "the same prepared source must remain available to settlement attribution",
+    );
   });
 });

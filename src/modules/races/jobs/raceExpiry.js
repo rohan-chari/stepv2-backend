@@ -444,7 +444,23 @@ async function resolveExpiredRaces() {
           continue;
         }
 
-        await settlementSampleModel.prepareUsers?.([participant.userId]);
+        // Leech scoring for the victim reads the source racer's closed sample
+        // buckets. Deferred settlement loading therefore has to prepare that
+        // cross-participant dependency in the same bounded chunk; preparing
+        // only the victim makes the strict adapter reject the source read and
+        // leaves every expired race with a historical Leech permanently ACTIVE.
+        const participantLeeches = race.powerupsEnabled
+          ? await settlementEffectModel.findEffectsForRaceByType(
+              race.id,
+              participant.id,
+              "LEECH",
+            )
+          : [];
+        const scoringUserIds = [...new Set([
+          participant.userId,
+          ...participantLeeches.map((effect) => effect.sourceUserId),
+        ].filter(Boolean))];
+        await settlementSampleModel.prepareUsers?.(scoringUserIds);
         try {
           const { baseAdjusted, hasSampleData, effectiveStart } =
             await calculateBaseAdjusted({
@@ -507,7 +523,7 @@ async function resolveExpiredRaces() {
           },
           });
         } finally {
-          settlementSampleModel.releaseUsers?.([participant.userId]);
+          settlementSampleModel.releaseUsers?.(scoringUserIds);
         }
         if ((participantIndex + 1) % 25 === 0 || participantIndex + 1 === acceptedParticipants.length) {
           trace("scoring-progress", phaseStartedAt, {

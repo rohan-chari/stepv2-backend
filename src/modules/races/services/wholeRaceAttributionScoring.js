@@ -45,7 +45,18 @@ async function scoreWholeRaceTotals({
   const evaluated = [];
   for (const entry of entries) {
     const participant = entry.participant;
-    if (prepareSampleUsers) await prepareSampleUsers([participant.userId]);
+    const leechesByType = racePowerupsEnabled
+      ? await raceActiveEffectModel.findEffectsForRaceByTypes(
+          raceId,
+          participant.id,
+          ["LEECH"],
+        )
+      : null;
+    const scoringUserIds = [...new Set([
+      participant.userId,
+      ...(leechesByType?.LEECH || []).map((effect) => effect.sourceUserId),
+    ].filter(Boolean))];
+    if (prepareSampleUsers) await prepareSampleUsers(scoringUserIds);
     let current;
     try {
       current = await calculateCurrentTotal({
@@ -62,7 +73,7 @@ async function scoreWholeRaceTotals({
         now: entry.now || now,
       });
     } finally {
-      if (releaseSampleUsers) releaseSampleUsers([participant.userId]);
+      if (releaseSampleUsers) releaseSampleUsers(scoringUserIds);
     }
     evaluated.push({
       participant,
