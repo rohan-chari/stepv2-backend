@@ -244,6 +244,38 @@ function makeActivePrisma({ activeParticipations = [], activeEffects = {} } = {}
   };
 }
 
+test("modern Home bypass never enters the joined-race read path", async () => {
+  const prisma = makeActivePrisma({
+    activeParticipations: [{
+      id: "rp-modern",
+      userId: ME_ID,
+      race: { id: "race-modern", status: "ACTIVE", participants: [] },
+    }],
+  });
+  const findMany = prisma.raceParticipant.findMany;
+  let activeRaceReads = 0;
+  prisma.raceParticipant.findMany = async (args) => {
+    if (
+      args.where?.userId === ME_ID &&
+      args.where?.status === "ACCEPTED" &&
+      args.where?.race?.status === "ACTIVE"
+    ) {
+      activeRaceReads += 1;
+    }
+    return findMany(args);
+  };
+  const get = buildGetHomeRaceCard({ prisma, now: () => FIXED_NOW });
+
+  const result = await get({
+    userId: ME_ID,
+    homeActiveRaces: true,
+    skipJoinedRaceCards: true,
+  });
+
+  assert.equal(result.state, "EMPTY");
+  assert.equal(activeRaceReads, 0);
+});
+
 // The ACTIVE_RACES path now computes each participant's live race-relative
 // total via calculateBaseAdjusted + calculateCurrentTotal (same math as the
 // race-detail screen) instead of reading the cached total_steps column. Those

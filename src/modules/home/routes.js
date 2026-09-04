@@ -45,6 +45,14 @@ const { buildServiceBanner } = require("./services/buildServiceBanner");
 const {
   resolveActiveContestBanner: defaultResolveActiveContestBanner,
 } = require("../giveaways");
+const { compareVersions } = require("../../utils/appVersion");
+
+// Joined-race cards left the Home composition in 2.3.0. Requests from that
+// version onward still carry the old homeActiveRaces query parameter, but the
+// client only consumes the remaining Home batch fields and suggested races
+// come from /home/suggested-races. Keep the frozen pre-2.3.0 contract while
+// preventing modern app opens from hydrating or replaying race standings.
+const HOME_JOINED_RACE_CARDS_REMOVED_VERSION = "2.3.0";
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -128,6 +136,11 @@ function createHomeRouter(dependencies = {}) {
       const homePersistedTotals =
         req.query.homePersistedTotals === "1" ||
         req.query.homePersistedTotals === "true";
+      const skipJoinedRaceCards =
+        (compareVersions(
+          req.headers["x-app-version"],
+          HOME_JOINED_RACE_CARDS_REMOVED_VERSION,
+        ) ?? -1) >= 0;
       const [leanLiveEnabled, snapshotReuseEnabled] = await Promise.all([
         isStrictFlagEnabled(settings, "homeRaceCardLeanLiveV1Enabled"),
         isStrictFlagEnabled(settings, "homeRaceCardSnapshotReuseV1Enabled"),
@@ -162,6 +175,7 @@ function createHomeRouter(dependencies = {}) {
           compactShell: compact,
           homeActiveRaces,
           homePersistedTotals,
+          skipJoinedRaceCards,
           localDate: req.query.localDate,
           leanLiveEnabled,
           snapshotReuseEnabled,
@@ -187,6 +201,7 @@ function createHomeRouter(dependencies = {}) {
         userId: req.user.id,
         homeActiveRaces,
         homePersistedTotals,
+        skipJoinedRaceCards,
         // Match getRaceProgress: window race steps in the caller's timezone
         // (set globally by the extractTimezone middleware) so the home card and
         // the race-detail screen compute identical race-relative totals.

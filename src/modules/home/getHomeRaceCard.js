@@ -1760,6 +1760,10 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // §6.3: opt-in to persisted-total ACTIVE_RACES cards. Only honored together
     // with homeActiveRaces; ignored otherwise. Old clients never send it.
     homePersistedTotals = false,
+    // Home stopped rendering joined-race standings in app 2.3.0. The route
+    // stamps this from X-App-Version so modern requests skip the entire active
+    // race read/replay while frozen and unknown clients retain their contract.
+    skipJoinedRaceCards = false,
     timeZone = "UTC",
     supportsCharacters = false,
     supportsRemoteAssets = false,
@@ -1792,7 +1796,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // fall through to the legacy single-state logic below. Old clients never set
     // this flag, so they always get the legacy ACTIVE_RACE single-card response
     // (byte-for-byte unchanged).
-    if (homeActiveRaces) {
+    if (!skipJoinedRaceCards && homeActiveRaces) {
       const activeRaceOptions = {
         timeZone,
         now,
@@ -1818,7 +1822,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
           })
         : await checkActiveRaces(prisma, userId, activeRaceOptions);
       if (activeRaces) return activeRaces;
-    } else {
+    } else if (!skipJoinedRaceCards) {
       const fallback = () => checkActiveRace(
           prisma,
           userId,
