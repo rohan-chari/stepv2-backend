@@ -107,6 +107,18 @@ function buildDailyMover(dependencies = {}) {
       return null; // not marked -> retried next tick
     }
 
+    const raceIds = (races || []).map((race) => race.id);
+    let participantsByRace = null;
+    if (typeof participantModel.findAcceptedByRaces === "function") {
+      const allParticipants = await participantModel.findAcceptedByRaces(raceIds);
+      participantsByRace = new Map();
+      for (const participant of allParticipants || []) {
+        const list = participantsByRace.get(participant.raceId) || [];
+        list.push(participant);
+        participantsByRace.set(participant.raceId, list);
+      }
+    }
+
     for (const race of races || []) {
       try {
         await enqueue({
@@ -117,7 +129,9 @@ function buildDailyMover(dependencies = {}) {
         });
         if (inlineResolveInjected) await resolve({ raceId: race.id });
 
-        const participants = await participantModel.findAcceptedByRace(race.id);
+        const participants = participantsByRace
+          ? participantsByRace.get(race.id) || []
+          : await participantModel.findAcceptedByRace(race.id);
         if (!participants || participants.length === 0) continue;
 
         const ranked = [...participants].sort(

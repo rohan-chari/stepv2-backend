@@ -16,6 +16,7 @@ function makeDeps({
   participantsByRace = {},
   random = () => 0,
   resolveThrowsFor = [],
+  useBatch = false,
 } = {}) {
   const emitted = [];
   const updates = [];
@@ -61,8 +62,31 @@ function makeDeps({
       },
     },
   };
+  if (useBatch) {
+    deps.RaceParticipant.findAcceptedByRaces = async (raceIds) =>
+      raceIds.flatMap((raceId) => participantsByRace[raceId] || []);
+  }
   return { deps, emitted, updates, marks, resolvedRaceIds, enqueuedRaceIds };
 }
+
+test("uses one batch participant read when available", async () => {
+  const { deps } = makeDeps({
+    races: [{ id: "r1", name: "Race 1" }, { id: "r2", name: "Race 2" }],
+    participantsByRace: {
+      r1: [P({ id: "p1", userId: "u1", totalSteps: 2, dayStartPlacement: 2 })],
+      r2: [P({ id: "p2", userId: "u2", totalSteps: 1, dayStartPlacement: 2 })],
+    },
+    useBatch: true,
+  });
+  let batchCalls = 0;
+  let singleCalls = 0;
+  const batch = deps.RaceParticipant.findAcceptedByRaces;
+  deps.RaceParticipant.findAcceptedByRaces = async (ids) => { batchCalls += 1; return batch(ids); };
+  deps.RaceParticipant.findAcceptedByRace = async () => { singleCalls += 1; return []; };
+  await buildDailyMover(deps)();
+  assert.equal(batchCalls, 1);
+  assert.equal(singleCalls, 0);
+});
 
 test("a climb of more than 3 places emits one DAILY_MOVER and resets the baseline", async () => {
   const { deps, emitted, updates, marks } = makeDeps({
