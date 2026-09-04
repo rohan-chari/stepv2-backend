@@ -19,6 +19,14 @@ const {
 const {
   legacyGlobalSummaryEntitlement,
 } = require("./globalEventSummaryLifecycle");
+const {
+  deferUntilAfterCommit,
+  deferUntilAfterRollback,
+  isInPrismaTransactionScope,
+} = require("../../../db");
+const {
+  processGlobalEventCaptureFactCache,
+} = require("./globalEventCaptureFactCache");
 
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_WORK_BYTES = 16 * 1024 * 1024;
@@ -239,46 +247,51 @@ function connectedScoringUserIds({ race, effects, uploaderUserId }) {
   return connected;
 }
 
-async function loadMutableScoringFactsSnapshot(tx, {
-  dependencyUserIds,
-  earliest,
-  latest,
-}) {
+async function loadMutableScoringFactRows(tx, bounds) {
+  if (bounds.length === 0) return { samples: [], dailySteps: [], inputVersions: [] };
   const rows = await tx.$queryRawUnsafe(
-    `WITH dependencies AS MATERIALIZED (
-       SELECT dependency.user_id
-         FROM unnest($1::text[]) AS dependency(user_id)
+    `WITH bounds AS MATERIALIZED (
+       SELECT bound."userId", bound."sampleStart", bound."sampleEnd",
+              bound."dailyStart", bound."dailyEnd"
+         FROM jsonb_to_recordset($1::jsonb) AS bound(
+           "userId" text,
+           "sampleStart" timestamp,
+           "sampleEnd" timestamp,
+           "dailyStart" date,
+           "dailyEnd" date
+         )
      ), facts AS (
        SELECT 0 AS "kindOrder", 'sample'::text AS kind,
               sample.user_id AS "userId", sample.period_start AS "periodStart",
               sample.period_end AS "periodEnd", NULL::date AS date,
               sample.steps, NULL::bigint AS generation, sample.id AS "rowId"
          FROM step_samples sample
-         JOIN dependencies dependency ON dependency.user_id=sample.user_id
-        WHERE sample.period_end > $2::timestamp
-          AND sample.period_start < $3::timestamp
+         JOIN bounds bound ON bound."userId"=sample.user_id
+          AND bound."sampleStart" IS NOT NULL
+          AND sample.period_end > bound."sampleStart"
+          AND sample.period_start < bound."sampleEnd"
        UNION ALL
        SELECT 1 AS "kindOrder", 'daily'::text AS kind,
               daily.user_id AS "userId", NULL::timestamp AS "periodStart",
               NULL::timestamp AS "periodEnd", daily.date,
               daily.steps, NULL::bigint AS generation, daily.id AS "rowId"
          FROM steps daily
-         JOIN dependencies dependency ON dependency.user_id=daily.user_id
-        WHERE daily.date >= $2::date AND daily.date <= $3::date
+         JOIN bounds bound ON bound."userId"=daily.user_id
+          AND bound."dailyStart" IS NOT NULL
+          AND daily.date >= bound."dailyStart" AND daily.date <= bound."dailyEnd"
        UNION ALL
        SELECT 2 AS "kindOrder", 'version'::text AS kind,
               version.user_id AS "userId", NULL::timestamp AS "periodStart",
               NULL::timestamp AS "periodEnd", NULL::date AS date,
               NULL::integer AS steps, version.generation, version.user_id AS "rowId"
          FROM user_scoring_input_versions version
-         JOIN dependencies dependency ON dependency.user_id=version.user_id
+         JOIN (SELECT DISTINCT "userId" FROM bounds) dependency
+           ON dependency."userId"=version.user_id
      )
-     SELECT kind,"userId","periodStart","periodEnd",date,steps,generation
+     SELECT kind,"userId","periodStart","periodEnd",date,steps,generation,"rowId"
        FROM facts
       ORDER BY "kindOrder","userId","periodStart",date,"rowId"`,
-    dependencyUserIds,
-    earliest,
-    latest,
+    JSON.stringify(bounds),
   );
   const samples = [];
   const dailySteps = [];
@@ -290,13 +303,137 @@ async function loadMutableScoringFactsSnapshot(tx, {
         periodStart: row.periodStart,
         periodEnd: row.periodEnd,
         steps: row.steps,
+        rowId: row.rowId,
       });
     } else if (row.kind === "daily") {
-      dailySteps.push({ userId: row.userId, date: row.date, steps: row.steps });
+      dailySteps.push({
+        userId: row.userId,
+        date: row.date,
+        steps: row.steps,
+        rowId: row.rowId,
+      });
     } else if (row.kind === "version") {
       inputVersions.push({ userId: row.userId, generation: row.generation });
     }
   }
+  return { samples, dailySteps, inputVersions };
+}
+
+async function loadMutableScoringFactsSnapshot(tx, {
+  dependencyUserIds,
+  earliest,
+  latest,
+  factCache = processGlobalEventCaptureFactCache,
+}) {
+  const inputVersions = await tx.userScoringInputVersion.findMany({
+    where: { userId: { in: dependencyUserIds } },
+    select: { userId: true, generation: true },
+    orderBy: { userId: "asc" },
+  });
+  coordinatedOptimizationMetrics.observe(
+    "global_summary_capture_generation_validation_rows",
+    inputVersions.length,
+  );
+  const generationByUserId = new Map(
+    inputVersions.map((row) => [row.userId, row.generation]),
+  );
+  const requests = dependencyUserIds.map((userId) => ({
+    userId,
+    generation: generationByUserId.get(userId),
+    sampleStartMs: new Date(earliest).getTime(),
+    sampleEndMs: new Date(latest).getTime(),
+    dailyStart: new Date(earliest).toISOString().slice(0, 10),
+    dailyEnd: new Date(latest).toISOString().slice(0, 10),
+  }));
+  if (!isInPrismaTransactionScope()) {
+    const loaded = await loadMutableScoringFactRows(tx, requests.map((request) => ({
+      userId: request.userId,
+      sampleStart: new Date(request.sampleStartMs),
+      sampleEnd: new Date(request.sampleEndMs),
+      dailyStart: request.dailyStart,
+      dailyEnd: request.dailyEnd,
+    })));
+    coordinatedOptimizationMetrics.observe(
+      "global_summary_capture_sample_db_rows", loaded.samples.length,
+    );
+    coordinatedOptimizationMetrics.observe(
+      "global_summary_capture_daily_db_rows", loaded.dailySteps.length,
+    );
+    return {
+      samples: loaded.samples.map(({ rowId: _rowId, ...row }) => row),
+      dailySteps: loaded.dailySteps.map(({ rowId: _rowId, ...row }) => row),
+      inputVersions,
+    };
+  }
+
+  const resolved = new Map();
+  let unresolved = requests;
+  while (unresolved.length > 0) {
+    const leaders = [];
+    const waiters = [];
+    for (const request of unresolved) {
+      const result = factCache.inspect(request);
+      if (result.outcome === "hit") {
+        coordinatedOptimizationMetrics.increment(
+          "global_summary_capture_fact_cache_users_total", { outcome: "hit" },
+        );
+        resolved.set(request.userId, result.facts);
+      } else if (result.outcome === "miss") {
+        coordinatedOptimizationMetrics.increment(
+          "global_summary_capture_fact_cache_users_total", { outcome: "miss" },
+        );
+        leaders.push({ request, claim: result });
+      } else {
+        waiters.push({ request, wait: result.wait });
+      }
+    }
+    if (leaders.length > 0) {
+      for (const { claim } of leaders) {
+        await deferUntilAfterRollback(() => claim.rollback());
+      }
+      const loaded = await loadMutableScoringFactRows(
+        tx,
+        leaders.flatMap(({ claim }) => claim.bounds),
+      );
+      coordinatedOptimizationMetrics.observe(
+        "global_summary_capture_sample_db_rows", loaded.samples.length,
+      );
+      coordinatedOptimizationMetrics.observe(
+        "global_summary_capture_daily_db_rows", loaded.dailySteps.length,
+      );
+      coordinatedOptimizationMetrics.observe(
+        "global_summary_capture_generation_validation_rows",
+        loaded.inputVersions.length,
+      );
+      const loadedGenerationByUserId = new Map(
+        loaded.inputVersions.map((row) => [row.userId, row.generation]),
+      );
+      const generationChanged = leaders.some(({ request }) =>
+        String(loadedGenerationByUserId.get(request.userId)) !==
+          String(request.generation));
+      if (generationChanged) {
+        for (const { claim } of leaders) claim.rollback();
+        const error = new Error("summary capture generation witness changed");
+        error.code = "SUMMARY_CAPTURE_CLOSURE_CHANGED";
+        throw error;
+      }
+      for (const { request, claim } of leaders) {
+        const userLoaded = {
+          samples: loaded.samples.filter((row) => row.userId === request.userId),
+          dailySteps: loaded.dailySteps.filter((row) => row.userId === request.userId),
+        };
+        resolved.set(request.userId, claim.facts(userLoaded));
+        await deferUntilAfterCommit(() => claim.commit(userLoaded));
+      }
+    }
+    if (waiters.length === 0) break;
+    await Promise.all(waiters.map(({ wait }) => wait));
+    unresolved = waiters.map(({ request }) => request);
+  }
+  const samples = dependencyUserIds.flatMap((userId) => resolved.get(userId)?.samples || []);
+  const dailySteps = dependencyUserIds.flatMap(
+    (userId) => resolved.get(userId)?.dailySteps || [],
+  );
   return { samples, dailySteps, inputVersions };
 }
 

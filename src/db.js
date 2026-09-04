@@ -280,10 +280,20 @@ const prisma = new Proxy(rootPrisma, {
           return rootPrisma.$transaction(operation, options);
         }
         const afterCommit = [];
-        const result = await rootPrisma.$transaction(
-          (tx) => prismaScope.run({ client: tx, afterCommit }, () => operation(tx)),
-          options,
-        );
+        const afterRollback = [];
+        let result;
+        try {
+          result = await rootPrisma.$transaction(
+            (tx) => prismaScope.run(
+              { client: tx, afterCommit, afterRollback },
+              () => operation(tx),
+            ),
+            options,
+          );
+        } catch (error) {
+          await runAfterTransactionTasks(afterRollback, "rollback");
+          throw error;
+        }
         await runAfterCommitTasks(afterCommit);
         return result;
       };
@@ -306,6 +316,13 @@ function deferUntilAfterCommit(task) {
   return Promise.resolve();
 }
 
+function deferUntilAfterRollback(task) {
+  const scope = prismaScope.getStore();
+  if (!scope) return Promise.resolve();
+  scope.afterRollback.push(task);
+  return Promise.resolve();
+}
+
 function isInPrismaTransactionScope() {
   return Boolean(prismaScope.getStore());
 }
@@ -315,20 +332,34 @@ async function runInPrismaTransaction(work, options = {}) {
   if (existing) return work(existing.client);
 
   const afterCommit = [];
-  const result = await rootPrisma.$transaction(
-    (tx) => prismaScope.run({ client: tx, afterCommit }, () => work(tx)),
-    options,
-  );
+  const afterRollback = [];
+  let result;
+  try {
+    result = await rootPrisma.$transaction(
+      (tx) => prismaScope.run(
+        { client: tx, afterCommit, afterRollback },
+        () => work(tx),
+      ),
+      options,
+    );
+  } catch (error) {
+    await runAfterTransactionTasks(afterRollback, "rollback");
+    throw error;
+  }
   await runAfterCommitTasks(afterCommit);
   return result;
 }
 
 async function runAfterCommitTasks(tasks, logger = console) {
+  return runAfterTransactionTasks(tasks, "commit", logger);
+}
+
+async function runAfterTransactionTasks(tasks, phase, logger = console) {
   for (const task of tasks || []) {
     try {
       await task();
     } catch (error) {
-      logger.error("[DB] postcommit callback failed", error);
+      logger.error(`[DB] post${phase} callback failed`, error);
     }
   }
 }
@@ -342,6 +373,7 @@ module.exports = {
   databasePoolTelemetry,
   runInPrismaTransaction,
   deferUntilAfterCommit,
+  deferUntilAfterRollback,
   isInPrismaTransactionScope,
   runAfterCommitTasks,
 };

@@ -62,8 +62,13 @@ test("summary capture snapshots mutable scoring facts without a broad dependency
   );
   assert.match(
     source,
-    /WITH dependencies AS MATERIALIZED[\s\S]*FROM step_samples sample[\s\S]*UNION ALL[\s\S]*FROM steps daily[\s\S]*UNION ALL[\s\S]*FROM user_scoring_input_versions version/,
-    "samples, daily totals, and generation witnesses must share one statement snapshot",
+    /WITH bounds AS MATERIALIZED[\s\S]*FROM step_samples sample[\s\S]*UNION ALL[\s\S]*FROM steps daily[\s\S]*UNION ALL[\s\S]*FROM user_scoring_input_versions version/,
+    "each cache miss must read samples, daily totals, and its generation revalidation in one statement snapshot",
+  );
+  assert.match(
+    source,
+    /generationChanged[\s\S]*SUMMARY_CAPTURE_CLOSURE_CHANGED/,
+    "a cache fill must fail closed when its generation changed after the initial closure witness",
   );
   assert.match(
     source,
