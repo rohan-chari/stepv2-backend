@@ -1,9 +1,50 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  claimEligibleSummaryWork,
   lockEligibleSummaryCaptureDependencies,
   persistCapturedSummaryImpactsForRace,
 } = require("../../src/modules/steps/services/globalEventSummaryCapture");
+
+test("insufficient post-event coverage skips mutable scoring facts", async () => {
+  const eventEnd = new Date("2026-09-02T12:00:00.000Z");
+  const tx = {
+    globalEventSummaryWork: {
+      async findFirst() { return null; },
+    },
+    race: {
+      async findMany() { throw new Error("mutable scoring facts must not be loaded"); },
+    },
+  };
+
+  const result = await claimEligibleSummaryWork(tx, {
+    userId: "user-1",
+    captureDependencies: {
+      activeWork: null,
+      works: [{
+        id: "work-1",
+        eventId: "event-1",
+        userId: "user-1",
+        expiresAt: new Date("2026-09-03T12:00:00.000Z"),
+        event: { id: "event-1", endsAt: eventEnd, summaryAttributionVersion: 2 },
+      }],
+      impacts: [{
+        eventId: "event-1",
+        raceId: "race-1",
+        userId: "user-1",
+        status: "PENDING",
+        attributionVersion: 2,
+      }],
+      entitlements: [{ eventId: "event-1", userId: "user-1", endsAt: eventEnd }],
+    },
+    captureSyncRequestId: "sync-1",
+    captureCompletedAt: new Date("2026-09-02T12:01:00.000Z"),
+    captureCoverageThrough: new Date("2026-09-02T11:59:59.000Z"),
+    sourceScoringInputGeneration: 1n,
+  });
+
+  assert.equal(result, null);
+});
 
 test("summary capture loads active and waiting work with event definitions in one query", async () => {
   const calls = [];

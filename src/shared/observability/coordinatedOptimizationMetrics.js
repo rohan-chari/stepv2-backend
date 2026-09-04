@@ -1,6 +1,10 @@
 const APPROVED_METRICS = new Set([
   "global_summary_capture_lookup_total",
   "global_summary_capture_lookup_per_sync",
+  "global_summary_capture_mutable_scope_total",
+  "global_summary_capture_mutable_users",
+  "global_summary_capture_mutable_rows",
+  "global_summary_capture_coverage_skip_total",
   "global_summary_waiting_races_ready_total",
   "global_summary_recovery_repair_total",
   "global_summary_worker_claim_total",

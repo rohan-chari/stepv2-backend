@@ -275,8 +275,48 @@ async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) 
   });
   const racesById = new Map(races.map((race) => [race.id, race]));
   const workByEventId = new Map(works.map((work) => [work.eventId, work]));
-  const dependencyUserIds = [...new Set(races.flatMap((race) =>
-    race.participants.map((participant) => participant.userId)))].sort();
+  const effects = await tx.raceActiveEffect.findMany({
+    where: {
+      raceId: { in: raceIds },
+      type: { in: CAPTURE_EFFECT_TYPES },
+      status: { in: ["ACTIVE", "EXPIRED"] },
+    },
+    select: {
+      id: true, raceId: true, type: true, status: true, startsAt: true,
+      expiresAt: true, targetParticipantId: true, targetUserId: true,
+      sourceUserId: true, metadata: true,
+    },
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+  });
+  const crossUserRaceIds = new Set(effects
+    .filter((effect) => effect.type === "LEECH" || effect.type === "HITCHHIKE")
+    .map((effect) => effect.raceId));
+  const factUserIdsByRaceId = new Map();
+  const recordedScopeRaceIds = new Set();
+  for (const impact of impacts) {
+    const race = racesById.get(impact.raceId);
+    const work = workByEventId.get(impact.eventId);
+    if (!race || !work) continue;
+    const needsWholeRace = race.powerupsEnabled && crossUserRaceIds.has(race.id);
+    if (!recordedScopeRaceIds.has(race.id)) {
+      coordinatedOptimizationMetrics.increment(
+        "global_summary_capture_mutable_scope_total",
+        { outcome: needsWholeRace ? "whole_race" : "uploader_only" },
+      );
+      recordedScopeRaceIds.add(race.id);
+    }
+    factUserIdsByRaceId.set(race.id, new Set(
+      needsWholeRace
+        ? race.participants.map((participant) => participant.userId)
+        : [work.userId],
+    ));
+  }
+  const factUserIds = [...new Set([...factUserIdsByRaceId.values()]
+    .flatMap((userIds) => [...userIds]))].sort();
+  coordinatedOptimizationMetrics.observe(
+    "global_summary_capture_mutable_users",
+    factUserIds.length,
+  );
   let earliest = null;
   let latest = null;
   for (const impact of impacts) {
@@ -291,43 +331,35 @@ async function loadArtifactFacts(tx, { works, impacts, entitlementsByEventId }) 
     if (!earliest || rangeStart < earliest) earliest = rangeStart;
     if (!latest || rangeEnd > latest) latest = rangeEnd;
   }
-  const shouldLoadMutableFacts = Boolean(dependencyUserIds.length && earliest && latest);
-  const [mutableFacts, effects] = shouldLoadMutableFacts
-    ? await Promise.all([
-        // Samples, daily totals, and their generation witnesses must come from
-        // one PostgreSQL statement snapshot. C0 already freezes race topology
-        // and effects; statement-level MVCC makes concurrent step writers land
-        // wholly before or wholly after this immutable capture input snapshot.
-        loadMutableScoringFactsSnapshot(tx, { dependencyUserIds, earliest, latest }),
-        tx.raceActiveEffect.findMany({
-          where: {
-            raceId: { in: raceIds },
-            type: { in: CAPTURE_EFFECT_TYPES },
-            status: { in: ["ACTIVE", "EXPIRED"] },
-          },
-          select: {
-            id: true, raceId: true, type: true, status: true, startsAt: true,
-            expiresAt: true, targetParticipantId: true, targetUserId: true,
-            sourceUserId: true, metadata: true,
-          },
-          orderBy: [{ startsAt: "asc" }, { id: "asc" }],
-        }),
-      ])
-    : [{ samples: [], dailySteps: [], inputVersions: [] }, []];
+  const shouldLoadMutableFacts = Boolean(factUserIds.length && earliest && latest);
+  const mutableFacts = shouldLoadMutableFacts
+    ? await loadMutableScoringFactsSnapshot(tx, {
+        // Both mutable rows and their generation witnesses are scoped to users
+        // that can affect the uploader's counterfactual.
+        dependencyUserIds: factUserIds,
+        earliest,
+        latest,
+      })
+    : { samples: [], dailySteps: [], inputVersions: [] };
   const capturedInputVersionUserIds = mutableFacts.inputVersions
     .map((row) => row.userId)
     .sort();
+  coordinatedOptimizationMetrics.observe(
+    "global_summary_capture_mutable_rows",
+    mutableFacts.samples.length + mutableFacts.dailySteps.length +
+      mutableFacts.inputVersions.length,
+  );
   if (shouldLoadMutableFacts && (
-    mutableFacts.inputVersions.length !== dependencyUserIds.length ||
+    mutableFacts.inputVersions.length !== factUserIds.length ||
     capturedInputVersionUserIds.some(
-      (userId, index) => userId !== dependencyUserIds[index],
+      (userId, index) => userId !== factUserIds[index],
     )
   )) {
     const error = new Error("summary capture generation witness changed");
     error.code = "SUMMARY_CAPTURE_CLOSURE_CHANGED";
     throw error;
   }
-  return { racesById, ...mutableFacts, effects };
+  return { racesById, factUserIdsByRaceId, ...mutableFacts, effects };
 }
 
 async function buildArtifact(tx, {
@@ -348,13 +380,15 @@ async function buildArtifact(tx, {
     return { ...row, cutoffAt: new Date(Math.min(...candidates)) };
   });
   const dependencyUserIds = participantRows.map((row) => row.userId).sort();
+  const factUserIds = artifactFacts?.factUserIdsByRaceId?.get(race.id) ||
+    new Set(dependencyUserIds);
   const earliestDate = new Date(new Date(race.startedAt).getTime() - 24 * 60 * 60 * 1000);
   const latestDate = new Date(cutoffAt.getTime() + 24 * 60 * 60 * 1000);
   const loaded = artifactFacts || {};
   const [samples, dailySteps, effects, inputVersions] = artifactFacts ? [
-    loaded.samples.filter((row) => dependencyUserIds.includes(row.userId) &&
+    loaded.samples.filter((row) => factUserIds.has(row.userId) &&
       new Date(row.periodEnd) > new Date(race.startedAt) && new Date(row.periodStart) < cutoffAt),
-    loaded.dailySteps.filter((row) => dependencyUserIds.includes(row.userId) &&
+    loaded.dailySteps.filter((row) => factUserIds.has(row.userId) &&
       new Date(row.date) >= earliestDate && new Date(row.date) <= latestDate),
     race.powerupsEnabled
       ? loaded.effects.filter((row) => row.raceId === race.id)
@@ -726,17 +760,46 @@ async function claimEligibleSummaryWork(tx, {
       if (legacy) entitlementsByEventId.set(work.eventId, legacy);
     }
   }
+  const coverageQualifiedCandidates = candidates.filter((work) => {
+    if (work.event.summaryAttributionVersion !== 2) return false;
+    const entitlement = entitlementsByEventId.get(work.eventId);
+    if (!entitlement) return false;
+    return new Date(captureCompletedAt) >= new Date(entitlement.endsAt) &&
+      new Date(captureCoverageThrough) >= new Date(entitlement.endsAt);
+  });
+  const coverageSkipped = candidates.filter((work) => {
+    const entitlement = entitlementsByEventId.get(work.eventId);
+    return entitlement && (
+      new Date(captureCompletedAt) < new Date(entitlement.endsAt) ||
+      new Date(captureCoverageThrough) < new Date(entitlement.endsAt)
+    );
+  }).length;
+  if (coverageSkipped > 0) {
+    coordinatedOptimizationMetrics.increment(
+      "global_summary_capture_coverage_skip_total",
+      {},
+      coverageSkipped,
+    );
+  }
+  // The intake path carries the entitlement snapshot captured under the C0
+  // fences, so it can safely gate before hydration. Preserve the standalone
+  // fallback's existing per-work entitlement lookup semantics.
+  const hydrationCandidates = carriedImpacts
+    ? coverageQualifiedCandidates
+    : candidates;
+  const capturableEventIds = new Set(hydrationCandidates.map((work) => work.eventId));
   const allPendingImpacts = carriedImpacts
-    ? carriedImpacts.filter((impact) => impact.status === "PENDING")
+    ? carriedImpacts.filter((impact) =>
+        impact.status === "PENDING" && capturableEventIds.has(impact.eventId))
     : [];
   const artifactFacts = carriedImpacts
     ? await loadArtifactFacts(tx, {
-        works: candidates,
+        works: hydrationCandidates,
         impacts: allPendingImpacts,
         entitlementsByEventId,
       })
     : null;
-  for (const work of candidates) {
+  for (const work of hydrationCandidates) {
     if (work.event.summaryAttributionVersion !== 2) continue;
     const entitlement = entitlementsByEventId.get(work.eventId) ||
       await tx.globalStepEventEntitlement.findUnique({
