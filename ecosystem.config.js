@@ -29,6 +29,10 @@
 const PROD_DIR = "/var/www/step-tracker-backend";
 const STAGING_DIR = "/var/www/step-tracker-backend-staging";
 const BACKGROUND_NODE_ARGS = "--max-old-space-size=320 --max-semi-space-size=8";
+// The cron owner may settle an entire delayed Daily cohort fleet in one pass.
+// Keep its heap distinct from the bounded two-lane resolution worker: the
+// 2026-09-05 catch-up exceeded 320 MB and otherwise entered an OOM restart loop.
+const CRON_NODE_ARGS = "--max-old-space-size=1024 --max-semi-space-size=16";
 
 /**
  * Both apps are identical apart from their directory — same repo, deployed
@@ -101,7 +105,7 @@ module.exports = {
       DATABASE_POOL_TOTAL_BUDGET: "32",
       PORT: 3011,
       HOST: "127.0.0.1",
-    }, { exec_mode: "fork", node_args: BACKGROUND_NODE_ARGS }),
+    }, { exec_mode: "fork", node_args: CRON_NODE_ARGS }),
     // Staging stays at ONE because it serves essentially no traffic. This was
     // originally required by the former 2 GB host; keeping it at one on the
     // replacement 8 GB host preserves capacity for production and load spikes.

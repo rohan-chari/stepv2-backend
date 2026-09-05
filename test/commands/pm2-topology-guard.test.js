@@ -210,7 +210,10 @@ test("production config delegates clustered HTTP memory enforcement to the watch
     resolution.node_args,
     "--max-old-space-size=320 --max-semi-space-size=8",
   );
-  assert.equal(cron.node_args, resolution.node_args);
+  assert.equal(
+    cron.node_args,
+    "--max-old-space-size=1024 --max-semi-space-size=16",
+  );
   assert.equal(resolution.exp_backoff_restart_delay, 1000);
   assert.equal(cron.exp_backoff_restart_delay, undefined);
   assert.equal(http.exp_backoff_restart_delay, undefined);
