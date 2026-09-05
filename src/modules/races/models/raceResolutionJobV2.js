@@ -243,89 +243,111 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       },
       tx = prisma,
     ) {
-      await tx.$executeRawUnsafe(
-        `INSERT INTO race_resolution_full_triggers (
-           id,race_id,user_id,participant_id,resolution_time_zone,requested_at,created_at
-         ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$5)`,
-        raceId,
-        scope?.userId || null,
-        scope?.participantId || null,
-        resolutionTimeZone,
+      const [row] = await this.enqueueFullScopeTriggers({
+        entries: [{ raceId, resolutionTimeZone, queuePriority, scope }],
         now,
-      );
-      const notBeforeAt = burstCoalescing
-        ? new Date(now.getTime() + (
-            scope?.userId && scope?.participantId
-              ? LARGE_SCOPED_DEBOUNCE_MS
-              : DEFAULT_DEBOUNCE_MS
-          ))
-        : null;
-      // The append above is the durable handoff. On a hot large race the
-      // ordinary queue row nearly always already exists, and attempting even
-      // `ON CONFLICT DO NOTHING` against it waits behind the resolution
-      // worker's row lock. A plain MVCC read does not, so return the active
-      // generation immediately and let trigger promotion fold in this upload.
-      const active = await tx.$queryRawUnsafe(
-        `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id=$1`,
-        raceId,
-      );
-      if (active[0] && ["queued", "running"].includes(active[0].state)) {
-        return normalizeRow(active[0]);
-      }
-      const inserted = await tx.$queryRawUnsafe(
-        `INSERT INTO race_resolution_jobs_v2 (
-           id,race_id,generation,resolution_time_zone,state,attempts,
-           requested_at,not_before_at,triggered_by_user_ids,
-           processing_triggered_by_user_ids,dirty_reasons,
-           dirty_participant_ids,dirty_powerup_types,dirty_priority,
-           queue_priority,full_trigger_seed_only,created_at,updated_at
-         ) VALUES (
-           gen_random_uuid()::text,$1,1,$2,'queued',0,
-           $3,$4,'[]'::jsonb,'[]'::jsonb,'["FULL"]'::jsonb,
-           '[]'::jsonb,'[]'::jsonb,'COALESCE',$5,$6,$3,$3
-         )
-         ON CONFLICT (race_id) DO NOTHING
-         RETURNING ${jobColumns()}`,
-        raceId,
-        resolutionTimeZone,
-        now,
-        notBeforeAt,
-        normalizeQueuePriority(queuePriority),
-        Boolean(scope?.userId && scope?.participantId),
-      );
-      if (inserted.length === 1) return normalizeRow(inserted[0]);
+        burstCoalescing,
+      }, tx);
+      return row || null;
+    },
 
-      // A completed/failed generation needs to become visibly queued before
-      // the HTTP response. Exactly one concurrent uploader wins this guarded
-      // transition; after that all others take the non-locking read below.
-      const restarted = await tx.$queryRawUnsafe(
-        `UPDATE race_resolution_jobs_v2
-            SET generation=generation+1,
-                resolution_time_zone=COALESCE($2,resolution_time_zone),
-                state='queued',attempts=0,requested_at=$3,
-                not_before_at=$4,retry_at=NULL,last_error_code=NULL,
-                dirty_reasons='["FULL"]'::jsonb,
-                dirty_participant_ids='[]'::jsonb,
-                dirty_powerup_types='[]'::jsonb,
-                dirty_priority='COALESCE',queue_priority=$5,
-                full_trigger_seed_only=$6,
-                triggered_by_user_ids='[]'::jsonb,updated_at=$3
-          WHERE race_id=$1
-            AND state IN ('succeeded','failed')
-          RETURNING ${jobColumns()}`,
-        raceId,
-        resolutionTimeZone,
-        now,
-        notBeforeAt,
-        normalizeQueuePriority(queuePriority),
-        Boolean(scope?.userId && scope?.participantId),
-      );
-      if (restarted.length === 1) return normalizeRow(restarted[0]);
-      const existing = await tx.$queryRawUnsafe(
-        `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id=$1`,
-        raceId,
-      );
-      return normalizeRow(existing[0]);
+    async enqueueFullScopeTriggers(
+      { entries, now = new Date(), burstCoalescing = false },
+      tx = prisma,
+    ) {
+      const ordered = [...new Map((entries || [])
+        .filter((entry) => entry?.raceId)
+        .map((entry) => [entry.raceId, entry])).values()]
+        .sort((a, b) => String(a.raceId).localeCompare(String(b.raceId)));
+      const results = [];
+      // Bound statement payloads for non-HTTP callers too. Pages retain global
+      // ascending race order, including when a transaction holds earlier locks.
+      const batchSize = 250;
+      for (let offset = 0; offset < ordered.length; offset += batchSize) {
+        const batch = ordered.slice(offset, offset + batchSize).map((entry) => ({
+          raceId: entry.raceId,
+          userId: entry.scope?.userId || null,
+          participantId: entry.scope?.participantId || null,
+          resolutionTimeZone: entry.resolutionTimeZone || null,
+          queuePriority: normalizeQueuePriority(entry.queuePriority || "MAINTENANCE"),
+          seedOnly: Boolean(entry.scope?.userId && entry.scope?.participantId),
+          notBeforeAt: burstCoalescing
+            ? new Date(now.getTime() + (entry.scope?.userId && entry.scope?.participantId
+              ? LARGE_SCOPED_DEBOUNCE_MS : DEFAULT_DEBOUNCE_MS)).toISOString()
+            : null,
+        }));
+        await tx.$executeRawUnsafe(
+          `INSERT INTO race_resolution_full_triggers (
+             id,race_id,user_id,participant_id,resolution_time_zone,requested_at,created_at
+           ) SELECT gen_random_uuid(),i."raceId",i."userId",i."participantId",
+                    i."resolutionTimeZone",$2::timestamp,$2::timestamp
+             FROM jsonb_to_recordset($1::jsonb) AS i(
+               "raceId" text,"userId" text,"participantId" text,"resolutionTimeZone" text
+             ) ORDER BY i."raceId"`,
+          JSON.stringify(batch), now,
+        );
+        // The trigger is the durable handoff. Do not upsert already-active jobs:
+        // even DO NOTHING would wait behind a worker holding their row locks.
+        const existing = await tx.$queryRawUnsafe(
+          `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id=ANY($1::text[])`,
+          batch.map((entry) => entry.raceId),
+        );
+        const byRaceId = new Map(existing.map((row) => [row.raceId, row]));
+        const inactive = batch.filter((entry) =>
+          !["queued", "running"].includes(byRaceId.get(entry.raceId)?.state));
+        if (inactive.length > 0) {
+          // Seed and reactivate in ONE ordered statement. Separate insert and
+          // update passes can invert lock order across overlapping race sets.
+          // A concurrent uploader may already have activated a row after our
+          // read; the conflict predicate preserves that uploader's generation.
+          const activated = await tx.$queryRawUnsafe(
+            `INSERT INTO race_resolution_jobs_v2 AS job (
+               id,race_id,generation,resolution_time_zone,state,attempts,
+               requested_at,not_before_at,triggered_by_user_ids,
+               processing_triggered_by_user_ids,dirty_reasons,
+               dirty_participant_ids,dirty_powerup_types,dirty_priority,
+               queue_priority,full_trigger_seed_only,created_at,updated_at
+             ) SELECT gen_random_uuid()::text,i."raceId",1,i."resolutionTimeZone",'queued',0,
+                      $2::timestamp,i."notBeforeAt",'[]'::jsonb,'[]'::jsonb,'["FULL"]'::jsonb,
+                      '[]'::jsonb,'[]'::jsonb,'COALESCE',i."queuePriority",i."seedOnly",
+                      $2::timestamp,$2::timestamp
+               FROM jsonb_to_recordset($1::jsonb) AS i(
+                 "raceId" text,"resolutionTimeZone" text,"notBeforeAt" timestamp,
+                 "queuePriority" text,"seedOnly" boolean
+               ) ORDER BY i."raceId"
+             ON CONFLICT (race_id) DO UPDATE SET
+               generation=job.generation+1,
+               resolution_time_zone=COALESCE(EXCLUDED.resolution_time_zone,job.resolution_time_zone),
+               state='queued',attempts=0,requested_at=EXCLUDED.requested_at,
+               not_before_at=EXCLUDED.not_before_at,retry_at=NULL,last_error_code=NULL,
+               dirty_reasons='["FULL"]'::jsonb,dirty_participant_ids='[]'::jsonb,
+               dirty_powerup_types='[]'::jsonb,dirty_priority='COALESCE',
+               queue_priority=EXCLUDED.queue_priority,
+               full_trigger_seed_only=EXCLUDED.full_trigger_seed_only,
+               triggered_by_user_ids='[]'::jsonb,updated_at=EXCLUDED.updated_at
+             WHERE job.state IN ('succeeded','failed')
+             RETURNING ${jobColumns()}`,
+            JSON.stringify(inactive), now,
+          );
+          const activatedIds = new Set();
+          for (const row of activated) {
+            byRaceId.set(row.raceId, row);
+            activatedIds.add(row.raceId);
+          }
+          const racedIds = inactive.filter((entry) => !activatedIds.has(entry.raceId))
+            .map((entry) => entry.raceId);
+          if (racedIds.length > 0) {
+            // READ COMMITTED: see the concurrent winner after the conflict wait.
+            const winners = await tx.$queryRawUnsafe(
+              `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id=ANY($1::text[])`,
+              racedIds,
+            );
+            for (const row of winners) byRaceId.set(row.raceId, row);
+          }
+        }
+        results.push(...batch.map((entry) => normalizeRow(byRaceId.get(entry.raceId))));
+      }
+      return results;
     },
 
     async promoteFullScopeTriggers({
@@ -699,16 +721,17 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         row.dirtyReasons.includes("FULL"))) {
         const byRaceId = new Map();
         const fullRows = rowsIn.filter((row) => row.dirtyReasons.includes("FULL"));
-        for (const row of fullRows) {
-          byRaceId.set(row.raceId, await this.enqueueFullScopeTrigger({
+        const fullJobs = await this.enqueueFullScopeTriggers({
+          entries: fullRows.map((row) => ({
             raceId: row.raceId,
             resolutionTimeZone: row.resolutionTimeZone,
-            now,
-            burstCoalescing,
             queuePriority: row.queuePriority,
             scope: largeRaceScopeByRaceId?.get?.(row.raceId) || null,
-          }, tx));
-        }
+          })),
+          now,
+          burstCoalescing,
+        }, tx);
+        fullJobs.forEach((row, index) => byRaceId.set(fullRows[index].raceId, row));
         const ordinaryRaceIds = rowsIn
           .filter((row) => !row.dirtyReasons.includes("FULL"))
           .map((row) => row.raceId);

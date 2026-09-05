@@ -82,7 +82,7 @@ test("a large FULL upload appends a trigger and seeds one ordinary queue generat
     },
     async $queryRawUnsafe(sql) {
       queries.push(sql);
-      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=\$1/s.test(sql)) {
+      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=ANY\(\$1::text\[\]\)/s.test(sql)) {
         return [];
       }
       if (/INSERT INTO race_resolution_jobs_v2/.test(sql)) {
@@ -126,7 +126,7 @@ test("large-race intake durably carries uploader scope for bounded promotion", a
     async $executeRawUnsafe(...args) { writes.push(args); return 1; },
     async $queryRawUnsafe(sql, ...args) {
       queries.push([sql, ...args]);
-      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=\$1/s.test(sql)) {
+      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=ANY\(\$1::text\[\]\)/s.test(sql)) {
         return [];
       }
       if (/INSERT INTO race_resolution_jobs_v2/.test(sql)) {
@@ -151,11 +151,13 @@ test("large-race intake durably carries uploader scope for bounded promotion", a
   });
 
   assert.match(writes[0][0], /user_id,participant_id/);
-  assert.equal(writes[0][2], "user-1");
-  assert.equal(writes[0][3], "participant-1");
+  const [trigger] = JSON.parse(writes[0][1]);
+  assert.equal(trigger.userId, "user-1");
+  assert.equal(trigger.participantId, "participant-1");
   const seed = queries.find(([sql]) => /INSERT INTO race_resolution_jobs_v2/.test(sql));
+  const [seedRow] = JSON.parse(seed[1]);
   assert.equal(
-    seed[4].getTime() - seed[3].getTime(),
+    new Date(seedRow.notBeforeAt).getTime() - seed[2].getTime(),
     5000,
     "scoped batches coalesce one launch window while staying below the closure cap",
   );
@@ -167,7 +169,7 @@ test("a hot large-race upload never contends on the shared queue row", async () 
     async $executeRawUnsafe() { return 1; },
     async $queryRawUnsafe(sql) {
       queries.push(sql);
-      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=\$1/s.test(sql)) {
+      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=ANY\(\$1::text\[\]\)/s.test(sql)) {
         return [{
           id: "job-1", raceId: "race-1", state: "running", generation: 9,
           processingGeneration: 9, dirtyReasons: ["FULL"],
@@ -192,7 +194,7 @@ test("a multi-race upload keeps FULL races off the shared upsert", async () => {
       return 1;
     },
     async $queryRawUnsafe(sql, encoded) {
-      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=\$1/s.test(sql)) {
+      if (/SELECT .* FROM race_resolution_jobs_v2 WHERE race_id=ANY\(\$1::text\[\]\)/s.test(sql)) {
         return [{ id: "large-job", raceId: "race-large", state: "queued", generation: 3 }];
       }
       if (/jsonb_to_recordset/.test(sql)) {
