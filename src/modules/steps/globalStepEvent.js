@@ -260,6 +260,10 @@ function compatibilityEnvelopeForLocalEvent({
 // prorates a sample by the fraction of its duration inside the sub-interval —
 // identical to how per-participant timed effects already slice, so no steps are
 // double-counted or dropped at boundaries.
+function globalEventSegmentBoost(steps, signedMultiplier, eventMultiplier) {
+  return steps > 0 ? steps * signedMultiplier * (eventMultiplier - 1) : 0;
+}
+
 async function computeGlobalEventBoost({
   globalEvents = [],
   effectGroups = {},
@@ -298,7 +302,7 @@ async function computeGlobalEventBoost({
         new Date(segEnd)
       );
       if (segSteps > 0) {
-        boost += segSteps * m * (multiplier - 1);
+        boost += globalEventSegmentBoost(segSteps, m, multiplier);
       }
     }
   }
@@ -387,6 +391,7 @@ function shouldStartGlobalEvent({ now, todaysEvents = [], pickInt }) {
 module.exports = {
   // step math
   computeGlobalEventBoost,
+  globalEventSegmentBoost,
   // scheduler
   shouldStartGlobalEvent,
   chooseEventStartForEtDay,

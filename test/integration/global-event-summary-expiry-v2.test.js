@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { before, beforeEach, describe, it } = require("node:test");
 const { createHash, randomUUID } = require("node:crypto");
+const { inspectArtifact } = require("./helpers/durableCaptureAssertions");
 
 const {
   cleanDatabase,
@@ -41,6 +42,17 @@ const {
 const CAPABILITIES = "impact_summaries,impact_summary_expiry_v1";
 let server;
 
+// Capture publication is now a durable worker handoff, not part of POST.
+// Drive the real scheduler without bypassing scoring or race reconciliation.
+async function completedArtifact(args) {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const artifact = await prisma.globalEventCaptureArtifact.findFirst(args);
+    if (artifact) return artifact;
+    await buildGlobalEventSummaryTick({ prisma, now: () => new Date() })();
+  }
+  assert.fail("accepted capture did not publish within 400 bounded worker claims");
+}
+
 async function createEvent({ startsAt, endsAt } = {}) {
   const now = Date.now();
   return prisma.globalStepEvent.create({
@@ -65,7 +77,9 @@ async function createRace(user, suffix = "expiry") {
     },
   });
   await prisma.raceParticipant.create({
-    data: { raceId: race.id, userId: user.user.id, status: "ACCEPTED" },
+    // These fixtures describe participation throughout the already-started
+    // race. The database default (now) would instead mean a post-event join.
+    data: { raceId: race.id, userId: user.user.id, status: "ACCEPTED", joinedAt: race.startedAt },
   });
   return race;
 }
@@ -656,6 +670,9 @@ describe("global event summary expiry v2 HTTP contract", () => {
       orderBy: { raceId: "asc" },
     });
     assert.deepEqual(vector.map((row) => row.attributionVersion), [2, 2]);
+    for (const row of vector) await completedArtifact({ where: {
+      eventId: event.id, raceId: row.raceId, userId: owner.user.id,
+    } });
     assert.equal(await prisma.globalEventCaptureArtifact.count({
       where: { eventId: event.id, userId: owner.user.id },
     }), 2);
@@ -812,7 +829,7 @@ describe("global event summary expiry v2 HTTP contract", () => {
       state: "QUEUED",
       expiresAt: waiting.expiresAt.toISOString(),
     });
-    const firstArtifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+    const firstArtifact = await completedArtifact({
       where: { workId: waiting.id },
     });
 
@@ -871,7 +888,7 @@ describe("global event summary expiry v2 HTTP contract", () => {
       state: "WAITING_RACES",
       expiresAt: waiting.expiresAt.toISOString(),
     });
-    const retainedArtifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+    const retainedArtifact = await completedArtifact({
       where: { workId: waiting.id },
     });
     assert.equal(retainedArtifact.payloadDigest, firstArtifact.payloadDigest);
@@ -1184,19 +1201,20 @@ describe("global event summary expiry v2 HTTP contract", () => {
     ]);
     assert.equal(sync.status, 202);
     assert.equal(dependencySync.status, 202);
-    const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+    const artifact = await completedArtifact({
       where: { eventId: event.id, raceId: race.id, userId: user.user.id },
     });
+    const { captureContext, pinnedFacts } = await inspectArtifact(artifact);
     assert.deepEqual(
-      artifact.payload.participants.map((row) => row.userId).sort(),
+      captureContext.payload.participants.map((row) => row.userId).sort(),
       [user.user.id, leecher.user.id, hitchTarget.user.id].sort(),
     );
     assert.deepEqual(
-      artifact.payload.dependencyInputGenerations.map((row) => row.userId).sort(),
+      [...new Set(pinnedFacts.roots.map((row) => row.user_id))].sort(),
       [user.user.id, leecher.user.id, hitchTarget.user.id].sort(),
       "the immutable artifact includes the uploader and every cross-user input generation",
     );
-    assert.equal(artifact.payload.effects.some((row) => row.id === blockedEffect.id), false);
+    assert.equal(captureContext.payload.effects.some((row) => row.id === blockedEffect.id), false);
     assert.equal(artifact.payload.attributionDeltaSteps, 50,
       "Hitchhike credit is drainable before Leech, leaving only 50 event steps");
 
@@ -1297,21 +1315,22 @@ describe("global event summary expiry v2 HTTP contract", () => {
     });
     assert.equal(sync.status, 202);
 
-    const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+    const artifact = await completedArtifact({
       where: { eventId: event.id, raceId: race.id, userId: user.user.id },
     });
+    const { pinnedFacts } = await inspectArtifact(artifact);
     assert.deepEqual(
-      artifact.payload.samples.map((row) => row.userId),
+      pinnedFacts.samples.map((row) => row.userId),
       [user.user.id],
       "unrelated participants' sample histories must not enter the immutable capture",
     );
     assert.deepEqual(
-      artifact.payload.dependencyInputGenerations.map((row) => row.userId),
+      [...new Set(pinnedFacts.roots.map((row) => row.user_id))],
       [user.user.id],
       "unrelated participants' scoring generations must not enter the immutable capture",
     );
     assert.equal(
-      artifact.payload.dailySteps.some((row) => row.userId === bystander.user.id),
+      pinnedFacts.dailySteps.some((row) => row.userId === bystander.user.id),
       false,
       "unrelated participants' daily totals must not enter the immutable capture",
     );
@@ -1435,21 +1454,23 @@ describe("global event summary expiry v2 HTTP contract", () => {
       },
     });
     assert.equal(sync.status, 202);
-    const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+    const artifact = await completedArtifact({
       where: { eventId: event.id, raceId: race.id, userId: uploader.user.id },
     });
+    const { pinnedFacts } = await inspectArtifact(artifact);
     const expectedDependencies = [
       uploader.user.id,
       linked.user.id,
-      transitivelyLinked.user.id,
       historicalHitchTarget.user.id,
     ].sort();
+    assert.equal(pinnedFacts.samples.some((row) => row.userId === transitivelyLinked.user.id), false,
+      "a raw-fact leaf's incoming Leech must not become a transitive scoring dependency");
     assert.deepEqual(
-      [...new Set(artifact.payload.samples.map((row) => row.userId))].sort(),
+      [...new Set(pinnedFacts.samples.map((row) => row.userId))].sort(),
       expectedDependencies,
     );
     assert.deepEqual(
-      artifact.payload.dependencyInputGenerations.map((row) => row.userId).sort(),
+      [...new Set(pinnedFacts.roots.map((row) => row.user_id))].sort(),
       expectedDependencies,
       "a disconnected historical effect component must not force race-wide hydration",
     );
@@ -1845,6 +1866,14 @@ describe("global event summary expiry v2 HTTP contract", () => {
       const [first, second] = await Promise.all([firstPromise, secondPromise]);
       assert.equal(first.status, 202);
       assert.equal(second.status, 202);
+      const works = await prisma.globalEventSummaryWork.findMany({
+        where: { eventId: event.id },
+        orderBy: { userId: "asc" },
+      });
+      assert.deepEqual(works.map((work) => work.status), ["QUEUED", "QUEUED"]);
+      for (const uploader of [uploaderA, uploaderB]) await completedArtifact({ where: {
+        workId: workIdsByUserId.get(uploader.user.id), raceId: raceByUserId.get(uploader.user.id),
+      } });
       const artifacts = await prisma.globalEventCaptureArtifact.findMany({
         where: { eventId: event.id },
         select: { workId: true, userId: true, raceId: true },
@@ -1866,11 +1895,6 @@ describe("global event summary expiry v2 HTTP contract", () => {
         { userId: uploaderA.user.id, steps: 300 },
         { userId: uploaderB.user.id, steps: 500 },
       ].sort((a, b) => a.userId.localeCompare(b.userId)));
-      const works = await prisma.globalEventSummaryWork.findMany({
-        where: { eventId: event.id },
-        orderBy: { userId: "asc" },
-      });
-      assert.deepEqual(works.map((work) => work.status), ["QUEUED", "QUEUED"]);
     } finally {
       releaseCapture();
       await Promise.allSettled([firstPromise, secondPromise].filter(Boolean));
@@ -2064,13 +2088,16 @@ describe("global event summary expiry v2 HTTP contract", () => {
       },
     });
     assert.equal(sync.status, 202);
-    const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+    const artifact = await completedArtifact({
       where: { workId: work.id, raceId: race.id, userId: uploader.user.id },
     });
-    assert.deepEqual(artifact.payload.dependencyInputGenerations, [
-      { userId: uploader.user.id, generation: "2" },
-      { userId: dependency.user.id, generation: "1" },
-    ].sort((a, b) => a.userId.localeCompare(b.userId)));
+    const { pinnedFacts, owner: capturedOwner } = await inspectArtifact(artifact);
+    assert.equal(capturedOwner.context.provenance.sourceScoringInputGeneration, "2");
+    assert.deepEqual([...new Set(pinnedFacts.roots.map((row) => row.user_id))].sort(),
+      [uploader.user.id, dependency.user.id].sort());
+    assert.ok(pinnedFacts.roots.filter((row) => row.user_id === dependency.user.id)
+      .every((row) => row.revision === "0"),
+      "a dependency with no source facts must have explicit empty revision-zero roots, not missing inputs");
     const versions = await prisma.userScoringInputVersion.findMany({
       where: { userId: { in: [uploader.user.id, dependency.user.id] } },
       select: { userId: true, generation: true },
@@ -2277,15 +2304,15 @@ describe("global event summary expiry v2 HTTP contract", () => {
         clearTimeout(completionTimeout);
       }
       assert.equal(sync.status, 202);
-      const artifact = await prisma.globalEventCaptureArtifact.findFirstOrThrow({
+      const artifact = await completedArtifact({
         where: { workId: work.id, raceId: race.id, userId: uploader.user.id },
       });
-      assert.equal(artifact.payload.samples.find(
+      const { pinnedFacts } = await inspectArtifact(artifact);
+      assert.equal(pinnedFacts.samples.find(
         (sample) => sample.userId === dependency.user.id,
       ).steps, 100);
-      assert.equal(artifact.payload.dependencyInputGenerations.find(
-        (version) => version.userId === dependency.user.id,
-      ).generation, "1");
+      assert.ok(pinnedFacts.roots.some((root) => root.user_id === dependency.user.id && root.revision === "1"),
+        "the accepted dependency revision must remain the committed pre-writer version");
     } finally {
       releaseWriter();
       await writer;
@@ -2457,6 +2484,7 @@ describe("global event summary expiry v2 HTTP contract", () => {
         },
       });
       assert.equal(sync.status, 202);
+      await completedArtifact({ where: { eventId: event.id, raceId: race.id, userId: user.user.id } });
       const tick = buildGlobalEventSummaryTick({ prisma, now: () => new Date() });
       assert.deepEqual(await tick(), { upserts: 0 });
       const worker = buildRaceResolutionWorkerV2({

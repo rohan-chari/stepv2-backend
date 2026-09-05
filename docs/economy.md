@@ -1,5 +1,45 @@
 # Backend economy ledger
 
+## Hitchhike V3 immutable-summary scoring inputs
+
+**Code verified 2026-09-05; no production configuration or player distributions
+queried for this architecture review.** These are stored-effect scoring rules,
+not a proposed change to live prices, availability, or multipliers.
+
+- `src/modules/powerups/hitchhikeCopies.js` reads the copy ratio from each
+  effect's `metadata.copyRatio` (positive finite value; code fallback 1).
+  Versions 1/2 stop at the closed-hour boundary; V3 includes timestamped steps
+  through the scoring instant. V2/V3 exact copies use the target's signed
+  local/global modified contribution and floor after applying the copy ratio.
+- V3 frozen captures return their stored signed `effectiveContribution`
+  immediately, with no new sample calculation. The regression in
+  `test/utils/hitchhikeCopies.test.js` preserves a frozen contribution of -750
+  even when the sample source would now return 99,999 steps.
+- Unfrozen V3 selects coarse history only when `coarseRawAttributed` is
+  **strictly greater** than exact raw sample steps. The sources are alternatives,
+  not additive; equal raw evidence selects exact scoring. Coarse contribution
+  is already signed/scaled and must not be multiplied a second time.
+- `src/modules/powerups/models/hitchhikeAttributionCapture.js` owns coarse
+  source intervals by target/day. The credited amount is the floor of the
+  difference between canonical absolute daily checkpoint scores, multiplied
+  by the stored copy ratio. A missing cast checkpoint cannot distinguish
+  pre-cast walking and therefore starts as a baseline, not a retroactive grant.
+- The global-event summary scorer currently supplies both `now` and
+  `raceEndsAt` as the event end (`globalEventSummaryCapture.js`). Its Hitchhike
+  window is closed, so this path cannot reserve a new coarse daily increment.
+  Existing frozen/coarse checkpoint facts are nevertheless scoring inputs.
+- Copies enter `preLeechTotal`, are drainable before Leech transfers, and do
+  not advance mystery-box progress. Leech credits do not recursively become
+  drainable within the same scoring pass (`leechTransfers.js`).
+
+Code-backed checkpoint examples with a stored ratio of 1: exact 400/coarse 500
+selects the stored coarse contribution; exact 500/coarse 500 selects exact;
+a frozen -750 remains -750 in either global-event counterfactual. Exact
+100 steps under an otherwise unmodified 2x event yields 200 copied steps in
+the with-event branch and 100 without it, when the event applies to the copied
+target. These are deterministic fixtures, not estimated player EV or live
+balance settings.
+
 ## Bounty and cleanser interaction
 
 **Verified 2026-09-01 against production rows, production PM2 environment,

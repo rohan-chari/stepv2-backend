@@ -223,6 +223,14 @@ async function sumOpenWindows(model, userId, windows) {
   );
 }
 
+function reduceEffectSegment(terms, steps, multiplier) {
+  if (!steps || steps <= 0) return terms;
+  if (multiplier === 0) terms.frozenSteps += steps;
+  else if (multiplier > 0) terms.buffedSteps += (multiplier - 1) * steps;
+  else { terms.reversedSteps += steps; terms.buffedSteps += (multiplier + 1) * steps; }
+  return terms;
+}
+
 // `globalContext` (optional, additive): { globalEvents: [...], now: Date }. When
 // present, the EXTRA steps from any active GlobalStepEvent windows are returned
 // as `globalBoostedSteps`, scaling the SIGNED per-participant rate (§3): positive
@@ -335,17 +343,8 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
           nowDate
         );
         for (let k = 0; k < segments.length; k++) {
-          const s = sums[k];
-          if (!s || s <= 0) continue;
-          const m = segments[k].m;
-          if (m === 0) {
-            frozenSteps += s;
-          } else if (m > 0) {
-            buffedSteps += (m - 1) * s;
-          } else {
-            reversedSteps += s;
-            buffedSteps += (m + 1) * s;
-          }
+          const terms = reduceEffectSegment({ frozenSteps, buffedSteps, reversedSteps }, sums[k], segments[k].m);
+          ({ frozenSteps, buffedSteps, reversedSteps } = terms);
         }
       }
     } else {
@@ -777,6 +776,9 @@ async function createIncrementalEffectScoreCapture({
 
 module.exports = {
   computeEffectModifiers,
+  computeEffectModifiersFallback,
+  mergeRainstormWindows,
+  reduceEffectSegment,
   computeSnapshotEffectiveTotal,
   createIncrementalEffectScoreCapture,
   signedMultiplierForEffects,

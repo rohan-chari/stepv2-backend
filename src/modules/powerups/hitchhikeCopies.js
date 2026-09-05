@@ -59,6 +59,28 @@ function toMsOrNull(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function hitchhikeScoringWindow(effect, now, {raceEndsAt=null,targetFinishedAt=null,targetForfeitedAt=null}={}) {
+  if (!effect?.targetUserId || !effect?.sourceUserId) return null;
+  const nowMs=toMsOrNull(now);
+  const windowStart=toMsOrNull(effect.startsAt);
+  if (windowStart===null) return null;
+  const scoringVersion=Number(effect.metadata?.scoringVersion) || 1;
+  const rawEnd=Math.min(...[toMsOrNull(effect.expiresAt) ?? nowMs,toMsOrNull(raceEndsAt),
+    toMsOrNull(targetFinishedAt),toMsOrNull(targetForfeitedAt)].filter((value)=>value!==null));
+  const windowEnd=Math.min(rawEnd,scoringVersion>=3 ? nowMs : Math.floor(nowMs/HOUR_MS)*HOUR_MS);
+  return {nowMs,windowStart,windowEnd,rawEnd,scoringVersion};
+}
+
+function hitchhikeExactContribution(effect, rawSteps, modifiers) {
+  const effective=rawSteps-modifiers.frozenSteps+modifiers.buffedSteps-
+    2*modifiers.reversedSteps+(modifiers.globalBoostedSteps || 0);
+  return Math.floor(effective*hitchhikeCopyRatio(effect));
+}
+
+function hitchhikeFlooredBalance(preLeechTotal, copiedSteps) {
+  return Math.max(0,(preLeechTotal || 0)+copiedSteps);
+}
+
 function localDayStart(instant, timeZone) {
   try {
     const parts = getTimeZoneParts(instant, timeZone);
@@ -114,13 +136,9 @@ async function computeHitchhikeCopiedSteps(
     globalEvents = [], raceTimezone = "UTC",
     attributionCaptureModel = HitchhikeAttributionCapture } = {}
 ) {
-  if (!effect || !effect.targetUserId || !effect.sourceUserId) return 0;
-  const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
-  const currentHourStart = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
-  const scoringVersion = Number(effect.metadata?.scoringVersion) || 1;
-
-  const windowStart = toMsOrNull(effect.startsAt);
-  if (windowStart == null) return 0;
+  const window=hitchhikeScoringWindow(effect,now,{raceEndsAt,targetFinishedAt,targetForfeitedAt});
+  if (!window) return 0;
+  const {nowMs,windowStart,windowEnd,rawEnd,scoringVersion}=window;
 
   let existingCapture = null;
   if (scoringVersion === 3 &&
@@ -132,19 +150,10 @@ async function computeHitchhikeCopiedSteps(
     }
   }
 
-  const ends = [
-    toMsOrNull(effect.expiresAt) ?? nowMs,
-    toMsOrNull(raceEndsAt),
-    toMsOrNull(targetFinishedAt),
-    toMsOrNull(targetForfeitedAt),
-  ].filter((ms) => ms != null);
-  const rawEnd = Math.min(...ends);
   // v1/v2 are frozen compatibility contracts: both intentionally wait for the
   // current hour to close. V3 consumes the target's canonical, timestamped
   // contribution through the current scoring instant so a sparse open sample
   // can raise the target and the 1:1 copy together.
-  const sourceBoundary = scoringVersion >= 3 ? nowMs : currentHourStart;
-  const windowEnd = Math.min(rawEnd, sourceBoundary);
   if (!(windowEnd > windowStart)) return 0;
 
   const exactSampleSteps = await stepSampleModel.sumStepsInWindow(
@@ -196,9 +205,12 @@ async function computeHitchhikeCopiedSteps(
     globalEvents.length ? { globalEvents, now: new Date(windowEnd) } : null,
     new Date(windowEnd)
   );
-  const effective = exactSteps - modifiers.frozenSteps + modifiers.buffedSteps -
-    2 * modifiers.reversedSteps + (modifiers.globalBoostedSteps || 0);
-  const exactCopiedSteps = Math.floor(effective * hitchhikeCopyRatio(effect));
+  const exactCopiedSteps = hitchhikeExactContribution(effect,exactSteps,modifiers);
+  if (scoringVersion === 3 && typeof attributionCaptureModel?.selectBoundaryContribution === "function") {
+    return attributionCaptureModel.selectBoundaryContribution({
+      effectId: effect.id, exactSteps, exactCopiedSteps, rawEnd, nowMs,
+    });
+  }
   if (scoringVersion !== 3 ||
       typeof attributionCaptureModel?.replaceV3 !== "function") {
     return exactCopiedSteps;
@@ -490,13 +502,16 @@ function applyHitchhikeCopies(entries, copies) {
   return entries.map((e) => {
     const add = credit.get(e.userId) || 0;
     if (add === 0) return e;
-    return { ...e, preLeechTotal: Math.max(0, (e.preLeechTotal || 0) + add) };
+    return { ...e, preLeechTotal: hitchhikeFlooredBalance(e.preLeechTotal,add) };
   });
 }
 
 module.exports = {
   HITCHHIKE_DEFAULT_COPY_RATIO,
   hitchhikeCopyRatio,
+  hitchhikeScoringWindow,
+  hitchhikeExactContribution,
+  hitchhikeFlooredBalance,
   computeHitchhikeCopiedSteps,
   createIncrementalHitchhikeCopyCapture,
   collectRaceHitchhikeCopies,

@@ -81,16 +81,15 @@ const ACTIVE_NOTICE_TIMED_TYPES = new Set([
 // value is folded into the total by the SAME computeEffectModifiers the display
 // path uses, so display == settlement.
 function getEffectiveStart(participant, raceStartedAt) {
-  const joinedAt = participant.joinedAt || raceStartedAt;
-  return joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
+  const raceStart = new Date(raceStartedAt);
+  const joinedAt = new Date(participant.joinedAt || raceStart);
+  return joinedAt > raceStart ? joinedAt : raceStart;
 }
 
-async function calculateBaseAdjusted({
+function createBaseAdjustedPlan({
   participant,
   raceStartedAt,
   timeZone,
-  stepsModel,
-  stepSampleModel,
   now,
   raceEndsAt = null,
 }) {
@@ -149,6 +148,23 @@ async function calculateBaseAdjusted({
   const startsAtLocalMidnight =
     effectiveStart.getTime() === startOfStartDay.getTime();
 
+  const startDayIsCompleteAtCutoff =
+    !deadlinePassed || nextStartDayMidnight.getTime() <= raceEndMs;
+  return { effectiveStart, startDate, scoringNow, today, dayAfterStartDate,
+    startDayWindowEnd, allowStartDayDaily: startsAtLocalMidnight && startDayIsCompleteAtCutoff,
+    allowPartialDayDaily: !deadlinePassed };
+}
+
+function startDayContribution(plan, samples, dailySteps) {
+  return plan.allowStartDayDaily ? Math.max(samples, dailySteps ?? 0) : Math.max(0, samples);
+}
+
+async function calculateBaseAdjusted(args) {
+  const { participant, timeZone, stepsModel, stepSampleModel } = args;
+  const plan = createBaseAdjustedPlan(args);
+  const { effectiveStart, startDate, scoringNow, today, dayAfterStartDate,
+    startDayWindowEnd, allowStartDayDaily, allowPartialDayDaily } = plan;
+
   let startDaySteps = 0;
   const startDaySamples = await stepSampleModel.sumStepsInWindow(
     participant.userId,
@@ -156,14 +172,12 @@ async function calculateBaseAdjusted({
     startDayWindowEnd
   );
 
-  const startDayIsCompleteAtCutoff =
-    !deadlinePassed || nextStartDayMidnight.getTime() <= raceEndMs;
-  if (startsAtLocalMidnight && startDayIsCompleteAtCutoff) {
+  if (allowStartDayDaily) {
     const startDayRow = await stepsModel.findByUserIdAndDate(
       participant.userId,
       startDate
     );
-    startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
+    startDaySteps = startDayContribution(plan, startDaySamples, startDayRow?.steps);
   } else if (startDaySamples > 0) {
     startDaySteps = startDaySamples;
   }
@@ -176,7 +190,7 @@ async function calculateBaseAdjusted({
     stepsModel,
     stepSampleModel,
     now: scoringNow,
-    allowPartialDayDaily: !deadlinePassed,
+    allowPartialDayDaily,
   });
 
   // `hasSampleData` decides whether effect scoring uses the precise segment walk
@@ -203,6 +217,10 @@ async function calculateBaseAdjusted({
     hasSampleData,
     effectiveStart,
   };
+}
+
+function preLeechScoringTotal({baseAdjusted,frozenSteps,buffedSteps,reversedSteps,globalBoostedSteps,bonusSteps=0}) {
+  return Math.max(0,baseAdjusted-frozenSteps+buffedSteps-2*reversedSteps+(globalBoostedSteps || 0)+bonusSteps);
 }
 
 async function calculateCurrentTotal({
@@ -293,15 +311,8 @@ async function calculateCurrentTotal({
   // leeches TARGETING this participant. A single-participant caller (sync-v2
   // reconcile) gets drain-only for that participant, which is the desired
   // uploader-only behavior.
-  const total = Math.max(
-    0,
-    baseAdjusted -
-      frozenSteps +
-      buffedSteps -
-      2 * reversedSteps +
-      (globalBoostedSteps || 0) +
-      (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
-  );
+  const total = preLeechScoringTotal({baseAdjusted,frozenSteps,buffedSteps,reversedSteps,globalBoostedSteps,
+    bonusSteps:racePowerupsEnabled ? participant.bonusSteps || 0 : 0});
 
   // Also expose the wave-5 groups (split coin flips) so settlement's
   // determineFinishSnapshot can interpolate finish time with the full §3
@@ -2081,9 +2092,12 @@ const resolveRaceState = buildResolveRaceState({
 module.exports = {
   POWERUP_EFFECT_TYPES,
   SETTLEMENT_EFFECT_TYPES,
+  createBaseAdjustedPlan,
+  startDayContribution,
   calculateBaseAdjusted,
   calculateSubsequentSteps,
   calculateCurrentTotal,
+  preLeechScoringTotal,
   captureIncrementalRacePrefixTerms,
   computeActiveTimedImpactCapture,
   discoverActiveImpactSources,

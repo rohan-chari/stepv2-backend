@@ -472,6 +472,9 @@ async function repairSummaryReadiness(prisma, current, batchSize = 100) {
 async function nextSummaryDueAt(prisma = defaultPrisma) {
   const [row = {}] = await prisma.$queryRawUnsafe(
     `SELECT LEAST(
+       (SELECT MIN(available_at) FROM durable_global_event_capture_requests WHERE status='PENDING'),
+       (SELECT MIN(lease_until) FROM durable_global_event_capture_requests WHERE status='PROCESSING'),
+       (SELECT MIN(expires_at) FROM durable_global_event_capture_requests WHERE status IN ('PENDING','PROCESSING')),
        (SELECT MIN(available_at) FROM global_event_summary_work
          WHERE status='QUEUED' AND lease_until IS NULL),
        (SELECT MIN(lease_until) FROM global_event_summary_work
@@ -583,6 +586,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   const retryMs = options.retryMs || DEFAULT_RETRY_MS;
   const tickBudgetMs = options.tickBudgetMs || DEFAULT_TICK_BUDGET_MS;
   const startedAtMs = Date.now();
+  const captureDrain = await require("../services/durableGlobalEventCapture").drainDurableCapture(prisma);
   const works = await claimActiveWork(prisma, current, batchSize, leaseMs);
   for (const work of works) {
     coordinatedOptimizationMetrics.increment("global_summary_worker_claim_total", {
@@ -592,7 +596,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   const result = {
     created: 0,
     expired: 0,
-    candidatesSelected: candidateIds.length + legacyGroups.length + works.length,
+    candidatesSelected: candidateIds.length + legacyGroups.length + works.length + captureDrain.selected,
     retries: 0,
   };
   for (let work of works) {

@@ -128,8 +128,9 @@ function buildRecordStepSyncV2(dependencies = {}) {
     for (let attempt = 0; attempt < CAPTURE_CLOSURE_RETRIES; attempt += 1) {
       const startedAt = process.hrtime.bigint();
       try {
-        // Explicit dependency and race fences inside the transaction provide
-        // the summary-capture consistency boundary. Read Committed lets a
+        // Durable capture selects metadata and fact revisions in one statement
+        // under its retention fence; race fences alone do not exclude every
+        // effect/checkpoint writer. Read Committed lets a
         // shared race queue row wait for its current writer and then merge the
         // latest committed generation instead of aborting on a stale snapshot.
         return await prisma.$transaction(work, { timeout: 15_000, maxWait: 10_000 });

@@ -10,6 +10,13 @@ function lifecycleCandidateSql() {
      WHERE e.ends_at < $1
        AND e.start_processed_at IS NOT NULL
        AND e.end_processed_at IS NOT NULL
+       -- Capture provenance has its own completed-at retention clock and
+       -- bounded pin release. Do not bypass it through the work FK cascade.
+       AND NOT EXISTS (
+         SELECT 1 FROM global_event_summary_work w
+         JOIN durable_global_event_capture_requests c ON c.work_id=w.id
+         WHERE w.event_id=e.event_id AND w.user_id=e.user_id
+       )
        AND NOT EXISTS (
          SELECT 1 FROM global_event_race_impacts i
           WHERE i.event_id = e.event_id AND i.user_id = e.user_id

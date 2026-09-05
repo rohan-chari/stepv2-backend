@@ -13,6 +13,27 @@ function dailyRowDateKey(date) {
   return new Date(date).toISOString().slice(0, 10);
 }
 
+// A single resumable day of the canonical base-step walk. Keep the ordinary
+// scorer's bulk query below: capture workers use this descriptor one day at a
+// time, while HTTP display/resolution still batches all descriptors.
+function subsequentDayWindow({ date, timeZone, now }) {
+  const midnight = (key) => {
+    const parsed = parseDateString(key);
+    return zonedDateTimeToUtc({ ...parsed, hour: 0, minute: 0, second: 0 }, timeZone);
+  };
+  const start = midnight(date);
+  const nowMs = new Date(now).getTime();
+  if (start.getTime() >= nowMs) return null;
+  const end = midnight(addDaysToDateString(date, 1));
+  return { date, start, end: new Date(Math.min(end.getTime(), nowMs)),
+    isCompleteDay: end.getTime() <= nowMs };
+}
+
+function subsequentDayContribution(window, sampleSteps, dailySteps, allowPartialDayDaily) {
+  return Math.max(sampleSteps || 0,
+    window.isCompleteDay || allowPartialDayDaily ? dailySteps || 0 : 0);
+}
+
 // SHARED across the display path (getRaceProgress) and the settlement path
 // (raceStateResolution) so the two stay logically identical — there is a
 // display-vs-settlement parity test that depends on this.
@@ -50,8 +71,6 @@ async function calculateSubsequentSteps({
     if (key) dailyByDate.set(key, (dailyByDate.get(key) || 0) + (row.steps || 0));
   }
 
-  const nowMs = new Date(now).getTime();
-
   // First pass: compute each day's window (identical boundaries and guards to
   // the original one-query-per-day loop), THEN sum all windows in one batched
   // query. Per-day results are unchanged; only the number of round-trips is.
@@ -62,44 +81,14 @@ async function calculateSubsequentSteps({
     date <= today;
     date = addDaysToDateString(date, 1)
   ) {
-    const parsed = parseDateString(date);
-    const dayStart = zonedDateTimeToUtc(
-      {
-        year: parsed.year,
-        month: parsed.month,
-        day: parsed.day,
-        hour: 0,
-        minute: 0,
-        second: 0,
-      },
-      timeZone
-    );
     // A day whose local midnight is at or after `now` contributes no steps. This
     // matters at settlement of a midnight-aligned race, where `now` (= endsAt)
     // lands exactly on the day boundary: without this guard, `today` resolves to
     // the day AFTER the race and its full daily total would leak into the score.
     // Days are ascending, so once one starts at/after `now`, all later ones do.
-    if (dayStart.getTime() >= nowMs) break;
-    const nextDate = addDaysToDateString(date, 1);
-    const nextParsed = parseDateString(nextDate);
-    let dayEnd = zonedDateTimeToUtc(
-      {
-        year: nextParsed.year,
-        month: nextParsed.month,
-        day: nextParsed.day,
-        hour: 0,
-        minute: 0,
-        second: 0,
-      },
-      timeZone
-    );
-    const isCompleteDay = dayEnd.getTime() <= nowMs;
-    // Cap the final (today) day's window at `now` so we never count beyond it.
-    if (dayEnd.getTime() > nowMs) {
-      dayEnd = new Date(nowMs);
-    }
-
-    dayWindows.push({ date, start: dayStart, end: dayEnd, isCompleteDay });
+    const window = subsequentDayWindow({ date, timeZone, now });
+    if (!window) break;
+    dayWindows.push(window);
   }
 
   // Batched path when the model supports it (the real StepSample does); fall
@@ -120,13 +109,12 @@ async function calculateSubsequentSteps({
     // genuinely-live current day (where it cannot contain future walking). At
     // a historical race deadline inside a day, however, that row may have been
     // updated after the race ended; use only time-sliced samples there.
-    const dailySteps = dayWindows[i].isCompleteDay || allowPartialDayDaily
-      ? (dailyByDate.get(dayWindows[i].date) || 0)
-      : 0;
-    total += Math.max(daySampleSums[i] || 0, dailySteps);
+    total += subsequentDayContribution(dayWindows[i], daySampleSums[i],
+      dailyByDate.get(dayWindows[i].date), allowPartialDayDaily);
   }
 
   return total;
 }
 
-module.exports = { calculateSubsequentSteps, dailyRowDateKey };
+module.exports = { calculateSubsequentSteps, dailyRowDateKey,
+  subsequentDayWindow, subsequentDayContribution };

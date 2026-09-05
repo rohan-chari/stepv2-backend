@@ -129,11 +129,14 @@ function artifactModels(payload) {
   return { sampleModel, stepsModel, effectModel };
 }
 
-async function scoreWholeRaceArtifact(payload, includeEvent) {
-  const { sampleModel, stepsModel, effectModel } = artifactModels(payload);
+async function scoreWholeRaceArtifact(payload, includeEvent, models) {
+  const { sampleModel, stepsModel, effectModel } = models || artifactModels(payload);
   const eventEndMs = new Date(payload.event.endsAt).getTime();
   const entries = [];
+  const evaluatedIds = payload.scoringPlan
+    ? new Set(payload.scoringPlan.evaluatedParticipantIds) : null;
   for (const participant of payload.participants || []) {
+    if (evaluatedIds && !evaluatedIds.has(participant.id)) continue;
     const cutoffAt = new Date(participant.cutoffAt);
     const base = await calculateBaseAdjusted({
       participant,
@@ -164,6 +167,9 @@ async function scoreWholeRaceArtifact(payload, includeEvent) {
     entries,
     raceActiveEffectModel: effectModel,
     stepSampleModel: sampleModel,
+    attributionCaptureModel: Array.isArray(payload.hitchhikeCaptures)
+      ? require("./capturedHitchhikeInputs").capturedHitchhikeInputs(payload.hitchhikeCaptures)
+      : undefined,
     now: new Date(payload.event.endsAt),
     eventsByUserId,
     isFrozen: (participant) => [participant.finishedAt, participant.forfeitedAt]
@@ -174,10 +180,10 @@ async function scoreWholeRaceArtifact(payload, includeEvent) {
   return Number(totals.get(uploader?.id)) || 0;
 }
 
-async function scoreCaptureArtifact(payload) {
+async function scoreCaptureArtifact(payload, models) {
   const [withEvent, withoutEvent] = await Promise.all([
-    scoreWholeRaceArtifact(payload, true),
-    scoreWholeRaceArtifact(payload, false),
+    scoreWholeRaceArtifact(payload, true, models),
+    scoreWholeRaceArtifact(payload, false, models),
   ]);
   return Math.round(withEvent - withoutEvent);
 }
@@ -971,6 +977,18 @@ async function claimEligibleSummaryWork(tx, {
     ? carriedImpacts.filter((impact) =>
         impact.status === "PENDING" && capturableEventIds.has(impact.eventId))
     : [];
+  if (carriedImpacts) {
+    const durableReceipt = await require("./durableGlobalEventCapture").enqueueDurableCaptures(tx, {
+      candidates: coverageQualifiedCandidates,
+      impacts: carriedImpacts,
+      entitlementsByEventId,
+      provenance: {
+        captureSyncRequestId, captureCompletedAt, captureCoverageThrough,
+        sourceScoringInputGeneration,
+      },
+    });
+    return receipt || durableReceipt;
+  }
   const artifactFacts = carriedImpacts
     ? await loadArtifactFacts(tx, {
         works: hydrationCandidates,
@@ -1283,14 +1301,87 @@ async function persistCapturedSummaryImpactsForRace(tx, {
   };
 }
 
+// Capture only race/event topology while the caller holds the existing C0
+// fences. Mutable input roots are pinned separately in one SQL snapshot; raw
+// sample reads and counterfactual evaluation belong to the durable worker.
+async function prepareDurableCaptureContext(tx, { work, impacts, entitlement, snapshot }) {
+  const races = snapshot ? snapshot.races : await tx.race.findMany({
+    where: { id: { in: impacts.map((impact) => impact.raceId) } },
+    select: artifactRaceSelect,
+    orderBy: { id: "asc" },
+  });
+  const effects = snapshot ? snapshot.effects : await tx.raceActiveEffect.findMany({
+    where: {
+      raceId: { in: races.map((race) => race.id) },
+      type: { in: CAPTURE_EFFECT_TYPES },
+      status: { in: ["ACTIVE", "EXPIRED"] },
+    },
+    select: {
+      id: true, raceId: true, type: true, status: true, startsAt: true,
+      expiresAt: true, targetParticipantId: true, targetUserId: true,
+      sourceUserId: true, metadata: true,
+    },
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+  });
+  const hitchhikeIds = effects.filter((effect) => effect.type === "HITCHHIKE" &&
+    Number(effect.metadata?.scoringVersion) === 3).map((effect) => effect.id);
+  const hitchhikeCaptures = snapshot ? snapshot.hitchhikeCaptures : hitchhikeIds.length ? await tx.hitchhikeAttributionCapture.findMany({
+    where: { effectId: { in: hitchhikeIds } }, orderBy: { effectId: "asc" },
+  }) : [];
+  const captures = [];
+  for (const impact of impacts) {
+    const race = races.find((row) => row.id === impact.raceId);
+    const participant = race?.participants.find((row) => row.userId === work.userId);
+    if (!participant) return { error: "PARTICIPANT_STATE_UNREPLAYABLE" };
+    const cutoffAt = artifactCutoffAt(race, participant, entitlement);
+    if (!Number.isFinite(cutoffAt.getTime())) return { error: "INPUTS_NOT_RETAINED" };
+    const scoringPlan = require("./durableCaptureScoringPlan").buildDurableCaptureScoringPlan({
+      race, effects, uploaderUserId: work.userId, eventEndsAt: entitlement.endsAt,
+    });
+    const users = scoringPlan.factUserIds;
+    const retainedEffectIds = new Set(scoringPlan.effectIds);
+    captures.push({
+      raceId: race.id,
+      userIds: users,
+      rangeStart: new Date(new Date(race.startedAt).getTime() - DAY_MS),
+      rangeEnd: new Date(cutoffAt.getTime() + DAY_MS),
+      payload: {
+        schemaVersion: 1,
+        scoringPlan,
+        userId: work.userId,
+        race: {
+          id: race.id, startedAt: race.startedAt, endsAt: race.endsAt,
+          timezone: race.timezone || entitlement.timezone,
+          powerupsEnabled: race.powerupsEnabled,
+        },
+        participants: race.participants.map((row) => ({
+          ...row, cutoffAt: artifactCutoffAt(race, row, entitlement),
+        })),
+        event: {
+          id: work.eventId, startsAt: entitlement.startsAt, endsAt: entitlement.endsAt,
+          multiplier: work.event.multiplier,
+        },
+        cutoffAt,
+        hitchhikeCaptures: hitchhikeCaptures.filter((row) => row.raceId === race.id),
+        effects: race.powerupsEnabled ? effects.filter((row) => row.raceId === race.id && retainedEffectIds.has(row.id))
+          .map(({ raceId: _raceId, ...row }) => row) : [],
+      },
+    });
+  }
+  return { captures: normalize(captures) };
+}
+
 module.exports = {
   MAX_ARTIFACT_BYTES,
   MAX_WORK_BYTES,
   canonicalize,
   digestCanonical,
   scoreCaptureArtifact,
+  artifactModels,
   lockEligibleSummaryCaptureDependencies,
   claimEligibleSummaryWork,
   persistCapturedSummaryImpactsForRace,
   refreshSummaryReadinessForRace,
+  prepareDurableCaptureContext,
+  CAPTURE_EFFECT_TYPES,
 };

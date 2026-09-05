@@ -11,6 +11,7 @@ const {
 } = require("../globalStepEvent");
 const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
 const redisCache = require("../../../shared/cache/redisCache");
+const { randomUUID } = require("node:crypto");
 
 const TERMINAL_WORK_STATES = new Set([
   "CREATED",
@@ -89,40 +90,31 @@ async function createSummaryWorkForEntitlement(tx, entitlement, now = new Date()
     : expired
       ? "EXPIRED_UNDELIVERED"
       : "WAITING_SYNC";
-  const work = await tx.globalEventSummaryWork.upsert({
+  // Empty-update Prisma upserts may be implemented as SELECT then INSERT.
+  // Independent summary workers can bootstrap the same entitlement together;
+  // use the unique key atomically without rewriting an existing work's state.
+  await tx.$executeRawUnsafe(`INSERT INTO global_event_summary_work
+    (id,event_id,user_id,expires_at,status,required_race_count,available_at,last_error_code,updated_at)
+    VALUES ($1,$2,$3,$4::timestamp,$5,$6,$7::timestamp,$8,clock_timestamp())
+    ON CONFLICT (event_id,user_id) DO NOTHING`, randomUUID(), entitlement.eventId,
+  entitlement.userId, expiresAt, initialStatus, impactCount, new Date(now),
+  incompatible ? "DEPENDENCY_INPUT_UNREPLAYABLE" : expired ? "DEADLINE_PASSED" : null);
+  // This subsequent READ COMMITTED statement observes a competing inserter
+  // after ON CONFLICT has waited for it, unlike a same-statement fallback CTE.
+  const work = await tx.globalEventSummaryWork.findUniqueOrThrow({
     where: {
       eventId_userId: {
         eventId: entitlement.eventId,
         userId: entitlement.userId,
       },
     },
-    update: {},
-    create: {
-      eventId: entitlement.eventId,
-      userId: entitlement.userId,
-      expiresAt,
-      status: initialStatus,
-      requiredRaceCount: impactCount,
-      availableAt: new Date(now),
-      ...(incompatible
-        ? { lastErrorCode: "DEPENDENCY_INPUT_UNREPLAYABLE" }
-        : expired
-          ? { lastErrorCode: "DEADLINE_PASSED" }
-          : {}),
-    },
   });
   if (expired || incompatible) {
     if (tx.jobRun) {
-      await tx.jobRun.upsert({
-        where: {
-          jobName: `global_event_summary:${entitlement.eventId}:${entitlement.userId}:v2`,
-        },
-        update: {},
-        create: {
-          jobName: `global_event_summary:${entitlement.eventId}:${entitlement.userId}:v2`,
-          lastRanFor: incompatible ? "UNSCORABLE" : "EXPIRED_UNDELIVERED",
-        },
-      });
+      await tx.$executeRawUnsafe(`INSERT INTO job_runs (job_name,last_ran_for,updated_at)
+        VALUES ($1,$2,clock_timestamp()) ON CONFLICT (job_name) DO NOTHING`,
+      `global_event_summary:${entitlement.eventId}:${entitlement.userId}:v2`,
+      incompatible ? "UNSCORABLE" : "EXPIRED_UNDELIVERED");
     }
     // Terminal work is the durable handoff. The summary scheduler reconciles
     // its pending races in a later C0-only phase and stamps raceReconciledAt;

@@ -29,6 +29,10 @@ function leechRatio(effect) {
   return Number.isFinite(raw) && raw > 0 ? raw : LEECH_DEFAULT_RATIO;
 }
 
+function resolveLeechDrain(earnedTransfer, victimRemaining) {
+  return Math.max(0, Math.min(earnedTransfer || 0, victimRemaining));
+}
+
 // earnedTransfer for ONE leech = floor(attackerWindowSteps / ratio), no cap.
 //
 // attackerWindowSteps = the leecher's (sourceUserId) eligible steps in
@@ -121,7 +125,7 @@ function applyLeechTransfers(entries, { onTransfer = null } = {}) {
 
   for (const t of all) {
     const victimRemaining = remaining.get(t.victimParticipantId) ?? 0;
-    const actual = Math.max(0, Math.min(t.earnedTransfer || 0, victimRemaining));
+    const actual = resolveLeechDrain(t.earnedTransfer, victimRemaining);
     if (typeof onTransfer === "function") {
       onTransfer({
         effectId: t.effectId,
@@ -237,6 +241,7 @@ function createIncrementalLeechTransferState(entries = []) {
 module.exports = {
   LEECH_DEFAULT_RATIO,
   leechRatio,
+  resolveLeechDrain,
   computeLeechEarnedTransfer,
   applyLeechTransfers,
   createIncrementalLeechTransferState,
