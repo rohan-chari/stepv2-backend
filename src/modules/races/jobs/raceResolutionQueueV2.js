@@ -51,6 +51,7 @@ const {
 const {
   buildRaceResolutionInputFingerprint: defaultBuildInputFingerprint,
 } = require("../services/raceResolutionInputFingerprint");
+const { planningInputModels } = require("../services/raceResolutionPlanningInputs");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
 const { eventBus: defaultEventBus } = require("../../../shared/events/eventBus");
 const {
@@ -1379,6 +1380,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // DEPENDENCY_CLOSURE and the Trail-Mine escalation cleared. It is
     // the single gate every closure behavior below reads.
     let closurePlan = null;
+    let planningFingerprint = null;
     let closureSelectionInvariant = null;
     // bool when a closure plan was evaluated, null when the envelope is not
     // candidate-shaped or the planner said FULL.
@@ -1406,7 +1408,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 // fence uses this worker's injected dependency — two different
                 // code paths computing the digest that must match each other, and
                 // a test can only ever see one of them.
-                buildInputFingerprint,
+                buildInputFingerprint: async (options) => {
+                  planningFingerprint = await buildInputFingerprint(options);
+                  return planningFingerprint;
+                },
               })
             );
             if (
@@ -1590,6 +1595,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               now: capturedAt,
               balanceConfigVersion: config.version,
             });
+            planningFingerprint = fingerprint;
             const validUntil = fingerprint && computeArtifactReuseDeadline({
               asOf: capturedAt,
               timeZone: fingerprint.race?.timezone || job.processingTimeZone || "UTC",
@@ -1772,6 +1778,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             // effects, where the closure would compute the same rows for more
             // work. Nothing shipped changes ordering here.
             const useClosure = !forceFull && closurePlan != null;
+            const protectedPlan = useClosure ? {
+              digest: closurePlan.graphFingerprint, validUntil: closurePlan.validUntil,
+            } : sourceInputWork ? sourceInputFingerprint : null;
+            const reusedModels = protectedPlan?.digest === planningFingerprint?.digest
+              ? planningInputModels({
+                fingerprint: planningFingerprint, validUntil: protectedPlan?.validUntil,
+                scoringInputVersionModel: defaultPrisma.userScoringInputVersion,
+              }) : {};
             const computeStartedAt = Date.now();
             const computeResolve = buildResolveRaceState({
               Race: raceModel,
@@ -1783,6 +1797,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               strictScoringPrefetch: true,
               useProcessScoringInputCache: true,
               scoringInputVersionModel: defaultPrisma.userScoringInputVersion,
+              ...reusedModels,
               ...(dependencies.prefetchRaceScoringModels
                 ? { prefetchRaceScoringModels: dependencies.prefetchRaceScoringModels }
                 : {}),
@@ -2610,6 +2625,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           resolveTimedActiveImpacts =
             job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
           closurePlan = null;
+          planningFingerprint = null;
           forceFull = true;
           continue;
         }
@@ -2636,6 +2652,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           resolveTimedActiveImpacts =
             job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
           closurePlan = null;
+          planningFingerprint = null;
           forceFull = true;
           continue;
         }

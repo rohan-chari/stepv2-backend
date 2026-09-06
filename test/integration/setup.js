@@ -5,6 +5,11 @@ const { signSessionToken } = require("../../src/modules/users/services/sessionTo
 
 // Tables in deletion order (respects foreign key constraints)
 const TABLES_IN_ORDER = [
+  "durable_capture_compaction_schedule",
+  "global_event_recovery_candidates",
+  "global_event_recovery_seed",
+  "global_event_recovery_event_refresh",
+  "global_event_recovery_orphan_cursor",
   // Keep this complete and child-to-parent ordered. TRUNCATE ... CASCADE walks
   // the whole FK graph and takes AccessExclusive locks on every discovered
   // table/index; on the local integration DB that turned an empty cleanup into

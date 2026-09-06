@@ -472,6 +472,7 @@ async function repairSummaryReadiness(prisma, current, batchSize = 100) {
 async function nextSummaryDueAt(prisma = defaultPrisma) {
   const [row = {}] = await prisma.$queryRawUnsafe(
     `SELECT LEAST(
+       (SELECT next_due_at FROM durable_capture_compaction_schedule WHERE singleton),
        (SELECT MIN(available_at) FROM durable_global_event_capture_requests WHERE status='PENDING'),
        (SELECT MIN(lease_until) FROM durable_global_event_capture_requests WHERE status='PROCESSING'),
        (SELECT MIN(expires_at) FROM durable_global_event_capture_requests WHERE status IN ('PENDING','PROCESSING')),
@@ -522,9 +523,18 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
     return { created: 0, expired: 0, candidatesSelected: 0, retries: 0 };
   }
   const runRecovery = options.recovery !== false;
+  if (runRecovery) {
+    await prisma.$queryRawUnsafe("SELECT global_event_recovery_seed_page(128)");
+    await prisma.$queryRawUnsafe("SELECT global_event_recovery_revalidate_page('SUMMARY_V2',$1::timestamp,500)", current);
+  }
   const candidateIds = runRecovery ? await prisma.$queryRawUnsafe(
-    `SELECT e.id
-       FROM global_step_event_entitlements e
+    `WITH candidates AS MATERIALIZED (
+       SELECT DISTINCT event_id,user_id,source_id FROM (SELECT event_id,user_id,source_id FROM global_event_recovery_candidates
+       WHERE kind='SUMMARY_V2' AND available_at <= $1::timestamp
+       ORDER BY available_at,event_id,user_id,id LIMIT $2) page
+     ) SELECT e.id
+       FROM candidates candidate
+       JOIN global_step_event_entitlements e ON e.id=candidate.source_id
        JOIN global_step_events event ON event.id = e.event_id
       WHERE e.ends_at <= $1::timestamp
         AND event.summary_attribution_version = 2
@@ -536,7 +546,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
       LIMIT $2`,
     current.toISOString(),
     batchSize,
-  ).catch(() => []) : [];
+  ) : [];
   const ended = candidateIds.length
     ? await prisma.globalStepEventEntitlement.findMany({
         where: { id: { in: candidateIds.map((row) => row.id) } },
@@ -547,22 +557,28 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
     await createSummaryWorkForEntitlement(prisma, entitlement, current);
   }
   const legacyGroups = runRecovery ? await prisma.$queryRawUnsafe(
-    `SELECT impact.event_id AS "eventId", impact.user_id AS "userId"
-       FROM global_event_race_impacts impact
-       JOIN global_step_events event ON event.id = impact.event_id
+    `WITH candidates AS MATERIALIZED (
+       SELECT DISTINCT event_id,user_id,source_id FROM (SELECT event_id,user_id,source_id FROM global_event_recovery_candidates
+       WHERE kind='SUMMARY_V2' AND available_at <= $1::timestamp
+       ORDER BY available_at,event_id,user_id,id LIMIT $2) page
+     ) SELECT candidate.event_id AS "eventId", candidate.user_id AS "userId"
+       FROM candidates candidate
+       JOIN global_step_events event ON event.id = candidate.event_id
       WHERE event.ends_at <= $1::timestamp
         AND event.schedule_mode = 'LEGACY_GLOBAL'
         AND event.summary_attribution_version = 2
+        AND candidate.source_id=candidate.event_id
+        AND EXISTS (SELECT 1 FROM global_event_race_impacts impact
+          WHERE impact.event_id=candidate.event_id AND impact.user_id=candidate.user_id)
         AND NOT EXISTS (
           SELECT 1 FROM global_event_summary_work work
-           WHERE work.event_id = impact.event_id AND work.user_id = impact.user_id
+           WHERE work.event_id = candidate.event_id AND work.user_id = candidate.user_id
         )
-      GROUP BY impact.event_id, impact.user_id
-      ORDER BY MIN(event.ends_at) ASC, impact.event_id ASC, impact.user_id ASC
+      ORDER BY event.ends_at ASC, candidate.event_id ASC, candidate.user_id ASC
       LIMIT $2`,
     current.toISOString(),
     batchSize,
-  ).catch(() => []) : [];
+  ) : [];
   for (const group of legacyGroups) {
     const event = await prisma.globalStepEvent.findUnique({
       where: { id: group.eventId },
@@ -640,13 +656,21 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
 
 async function runV1(prisma, current, batchSize = 100) {
   const limit = Math.min(V1_BATCH_SIZE, Math.max(1, Number(batchSize) || V1_BATCH_SIZE));
+  await prisma.$queryRawUnsafe("SELECT global_event_recovery_seed_page(128)");
+  await prisma.$queryRawUnsafe("SELECT global_event_recovery_revalidate_page('SUMMARY_V1',$1::timestamp,500)", current);
   const groups = await prisma.$queryRawUnsafe(
-    `SELECT impact.event_id AS "eventId",
+    `WITH candidates AS (
+       SELECT DISTINCT event_id,user_id FROM (SELECT event_id,user_id FROM global_event_recovery_candidates
+       WHERE kind='SUMMARY_V1' AND available_at <= $1::timestamp
+       ORDER BY available_at,event_id,user_id,id LIMIT $2) page
+     ) SELECT impact.event_id AS "eventId",
             impact.user_id AS "userId",
             COALESCE(SUM(impact.delta_steps), 0)::bigint AS "deltaSteps",
             COUNT(*)::bigint AS "raceCount",
             COUNT(*) FILTER (WHERE impact.delta_steps <> 0)::bigint AS "nonzeroCount"
-       FROM global_event_race_impacts impact
+       FROM candidates candidate
+       JOIN global_event_race_impacts impact
+         ON impact.event_id=candidate.event_id AND impact.user_id=candidate.user_id
        JOIN global_step_events event ON event.id=impact.event_id
        LEFT JOIN global_step_event_entitlements entitlement
          ON entitlement.event_id=impact.event_id

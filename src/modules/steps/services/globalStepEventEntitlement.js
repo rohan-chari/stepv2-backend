@@ -130,6 +130,21 @@ async function appendScheduledEntitlementEventsBatch(tx, {
     };
   });
   if (!rows.length) return 0;
+  // A missing outbox row is not a new domain event. The durable receipt owns
+  // its identity and timestamps even after outbox retention or crash repair.
+  // finalizeMany below still verifies the complete immutable envelope digest.
+  const receipts = await tx.domainEventReceipt.findMany({
+    where: { eventKey: { in: rows.map((row) => row.eventKey) } },
+    select: { eventKey: true, domainEventId: true, occurredAt: true, availableAt: true },
+  });
+  const receiptByKey = new Map(receipts.map(receipt => [receipt.eventKey, receipt]));
+  for (const row of rows) {
+    const receipt = receiptByKey.get(row.eventKey);
+    if (!receipt) continue;
+    row.id = receipt.domainEventId;
+    row.occurredAt = receipt.occurredAt;
+    row.availableAt = receipt.availableAt;
+  }
   await tx.domainEventOutbox.createMany({ data: rows, skipDuplicates: true });
   const storedEvents = await tx.domainEventOutbox.findMany({
     where: { eventKey: { in: rows.map((row) => row.eventKey) } },

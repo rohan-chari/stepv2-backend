@@ -467,6 +467,9 @@ describe("durable asynchronous global-event capture", () => {
     await prisma.$executeRawUnsafe(`UPDATE durable_capture_fact_roots
       SET retention_expires_at=clock_timestamp()-interval '1 day',last_used_at=clock_timestamp()-interval '31 days'`);
     for (let tick = 0; tick < 8; tick++) {
+      // Each loop represents a due maintenance pass, not eight same-instant
+      // user wakes; the production coordinator now owns that persisted clock.
+      await prisma.$executeRawUnsafe("UPDATE durable_capture_compaction_schedule SET next_due_at=now()");
       await buildGlobalEventSummaryTick({ prisma, now: () => new Date() })();
     }
     const [remaining] = await prisma.$queryRawUnsafe("SELECT count(*)::int AS count FROM durable_capture_fact_roots");

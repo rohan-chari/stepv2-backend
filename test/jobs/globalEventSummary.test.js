@@ -176,8 +176,13 @@ test("v1 recap discovers only unfinished eligible groups in one bounded query", 
   const current = new Date("2026-08-17T12:00:00.000Z");
   const writes = [];
   const queries = [];
+  const maintenance = [];
   const prisma = {
     async $queryRawUnsafe(sql, ...params) {
+      if (/^SELECT global_event_recovery_(seed|revalidate)_page/.test(sql)) {
+        maintenance.push({ sql, params });
+        return [{ processed: 0 }];
+      }
       queries.push({ sql, params });
       return [{
         eventId: "event-1",
@@ -207,6 +212,10 @@ test("v1 recap discovers only unfinished eligible groups in one bounded query", 
 
   assert.deepEqual(await tick(), { upserts: 1 });
   assert.equal(queries.length, 1);
+  assert.equal(maintenance.length, 2);
+  assert.match(maintenance[0].sql, /seed_page\(128\)/);
+  assert.match(maintenance[1].sql, /revalidate_page\('SUMMARY_V1',\$1::timestamp,500\)/);
+  assert.match(queries[0].sql, /FROM global_event_recovery_candidates/);
   assert.match(queries[0].sql, /NOT EXISTS[\s\S]*FROM job_runs/i);
   assert.doesNotMatch(queries[0].sql, /MATERIALIZED/i);
   assert.ok(

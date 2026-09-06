@@ -260,6 +260,9 @@ describe("durable interval projection reuse", () => {
     }
     await prisma.$executeRawUnsafe("UPDATE durable_capture_fact_heads SET next_compaction_at=now() WHERE user_id=$1",
       f.account.user.id);
+    // Simulated maintenance time must advance the new durable runner clock as
+    // well as the existing per-head clock. Retention assertions stay unchanged.
+    await prisma.$executeRawUnsafe("UPDATE durable_capture_compaction_schedule SET next_due_at=now()");
     await buildGlobalEventSummaryTick({ prisma, now: () => new Date() })();
     const [recent] = await prisma.$queryRawUnsafe(
       "SELECT count(*)::int AS count FROM durable_capture_fact_journal WHERE user_id=$1", f.account.user.id);
@@ -267,6 +270,7 @@ describe("durable interval projection reuse", () => {
     for (let pass = 0; pass < 3; pass++) {
       await prisma.$executeRawUnsafe(`UPDATE durable_capture_fact_heads
         SET next_compaction_at=now(),updated_at=now()-INTERVAL '11 minutes' WHERE user_id=$1`, f.account.user.id);
+      await prisma.$executeRawUnsafe("UPDATE durable_capture_compaction_schedule SET next_due_at=now()");
       await buildGlobalEventSummaryTick({ prisma, now: () => new Date() })();
     }
     const [quiet] = await prisma.$queryRawUnsafe(

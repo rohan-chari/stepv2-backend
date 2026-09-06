@@ -28,9 +28,9 @@ async function cleanupDurableCaptures(client, { pinBudget = { remaining:128 }, r
   const pinsDeleted=await releaseTerminalCapturePins(client,{budget:pinBudget});
   const scoreRowsDeleted = await require("./durableCaptureStageScoring")
     .compactDurableScoreProgress({ client, limit: 128 });
-  // Live source writes create journals regardless of whether a capture is
-  // pending. Preserve bounded compaction and orphan cleanup on every wake.
-  const facts = await require("./durableCaptureFacts").compactFactHistory({ client, limit: 128 });
+  // Live source writes create journals even without pending captures. Their
+  // maintenance deadline is durable, not reset by each summary wake/restart.
+  const facts = await require("./durableCaptureFacts").compactFactHistoryIfDue({ client, limit: 128 });
   if (!retention) return { pinsDeleted, scoreRowsDeleted, ...facts };
   const requestsDeleted = await client.$transaction(async (tx) => {
     const owners = await tx.$queryRawUnsafe(`SELECT id FROM durable_global_event_capture_requests

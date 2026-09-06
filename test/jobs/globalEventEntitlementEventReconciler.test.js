@@ -17,6 +17,14 @@ test("entitlement-event reconciliation repairs one bounded page set-wise", async
   let transactions = 0;
   let batch;
   const tx = {
+    async $queryRawUnsafe(sql, values, current) {
+      assert.deepEqual(values, ids);
+      assert.equal(current.toISOString(), "2098-08-27T10:00:00.000Z");
+      assert.match(sql, /FROM global_step_event_entitlements/);
+      assert.match(sql, /FROM domain_event_outbox/);
+      assert.match(sql, /terminal_status IS NOT NULL/);
+      return ids.map(id => ({ id }));
+    },
     globalStepEventEntitlement: {
       async findMany(input) {
         assert.deepEqual(input.where.id.in, ids);

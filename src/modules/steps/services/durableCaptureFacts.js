@@ -192,4 +192,9 @@ async function compactFactHistory({ client, limit = 1000 }) {
   return { journalDeleted: result.journal_deleted, rootsDeleted: result.roots_deleted };
 }
 
-module.exports = { pinFactRoots, materializeFactRoots, readFactRootPage, loadFactRoots, releaseFactRoots, compactFactHistory };
+async function compactFactHistoryIfDue({ client, limit = 128 }) {
+  const [result] = await client.$queryRawUnsafe("SELECT * FROM durable_capture_compact_if_due($1::integer)", limit);
+  return { journalDeleted: result.journal_deleted, rootsDeleted: result.roots_deleted };
+}
+
+module.exports = { pinFactRoots, materializeFactRoots, readFactRootPage, loadFactRoots, releaseFactRoots, compactFactHistory, compactFactHistoryIfDue };

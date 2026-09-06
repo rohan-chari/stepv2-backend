@@ -15,24 +15,30 @@ function buildGlobalEventEntitlementEventReconciler(dependencies = {}) {
     if (!(await generationUsable({ client: prisma, now: current }))) {
       return { published: 0, generationReady: false };
     }
+    await prisma.$queryRawUnsafe("SELECT global_event_recovery_seed_page(128)");
+    // Maintenance finishes its own transaction BEFORE publication can acquire
+    // any source/outbox locks. Ordinary writers only append independent signals.
+    await prisma.$queryRawUnsafe("SELECT global_event_recovery_revalidate_page('ENTITLEMENT_EVENT',$1::timestamp,$2)", current, pageSize);
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT entitlement.id
-         FROM global_step_event_entitlements entitlement
-        WHERE entitlement.ends_at > $1
-          AND NOT EXISTS (
-            SELECT 1 FROM domain_event_outbox event
-             WHERE event.event_key =
-               'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:' || entitlement.id || ':' || entitlement.schedule_revision::text
-          )
-        ORDER BY entitlement.created_at, entitlement.id
-        LIMIT $2`,
+      `SELECT DISTINCT id,"eventId","userId" FROM (SELECT source_id AS id,event_id AS "eventId",user_id AS "userId"
+         FROM global_event_recovery_candidates
+        WHERE kind='ENTITLEMENT_EVENT' AND available_at <= $1
+        ORDER BY available_at,event_id,user_id,id
+        LIMIT $2) page`,
       current,
       pageSize,
     );
     const published = rows.length > 0
       ? await prisma.$transaction(async (tx) => {
+        const eligible = await tx.$queryRawUnsafe(`SELECT entitlement.id
+          FROM global_step_event_entitlements entitlement WHERE id=ANY($1::text[]) AND ends_at>$2
+          AND NOT EXISTS (SELECT 1 FROM domain_event_outbox WHERE event_key=
+            'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:' || entitlement.id || ':' || entitlement.schedule_revision::text)
+          AND NOT EXISTS (SELECT 1 FROM domain_event_receipts WHERE terminal_status IS NOT NULL AND event_key=
+            'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:' || entitlement.id || ':' || entitlement.schedule_revision::text)`,
+          rows.map(row => row.id), current);
         const entitlements = await tx.globalStepEventEntitlement.findMany({
-          where: { id: { in: rows.map((row) => row.id) }, endsAt: { gt: current } },
+          where: { id: { in: eligible.map((row) => row.id) }, endsAt: { gt: current } },
           include: { event: true },
         });
         await appendBatch(tx, { entitlements, occurredAt: current });
