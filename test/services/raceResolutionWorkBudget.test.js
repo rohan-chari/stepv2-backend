@@ -87,7 +87,7 @@ test("configured three-slot budget runs three core/post handlers but not four", 
 test("process startup honors concurrency 3 and returning the env to 2", () => {
   const { execFileSync } = require("node:child_process");
   const modulePath = require.resolve("../../src/modules/races/services/raceResolutionWorkBudget");
-  for (const [value, expected] of [["3",3], ["2",2], ["1",1], ["",2], ["garbage",2], ["1.5",2], ["99",2]]) {
+  for (const [value, expected] of [["5",5], ["4",4], ["3",3], ["2",2], ["1",1], ["",2], ["garbage",2], ["1.5",2], ["6",2], ["99",2]]) {
     const result = execFileSync(process.execPath, ["-e",
       `console.log(require(${JSON.stringify(modulePath)}).raceResolutionWorkBudget.snapshot().maxActive)`], {
       env: { ...process.env, ASYNC_RACE_RESOLUTION_CONCURRENCY: value }, encoding: "utf8",
@@ -101,5 +101,30 @@ test("failed work releases its slot at concurrency three", async () => {
   const results = await Promise.allSettled(Array.from({length: 9}, (_, i) =>
     budget.run(i % 2 ? "post" : "core", async () => { if (i % 2) throw new Error("expected"); return i; })));
   assert.equal(results.filter(r => r.status === "fulfilled").length, 5);
+  assert.equal(budget.snapshot().active, 0);
+});
+
+test("five shared slots bound mixed core/post work and release after failures", async () => {
+  const budget = buildRaceResolutionWorkBudget({ maxActive: 5 });
+  let release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  let active = 0;
+  let peak = 0;
+  const jobs = Array.from({ length: 12 }, (_, i) => budget.run(i % 2 ? "post" : "core", async () => {
+    active++;
+    peak = Math.max(peak, active);
+    try {
+      await barrier;
+      if (i % 2) throw new Error("expected");
+    } finally { active--; }
+  }));
+  const completed = Promise.allSettled(jobs);
+  await new Promise(setImmediate);
+  try {
+    assert.equal(active, 5);
+    assert.equal(budget.snapshot().queuedCore + budget.snapshot().queuedPost, 7);
+  } finally { release(); await completed; }
+  assert.equal(peak, 5);
+  assert.equal((await completed).filter(row => row.status === "rejected").length, 6);
   assert.equal(budget.snapshot().active, 0);
 });

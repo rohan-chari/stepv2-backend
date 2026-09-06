@@ -1,8 +1,9 @@
 const DEFAULT_MAX_ACTIVE = 2;
+const MAX_RESOLUTION_CONCURRENCY = 5;
 
 function buildRaceResolutionWorkBudget({ maxActive = DEFAULT_MAX_ACTIVE } = {}) {
   const requested = Number(maxActive);
-  const cap = Number.isInteger(requested) && requested >= 1 && requested <= 3
+  const cap = Number.isInteger(requested) && requested >= 1 && requested <= MAX_RESOLUTION_CONCURRENCY
     ? requested : DEFAULT_MAX_ACTIVE;
   const queued = [];
   let active = 0;
@@ -70,7 +71,7 @@ function buildRaceResolutionWorkBudget({ maxActive = DEFAULT_MAX_ACTIVE } = {}) 
 }
 
 // One process-wide budget covers both core resolution and post tasks. Reuse
-// the scheduler's operational setting so a third claim has a real third slot.
+// the scheduler's operational setting so each allowed claim has a real slot.
 // Captured at startup; changing the deployment env requires a safe reload.
 const raceResolutionWorkBudget = buildRaceResolutionWorkBudget({
   maxActive: process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY,
@@ -78,6 +79,7 @@ const raceResolutionWorkBudget = buildRaceResolutionWorkBudget({
 
 module.exports = {
   DEFAULT_MAX_ACTIVE,
+  MAX_RESOLUTION_CONCURRENCY,
   buildRaceResolutionWorkBudget,
   raceResolutionWorkBudget,
 };

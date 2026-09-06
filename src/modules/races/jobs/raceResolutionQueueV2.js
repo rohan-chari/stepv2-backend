@@ -38,6 +38,7 @@ const {
 } = require("../../steps/models/stepSyncRequest");
 const {
   raceResolutionWorkBudget: defaultWorkBudget,
+  MAX_RESOLUTION_CONCURRENCY,
 } = require("../services/raceResolutionWorkBudget");
 const {
   raceResolutionPostTaskHandoff: defaultPostTaskHandoff,
@@ -670,7 +671,7 @@ function createRaceResolutionAttemptWatchdog(dependencies = {}) {
 // Keeping this helper small and pure makes the scheduler's actual parallelism
 // directly testable without mocking the worker's settlement machinery.
 async function runBoundedRaceResolutionJobs(concurrency, processOne) {
-  const lanes = Math.min(3, Math.max(1, Number(concurrency) || 1));
+  const lanes = Math.min(MAX_RESOLUTION_CONCURRENCY, Math.max(1, Number(concurrency) || 1));
   // Do not reject early: the scheduler clears its in-flight guard when tick()
   // settles. An early rejection while a sibling is still resolving would let
   // the next 250ms tick exceed the lane cap. Surface the error only once every
@@ -695,7 +696,7 @@ function quietPeriodMs() {
 }
 
 function effectiveResolutionConcurrency(environment = process.env) {
-  return Math.min(3, Math.max(1,
+  return Math.min(MAX_RESOLUTION_CONCURRENCY, Math.max(1,
     Number(environment.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1));
 }
 
@@ -3114,7 +3115,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     if (raceResolutionWorkerDisabled()) return 0;
     const concurrency = concurrencyOverride == null
       ? effectiveResolutionConcurrency()
-      : Math.min(3, Math.max(1, Number(concurrencyOverride) || 1));
+      : Math.min(MAX_RESOLUTION_CONCURRENCY, Math.max(1, Number(concurrencyOverride) || 1));
     return runBoundedRaceResolutionJobs(concurrency, processOne);
   }
 

@@ -297,6 +297,20 @@ test("three lanes claim and process distinct race-resolution jobs concurrently",
   assert.equal(await ticking, 3);
 });
 
+test("five lanes run concurrently without admitting a sixth", async () => {
+  let calls = 0;
+  let release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const ticking = runBoundedRaceResolutionJobs(5, async () => {
+    calls++;
+    await barrier;
+    return { id: calls };
+  });
+  try { assert.equal(calls, 5); }
+  finally { release(); await ticking; }
+  assert.equal(await ticking, 5);
+});
+
 test("an empty lane does not prevent a claimed sibling job from completing", async () => {
   let calls = 0;
   const completed = await runBoundedRaceResolutionJobs(2, async () => {
