@@ -67,18 +67,6 @@ function inactivityWindowStart(now = new Date(), timeZone = SEED_TIMEZONE) {
   return etDayStart(addDaysToDateString(today, -2), timeZone);
 }
 
-function sumByUserAndDay(samples, timeZone) {
-  const totals = new Map();
-  for (const sample of samples) {
-    const steps = sample.steps || 0;
-    if (steps <= 0) continue;
-    const dayKey = etDayKey(new Date(sample.periodStart), timeZone);
-    const key = `${sample.userId}|${dayKey}`;
-    totals.set(key, (totals.get(key) || 0) + steps);
-  }
-  return totals;
-}
-
 // The subset of `userIds` that fails the two-day predicate. Returns a Set so
 // callers can filter/deleteMany without a second pass.
 //
@@ -98,45 +86,38 @@ async function filterInactiveUserIds({
   // D is the ET calendar date of `now` — never now.toISOString(), which is
   // already D+1 after 20:00 ET.
   const today = etDayKey(now, timeZone);
-  const dayMinus1 = addDaysToDateString(today, -1);
-  const dayMinus2 = addDaysToDateString(today, -2);
   const dayMinus3 = addDaysToDateString(today, -3);
 
   const windowStart = inactivityWindowStart(now, timeZone); // = start of D-2
   const windowEnd = etDayStart(today, timeZone); // = end of D-1
 
   const [samples, dailyRows, users] = await Promise.all([
-    // Same overlap predicate the per-user sample sums use; bucketing is by
-    // periodStart's ET day, which is all a binary zero/non-zero signal needs.
-    prisma.stepSample.findMany({
-      where: {
-        userId: { in: ids },
-        periodEnd: { gt: windowStart },
-        periodStart: { lt: windowEnd },
-      },
-      select: { userId: true, periodStart: true, steps: true },
-    }),
+    // The old replay summed positive samples by periodStart's ET date. A
+    // positive sample whose start lies in either completed day is equivalent,
+    // including at DST boundaries; a sample starting before D-2 never counted.
+    // EXISTS stops at the first match and returns at most one row per user.
+    prisma.$queryRawUnsafe(`SELECT u.id AS "userId" FROM users u
+      WHERE u.id=ANY($1::text[]) AND EXISTS (
+        SELECT 1 FROM step_samples s WHERE s.user_id=u.id AND s.steps>0
+          AND s.period_start >= $2::timestamp AND s.period_start < $3::timestamp
+          AND s.period_end > $2::timestamp
+      )`, ids, windowStart, windowEnd),
     // LOWER BOUND ONLY (spec §4.2.3): `steps.date` is a client-asserted local
     // date, so an active user in a timezone ahead of ET can key their activity
     // to D or even D+1. Any non-zero row from D-3 onward keeps them. Over-
     // keeping is safe; over-pruning would break an active frozen client.
-    prisma.step.findMany({
-      where: {
-        userId: { in: ids },
-        date: { gte: dateColumnBound(dayMinus3) },
-      },
-      select: { userId: true, steps: true },
-    }),
+    prisma.$queryRawUnsafe(`SELECT u.id AS "userId" FROM users u
+      WHERE u.id=ANY($1::text[]) AND EXISTS (
+        SELECT 1 FROM steps s WHERE s.user_id=u.id AND s.steps>0 AND s.date >= $2::date
+      )`, ids, dateColumnBound(dayMinus3)),
     prisma.user.findMany({
       where: { id: { in: ids } },
       select: { id: true, createdAt: true, isReviewAccount: true },
     }),
   ]);
 
-  const sampleTotals = sumByUserAndDay(samples, timeZone);
-  const hasDailyActivity = new Set(
-    dailyRows.filter((row) => (row.steps || 0) > 0).map((row) => row.userId)
-  );
+  const hasSampleActivity = new Set(samples.map((row) => row.userId));
+  const hasDailyActivity = new Set(dailyRows.map((row) => row.userId));
   const usersById = new Map(users.map((user) => [user.id, user]));
 
   const inactive = new Set();
@@ -154,8 +135,7 @@ async function filterInactiveUserIds({
       continue;
     }
     if (hasDailyActivity.has(userId)) continue;
-    if ((sampleTotals.get(`${userId}|${dayMinus1}`) || 0) > 0) continue;
-    if ((sampleTotals.get(`${userId}|${dayMinus2}`) || 0) > 0) continue;
+    if (hasSampleActivity.has(userId)) continue;
     inactive.add(userId);
   }
   return inactive;

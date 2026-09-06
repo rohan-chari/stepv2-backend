@@ -381,7 +381,7 @@ async function compactDurableScoreProgress({client,limit=128}) {
   const owners=await client.$queryRawUnsafe(`(SELECT id FROM durable_capture_score_owners
       WHERE live_request_id IS NULL ORDER BY created_at,id LIMIT 32)
     UNION (SELECT o.id FROM durable_global_event_capture_requests r JOIN durable_capture_score_owners o ON o.live_request_id=r.id
-      WHERE r.status IN ('COMPLETE','EXPIRED','FAILED') AND r.completed_at<clock_timestamp()-interval '30 days'
+      WHERE r.status IN ('COMPLETE','EXPIRED','FAILED') AND r.completed_at<CURRENT_TIMESTAMP-interval '30 days'
       ORDER BY r.completed_at,r.id LIMIT 32)`);
   if (!owners.length) return 0;
   const ids=owners.map((row)=>row.id);

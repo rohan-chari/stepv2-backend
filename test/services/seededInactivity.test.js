@@ -20,6 +20,20 @@ function fakePrisma({ samples = [], stepRows = [], users = [] } = {}) {
   const calls = {};
   return {
     calls,
+    // Recording adapter for the new existence-query transport. Keep the
+    // existing date-bound assertions below unchanged; SQL semantics are also
+    // exercised through the real cron/enrollment integration suites.
+    async $queryRawUnsafe(sql, ids, from, through) {
+      if (sql.includes("FROM step_samples")) {
+        calls.stepSample = { where: { userId: { in: ids }, periodEnd: { gt: from }, periodStart: { gte: from, lt: through } } };
+        return samples.filter(row => ids.includes(row.userId) && row.steps > 0 && row.periodStart >= from && row.periodStart < through);
+      }
+      if (sql.includes("FROM steps")) {
+        calls.step = { where: { userId: { in: ids }, date: { gte: from } } };
+        return stepRows.filter(row => ids.includes(row.userId) && row.steps > 0 && (!row.date || row.date >= from));
+      }
+      throw new Error(`Unexpected activity query: ${sql}`);
+    },
     stepSample: {
       async findMany(args) {
         calls.stepSample = args;

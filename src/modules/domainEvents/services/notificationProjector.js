@@ -24,7 +24,9 @@ const {
 
 const EXPANSION_BATCH_SIZE = 100;
 const PROJECTION_BATCH_SIZE = 50;
-const PROJECTION_CONCURRENCY = 4;
+// Cron shares a four-connection pool with enrollment and maintenance. Keep
+// generic projections from consuming the entire pool in a single batch.
+const PROJECTION_CONCURRENCY = 2;
 const PROJECTOR_TICK_BUDGET_MS = 5_000;
 // Keep the delivery pace at 200 durable projections/second, but commit it as
 // one set-based statement. Two 100-row transactions repeated the same index,

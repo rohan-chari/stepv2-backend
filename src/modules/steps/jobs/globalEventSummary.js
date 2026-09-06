@@ -586,7 +586,9 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   const retryMs = options.retryMs || DEFAULT_RETRY_MS;
   const tickBudgetMs = options.tickBudgetMs || DEFAULT_TICK_BUDGET_MS;
   const startedAtMs = Date.now();
-  const captureDrain = await require("../services/durableGlobalEventCapture").drainDurableCapture(prisma);
+  const captureDrain = await require("../services/durableGlobalEventCapture").drainDurableCapture(prisma, {
+    retention: runRecovery, retentionState: options.retentionState,
+  });
   const works = await claimActiveWork(prisma, current, batchSize, leaseMs);
   for (const work of works) {
     coordinatedOptimizationMetrics.increment("global_summary_worker_claim_total", {
@@ -720,6 +722,7 @@ async function runV1(prisma, current, batchSize = 100) {
 function buildGlobalEventSummaryV2Tick(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
+  const retentionState = { pending: false };
   return async function globalEventSummaryV2Tick(tickOptions = {}) {
     const startedAt = Date.now();
     const current = new Date(now());
@@ -732,6 +735,7 @@ function buildGlobalEventSummaryV2Tick(dependencies = {}) {
       afterSummaryWorkTransition: dependencies.afterSummaryWorkTransition,
       afterSummaryRaceEnqueue: dependencies.afterSummaryRaceEnqueue,
       recovery: tickOptions.recovery === true,
+      retentionState,
     });
     return { ...result, durationMs: Date.now() - startedAt };
   };

@@ -223,7 +223,7 @@ async function compactIntervalProjections({ client, limit = 256 }) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 256) throw new Error("Invalid projection retention limit");
   return client.$executeRawUnsafe(`WITH selected AS (
     SELECT semantic_digest,root_id FROM durable_capture_interval_projections
-    WHERE created_at<clock_timestamp()-INTERVAL '30 days'
+    WHERE created_at<CURRENT_TIMESTAMP-INTERVAL '30 days'
     ORDER BY created_at,semantic_digest,root_id LIMIT $1 FOR UPDATE SKIP LOCKED
   ) DELETE FROM durable_capture_interval_projections p USING selected s
     WHERE p.semantic_digest=s.semantic_digest AND p.root_id=s.root_id`, limit);

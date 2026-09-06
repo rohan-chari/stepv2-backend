@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { before,beforeEach,describe,it } = require("node:test");
 const { cleanDatabase,createTestUser,getSharedServer,prisma,request } = require("./setup");
-const { buildGlobalEventSummaryTick } = require("../../src/modules/steps/jobs/globalEventSummary");
+const { buildGlobalEventSummaryTick, buildGlobalEventSummaryV2Tick } = require("../../src/modules/steps/jobs/globalEventSummary");
 
 let server;
 async function fixture() {
@@ -28,13 +28,15 @@ async function fixture() {
   return {account,work,capture};
 }
 const pins=async(id)=>Number((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM durable_capture_fact_pins WHERE owner_id=$1::uuid",id))[0].n);
-const tick=()=>buildGlobalEventSummaryTick({prisma,now:()=>new Date()})();
+const tick=(recovery=true)=>recovery
+  ? buildGlobalEventSummaryTick({prisma,now:()=>new Date()})()
+  : buildGlobalEventSummaryV2Tick({prisma,now:()=>new Date()})({recovery:false});
 
 describe("bounded terminal durable-capture pin release",()=>{
   before(async()=>{server=await getSharedServer();});
   beforeEach(async()=>{await cleanDatabase();});
-  for(const terminal of ["EXPIRED","FAILED"]) {
-    it(`${terminal} releases at most128pins per worker pass and eventually releases all`,async()=>{
+  for(const recovery of [true,false]) for(const terminal of ["EXPIRED","FAILED"]) {
+    it(`${terminal} releases at most128pins per worker pass and eventually releases all (recovery=${recovery})`,async()=>{
       const f=await fixture(); const healthy=await fixture();
       await prisma.$executeRawUnsafe("UPDATE durable_global_event_capture_requests SET available_at=clock_timestamp()+interval '1 hour' WHERE id=$1::uuid",healthy.capture.id);
       const healthyPins=await pins(healthy.capture.id); const before=await pins(f.capture.id);
@@ -43,14 +45,14 @@ describe("bounded terminal durable-capture pin release",()=>{
         await prisma.$executeRawUnsafe("UPDATE durable_global_event_capture_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid",f.capture.id);
         await prisma.globalEventSummaryWork.update({where:{id:f.work.id},data:{expiresAt:new Date(Date.now()-1000)}});
       } else await prisma.$executeRawUnsafe("UPDATE durable_global_event_capture_requests SET context_digest=repeat('0',64) WHERE id=$1::uuid",f.capture.id);
-      await tick();
+      await tick(recovery);
       let previous=await pins(f.capture.id);
       assert.equal(before-previous,128,"terminalization must not delete an unbounded owner pin vector");
       assert.ok(previous>0,"remaining pins must be queued for another bounded pass");
       const [status]=await prisma.$queryRawUnsafe("SELECT status FROM durable_global_event_capture_requests WHERE id=$1::uuid",f.capture.id);
       assert.equal(status.status,terminal);
       for(let attempt=0;attempt<10 && previous;attempt++) {
-        await tick(); const remaining=await pins(f.capture.id);
+        await tick(recovery); const remaining=await pins(f.capture.id);
         assert.ok(previous-remaining<=128); previous=remaining;
       }
       assert.equal(previous,0,"terminal pins must be eligible immediately, not after30days");

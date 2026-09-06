@@ -463,7 +463,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
   const acquireGlobalLock =
     dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
 
-  async function automaticCandidates(tx) {
+  async function automaticCandidates(tx, { seedId, windowStart }) {
     const users = await tx.user.findMany({
       where: {
         autoJoinFeaturedRaces: true,
@@ -472,7 +472,14 @@ function buildSeededRaceBuckets(dependencies = {}) {
       select: { id: true },
       orderBy: { id: "asc" },
     });
-    const ids = users.map((user) => user.id);
+    // Membership is write-once for this window. Exclude it before examining
+    // activity, while holding the same window lock as the eventual insert.
+    const existing = await tx.seededRaceWindowMembership.findMany({
+      where: { seedId, windowStart, userId: { in: users.map((user) => user.id) } },
+      select: { userId: true },
+    });
+    const taken = new Set(existing.map((row) => row.userId));
+    const ids = users.map((user) => user.id).filter((id) => !taken.has(id));
     if (!ids.length) return ids;
     if ((await settings.getFlag("seededInactivityPruneEnabled")) !== true) return ids;
     try {
@@ -490,7 +497,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
       if (now() >= windowStart) return 0;
       const finalized = await tx.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } });
       if (finalized > 0) return 0;
-      const userIds = await automaticCandidates(tx);
+      const userIds = await automaticCandidates(tx, { seedId: seed.id, windowStart });
       if (!userIds.length) return 0;
       const existing = await tx.seededRaceWindowMembership.findMany({
         where: { seedId: seed.id, windowStart, userId: { in: userIds } },

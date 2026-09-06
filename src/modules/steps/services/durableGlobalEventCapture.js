@@ -142,12 +142,19 @@ async function expireCaptures(client, pinBudget = { remaining:128 }) {
   });
 }
 
-async function drainDurableCapture(client) {
+async function drainDurableCapture(client, { retention = true, retentionState = { pending: false } } = {}) {
   const { preparedScoringModels } = require("./durablePreparedScoringInputs");
   const { digestCanonical } = require("./globalEventSummaryCapture");
   const { advanceDurableCaptureScore } = require("./durableCaptureStageScoring");
   const pinBudget={ remaining:128 };
-  await require("./durableCaptureCleanup").cleanupDurableCaptures(client,{pinBudget});
+  // Pin release and live journal compaction remain prompt. Historical
+  // collection belongs to recovery, not every wake of a busy capture queue.
+  const cleanup = await require("./durableCaptureCleanup").cleanupDurableCaptures(client,{
+    pinBudget,retention: retention || retentionState.pending,
+  });
+  // A full page continues on the next bounded wake; an empty/short page goes
+  // back to recovery cadence. Restart loss is safe: recovery retries in 60s.
+  retentionState.pending = cleanup.moreRetention === true;
   const expired = await expireCaptures(client,pinBudget);
   const request = await claimCapture(client);
   if (!request) return { selected: expired, published: 0 };

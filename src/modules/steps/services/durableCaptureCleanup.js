@@ -24,13 +24,17 @@ async function releaseTerminalCapturePins(client, { budget = { remaining:128 }, 
   return result.deleted;
 }
 
-async function cleanupDurableCaptures(client, { pinBudget = { remaining:128 } } = {}) {
+async function cleanupDurableCaptures(client, { pinBudget = { remaining:128 }, retention = true } = {}) {
   const pinsDeleted=await releaseTerminalCapturePins(client,{budget:pinBudget});
   const scoreRowsDeleted = await require("./durableCaptureStageScoring")
     .compactDurableScoreProgress({ client, limit: 128 });
+  // Live source writes create journals regardless of whether a capture is
+  // pending. Preserve bounded compaction and orphan cleanup on every wake.
+  const facts = await require("./durableCaptureFacts").compactFactHistory({ client, limit: 128 });
+  if (!retention) return { pinsDeleted, scoreRowsDeleted, ...facts };
   const requestsDeleted = await client.$transaction(async (tx) => {
     const owners = await tx.$queryRawUnsafe(`SELECT id FROM durable_global_event_capture_requests
-      WHERE status IN ('COMPLETE','EXPIRED','FAILED') AND completed_at<clock_timestamp()-interval '30 days'
+      WHERE status IN ('COMPLETE','EXPIRED','FAILED') AND completed_at<CURRENT_TIMESTAMP-interval '30 days'
       ORDER BY completed_at,id LIMIT 32 FOR UPDATE SKIP LOCKED`);
     if (!owners.length) return 0;
     const ids = owners.map((row) => row.id);
@@ -45,18 +49,18 @@ async function cleanupDurableCaptures(client, { pinBudget = { remaining:128 } } 
   });
   const answersDeleted = await client.$executeRawUnsafe(`WITH selected AS MATERIALIZED (
     SELECT scope_digest FROM durable_capture_prepared_inputs
-      WHERE updated_at<clock_timestamp()-interval '30 days'
+      WHERE updated_at<CURRENT_TIMESTAMP-interval '30 days'
       ORDER BY updated_at,scope_digest LIMIT 128 FOR UPDATE SKIP LOCKED
     ) DELETE FROM durable_capture_prepared_inputs p USING selected s WHERE p.scope_digest=s.scope_digest`);
   const progressDeleted = await client.$executeRawUnsafe(`WITH selected AS MATERIALIZED (
     SELECT scope_digest,method_digest FROM durable_capture_method_progress
-      WHERE updated_at<clock_timestamp()-interval '30 days'
+      WHERE updated_at<CURRENT_TIMESTAMP-interval '30 days'
       ORDER BY updated_at,scope_digest,method_digest LIMIT 128 FOR UPDATE SKIP LOCKED
     ) DELETE FROM durable_capture_method_progress p USING selected s
       WHERE p.scope_digest=s.scope_digest AND p.method_digest=s.method_digest`);
-  const facts = await require("./durableCaptureFacts").compactFactHistory({ client, limit: 128 });
   const projectionsDeleted = await require("./durableCaptureIntervalProjection").compactIntervalProjections({ client, limit: 128 });
-  return { requestsDeleted, answersDeleted, progressDeleted, projectionsDeleted, scoreRowsDeleted, pinsDeleted, ...facts };
+  const moreRetention = requestsDeleted >= 32 || answersDeleted >= 128 || progressDeleted >= 128 || projectionsDeleted >= 128;
+  return { requestsDeleted, answersDeleted, progressDeleted, projectionsDeleted, scoreRowsDeleted, pinsDeleted, moreRetention, ...facts };
 }
 
 module.exports = { cleanupDurableCaptures,releaseTerminalCapturePins };
