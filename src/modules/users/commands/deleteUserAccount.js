@@ -61,10 +61,27 @@ function buildDeleteUserAccount(dependencies = {}) {
       where: { userId },
       select: { tournamentId: true },
     });
+    const creatorSeries = db.raceSeries?.findMany
+      ? await db.raceSeries.findMany({
+          where: { creatorId: userId },
+          select: {
+            id: true,
+            subscriptions: {
+              where: { active: true },
+              select: { userId: true },
+            },
+          },
+        })
+      : [];
     return {
       raceIds: [...new Set(raceRows.map((row) => row.raceId))].sort(),
       tournamentIds: [
         ...new Set(tournamentRows.map((row) => row.tournamentId)),
+      ].sort(),
+      creatorSeriesIds: creatorSeries.map((row) => row.id).sort(),
+      recurringUserIds: [
+        ...new Set(creatorSeries.flatMap((row) =>
+          row.subscriptions.map((subscription) => subscription.userId))),
       ].sort(),
     };
   }
@@ -101,6 +118,7 @@ function buildDeleteUserAccount(dependencies = {}) {
     }
 
     let counterpartIds = [];
+    let recurringAffectedIds = [];
     let deletionComplete = false;
     for (let attempt = 0; attempt < 3 && !deletionComplete; attempt += 1) {
       const scope = await discoverMembershipScope(userId);
@@ -111,7 +129,10 @@ function buildDeleteUserAccount(dependencies = {}) {
       // the user guard and is detected by the reread below, or follows deletion.
       await acquireRaceWriteFences(tx, scope.raceIds);
       if (scope.raceIds.length > 0) await acquireGlobalEnrollmentLock(tx);
-      await lockFundedExposureUsers(tx, [userId]);
+      await lockFundedExposureUsers(
+        tx,
+        [...new Set([userId, ...(scope.recurringUserIds || [])])].sort(),
+      );
       await lockCompetitionRows(tx, scope);
 
       const participations = await tx.raceParticipant.findMany({
@@ -133,6 +154,47 @@ function buildDeleteUserAccount(dependencies = {}) {
         const drift = new Error("Account membership scope changed; retrying");
         drift.code = MEMBERSHIP_SCOPE_DRIFT;
         throw drift;
+      }
+
+      const creatorSeries = tx.raceSeries?.findMany
+        ? await tx.raceSeries.findMany({
+            where: { creatorId: userId },
+            select: {
+              id: true,
+              subscriptions: {
+                where: { active: true },
+                select: { userId: true },
+              },
+            },
+          })
+        : [];
+      const creatorSeriesIds = creatorSeries.map((row) => row.id).sort();
+      if (JSON.stringify(creatorSeriesIds) !== JSON.stringify(scope.creatorSeriesIds || [])) {
+        const drift = new Error("Account recurring-series scope changed; retrying");
+        drift.code = MEMBERSHIP_SCOPE_DRIFT;
+        throw drift;
+      }
+      recurringAffectedIds = [...new Set(creatorSeries.flatMap((row) =>
+        row.subscriptions.map((subscription) => subscription.userId)))];
+      if (creatorSeriesIds.length > 0) {
+        const endedAt = new Date();
+        await tx.raceSeriesSubscription.updateMany({
+          where: { seriesId: { in: creatorSeriesIds }, active: true },
+          data: { active: false, unsubscribedAt: endedAt },
+        });
+        // Race occurrences retain immutable lineage/history, so creator
+        // deletion terminalizes the series and reassigns its historical owner
+        // to the existing deleted-user sentinel instead of cascading through
+        // the RESTRICT occurrence relation.
+        await tx.raceSeries.updateMany({
+          where: { id: { in: creatorSeriesIds } },
+          data: {
+            creatorId: sentinelId,
+            enabled: false,
+            endedAt,
+            terminalReason: "CREATOR_ACCOUNT_DELETED",
+          },
+        });
       }
 
       // Shared race-payout-double lock order: durable provider identity first,
@@ -382,7 +444,15 @@ function buildDeleteUserAccount(dependencies = {}) {
     try {
       const authMeCache = require("../services/authMeCache");
       await Promise.all(
-        [userId, ...counterpartIds].map((id) => authMeCache.invalidateSafe(id))
+        [userId, ...counterpartIds, ...recurringAffectedIds]
+          .filter((id, index, values) => values.indexOf(id) === index)
+          .map((id) => authMeCache.invalidateSafe(id))
+      );
+    } catch {}
+    try {
+      const { invalidateUser } = require("../../races/services/raceListCache");
+      await Promise.allSettled(
+        recurringAffectedIds.map((id) => invalidateUser(id)),
       );
     } catch {}
     try {

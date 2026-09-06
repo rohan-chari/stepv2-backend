@@ -88,6 +88,52 @@ function buildCompleteRace(dependencies = {}) {
         ? async (raceId) => raceModel.update(raceId, { updatedAt: now() })
         : async () => null);
 
+  async function finalizeSettlement(raceId) {
+    if (!usesDefaultPersistence) return;
+    await db.$transaction(async (tx) => {
+      await acquireRaceWriteFence(tx, raceId);
+      await tx.$queryRaw`SELECT id FROM races WHERE id = ${raceId} FOR UPDATE`;
+      const settledRace = await tx.race.findUnique({
+        where: { id: raceId },
+        select: {
+          id: true,
+          status: true,
+          settlementCompletedAt: true,
+          seriesId: true,
+          rematchRootRaceId: true,
+        },
+      });
+      if (!settledRace || settledRace.status !== "COMPLETED") return;
+      const settledAt = settledRace.settlementCompletedAt || now();
+      if (!settledRace.settlementCompletedAt) {
+        await tx.race.update({
+          where: { id: raceId },
+          data: { settlementCompletedAt: settledAt },
+        });
+      }
+      if (settledRace.seriesId) {
+        const series = await tx.raceSeries.findUnique({
+          where: { id: settledRace.seriesId },
+          select: { enabled: true },
+        });
+        if (series?.enabled) {
+          await tx.raceSeriesRenewalJob.upsert({
+            where: { predecessorId: raceId },
+            update: {},
+            create: { predecessorId: raceId, state: "QUEUED" },
+          });
+        }
+      }
+      await tx.raceRematchNotificationEpisode.updateMany({
+        where: {
+          rootRaceId: settledRace.rematchRootRaceId || raceId,
+          closedAt: null,
+        },
+        data: { closedAt: settledAt },
+      });
+    });
+  }
+
   // A race status is a settlement *claim*, not a durable proof that each
   // idempotent ledger credit made it into its result row.  This reconciler is
   // deliberately fed only from the immutable v1 ledger artifacts, never from a
@@ -297,6 +343,7 @@ function buildCompleteRace(dependencies = {}) {
       if (
         !completedRace ||
         completedRace.status !== "COMPLETED" ||
+        completedRace.seriesId == null &&
         completedRace.payoutRoundingVersion !== 1 &&
           resolveFixedTeamPayoutStamp(completedRace) == null
       ) {
@@ -598,6 +645,7 @@ function buildCompleteRace(dependencies = {}) {
 
       await reconcileDurablePayoutArtifact(race);
       await touchCompletedResult(raceId);
+      await finalizeSettlement(raceId);
 
       return race;
     }
@@ -611,8 +659,18 @@ function buildCompleteRace(dependencies = {}) {
     // nothing, then stamped so the numbers freeze.
     const isFundedRace = race?.fundedPrize === true;
     if (isFundedRace) {
+      const recurringMinimum =
+        race.seriesId && race.recurringPayoutPolicyVersion === 1
+          ? Math.max(0, Number(race.recurringPayoutMinRawSteps) || 0)
+          : null;
+      const recurringQualifiers = recurringMinimum == null
+        ? null
+        : (race.participants || []).filter(
+            (participant) => Number(participant.rawSteps || 0) >= recurringMinimum,
+          );
       const quickQualifiers = quickSettlementParticipants(race, race.participants);
-      const rankedParticipants = (quickQualifiers || race.participants || [])
+      const qualifiedField = recurringQualifiers || quickQualifiers || race.participants || [];
+      const rankedParticipants = qualifiedField
         // A frozen forfeiter remains in the settled funded-player count when
         // they walked, but can never receive a tier. The payout array stays
         // sized by that full pool; assigning tiers to this filtered sequence
@@ -622,21 +680,25 @@ function buildCompleteRace(dependencies = {}) {
             participant.placement != null && participant.forfeitedAt == null
         )
         .sort((a, b) => a.placement - b.placement);
-      const eligibleRecipients = (quickQualifiers || race.participants || [])
+      const eligibleRecipients = qualifiedField
         .filter(
           (participant) =>
             participant.placement != null &&
             participant.forfeitedAt == null &&
-            (quickQualifiers || (participant.totalSteps || 0) > 0)
+            (quickQualifiers || recurringQualifiers || (participant.totalSteps || 0) > 0)
         )
         .sort((a, b) => a.placement - b.placement);
       const pool = computeSettledRacePool({
         race,
-        participants: race.participants,
+        participants: qualifiedField,
       });
       // Preserve the legacy field sizing. The new exit-policy compaction below
       // is an explicit second input, never a reinterpretation of this count.
-      const settledFieldSize = quickQualifiers
+      const settledFieldSize = recurringQualifiers
+        ? recurringQualifiers.length >= 2
+          ? recurringQualifiers.length
+          : 0
+        : quickQualifiers
         ? quickQualifiers.length >= 2
           ? quickQualifiers.length
           : 0
@@ -880,6 +942,7 @@ function buildCompleteRace(dependencies = {}) {
 
     await reconcileDurablePayoutArtifact(race);
     await touchCompletedResult(raceId);
+    await finalizeSettlement(raceId);
 
     return race;
   };

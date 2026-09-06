@@ -134,13 +134,9 @@ test("the existing cron-owned delivery scheduler releases due rows and subscribe
       wake = handler;
       return async () => {};
     },
-    prisma: {
-      inboxDeliveryOutbox: {
-        async findMany() {
-          events.push(["outboxScan"]);
-          return [];
-        },
-      },
+    run: async () => {
+      events.push(["outboxScan"]);
+      return { claimed: 0, delivered: 0, expired: 0 };
     },
     appSettings: { async getFlag() { return false; } },
     userFanoutDisabled: () => false,
@@ -152,6 +148,12 @@ test("the existing cron-owned delivery scheduler releases due rows and subscribe
   assert.deepEqual(events.map(([name]) => name), ["subscribe", "releaseDue", "outboxScan"]);
   await wake();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(events.map(([name]) => name), ["subscribe", "releaseDue", "outboxScan"]);
+  assert.deepEqual(events.map(([name]) => name), [
+    "subscribe",
+    "releaseDue",
+    "outboxScan",
+    "releaseDue",
+    "outboxScan",
+  ]);
   scheduled.stop();
 });

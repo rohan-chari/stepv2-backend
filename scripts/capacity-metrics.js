@@ -33,7 +33,7 @@ function roleUrls(config) {
 
 async function dockerStats(config) {
   try {
-    const { stdout: raw } = await execFileAsync("limactl", ["shell", config.lima_instance, "--", "bash", "-lc", "docker stats --no-stream --format '{{json .}}'"], {
+    const { stdout: raw } = await execFileAsync("limactl", ["shell", config.lima_instance, "--", "docker", "stats", "--no-stream", "--format", "{{json .}}"], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3_000,
     });
     return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
@@ -56,11 +56,11 @@ async function fetchHealth(url) {
 
 async function fetchHttpCensus(url, { fetchOne = fetchHealth, maximumAttempts = 20 } = {}) {
   const byIdentity = new Map();
-  for (let attempt = 0; attempt < maximumAttempts && byIdentity.size < 2; attempt += 1) {
-    const health = await fetchOne(url);
-    const capacity = health?.capacity;
-    if (capacity?.process?.role === "http" && [0, 1].includes(Number(capacity.process.instance))) {
-      byIdentity.set(`http:${Number(capacity.process.instance)}`, health);
+  for (let attempt = 0; attempt < maximumAttempts && byIdentity.size < 2; attempt += 2) {
+    const healthRows = await Promise.all([fetchOne(url), fetchOne(url)]);
+    for (const health of healthRows) {
+      const capacity = health?.capacity;
+      if (capacity?.process?.role === "http" && [0, 1].includes(Number(capacity.process.instance))) byIdentity.set(`http:${Number(capacity.process.instance)}`, health);
     }
   }
   if (!byIdentity.has("http:0") || !byIdentity.has("http:1")) {
@@ -97,6 +97,7 @@ function createCollector({
     connectionTimeoutMillis: 2_000, statement_timeout: 3_000, query_timeout: 3_000 }) : null;
   let timer = null;
   let stopping = false;
+  let phase = "warmup";
   const inFlight = new Set();
 
   async function databaseSample() {
@@ -123,12 +124,18 @@ function createCollector({
   }
 
   async function sample() {
-    const [httpCensus, resolution, cron, database, containers] = await Promise.all([
-      fetchHttpCensus(urls.http), fetchHealth(urls.resolution), fetchHealth(urls.cron),
+    const samplePhase = phase;
+    const [httpResult, resolutionResult, cronResult, databaseResult, containersResult] = await Promise.allSettled([
+      fetchHttpCensus(urls.http, { maximumAttempts: 2 }), fetchHealth(urls.resolution), fetchHealth(urls.cron),
       databaseSample(), dockerStats(config),
     ]);
+    const httpCensus = httpResult.status === "fulfilled" ? httpResult.value : { error: httpResult.reason?.message || "http census unavailable" };
+    const resolution = resolutionResult.status === "fulfilled" ? resolutionResult.value : { error: resolutionResult.reason?.message || "resolution health unavailable" };
+    const cron = cronResult.status === "fulfilled" ? cronResult.value : { error: cronResult.reason?.message || "cron health unavailable" };
+    const database = databaseResult.status === "fulfilled" ? databaseResult.value : { error: databaseResult.reason?.message || "database metrics unavailable" };
+    const containers = containersResult.status === "fulfilled" ? containersResult.value : [];
     samples.push({
-      at: new Date().toISOString(), health: { ...httpCensus, resolution, cron },
+      at: new Date().toISOString(), phase: samplePhase, health: { ...httpCensus, resolution, cron },
       containers, ...database,
     });
   }
@@ -155,13 +162,15 @@ function createCollector({
     });
   }
 
-  function start() {
+  function setPhase(nextPhase) { if (!["warmup", "measured", "drain"].includes(nextPhase)) throw new Error(`invalid metrics phase: ${nextPhase}`); phase = nextPhase; }
+  function start(initialPhase = "warmup") {
     if (timer) return;
     if (fs.existsSync(output)) throw new Error(`capacity metrics artifact already exists: ${output}`);
+    setPhase(initialPhase);
     timer = setInterval(scheduleSample, 1_000);
     scheduleSample();
   }
-  return { finish, sample, samples, start };
+  return { finish, sample, samples, start, setPhase };
 }
 
 async function main() {

@@ -1,7 +1,7 @@
 {
   "_comment": "PREPARED, NOT APPLIED. The complete Option H balance config (docs/economy.md §8 Option H; docs/box-raw-steps-position-and-option-h-requirements.md step 8). This artifact is the code-defaults baseline with the Option H transform applied, for review. DO NOT hand-paste it into a database: the real staging/prod row is written by `npm run balance:apply -- option-h-position-fairness --db=<staging|prod> --apply`, which applies the SAME pure transform to the LIVE row (so nothing already tuned in prod is clobbered) and re-runs validateConfig. ORDER IS MANDATORY: the raw-steps position fix must be deployed first.",
   "generatedBy": "scripts/balance-apply.js optionHPositionFairness(defaultConfig())",
-  "generatedAt": "2026-08-09",
+  "generatedAt": "2026-09-06",
   "migration": "option-h-position-fairness",
   "validateConfig": [],
   "preApplyChecklist": [
@@ -81,7 +81,8 @@
         "SHORTCUT",
         "CLEANSE",
         "MIRROR",
-        "POWER_OUTAGE"
+        "POWER_OUTAGE",
+        "DECOY"
       ]
     },
     "storeOnlyTypes": [
@@ -97,7 +98,6 @@
       "GHOST_PEPPER",
       "COIN_FLIP",
       "MYSTERY_POTION",
-      "DECOY",
       "UMBRELLA",
       "DRILL_SERGEANT",
       "PIGGY_BANK",
@@ -152,7 +152,8 @@
       ]
     },
     "typeWeights": {
-      "RED_CARD": 0.5
+      "RED_CARD": 0.5,
+      "DECOY": 0.5
     },
     "positionRules": {
       "leaderExcluded": [
@@ -172,6 +173,7 @@
         "CLEANSE": 0.5,
         "MIRROR": 0.5,
         "STEALTH_MODE": 1,
+        "DECOY": 0.5,
         "WRONG_TURN": 0.2,
         "LEG_CRAMP": 0.25,
         "PINECONE_TOSS": 0.4,

@@ -1,4 +1,7 @@
-const { prisma } = require("../../../db");
+const {
+  prisma,
+  runInPrismaTransaction,
+} = require("../../../db");
 const { RacePowerup } = require("../models/racePowerup");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
@@ -19,6 +22,7 @@ const {
   BOX_REROLL_REWARD_KIND,
   adsBoxRerollEnabled,
 } = require("../../economy/adRewards");
+const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence");
 
 // Batch 2026-08-08 item 11 — rewarded-ad mystery-box reroll.
 //
@@ -122,6 +126,16 @@ function buildRerollMysteryBox(dependencies = {}) {
   const rollFn = dependencies.rollPowerupOdds || rollPowerupOdds;
   const balance = dependencies.balanceConfig || defaultBalanceConfig;
   const isEnabled = dependencies.adsBoxRerollEnabled || adsBoxRerollEnabled;
+  const runTransaction = dependencies.runInPrismaTransaction ||
+    (dependencies.prisma?.$transaction
+      ? (work) => dependencies.prisma.$transaction(work)
+      : Object.keys(dependencies).length > 0
+        ? (work) => work(db)
+        : runInPrismaTransaction);
+  const acquireWriteFence = dependencies.acquireRaceWriteFence ||
+    (Object.keys(dependencies).length > 0 && !dependencies.prisma
+      ? async () => null
+      : acquireRaceWriteFence);
 
   return async function rerollMysteryBox({
     userId,
@@ -135,6 +149,24 @@ function buildRerollMysteryBox(dependencies = {}) {
     // Kill switch, read at CALL time. 503 mirrors /daily-reward/claim-extra-box.
     if (!isEnabled()) {
       throw new PowerupRerollError("Box reroll is disabled", 503, "DISABLED");
+    }
+
+    return runTransaction(async (tx) => {
+    // C0 is the first persistence lock. The participant, powerup and verified
+    // grant are then locked in canonical order; every mutation below commits or
+    // rolls back with the hidden audit event.
+    await acquireWriteFence(tx, raceId);
+    if (typeof tx?.$queryRawUnsafe === "function") {
+      await tx.$queryRawUnsafe("SELECT id FROM races WHERE id = $1 FOR UPDATE", raceId);
+      await tx.$queryRawUnsafe(
+        "SELECT id FROM race_participants WHERE race_id = $1 AND user_id = $2 FOR UPDATE",
+        raceId,
+        userId,
+      );
+      await tx.$queryRawUnsafe(
+        "SELECT id FROM race_powerups WHERE id = $1 FOR UPDATE",
+        powerupId,
+      );
     }
 
     // ── Ownership + eligibility. ALL of it runs before the ad credit is
@@ -222,7 +254,7 @@ function buildRerollMysteryBox(dependencies = {}) {
       effectiveDate = localDate;
     }
 
-    const grant = await db.adRewardGrant.findFirst({
+    const grant = await tx.adRewardGrant.findFirst({
       where: {
         userId,
         rewardKind: BOX_REROLL_REWARD_KIND,
@@ -243,8 +275,14 @@ function buildRerollMysteryBox(dependencies = {}) {
         "AD_NOT_VERIFIED"
       );
     }
+    if (typeof tx?.$queryRawUnsafe === "function") {
+      await tx.$queryRawUnsafe(
+        "SELECT id FROM ad_reward_grants WHERE id = $1 FOR UPDATE",
+        grant.id,
+      );
+    }
     // CAS: a concurrent duplicate loses here, before anything rerolls.
-    const consumed = await db.adRewardGrant.updateMany({
+    const consumed = await tx.adRewardGrant.updateMany({
       where: { id: grant.id, consumedAt: null },
       data: { consumedAt: new Date() },
     });
@@ -322,8 +360,17 @@ function buildRerollMysteryBox(dependencies = {}) {
 
     // ── Persist. Conditional on the row still being an un-rerolled HELD row, so
     // two concurrent rerolls cannot both write (the second loses and 409s).
-    const claimed = await db.racePowerup.updateMany({
-      where: { id: powerupId, status: "HELD", rerolledAt: null },
+    const claimed = await tx.racePowerup.updateMany({
+      where: {
+        id: powerupId,
+        userId,
+        raceId,
+        status: "HELD",
+        usedAt: null,
+        rarity: { not: null },
+        upgradeLevel: 0,
+        rerolledAt: null,
+      },
       data: {
         type: rolled.type,
         rarity: rolled.rarity,
@@ -357,6 +404,7 @@ function buildRerollMysteryBox(dependencies = {}) {
     // per-viewer overlay from a live findSlotPowerups read, not from the shared
     // cached snapshot, so there is nothing stale to drop.
     return { id: powerupId, type: rolled.type, rarity: rolled.rarity, rerolled: true };
+    }, { maxWait: 10_000, timeout: 20_000 });
   };
 }
 

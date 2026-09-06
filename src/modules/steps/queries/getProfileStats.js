@@ -68,15 +68,48 @@ function buildGetProfileStats(dependencies = {}) {
             AND rp.forfeited_at IS NULL
             AND r.status = 'completed'::"RaceStatus"
         ) placements
+      ),
+      race_stats AS (
+        SELECT
+          COUNT(*) FILTER (WHERE COALESCE(rp.raw_steps, 0) > 0)::bigint AS races_competed,
+          COUNT(*) FILTER (
+            WHERE COALESCE(rp.raw_steps, 0) > 0
+              AND rp.forfeited_at IS NULL
+              AND rp.placement = 1
+              AND competitors.accepted_count >= 2
+          )::bigint AS first_place_wins,
+          COUNT(*) FILTER (
+            WHERE COALESCE(rp.raw_steps, 0) > 0
+              AND rp.forfeited_at IS NULL
+              AND rp.placement BETWEEN 1 AND 3
+              AND competitors.accepted_count >= 2
+          )::bigint AS podium_finishes
+        FROM race_participants rp
+        JOIN races r ON r.id = rp.race_id
+        JOIN LATERAL (
+          SELECT COUNT(*)::integer AS accepted_count
+          FROM race_participants competitor
+          WHERE competitor.race_id = rp.race_id
+            AND competitor.status = 'accepted'::"RaceParticipantStatus"
+        ) competitors ON TRUE
+        WHERE rp.user_id = ${userId}
+          AND rp.status = 'accepted'::"RaceParticipantStatus"
+          AND r.status = 'completed'::"RaceStatus"
+          AND r.seed_id IS NULL
+          AND r.seeded_bucket_id IS NULL
       )
       SELECT
         totals.*,
         (SELECT COALESCE(MAX(length), 0) FROM streak)::bigint AS prior_streak,
         podiums.first_count,
         podiums.second_count,
-        podiums.third_count
+        podiums.third_count,
+        race_stats.races_competed,
+        race_stats.first_place_wins,
+        race_stats.podium_finishes
       FROM totals
       CROSS JOIN podiums
+      CROSS JOIN race_stats
     `;
     const row = rows[0] || {};
     const thisWeek = toSafeInteger(row.this_week);
@@ -85,6 +118,8 @@ function buildGetProfileStats(dependencies = {}) {
     const weekDays = toSafeInteger(row.week_days);
     const monthDays = toSafeInteger(row.month_days);
     const yearDays = toSafeInteger(row.year_days);
+    const racesCompeted = Math.max(0, toSafeInteger(row.races_competed));
+    const firstPlaceWins = Math.max(0, toSafeInteger(row.first_place_wins));
     return {
       contract: "profile-stats-v1",
       thisWeek,
@@ -102,6 +137,13 @@ function buildGetProfileStats(dependencies = {}) {
         second: Math.max(0, toSafeInteger(row.second_count)),
         third: Math.max(0, toSafeInteger(row.third_count)),
       },
+      racesCompeted,
+      firstPlaceWins,
+      podiumFinishes: Math.max(0, toSafeInteger(row.podium_finishes)),
+      winRate:
+        racesCompeted > 0
+          ? Math.round((firstPlaceWins / racesCompeted) * 10_000) / 10_000
+          : 0.0,
     };
   };
 }

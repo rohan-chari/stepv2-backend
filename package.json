@@ -47,6 +47,7 @@
     "capacity": "node scripts/capacity.js",
     "capacity:home": "node scripts/home-capacity-workflow.js",
     "capacity:db": "node scripts/capacity-db.js",
+    "capacity:global-event-sync": "node scripts/global-event-sync-capacity.js",
     "load-test": "node scripts/load-test.js",
     "load-test:k6:event-open": "node scripts/k6-event-open.js",
     "load-test:k6:home-open": "node scripts/k6-home-open.js",

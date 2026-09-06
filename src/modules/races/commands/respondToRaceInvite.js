@@ -4,7 +4,9 @@ const { Steps } = require("../../steps/models/steps");
 const { User } = require("../../users");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
-const { prisma: defaultPrisma } = require("../../../db");
+const { prisma: defaultPrisma, deferUntilAfterCommit } = require("../../../db");
+const { invalidateUser: defaultInvalidateRaceListUser } = require("../services/raceListCache");
+const authMeCache = require("../../users/services/authMeCache");
 const {
   buildAtomicHoldFn,
   ensureUserCanAfford,
@@ -67,6 +69,12 @@ function buildRespondToRaceInvite(dependencies = {}) {
   const appendDomainEvent = dependencies.appendDomainEvent ||
     (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const db = dependencies.prisma || defaultPrisma;
+  const invalidateRaceListUser =
+    dependencies.invalidateRaceListUser ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultInvalidateRaceListUser);
+  const invalidateAuthUser =
+    dependencies.invalidateAuthUser ||
+    (Object.keys(dependencies).length > 0 ? async () => null : authMeCache.invalidateSafe);
   const useTransactionalMutation =
     dependencies.prisma != null || !dependencies.RaceParticipant;
   const acquireWriteFence =
@@ -98,6 +106,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
     raceId,
     accept,
     team = null,
+    subscribeToSeries = false,
     clientFeatures = null,
   }) {
     const race = await raceModel.findById(raceId);
@@ -133,6 +142,25 @@ function buildRespondToRaceInvite(dependencies = {}) {
         400,
         "ALREADY_RESPONDED"
       );
+    }
+    if (accept && subscribeToSeries === true) {
+      const features = clientFeatures instanceof Set
+        ? clientFeatures
+        : new Set(clientFeatures || []);
+      if (!features.has("recurring_races_v1")) {
+        throw new RaceInviteResponseError(
+          "Update the app to join recurring races.",
+          400,
+          "UPDATE_REQUIRED",
+        );
+      }
+      if (!race.seriesId) {
+        throw new RaceInviteResponseError(
+          "This invite does not belong to a recurring race.",
+          400,
+          "INVALID_REQUEST",
+        );
+      }
     }
     // Fast deterministic rejection for an already-expired row. The conditional
     // write below repeats this predicate atomically for the boundary race.
@@ -326,6 +354,47 @@ function buildRespondToRaceInvite(dependencies = {}) {
               data: updateFields,
             });
             if (claimed.count !== 1) return null;
+            if (subscribeToSeries === true) {
+              const activeSubscription = await tx.raceSeriesSubscription.findFirst({
+                where: { userId, active: true, seriesId: { not: race.seriesId } },
+                select: { id: true },
+              });
+              if (activeSubscription) {
+                throw new RaceInviteResponseError(
+                  "You already belong to an active recurring race series.",
+                  409,
+                  "RECURRING_SUBSCRIPTION_LIMIT",
+                );
+              }
+              const existingSubscription = await tx.raceSeriesSubscription.findUnique({
+                where: { seriesId_userId: { seriesId: race.seriesId, userId } },
+              });
+              if (existingSubscription) {
+                await tx.raceSeriesSubscription.update({
+                  where: { id: existingSubscription.id },
+                  data: {
+                    active: true,
+                    subscribedAt: inviteResponseNow,
+                    unsubscribedAt: null,
+                  },
+                });
+              } else {
+                await tx.raceSeriesSubscription.create({
+                  data: {
+                    seriesId: race.seriesId,
+                    userId,
+                    active: true,
+                    subscribedAt: inviteResponseNow,
+                  },
+                });
+              }
+              await deferUntilAfterCommit(async () => {
+                await Promise.allSettled([
+                  invalidateRaceListUser(userId),
+                  invalidateAuthUser(userId),
+                ]);
+              });
+            }
             if (lockedRace.status === "ACTIVE") {
               await enrollIfGlobalEventActive(tx, {
                 raceId, userIds: [userId], at: inviteResponseNow,

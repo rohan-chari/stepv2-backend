@@ -9,6 +9,7 @@ const { DeviceToken } = require("../../../shared/push/deviceToken");
 const { apnsService: defaultApns } = require("../../../shared/push/apns");
 const { fcmService: defaultFcm } = require("../../../shared/push/fcm");
 const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
+const { safePublicDisplayName } = require("../../../shared/lib/displayNameValidator");
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -51,16 +52,51 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
     if (!actorName) {
       try { actorName = (await userModel.findById(actorUserId))?.displayName; } catch {}
     }
-    actorName ||= "Someone";
+    actorName = safePublicDisplayName(actorName) || "Someone";
     const multiplier = Number.isFinite(Number(data?.multiplier)) ? Number(data.multiplier) : null;
     const currentTime = now();
-    const candidates = recipients.map((userId, ordinal) => ({
+    let actorTeam = null;
+    let candidates = recipients.map((userId, ordinal) => ({
       id: crypto.randomUUID(),
       userId,
       ordinal,
       deliveryKey: `race-resolution:${raceId}:${sourceGeneration}:${actorUserId}:${userId}`,
     }));
     const claimRows = async (transaction) => {
+      const race = transaction.race?.findUnique
+        ? await transaction.race.findUnique({
+            where: { id: raceId },
+            select: { isTeamRace: true },
+          })
+        : null;
+      if (race?.isTeamRace === true) {
+        const memberships = await transaction.raceParticipant.findMany({
+          where: {
+            raceId,
+            userId: { in: [actorUserId, ...candidates.map((row) => row.userId)] },
+            status: "ACCEPTED",
+            forfeitedAt: null,
+          },
+          select: { userId: true, team: true },
+        });
+        const byUser = new Map(memberships.map((row) => [row.userId, row.team]));
+        actorTeam = byUser.get(actorUserId);
+        if (actorTeam !== "TEAM_A" && actorTeam !== "TEAM_B") return [];
+        candidates = candidates
+          .filter((candidate) => {
+            const recipientTeam = byUser.get(candidate.userId);
+            return (
+              (recipientTeam === "TEAM_A" || recipientTeam === "TEAM_B") &&
+              recipientTeam !== actorTeam
+            );
+          })
+          .map((candidate, ordinal) => ({
+            ...candidate,
+            ordinal,
+            recipientTeam: byUser.get(candidate.userId),
+          }));
+        if (candidates.length === 0) return [];
+      }
       if (participantClaim?.participantId) {
         const claimed = await transaction.raceParticipant.updateMany({
           where: { id: participantClaim.participantId, highMultiplierNotifiedAt: null },
@@ -116,8 +152,15 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
           raceId, raceName: data?.raceName ?? null, sourceGeneration,
           actorUserId, actorName, multiplier, stealthed: data?.stealthed === true,
           endsAt: data?.endsAt ?? null,
+          actorTeam,
         },
-        audience: candidates.map((candidate) => ({ recipientId: candidate.userId, facts: {} })),
+        audience: candidates.map((candidate) => ({
+          recipientId: candidate.userId,
+          facts: {
+            actorTeam,
+            recipientTeam: candidate.recipientTeam ?? null,
+          },
+        })),
       });
       return candidates.map(({ userId }) => ({ userId }));
     };

@@ -2,11 +2,19 @@ const { resolveContestBanner } = require("../../giveaways");
 const { isAllowedBannerMessage } = require("../../giveaways/services/validation");
 
 async function buildServiceBanner({ settings, prisma, supportsReferralContest, now = new Date() }) {
-  const [enabled, rawMessage, rawSlug] = await Promise.all([
-    settings.getFlag("homeServiceBannerEnabled"),
-    settings.getFlag("homeServiceBannerMessage"),
-    settings.getFlag("homeServiceBannerContestSlug"),
-  ]);
+  const keys = [
+    "homeServiceBannerEnabled",
+    "homeServiceBannerMessage",
+    "homeServiceBannerContestSlug",
+  ];
+  const shared = typeof settings.getSharedFlags === "function"
+    ? await settings.getSharedFlags(keys)
+    : Object.fromEntries(await Promise.all(
+        keys.map(async (key) => [key, await settings.getFlag(key)]),
+      ));
+  const enabled = shared.homeServiceBannerEnabled;
+  const rawMessage = shared.homeServiceBannerMessage;
+  const rawSlug = shared.homeServiceBannerContestSlug;
   if (enabled !== true || typeof rawMessage !== "string") return null;
   const message = rawMessage.trim();
   if (message.length < 1 || message.length > 240) return null;

@@ -2,6 +2,13 @@ const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { createRace: defaultCreateRace } = require("./commands/createRace");
 const {
+  createRecurringRace: defaultCreateRecurringRace,
+  assertRecurringSeriesToggle,
+} = require("./commands/createRecurringRace");
+const {
+  createRaceRematch: defaultCreateRaceRematch,
+} = require("./commands/createRaceRematch");
+const {
   inviteToRace: defaultInviteToRace,
 } = require("./commands/inviteToRace");
 const {
@@ -223,6 +230,10 @@ const { prisma: defaultPrisma } = require("../../db");
 const {
   raceLaunchAuxiliaryBatch,
 } = require("./services/raceLaunchAuxiliaryBatch");
+const {
+  buildAttachRaceViewerState,
+  attachRaceViewerState: defaultAttachRaceViewerState,
+} = require("./queries/attachRaceViewerState");
 
 // A powerup is STEALABLE via Pickpocket only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -274,6 +285,10 @@ function createRacesRouter(dependencies = {}) {
   const performanceQueryCounter = dependencies.performanceQueryCounter || null;
 
   const createRace = dependencies.createRace || defaultCreateRace;
+  const createRecurringRace =
+    dependencies.createRecurringRace || defaultCreateRecurringRace;
+  const createRaceRematch =
+    dependencies.createRaceRematch || defaultCreateRaceRematch;
   const inviteToRace = dependencies.inviteToRace || defaultInviteToRace;
   const respondToRaceInvite =
     dependencies.respondToRaceInvite || defaultRespondToRaceInvite;
@@ -329,6 +344,16 @@ function createRacesRouter(dependencies = {}) {
   const getRaceInvitePreflight =
     dependencies.getRaceInvitePreflight || defaultGetRaceInvitePreflight;
   const settings = dependencies.appSettings || appSettings;
+  const hasInjectedRaceProjection =
+    typeof dependencies.getRaceDetails === "function" ||
+    typeof dependencies.getRaces === "function";
+  const attachRaceViewerState =
+    dependencies.attachRaceViewerState ||
+    (dependencies.prisma
+      ? buildAttachRaceViewerState(dependencies)
+      : hasInjectedRaceProjection
+        ? async (value) => value
+        : defaultAttachRaceViewerState);
   const seededBuckets = dependencies.seededBuckets || buildSeededRaceBuckets(dependencies);
   const racePayoutDoubleModel =
     dependencies.RacePayoutDouble ||
@@ -714,8 +739,10 @@ function createRacesRouter(dependencies = {}) {
         team,
         creationSource,
         startPolicy,
+        recurringSeries,
       } = req.body;
-      const create = () => createRace({
+      assertRecurringSeriesToggle(recurringSeries);
+      const createInput = {
         userId: req.user.id,
         name,
         maxDurationDays,
@@ -739,7 +766,19 @@ function createRacesRouter(dependencies = {}) {
         clientFeatures: req.clientFeatures,
         creationSource,
         startPolicy,
-      });
+      };
+      if (recurringSeries === true) {
+        const result = await createRecurringRace({
+          userId: req.user.id,
+          idempotencyKey:
+            req.headers["idempotency-key"] ?? req.body?.idempotencyKey,
+          input: createInput,
+          timeZone: req.timeZone,
+          clientFeatures: req.clientFeatures,
+        });
+        return res.status(result.replay ? 200 : 201).json(result.response);
+      }
+      const create = () => createRace(createInput);
       const race = supportsNextRace(req.clientFeatures) &&
         hasAnyQuickMetadata({ creationSource, startPolicy })
         ? await withQuickMembershipLock(req.user.id, create)
@@ -765,10 +804,29 @@ function createRacesRouter(dependencies = {}) {
           .status(status)
           .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
+      if (error?.statusCode && error?.code) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       console.error("Create race error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  router.post("/:raceId/rematch", asyncHandler(async (req, res) => {
+    const result = await createRaceRematch({
+      requesterId: req.user.id,
+      sourceRaceId: req.params.raceId,
+      idempotencyKey:
+        req.headers["idempotency-key"] ?? req.body?.idempotencyKey,
+      timeZone: req.timeZone,
+      clientFeatures: req.clientFeatures,
+    });
+    res.status(result.replay ? 200 : 201).json(result.response);
+  }));
 
   // Fresh invite decision check for the Races-tab gate. This must precede the
   // full list: the gate needs only pending invitation cards, not list payload.
@@ -922,6 +980,7 @@ function createRacesRouter(dependencies = {}) {
           logger.error("Build review opportunities error:", error);
         }
       }
+      await attachRaceViewerState(result, req.user.id);
       res.json(compactRaceListEnabled ? compactRaceList(result) : result);
     } catch (error) {
       console.error("Get races error:", error);
@@ -1446,6 +1505,7 @@ function createRacesRouter(dependencies = {}) {
           ? race.participants.length
           : 0;
         capacityOutcome = "success";
+        await attachRaceViewerState(race, req.user.id);
         return res.json({
           contract: "race-bootstrap-v1",
           race,
@@ -1513,6 +1573,7 @@ function createRacesRouter(dependencies = {}) {
         globalPowerupInventory:
           inventoryResult.status === "fulfilled" ? inventoryResult.value : null,
       };
+      await attachRaceViewerState(body.race, req.user.id);
       if (resolvedContext.race?._leanProgressProjection) {
         const hydratedIds = new Set([
           ...(Array.isArray(race?.participants)
@@ -1581,6 +1642,8 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         includeUser: req.query.includeUser !== "false",
         limit: req.query.limit,
+        audience: req.query.audience || "ALL",
+        teamChatCapable: req.clientFeatures?.has("team_chat_v1") === true,
       });
       if (!conditional) return res.json(result);
       const revision = messageStreamsRevision(result);
@@ -1600,7 +1663,10 @@ function createRacesRouter(dependencies = {}) {
       });
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
       }
       logger.error("Race message streams error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -1643,6 +1709,7 @@ function createRacesRouter(dependencies = {}) {
         null,
         raceDetailsPagingOptions(req)
       );
+      await attachRaceViewerState(result, req.user.id);
       res.json(result);
     } catch (error) {
       if (error.statusCode) {
@@ -1681,11 +1748,12 @@ function createRacesRouter(dependencies = {}) {
   // PUT /races/:raceId/respond
   router.put("/:raceId/respond", async (req, res) => {
     try {
-      const { accept, team } = req.body;
+      const { accept, team, subscribeToSeries } = req.body;
       const participant = await respondToRaceInvite({
         userId: req.user.id,
         raceId: req.params.raceId,
         accept,
+        subscribeToSeries,
         // Team races (TR-201): side is required when accepting; ignored otherwise.
         team: team || null,
         clientFeatures: req.clientFeatures,
@@ -2484,6 +2552,8 @@ function createRacesRouter(dependencies = {}) {
           limit: parsedLimit,
           kind: parsedKind,
           timelineV1,
+          audience: req.query.audience || "ALL",
+          teamChatCapable: req.clientFeatures?.has("team_chat_v1") === true,
         }),
       );
       returnedItems =
@@ -2493,7 +2563,10 @@ function createRacesRouter(dependencies = {}) {
       res.json(timelineV1 ? { ...result, timelineVersion: 1 } : result);
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
       }
       console.error("Get race messages error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -2512,18 +2585,23 @@ function createRacesRouter(dependencies = {}) {
   // POST /races/:raceId/messages
   router.post("/:raceId/messages", async (req, res) => {
     try {
-      const { body } = req.body;
+      const { body, audience = "ALL" } = req.body;
       const message = await sendRaceMessage({
         userId: req.user.id,
         raceId: req.params.raceId,
         body,
+        audience,
+        teamChatCapable: req.clientFeatures?.has("team_chat_v1") === true,
       });
       res.status(201).json({ message });
     } catch (error) {
       if (error.name === "RaceMessageError") {
         return res
           .status(error.statusCode || 400)
-          .json({ error: error.message });
+          .json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+          });
       }
       console.error("Send race message error:", error);
       res.status(500).json({ error: "Internal server error" });

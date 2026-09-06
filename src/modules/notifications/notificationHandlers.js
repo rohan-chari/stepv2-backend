@@ -18,6 +18,7 @@ const {
 const {
   buildSilentRefreshDelivery,
 } = require("./services/silentRefreshDelivery");
+const { safePublicDisplayName } = require("../../shared/lib/displayNameValidator");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
 const INBOX_VISIBLE_TYPES = new Set([
@@ -245,7 +246,7 @@ function registerNotificationHandlers(dependencies = {}) {
     try {
       const user = await userModel.findById(userId);
       if (user && user.displayName) {
-        actorName = user.displayName;
+        actorName = safePublicDisplayName(user.displayName) || "Someone";
       }
     } catch {}
 
@@ -1128,7 +1129,7 @@ function registerNotificationHandlers(dependencies = {}) {
 
       const now = new Date();
       const collapseId = `race_chat_${raceId}`;
-      const senderLabel = senderName || "Someone";
+      const senderLabel = safePublicDisplayName(senderName) || "Someone";
       const previewBody = body && body.length > 120 ? `${body.slice(0, 117)}…` : body;
       const alertBody = `${senderLabel}: ${previewBody}`;
 
@@ -1545,7 +1546,7 @@ function registerNotificationHandlers(dependencies = {}) {
       const stealthed = data?.stealthed === true;
       const name = stealthed
         ? "???"
-        : actorName || (await findActorName(actorUserId));
+        : safePublicDisplayName(actorName) || (await findActorName(actorUserId));
       const mult = Number.isFinite(Number(multiplier)) ? Number(multiplier) : null;
       const title = "🔥 Someone's heating up";
       const body =
@@ -1654,7 +1655,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: null,
         title: "The bracket is set!",
         buildBody: () =>
-          `Round 1: you vs ${opponentName}. ${days}d. Go!`,
+          `Round 1: you vs ${safePublicDisplayName(opponentName) || "Name unavailable"}. ${days}d. Go!`,
         payload: {
           type: "TOURNAMENT_STARTED",
           route: "race_detail",
@@ -1678,7 +1679,7 @@ function registerNotificationHandlers(dependencies = {}) {
         recipientUserId: userId,
         actorUserId: null,
         title: `${label}!`,
-        buildBody: () => `You drew ${opponentName}. ${days}d on the clock.`,
+        buildBody: () => `You drew ${safePublicDisplayName(opponentName) || "Name unavailable"}. ${days}d on the clock.`,
         payload: {
           type: "TOURNAMENT_ROUND_STARTED",
           route: "race_detail",
@@ -1727,7 +1728,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: null,
         title: "Knocked out",
         buildBody: () =>
-          `Knocked out in the ${label} by ${opponentName}. Follow the bracket to the end!`,
+          `Knocked out in the ${label} by ${safePublicDisplayName(opponentName) || "Name unavailable"}. Follow the bracket to the end!`,
         payload: {
           type: "TOURNAMENT_ELIMINATED",
           route: "tournament_detail",
@@ -1779,7 +1780,7 @@ function registerNotificationHandlers(dependencies = {}) {
         recipientUserId: userId,
         actorUserId: null,
         title: "Tournament over",
-        buildBody: () => `${championName} took the crown in ${tournamentName}.`,
+        buildBody: () => `${safePublicDisplayName(championName) || "Name unavailable"} took the crown in ${tournamentName}.`,
         payload: {
           type: "TOURNAMENT_COMPLETED",
           route: "tournament_detail",

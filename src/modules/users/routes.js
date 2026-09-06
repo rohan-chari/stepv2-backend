@@ -56,6 +56,7 @@ const {
 const {
   validateDisplayName,
   DISPLAY_NAME_MIN_LENGTH,
+  containsDisplayNameProfanity,
 } = require("../../shared/lib/displayNameValidator");
 const { isAdminUser, withAdminFlag } = require("../admin");
 const {
@@ -235,6 +236,10 @@ function createAuthRouter(dependencies = {}) {
     const clientSafeUser = serializeAuthenticatedUser(user);
     return {
       ...clientSafeUser,
+      capabilities: {
+        recurringRacesV1: true,
+        teamChatV1: true,
+      },
       featureFlags: {
         bannerAdsEnabled: await safeFlag("bannerAdsEnabled", true),
         dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),
@@ -591,6 +596,18 @@ function createAuthRouter(dependencies = {}) {
         load: assemble,
       });
 
+      // The rename gate is a security/remediation decision, not ordinary
+      // presentation data. Re-evaluate it from the authoritative stored name
+      // even when the assembled auth envelope is warm so an administratively
+      // discovered legacy name is gated on the very next app open.
+      const currentName = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { displayName: true },
+      });
+      user.displayNameRequiresRename = containsDisplayNameProfanity(
+        currentName?.displayName,
+      );
+
       res.json(
         compact
           ? { contract: "auth-shell-v1", user: serializeAuthShellUser(user) }
@@ -711,7 +728,12 @@ function createAuthRouter(dependencies = {}) {
     if (displayName !== null) {
       const validation = validateDisplayName(displayName);
       if (!validation.isValid) {
-        return res.status(400).json({ error: validation.error });
+        return res.status(400).json({
+          error: validation.code === "DISPLAY_NAME_PROFANE"
+            ? "Choose a name without profanity."
+            : validation.error,
+          ...(validation.code ? { code: validation.code } : {}),
+        });
       }
 
       try {
@@ -1004,7 +1026,13 @@ function createAuthRouter(dependencies = {}) {
 
     const validation = validateDisplayName(name);
     if (!validation.isValid) {
-      return res.json({ available: false, reason: validation.error });
+      return res.json({
+        available: false,
+        reason: validation.code === "DISPLAY_NAME_PROFANE"
+          ? "Choose a name without profanity."
+          : validation.error,
+        ...(validation.code ? { code: validation.code } : {}),
+      });
     }
 
     const existing = await UserModel.findByDisplayNameInsensitive(

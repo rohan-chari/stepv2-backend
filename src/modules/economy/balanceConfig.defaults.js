@@ -181,6 +181,9 @@ const DEFAULT_CONFIG = {
       // Also removed from storeOnlyTypes below — the two lists are the
       // disjoint authorities and BOTH had to change (D13).
       "POWER_OUTAGE",
+      // Decoy is a rolled solo defense as of the 2026-09-06 balance. Its
+      // relative weight and trailer adjustment are pinned below.
+      "DECOY",
     ],
   },
 
@@ -212,7 +215,6 @@ const DEFAULT_CONFIG = {
     "GHOST_PEPPER",
     "COIN_FLIP",
     "MYSTERY_POTION",
-    "DECOY",
     // POWER_OUTAGE deliberately ABSENT (batch 2026-08-09 item 6): it is now
     // box-droppable as a RARE. This list and the code default are UNIONED by
     // enforceStoreOnlyExclusion on every config load, so leaving it here would
@@ -305,6 +307,7 @@ const DEFAULT_CONFIG = {
   // total probability and the position curve are untouched.
   typeWeights: {
     RED_CARD: 0.5,
+    DECOY: 0.5,
   },
 
   // Position-aware drop rules. These act STRICTLY WITHIN an already-chosen
@@ -341,7 +344,12 @@ const DEFAULT_CONFIG = {
     leadingDownweight: { RUNNERS_HIGH: 0.5, POWER_OUTAGE: 0.3 },
     // Applied toward the BACK. These depend on being attacked, which is rare at
     // the back of the field.
-    trailingDownweight: { CLEANSE: 0.5, MIRROR: 0.5, STEALTH_MODE: 0.5 },
+    trailingDownweight: {
+      CLEANSE: 0.5,
+      MIRROR: 0.5,
+      STEALTH_MODE: 0.5,
+      DECOY: 0.5,
+    },
 
     // Normalized position (0 = leader, 1 = last) at which each down-weight group
     // reaches full strength. Between the threshold and mid-field the multiplier

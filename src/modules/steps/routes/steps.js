@@ -444,9 +444,10 @@ function createStepsRouter(dependencies = {}) {
       const monthStart = `${parts.year}-${String(parts.month).padStart(2, "0")}-01`;
       const yearStart = `${parts.year}-01-01`;
 
-      const compact =
-        req.query.view === "profile-v1" &&
-        (await isStrictFlagEnabled(settings, "apiProfileStatsV1Enabled"));
+      // profile-v1 is a permanent additive contract. The rollout flag remains
+      // known for frozen deployments, but a client explicitly requesting this
+      // view must never fall through to the legacy response shape.
+      const compact = req.query.view === "profile-v1";
       if (compact) {
         const profile = await getProfileStats({
           userId: req.user.id,

@@ -168,10 +168,11 @@ test("the down-weight makes a leader strictly less likely to draw POWER_OUTAGE t
   );
 });
 
-// The swap must be odds-neutral for everyone else: Fanny Pack out, Power Outage
-// in, same RARE tier size, so no other type's share moved.
-test("the FANNY_PACK -> POWER_OUTAGE swap leaves the RARE tier size unchanged", () => {
-  assert.equal(CFG.dropPool.RARE.length, 10);
+// The earlier Fanny Pack -> Power Outage swap stayed size-neutral. This release
+// deliberately adds Decoy as an eleventh weighted RARE result.
+test("the RARE tier includes the additive Decoy roll", () => {
+  assert.equal(CFG.dropPool.RARE.length, 11);
+  assert.ok(CFG.dropPool.RARE.includes("DECOY"));
 });
 
 // ---------------------------------------------------------------------------

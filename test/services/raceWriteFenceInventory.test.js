@@ -59,6 +59,16 @@ test("new-race participant writers establish the shared C0 row before membership
       "acquireRaceWriteFence(tx, race.id)",
       "tx.raceParticipant.create({",
     ],
+    [
+      "src/modules/races/commands/createRaceRematch.js",
+      "acquireRaceWriteFence(tx, created.id)",
+      "tx.raceParticipant.createMany({",
+    ],
+    [
+      "src/modules/races/jobs/raceSeriesRenewal.js",
+      "acquireRaceWriteFence(tx, created.id)",
+      "tx.raceParticipant.create({",
+    ],
   ]) {
     const text = source(relativePath);
     const fenceIndex = text.indexOf(fence);
@@ -72,6 +82,8 @@ test("new-race participant writers establish the shared C0 row before membership
 const MEMBERSHIP_WRITER_LOCK_INVENTORY = [
   ["src/modules/races/commands/createRace.js", ["lockFundedExposureUsers", "acquireRaceWriteFence"], "participantModel.create({"],
   ["src/modules/races/commands/inviteToRace.js", ["acquireWriteFence", "lockFundedExposureUsers"], "raceParticipant.createMany"],
+  ["src/modules/races/commands/createRaceRematch.js", ["acquireRaceWriteFence"], "raceParticipant.createMany"],
+  ["src/modules/races/jobs/raceSeriesRenewal.js", ["acquireRaceWriteFence", "lockFundedExposureUsers"], "raceParticipant.create"],
   ["src/modules/tournaments/commands/createTournament.js", ["lockFundedExposureUsers"], "participants: {"],
   ["src/modules/tournaments/commands/inviteToTournament.js", ["withTournamentLock", "userIds:"], "tournamentParticipant.create"],
   ["src/modules/tournaments/commands/joinTournamentCore.js", ["withTournamentLock", "resolveUserIds:"], "tournamentParticipant.create"],
@@ -120,6 +132,7 @@ test("tournament advancement guards every surviving user before the tournament r
 // production helpers so the guard cannot satisfy itself.
 const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
+  "src/modules/loadTesting/globalEventSyncFixture.js": ["raceParticipant.deleteMany"],
   "src/modules/loadTesting/racesTabOpenFixtures.js": [
     "raceParticipant.deleteMany",
     "tournamentParticipant.deleteMany",
@@ -140,6 +153,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/commands/cancelRace.js": ["participantModel.update"],
   "src/modules/races/commands/completeRace.js": ["participantModel.update", "raceParticipant.updateMany", "tournamentParticipant.update", "tournamentParticipant.update"],
   "src/modules/races/commands/createRace.js": ["participantModel.create"],
+  "src/modules/races/commands/createRaceRematch.js": ["raceParticipant.createMany"],
   "src/modules/races/commands/forfeitRace.js": ["raceParticipant.updateMany"],
   "src/modules/races/commands/inviteToRace.js": ["participantModel.createMany", "raceParticipant.createMany"],
   "src/modules/races/commands/joinRaceCore.js": ["participantModel.create", "raceParticipant.create"],
@@ -150,11 +164,12 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/commands/setRaceChatMute.js": ["raceParticipant.update", "raceParticipant.update"],
   "src/modules/races/commands/setRacePlacementMute.js": ["raceParticipant.update"],
   "src/modules/races/commands/startRace.js": ["participantModel.update"],
-  "src/modules/races/commands/switchRaceTeam.js": ["participantModel.update"],
+  "src/modules/races/commands/switchRaceTeam.js": ["participantModel.update", "raceParticipant.update"],
   "src/modules/races/jobs/placementRecompute.js": ["participantModel.update", "participantModel.update", "participantModel.update", "participantModel.update"],
   "src/modules/races/jobs/raceAdminCommandRunner.js": ["raceParticipant.create", "raceParticipant.update"],
   "src/modules/races/jobs/raceExpiry.js": ["raceParticipant.update", "raceParticipant.update"],
   "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update", "raw.race_participants.update", "raw.race_participants.update"],
+  "src/modules/races/jobs/raceSeriesRenewal.js": ["raceParticipant.create"],
   "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raw.race_participants.update", "raw.race_participants.update"],
   "src/modules/races/models/racePlacementBaseline.js": ["raw.race_participants.update"],
@@ -372,6 +387,7 @@ const SERIALIZED_MEMBERSHIP_LOCK_OWNERS = {
   "src/modules/races/commands/autoJoinFeaturedRaces.js": ["src/modules/races/commands/autoJoinFeaturedRaces.js", ["acquireWriteFence", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers"]],
   "src/modules/races/commands/completeRace.js": ["src/modules/races/commands/completeRace.js", ["acquireRaceWriteFence", "lockFundedExposureUsers", "FOR UPDATE"]],
   "src/modules/races/commands/createRace.js": ["src/modules/races/commands/createRace.js", ["lockFundedExposureUsers", "acquireRaceWriteFence"]],
+  "src/modules/races/commands/createRaceRematch.js": ["src/modules/races/commands/createRaceRematch.js", ["createRace\\(\\{", "acquireRaceWriteFence"]],
   "src/modules/races/commands/forfeitRace.js": ["src/modules/races/commands/forfeitRace.js", ["acquireWriteFence", "lockFundedExposureUsers"]],
   "src/modules/races/commands/inviteToRace.js": ["src/modules/races/commands/inviteToRace.js", ["acquireWriteFence", "lockFundedExposureUsers"]],
   "src/modules/races/commands/joinRaceCore.js": ["src/modules/races/services/raceJoinLock.js", ["acquireFundedMembershipRaceWriteFences", "lockFundedExposureUsers", "lockCompetitionRows"]],
@@ -379,6 +395,7 @@ const SERIALIZED_MEMBERSHIP_LOCK_OWNERS = {
   "src/modules/races/commands/leaveRace.js": ["src/modules/races/commands/leaveRace.js", ["acquireWriteFence", "lockFundedExposureUsers"]],
   "src/modules/races/commands/respondToRaceInvite.js": ["src/modules/races/commands/respondToRaceInvite.js", ["acquireWriteFence", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers"]],
   "src/modules/races/jobs/raceAdminCommandRunner.js": ["src/modules/races/jobs/raceAdminCommandRunner.js", ["acquireRaceWriteFence", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers", "lockCompetitionRows"]],
+  "src/modules/races/jobs/raceSeriesRenewal.js": ["src/modules/races/jobs/raceSeriesRenewal.js", ["createRace\\(\\{", "acquireRaceWriteFence", "lockFundedExposureUsers"]],
   "src/modules/races/jobs/seededRaceRenewal.js": ["src/modules/races/jobs/seededRaceRenewal.js", ["acquireRaceWriteFence", "lockFundedExposureUsers"]],
   "src/modules/races/services/commitRaceStart.js": ["src/modules/races/services/commitRaceStart.js", ["acquireRaceWriteFence", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers"]],
   "src/modules/races/services/seededRaceBuckets.js": ["src/modules/races/services/seededRaceBuckets.js", ["acquireRaceWriteFence", "lockFundedExposureUsers"]],
@@ -417,6 +434,7 @@ const INDIRECT_MEMBERSHIP_LOCK_OWNERS = {
 
 const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/loadTesting/fixtures.js",
+  "src/modules/loadTesting/globalEventSyncFixture.js",
   "src/modules/loadTesting/racesTabOpenFixtures.js",
   "src/modules/notifications/dailyMover.js",
   "src/modules/powerups/commands/openMysteryBox.js",

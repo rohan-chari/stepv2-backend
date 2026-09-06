@@ -614,6 +614,29 @@ function buildAppSettings(dependencies = {}) {
     }
   }
 
+  // Home's manually edited service banner needs immediate cross-worker
+  // visibility. This deliberately bypasses the 30-second process-local map and
+  // consults the versioned shared settings value, falling through to Postgres
+  // whenever Redis is absent or unhealthy.
+  async function getSharedFlags(keys) {
+    const requested = [...new Set(keys || [])].filter((key) => key in KNOWN_FLAGS);
+    const rows = await derivedCache.cachedRead({
+      key: cacheKeys.appSettingsKey,
+      prefix: cacheKeys.PREFIX.APP_SETTINGS,
+      ttlSeconds: CATALOG_TTL_SECONDS,
+      enabled: true,
+      load: readRows,
+    });
+    return Object.fromEntries(requested.map((key) => {
+      const fallback = KNOWN_FLAGS[key];
+      const value = rows?.[key];
+      if (typeof fallback === "boolean") {
+        return [key, typeof value === "boolean" ? value : fallback];
+      }
+      return [key, value === undefined ? fallback : value];
+    }));
+  }
+
   // Raw stored value of a setting, or undefined if no row exists (NO default
   // substitution). Used by numeric flags (stepSampleBucketMinutes) whose served
   // shape must distinguish "explicitly stored" from "absent" so the client can
@@ -960,6 +983,7 @@ function buildAppSettings(dependencies = {}) {
 
   return {
     getFlag,
+    getSharedFlags,
     getRawFlag,
     getRawFlagState,
     getUncachedFlag,

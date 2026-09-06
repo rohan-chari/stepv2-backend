@@ -93,8 +93,31 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
         });
         if (existing) return idempotentResult(existing);
 
+        const decoyRequest = String(sku).toUpperCase() === "POWERUP_DECOY";
+        const grandfatheredGrant = decoyRequest
+          ? await tx.adRewardGrant.findFirst({
+              where: {
+                userId,
+                rewardKind: POWERUP_UNLOCK_REWARD_KIND,
+                shopItemId: sku,
+                consumedAt: null,
+              },
+              select: { id: true },
+            })
+          : null;
+        if (decoyRequest && !grandfatheredGrant) {
+          throw new UnlockWithAdsError(
+            "Decoy is no longer for sale.",
+            409,
+            "POWERUP_NOT_FOR_SALE",
+          );
+        }
         const item = await tx.powerupShopItem.findFirst({
-          where: { sku, active: true, ...testOnlyFilter(channel) },
+          where: {
+            sku,
+            ...(decoyRequest ? {} : { active: true }),
+            ...testOnlyFilter(channel),
+          },
         });
         if (!item) {
           throw new UnlockWithAdsError("Powerup not found", 404);

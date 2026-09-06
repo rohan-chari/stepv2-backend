@@ -14,6 +14,7 @@ const {
   request,
   getSharedServer,
 } = require("./setup");
+const { completeRace } = require("../../src/modules/races/commands/completeRace");
 
 let server;
 let nextAppleId = 0;
@@ -437,6 +438,88 @@ describe("Batch 2026-08-08 item 11 — rewarded-ad box reroll", () => {
     });
     const { status } = await reroll(alice.token, raceId, powerup.id);
     assert.equal(status, 400);
+  });
+
+  async function assertRerollAuditAtomic(powerupId, grantId) {
+    const [row, grant, audits] = await Promise.all([
+      prisma.racePowerup.findUniqueOrThrow({ where: { id: powerupId } }),
+      prisma.adRewardGrant.findUniqueOrThrow({ where: { id: grantId } }),
+      prisma.racePowerupEvent.count({
+        where: {
+          raceId,
+          actorUserId: alice.userId,
+          eventType: "POWERUP_REROLLED",
+        },
+      }),
+    ]);
+    assert.equal(Boolean(row.rerolledAt), Boolean(grant.consumedAt));
+    assert.equal(audits, grant.consumedAt ? 1 : 0);
+    return { row, grant };
+  }
+
+  it("serializes deferred reroll against using the same held powerup", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, today());
+    const [rerolled, used] = await Promise.all([
+      reroll(alice.token, raceId, powerup.id),
+      request(
+        server.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${powerup.id}/use`,
+        { token: alice.token, headers: ADS_FEATURES, body: {} },
+      ),
+    ]);
+    assert.notEqual(rerolled.status, 500);
+    assert.notEqual(used.status, 500);
+    const { row } = await assertRerollAuditAtomic(powerup.id, grant.id);
+    assert.ok(["HELD", "USED"].includes(row.status));
+  });
+
+  it("serializes deferred reroll against discarding the same held powerup", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, today());
+    const [rerolled, discarded] = await Promise.all([
+      reroll(alice.token, raceId, powerup.id),
+      request(
+        server.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${powerup.id}/discard`,
+        { token: alice.token, headers: ADS_FEATURES, body: {} },
+      ),
+    ]);
+    assert.notEqual(rerolled.status, 500);
+    assert.notEqual(discarded.status, 500);
+    const { row } = await assertRerollAuditAtomic(powerup.id, grant.id);
+    assert.equal(row.status, "DISCARDED");
+  });
+
+  it("serializes deferred reroll against canonical race completion", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, today());
+    const participants = await prisma.raceParticipant.findMany({
+      where: { raceId, status: "ACCEPTED" },
+      orderBy: { userId: "asc" },
+    });
+    await Promise.all(participants.map((participant, index) =>
+      prisma.raceParticipant.update({
+        where: { id: participant.id },
+        data: {
+          rawSteps: 2_000 - index,
+          totalSteps: 2_000 - index,
+          placement: index + 1,
+        },
+      })));
+    const [rerolled] = await Promise.all([
+      reroll(alice.token, raceId, powerup.id),
+      completeRace({
+        raceId,
+        winnerUserId: participants[0].userId,
+        participantUserIds: participants.map((row) => row.userId),
+      }),
+    ]);
+    assert.notEqual(rerolled.status, 500);
+    await assertRerollAuditAtomic(powerup.id, grant.id);
+    assert.equal((await prisma.race.findUniqueOrThrow({ where: { id: raceId } })).status, "COMPLETED");
   });
 
   it("another user's powerup -> 403", async () => {

@@ -75,6 +75,7 @@ async function createInboxAlert({
   userId, type, title, body, destination, sourceKey, now = new Date(),
   payload = null, prisma = defaultPrisma, tx = null,
   expiresAt = null,
+  replaceExisting = false,
   invalidateUnread = invalidateInboxUnread,
   publishWakeup = () => redisCache.publishNotificationWakeup({ kind: "INBOX_DELIVERY" }),
 }) {
@@ -87,7 +88,11 @@ async function createInboxAlert({
   const write = async (client) => {
     const alert = await client.inboxAlert.upsert({
       where: { userId_sourceKey: { userId, sourceKey } },
-      update: {},
+      update: replaceExisting ? {
+        title,
+        body,
+        destination: safeDestination,
+      } : {},
       create: {
         userId, type, title, body, destination: safeDestination, sourceKey,
         expiresAt: expiryFrom(now),
@@ -95,7 +100,17 @@ async function createInboxAlert({
     });
     await client.inboxDeliveryOutbox.upsert({
       where: { alertId_kind: { alertId: alert.id, kind: "PUSH" } },
-      update: expiresAt ? { expiresAt } : {},
+      update: {
+        ...(expiresAt ? { expiresAt } : {}),
+        ...(replaceExisting ? {
+          payload: {
+            title,
+            body,
+            destination: safeDestination,
+            ...(payload && typeof payload === "object" ? { payload } : {}),
+          },
+        } : {}),
+      },
       create: {
         alertId: alert.id,
         payload: {

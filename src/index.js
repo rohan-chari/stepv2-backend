@@ -68,6 +68,7 @@ const {
   scheduleRaceResolutionWorkerV2,
   scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTaskRunner,
+  scheduleRaceSeriesRenewal,
   scheduleResolvedImpactBoundaryScheduler,
   scheduleRaceAdminCommandRunner,
 } = require("./modules/races");
@@ -159,6 +160,8 @@ function startServer({
     schedulePlacementTransitions = scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTasks:
     scheduleResolutionPostTasks = scheduleRaceResolutionPostTaskRunner,
+  scheduleRaceSeriesRenewal:
+    scheduleRecurringRaceRenewal = scheduleRaceSeriesRenewal,
   scheduleResolvedImpactBoundaries:
     scheduleImpactBoundaries = scheduleResolvedImpactBoundaryScheduler,
   scheduleRaceAdminCommands:
@@ -183,6 +186,9 @@ function startServer({
   // production environment switch: it runs the complete event notification
   // path while excluding unrelated whole-base jobs from the measurement.
   capacityGlobalEventOnly = false,
+  // Capacity-only global-event step-sync profile: keep the summary and
+  // boundary schedulers alive, while excluding unrelated cron fan-outs.
+  capacityGlobalEventSync = false,
   // Injected only by the local capacity entrypoint. Production startup cannot
   // use this to suppress cron work.
   capacityHomeOpenIsolation = false,
@@ -242,6 +248,7 @@ function startServer({
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
+        retainStopHandle(scheduleRecurringRaceRenewal());
         if (!raceResolutionPostTaskWorkerDisabled()) {
           retainStopHandle(scheduleResolutionPostTasks());
         }
@@ -269,6 +276,13 @@ function startServer({
           startupBarrier: notificationAdmissionStartupBarrier,
         }));
         retainStopHandle(scheduleDeviceTokenCleanupJob());
+        return;
+      }
+      if (capacityGlobalEventSync) {
+        retainStopHandle(scheduleGlobalEvents());
+        retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
+        retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
+        retainStopHandle(scheduleGlobalSummary());
         return;
       }
       // Home-open capacity runs retain the production cron process and its
@@ -383,6 +397,7 @@ function startServer({
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
+        retainStopHandle(scheduleRecurringRaceRenewal());
       }
       // Delivery/publication groups are durable and drain independently of the
       // creation flag. The whole-runner emergency switch is checked here and

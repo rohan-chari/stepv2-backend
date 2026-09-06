@@ -8,6 +8,10 @@ const {
 const raceMessagesCache = require("../services/raceMessagesCache");
 const userPresentationCache = require("../services/userPresentationCache");
 const { appSettings } = require("../../../shared/config/appSettings");
+const { User } = require("../../users/models/user");
+const {
+  sanitizeDisplayNameSnapshots,
+} = require("../../../shared/lib/displayNameValidator");
 
 const CURSOR_VERSION = 1;
 const KIND_RANK = { USER: 1, SYSTEM: 0 };
@@ -117,11 +121,24 @@ function buildGetRaceMessages(dependencies = {}) {
     dependencies.RaceActiveEffect || RaceActiveEffect;
   const racePowerupEventModel =
     dependencies.RacePowerupEvent || RacePowerupEvent;
+  // Unit callers inject race/event models and should never fall through to a
+  // real database. Production uses the module model; tests may inject User too.
+  const rawUserModel = dependencies.User || (
+    !dependencies.Race && !dependencies.RacePowerupEvent ? User : null
+  );
 
   return async function getRaceMessages(
     userId,
     raceId,
-    { cursor, limit = 50, kind, accessContext = null, timelineV1 = false } = {}
+    {
+      cursor,
+      limit = 50,
+      kind,
+      accessContext = null,
+      timelineV1 = false,
+      audience = "ALL",
+      teamChatCapable = false,
+    } = {}
   ) {
     // Flag read is defensive: a settings failure must degrade to "no cache",
     // never to a 500 on the busiest endpoint in the product.
@@ -144,6 +161,19 @@ function buildGetRaceMessages(dependencies = {}) {
       kind === "USER" || kind === "SYSTEM" ? kind : null;
     const includeUser = normalizedKind !== "SYSTEM";
     const includeSystem = normalizedKind !== "USER";
+    const normalizedAudience = audience === "TEAM" ? "TEAM" : "ALL";
+    if (audience !== "ALL" && audience !== "TEAM") {
+      const error = new Error("Audience must be ALL or TEAM");
+      error.statusCode = 400;
+      error.code = "INVALID_REQUEST";
+      throw error;
+    }
+    if (normalizedAudience === "TEAM" && teamChatCapable !== true) {
+      const error = new Error("Update the app to use team chat.");
+      error.statusCode = 400;
+      error.code = "UPDATE_REQUIRED";
+      throw error;
+    }
     const callerSuppliedAccessContext = accessContext != null;
     const race = accessContext || (
       typeof raceModel.findMessageAccessContext === "function"
@@ -157,6 +187,23 @@ function buildGetRaceMessages(dependencies = {}) {
     }
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
+    const requestedTeam = normalizedAudience === "TEAM"
+      ? myParticipant?.team
+      : null;
+    // TEAM is a private membership-scoped stream. Resolve its stable failure
+    // before the broader read-access path (which may allow tournament
+    // spectating), so capable non-members never fall through to a generic 403
+    // or gain a private-read exception.
+    if (
+      normalizedAudience === "TEAM" &&
+      (!race.isTeamRace || myParticipant?.status !== "ACCEPTED" ||
+        myParticipant?.forfeitedAt || !["TEAM_A", "TEAM_B"].includes(requestedTeam))
+    ) {
+      const error = new Error("Team chat is unavailable.");
+      error.statusCode = 403;
+      error.code = "TEAM_CHAT_UNAVAILABLE";
+      throw error;
+    }
     if (!callerSuppliedAccessContext &&
         (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED"))) {
       // 2026-07-25 §5 — tournament spectating, identical to the relaxation
@@ -193,29 +240,6 @@ function buildGetRaceMessages(dependencies = {}) {
       }
     }
 
-    const stealthedNames = new Map();
-    if (stealthedUserIds.size > 0) {
-      for (const p of race.participants) {
-        if (stealthedUserIds.has(p.userId) && p.user?.displayName) {
-          stealthedNames.set(p.userId, p.user.displayName);
-        }
-      }
-    }
-    if (stealthedNames.size < stealthedUserIds.size) {
-      const missingIds = [...stealthedUserIds].filter(
-        (stealthedUserId) => !stealthedNames.has(stealthedUserId)
-      );
-      if (missingIds.length > 0) {
-        const names = await userPresentationCache.getMany(missingIds, true);
-        for (const stealthedUserId of missingIds) {
-          const user = names.get(stealthedUserId);
-          if (user?.displayName) {
-            stealthedNames.set(stealthedUserId, user.displayName);
-          }
-        }
-      }
-    }
-
     // C2 (spec §5 Phase C): only the exact default shape may be served from the
     // cache. A cursor, a non-50 limit, or the merged (no-`kind`) feed bypasses
     // entirely — caching unbounded query variants was explicitly rejected.
@@ -233,11 +257,15 @@ function buildGetRaceMessages(dependencies = {}) {
                 raceId,
                 kind: "USER",
                 enabled: true,
+                audience: normalizedAudience,
+                team: requestedTeam,
               })
             ).rows
           : raceMessageModel.findByRace(raceId, {
               cursor: parsedCursor,
               limit: fetchLimit,
+              audience: normalizedAudience,
+              team: requestedTeam,
             })
         : Promise.resolve([]),
       includeSystem
@@ -266,6 +294,33 @@ function buildGetRaceMessages(dependencies = {}) {
             })
         : Promise.resolve([]),
     ]);
+
+    // SYSTEM descriptions persist display-name snapshots in prose. Resolve
+    // only principals named by this bounded page so legacy-profane names and
+    // stealth are both remediated even when the access context is deliberately
+    // lean and carries only the viewer participant.
+    const eventPrincipalIds = new Set(powerupEvents.flatMap((event) => [
+      event.actorUserId,
+      event.targetUserId,
+      event.metadata?.attackerUserId,
+      event.metadata?.decoyOwnerUserId,
+      event.metadata?.redirectedUserId,
+    ]).filter(Boolean));
+    const eventPrincipalNames = new Map();
+    for (const participant of race.participants) {
+      if (participant.user?.displayName) {
+        eventPrincipalNames.set(participant.userId, participant.user.displayName);
+      }
+    }
+    const missingEventPrincipalIds = [...eventPrincipalIds].filter(
+      (principalId) => !eventPrincipalNames.has(principalId),
+    );
+    if (rawUserModel && missingEventPrincipalIds.length > 0) {
+      const users = await rawUserModel.findByIds(missingEventPrincipalIds);
+      for (const user of users) {
+        if (user.displayName) eventPrincipalNames.set(user.id, user.displayName);
+      }
+    }
 
     // Sender presentation is joined HERE, per request, from the per-user cache
     // (spec §3: "cosmetics are NOT embedded; they hydrate at read time"). The
@@ -308,6 +363,8 @@ function buildGetRaceMessages(dependencies = {}) {
         senderName,
         senderPhotoUrl,
         createdAt: m.createdAt,
+        audience: m.audience || "ALL",
+        team: m.team ?? null,
         _cursorKind: "USER",
         _cursorId: m.id,
       };
@@ -327,13 +384,12 @@ function buildGetRaceMessages(dependencies = {}) {
         e.metadata?.decoyOwnerUserId,
         e.metadata?.redirectedUserId,
       ].filter(Boolean));
-      for (const principalId of namedPrincipalIds) {
-        if (!stealthedUserIds.has(principalId)) continue;
-        const realName = stealthedNames.get(principalId);
-        if (realName && description.includes(realName)) {
-          description = description.replaceAll(realName, "???");
-        }
-      }
+      description = sanitizeDisplayNameSnapshots(
+        description,
+        namedPrincipalIds,
+        eventPrincipalNames,
+        stealthedUserIds,
+      );
       return {
         id: `evt_${e.id}`,
         kind: "SYSTEM",

@@ -156,6 +156,9 @@ test("Option H applies docs/economy.md §8 exactly, and is idempotent", () => {
     SNEAKY_SWAP: 0.5,
     CLEANSE: 0.5,
     MIRROR: 0.5,
+    // Decoy is now a RARE box roll and keeps the reviewed trailing
+    // down-weight introduced with that balance transition.
+    DECOY: 0.5,
     // Restored to full strength. It MUST be an explicit 1.0, not an omission:
     // mergeOverDefaults merges plain objects recursively, so a missing key
     // inherits the code default's 0.5 and the change silently does nothing.

@@ -5,6 +5,9 @@ const {
   suggestAvailableDisplayName,
 } = require("../services/discoverableName");
 const { ValidationError } = require("../../../shared/errors/AppError");
+const {
+  validateDisplayName,
+} = require("../../../shared/lib/displayNameValidator");
 
 class DisplayNameTakenError extends Error {
   constructor(
@@ -45,6 +48,16 @@ function buildSetDisplayName(dependencies = {}) {
     }
 
     if (displayName != null) {
+      const validation = validateDisplayName(displayName);
+      if (!validation.isValid) {
+        throw new ValidationError(
+          validation.code === "DISPLAY_NAME_PROFANE"
+            ? "Choose a name without profanity."
+            : validation.error,
+          validation.code || "DISPLAY_NAME_INVALID",
+        );
+      }
+      displayName = validation.normalized;
       const existing = await userModel.findByDisplayNameInsensitive(
         displayName,
         userId

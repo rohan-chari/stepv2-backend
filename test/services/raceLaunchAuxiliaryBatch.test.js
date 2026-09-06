@@ -15,9 +15,10 @@ test("review opportunities collapse concurrent race-list viewers", async () => {
     ];
   } } };
   const batch = createRaceLaunchAuxiliaryBatch();
+  const now = new Date("2026-09-01T00:00:00.000Z");
   const [one, two] = await Promise.all([
-    batch.loadReviewOpportunities({ prisma, userId: "u1", raceIds: ["r1"] }),
-    batch.loadReviewOpportunities({ prisma, userId: "u2", raceIds: ["r2"] }),
+    batch.loadReviewOpportunities({ prisma, userId: "u1", raceIds: ["r1"], now }),
+    batch.loadReviewOpportunities({ prisma, userId: "u2", raceIds: ["r2"], now }),
   ]);
   assert.deepEqual(one.map((row) => row.opportunityId), ["o1"]);
   assert.deepEqual(two.map((row) => row.opportunityId), ["o2"]);

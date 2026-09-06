@@ -91,13 +91,18 @@ const WELCOME_MYSTERY_BOX_DESCRIPTIONS = [
   "Welcome gift — a mystery box!",
 ];
 
-async function loadRows(raceId, kind, hiddenSystemEventTypes) {
+async function loadRows(raceId, kind, hiddenSystemEventTypes, audience = "ALL", team = null) {
   if (kind === "USER") {
     return prisma.raceMessage.findMany({
-      where: { raceId, deletedAt: null },
+      where: {
+        raceId,
+        deletedAt: null,
+        audience,
+        ...(audience === "TEAM" ? { team } : {}),
+      },
       // Sender is NOT included: presentation hydrates at read time from
       // `v1:user:cosmetics:{id}` so a rename/equip never rewrites this list.
-      select: { id: true, senderId: true, body: true, createdAt: true },
+      select: { id: true, senderId: true, body: true, createdAt: true, audience: true, team: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: CACHE_ROW_CAP,
     });
@@ -126,9 +131,15 @@ async function loadRows(raceId, kind, hiddenSystemEventTypes) {
   });
 }
 
-async function loadWatermarkRows(raceId) {
+async function loadWatermarkRows(raceId, audience = "ALL", team = null) {
   return prisma.raceMessage.findMany({
-    where: { raceId, kind: "USER", deletedAt: null },
+    where: {
+      raceId,
+      kind: "USER",
+      deletedAt: null,
+      audience,
+      ...(audience === "TEAM" ? { team } : {}),
+    },
     select: { id: true, createdAt: true },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: WATERMARK_ROW_CAP,
@@ -143,10 +154,10 @@ function projectWatermark(rows) {
   };
 }
 
-async function getWatermark({ raceId, enabled }) {
-  const dataKey = cacheKeys.raceMessageWatermark(raceId);
-  const versionKey = cacheKeys.raceMessagesVersion(raceId, "USER");
-  const load = () => loadWatermarkRows(raceId);
+async function getWatermark({ raceId, enabled, audience = "ALL", team = null }) {
+  const dataKey = cacheKeys.raceMessageWatermark(raceId, audience, team);
+  const versionKey = cacheKeys.raceMessagesVersion(raceId, "USER", audience, team);
+  const load = () => loadWatermarkRows(raceId, audience, team);
   if (!enabled || !redisCache.isEnabled()) return projectWatermark(await load());
   derivedCache.ensureSubscribed();
   if (derivedCache.isBypassed(cacheKeys.PREFIX.RACE_MESSAGES)) {
@@ -194,12 +205,12 @@ async function getWatermark({ raceId, enabled }) {
  *
  * @returns {Promise<{rows: any[], fromCache: boolean}>}
  */
-async function getRows({ raceId, kind, enabled, hiddenSystemEventTypes }) {
-  const listKey = cacheKeys.raceMessages(raceId, kind);
-  const versionKey = cacheKeys.raceMessagesVersion(raceId, kind);
+async function getRows({ raceId, kind, enabled, hiddenSystemEventTypes, audience = "ALL", team = null }) {
+  const listKey = cacheKeys.raceMessages(raceId, kind, audience, team);
+  const versionKey = cacheKeys.raceMessagesVersion(raceId, kind, audience, team);
   const dataKeys = [listKey];
-  if (kind === "USER") dataKeys.push(cacheKeys.raceMessageWatermark(raceId));
-  const load = () => loadRows(raceId, kind, hiddenSystemEventTypes);
+  if (kind === "USER") dataKeys.push(cacheKeys.raceMessageWatermark(raceId, audience, team));
+  const load = () => loadRows(raceId, kind, hiddenSystemEventTypes, audience, team);
 
   if (!enabled || !redisCache.isEnabled()) {
     return { rows: await load(), fromCache: false };
@@ -280,12 +291,12 @@ async function getRows({ raceId, kind, enabled, hiddenSystemEventTypes }) {
  *   carrying the acting change's timestamp (any newer durable identity works —
  *   spec §5 Phase C item 6).
  */
-async function invalidateKind(raceId, kind, durableRow) {
+async function invalidateKind(raceId, kind, durableRow, audience = "ALL", team = null) {
   if (!raceId) return true;
-  const listKey = cacheKeys.raceMessages(raceId, kind);
-  const versionKey = cacheKeys.raceMessagesVersion(raceId, kind);
+  const listKey = cacheKeys.raceMessages(raceId, kind, audience, team);
+  const versionKey = cacheKeys.raceMessagesVersion(raceId, kind, audience, team);
   const dataKeys = [listKey];
-  if (kind === "USER") dataKeys.push(cacheKeys.raceMessageWatermark(raceId));
+  if (kind === "USER") dataKeys.push(cacheKeys.raceMessageWatermark(raceId, audience, team));
   const marker = JSON.stringify(encodeMarker(durableRow));
 
   return derivedCache.invalidate({
@@ -304,11 +315,12 @@ async function invalidateKind(raceId, kind, durableRow) {
 /** Both kinds — used by membership changes, which alter the whole context. */
 async function invalidateRace(raceId, at = new Date()) {
   const synthetic = { id: `membership-${Date.now()}`, createdAt: at };
-  const results = await Promise.all(
-    cacheKeys.MESSAGE_KINDS.map((kind) =>
-      invalidateKind(raceId, kind, synthetic)
-    )
-  );
+  const results = await Promise.all([
+    invalidateKind(raceId, "SYSTEM", synthetic),
+    invalidateKind(raceId, "USER", synthetic, "ALL", null),
+    invalidateKind(raceId, "USER", synthetic, "TEAM", "TEAM_A"),
+    invalidateKind(raceId, "USER", synthetic, "TEAM", "TEAM_B"),
+  ]);
   return results.every(Boolean);
 }
 

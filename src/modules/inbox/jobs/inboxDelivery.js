@@ -911,6 +911,14 @@ function buildInboxDelivery(dependencies = {}) {
           data: { providerAcceptedAt: row.providerAcceptedAt || now(), acceptedTokens: [...accepted] },
         });
         if (acceptedUpdate.count !== 1) leaseLost = true;
+        const rematchEpisodeId = row.payload?.payload?.rematchEpisodeId;
+        if (!leaseLost && typeof rematchEpisodeId === "string" &&
+            prisma.raceRematchNotificationEpisode) {
+          await prisma.raceRematchNotificationEpisode.updateMany({
+            where: { id: rematchEpisodeId, providerAcceptedAt: null },
+            data: { providerAcceptedAt: row.providerAcceptedAt || now() },
+          });
+        }
       }
       if (!leaseLost && attribution?.delivery && outcomes.some((outcome) => outcome?.attributionAccepted)) {
         if (admitted) {

@@ -1,5 +1,8 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { characterPresentation } = require("../../cosmetics");
+const {
+  safePublicDisplayName,
+} = require("../../../shared/lib/displayNameValidator");
 
 const publicProfileUserSelect = {
   id: true,
@@ -50,6 +53,34 @@ function buildPublicProfileStatsQuery(db, userId, today) {
         AND rp.status = 'accepted'::"RaceParticipantStatus"
         AND rp.forfeited_at IS NULL
         AND r.status = 'completed'::"RaceStatus"
+    ), race_stats AS (
+      SELECT
+        COUNT(*) FILTER (WHERE COALESCE(rp.raw_steps, 0) > 0)::bigint AS races_competed,
+        COUNT(*) FILTER (
+          WHERE COALESCE(rp.raw_steps, 0) > 0
+            AND rp.forfeited_at IS NULL
+            AND rp.placement = 1
+            AND competitors.accepted_count >= 2
+        )::bigint AS first_place_wins,
+        COUNT(*) FILTER (
+          WHERE COALESCE(rp.raw_steps, 0) > 0
+            AND rp.forfeited_at IS NULL
+            AND rp.placement BETWEEN 1 AND 3
+            AND competitors.accepted_count >= 2
+        )::bigint AS podium_finishes
+      FROM race_participants rp
+      JOIN races r ON r.id = rp.race_id
+      JOIN LATERAL (
+        SELECT COUNT(*)::integer AS accepted_count
+        FROM race_participants competitor
+        WHERE competitor.race_id = rp.race_id
+          AND competitor.status = 'accepted'::"RaceParticipantStatus"
+      ) competitors ON TRUE
+      WHERE rp.user_id = ${userId}
+        AND rp.status = 'accepted'::"RaceParticipantStatus"
+        AND r.status = 'completed'::"RaceStatus"
+        AND r.seed_id IS NULL
+        AND r.seeded_bucket_id IS NULL
     )
     SELECT
       (SELECT COUNT(*) FROM placements WHERE effective_placement = 1)::bigint AS first_count,
@@ -58,7 +89,11 @@ function buildPublicProfileStatsQuery(db, userId, today) {
       COALESCE(
         (SELECT ROUND(AVG(s.steps))::numeric FROM steps s WHERE s.user_id = ${userId} AND s.date <= ${today}::date),
         0
-      ) AS avg_steps_per_day
+      ) AS avg_steps_per_day,
+      race_stats.races_competed,
+      race_stats.first_place_wins,
+      race_stats.podium_finishes
+    FROM race_stats
   `;
 }
 
@@ -85,6 +120,8 @@ function buildGetPublicProfile(dependencies = {}) {
 
     const today = new Date().toISOString().slice(0, 10);
     const [statsRow] = await buildPublicProfileStatsQuery(db, user.id, today);
+    const racesCompeted = safeNonNegativeInteger(statsRow?.races_competed);
+    const firstPlaceWins = safeNonNegativeInteger(statsRow?.first_place_wins);
     const { animal, accessories } = characterPresentation(
       user,
       supportsCharacters,
@@ -96,7 +133,7 @@ function buildGetPublicProfile(dependencies = {}) {
       contract: "public-profile-v1",
       user: {
         id: user.id,
-        displayName: user.displayName ?? null,
+        displayName: safePublicDisplayName(user.displayName),
         profilePhotoUrl: user.profilePhotoUrl ?? null,
         equippedAnimal: animal ?? null,
         equippedAccessories: Array.isArray(accessories) ? accessories : [],
@@ -108,6 +145,13 @@ function buildGetPublicProfile(dependencies = {}) {
           third: safeNonNegativeInteger(statsRow?.third_count),
         },
         avgStepsPerDay: safeNonNegativeNumber(statsRow?.avg_steps_per_day),
+        racesCompeted,
+        firstPlaceWins,
+        podiumFinishes: safeNonNegativeInteger(statsRow?.podium_finishes),
+        winRate:
+          racesCompeted > 0
+            ? Math.round((firstPlaceWins / racesCompeted) * 10_000) / 10_000
+            : 0.0,
       },
     };
   };

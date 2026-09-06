@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "schemaVersion": 2,
+    "postgresMajor": 17,
+    "provenanceRequired": true
+  },
+  "-4243780695296241816": {
+    "source": "src/modules/steps/services/globalEventSummaryCapture.js",
+    "function": "loadArtifactFacts",
+    "name": "dependency step-sample read",
+    "queryPattern": "step_samples"
+  },
+  "global-event-sync-scoring-lock": {
+    "source": "src/modules/steps/services/globalEventSummaryCapture.js",
+    "function": "lockEligibleSummaryCaptureDependencies",
+    "name": "scoring input version lock",
+    "queryPattern": "user_scoring_input_versions"
+  },
+  "global-event-sync-effect-read": {
+    "source": "src/modules/steps/services/globalEventSummaryCapture.js",
+    "function": "loadArtifactFacts",
+    "name": "race effect history read",
+    "queryPattern": "race_(powerup_events|active_effects)"
+  }
+}

@@ -4,6 +4,7 @@ const { RaceShareLink } = require("../models/raceShareLink");
 const {
   serializeTeamPayoutStamp,
 } = require("../services/teamWinnerReward");
+const { safePublicDisplayName } = require("../../../shared/lib/displayNameValidator");
 
 // Public, UNAUTHENTICATED preview of a shared race, used by both the web
 // landing page (GET /r/:token) and the app's pre-join screen
@@ -76,7 +77,7 @@ function buildGetSharedRacePreview(dependencies = {}) {
       maxDurationDays: race.maxDurationDays ?? null,
       host: race.creator
         ? {
-            displayName: race.creator.displayName ?? null,
+            displayName: safePublicDisplayName(race.creator.displayName),
             profilePhotoUrl: race.creator.profilePhotoUrl ?? null,
           }
         : null,

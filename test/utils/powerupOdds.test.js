@@ -19,11 +19,11 @@ test("rollPowerup returns COMMON type when rng favors common", () => {
 
 test("rollPowerup returns RARE type when rng favors rare", () => {
   // rng returns 0.99 => last bucket (RARE), then 0.99 => last powerup in tier.
-  // The last entry is POWER_OUTAGE as of batch 2026-08-09 item 6 (it took the
-  // slot vacated by FANNY_PACK, appended at the end of dropPool.RARE).
+  // Decoy is the final weighted RARE entry after the 2026-09-06 balance
+  // transition moved it from Shop into mystery-box rolls.
   const result = rollPowerup(1, 4, () => 0.99);
   assert.equal(result.rarity, "RARE");
-  assert.equal(result.type, "POWER_OUTAGE");
+  assert.equal(result.type, "DECOY");
 });
 
 test("leader gets more commons than last place over many rolls", () => {

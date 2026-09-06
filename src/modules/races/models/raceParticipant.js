@@ -201,7 +201,7 @@ const RaceParticipant = {
   },
 
   // Persisted, bounded fallback for a page projection miss/outage. The
-  // Expression-index order mirrors compareParticipantsForPlacement. Only the
+  // Expression-index order mirrors the legacy full progress response. Only the
   // requested page is ranked; OFFSET retains the legacy O(offset + limit) cost.
   // Count and page share one statement snapshot. An empty page returns one
   // count sentinel (participantId/userId null); consumers read totalCount before
@@ -232,7 +232,7 @@ const RaceParticipant = {
           CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC NULLS LAST,
           CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
           rp.joined_at ASC,
-          rp.user_id ASC
+          rp.id ASC
         OFFSET $2 LIMIT $3
       ), ranked AS (
         SELECT page.*, (ROW_NUMBER() OVER (
@@ -241,7 +241,7 @@ const RaceParticipant = {
             CASE WHEN "finishedAt" IS NOT NULL THEN placement END ASC NULLS LAST,
             CASE WHEN "finishedAt" IS NOT NULL THEN "finishedAt" END ASC NULLS LAST,
             CASE WHEN "finishedAt" IS NULL THEN "totalSteps" END DESC NULLS LAST,
-            "joinedAt" ASC, "userId" ASC
+            "joinedAt" ASC, "participantId" ASC
         ) + $2)::int AS "computedPlacement"
         FROM page
       )

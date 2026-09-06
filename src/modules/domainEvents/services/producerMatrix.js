@@ -78,7 +78,7 @@ function publicTypeAndSource(event, audience) {
   switch (event.eventType) {
     case "FRIEND_REQUEST_SENT_V1": return ["FRIEND_REQUEST_SENT", `${p.requesterId}:${p.addresseeId}`];
     case "FRIEND_REQUEST_ACCEPTED_V1": return ["FRIEND_REQUEST_ACCEPTED", p.friendshipId || `${p.requesterId}:${p.accepterId}`];
-    case "RACE_INVITE_SENT_V1": return ["RACE_INVITE_SENT", p.raceId];
+    case "RACE_INVITE_SENT_V1": return ["RACE_INVITE_SENT", p.rematchEpisodeId || p.raceId];
     case "RACE_INVITE_ACCEPTED_V1": return ["RACE_INVITE_ACCEPTED", p.raceId];
     case "RACE_BUYIN_CHANGED_V1": return ["RACE_BUYIN_CHANGED", `race-buyin:${p.changeId}`];
     case "RACE_SCHEDULED_TEAMS_UNEVEN_V1": return ["TEAM_RACE_SCHEDULED_UNEVEN", p.raceId];

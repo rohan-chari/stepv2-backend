@@ -19,7 +19,10 @@ const PREFIX = {
   SHOP_CATALOG: "v1:catalog:shop",
   POWERUP_CATALOG: "powerup-copy-catalog:v3",
   APP_SETTINGS: "v1:settings:app",
-  BALANCE: "v1:balance",
+  // v2 invalidates any pre-migration raw active-config row after Decoy moves
+  // from store-only to the RARE pool. A rolling old worker may keep using v1;
+  // new workers never ingest that stale snapshot.
+  BALANCE: "v2:balance",
   GLOBAL_EVENTS: "v1:events:global",
   ASSETS_MANIFEST: "v1:assets:manifest",
   USER_COSMETICS: "v1:user:cosmetics",
@@ -271,16 +274,26 @@ function completedRaceSummary(raceId, resultVersion) {
 }
 
 // ── C2: race chat lists + their durable version marker ──────────────────────
-function raceMessages(raceId, kind) {
-  return `${PREFIX.RACE_MESSAGES}:${raceId}:${kind}`;
+function raceMessageIdentity(kind, audience = "ALL", team = null) {
+  if (kind !== "USER") return kind;
+  return audience === "TEAM" && (team === "TEAM_A" || team === "TEAM_B")
+    ? `USER:${team}`
+    // Preserve the pre-team-chat key for the public/legacy stream. Besides
+    // keeping mixed-version workers on one cache identity, this avoids
+    // abandoning still-valid USER entries during a rolling deploy.
+    : "USER";
 }
 
-function raceMessagesVersion(raceId, kind) {
-  return `v1:race:msgver:${raceId}:${kind}`;
+function raceMessages(raceId, kind, audience = "ALL", team = null) {
+  return `${PREFIX.RACE_MESSAGES}:${raceId}:${raceMessageIdentity(kind, audience, team)}`;
 }
 
-function raceMessageWatermark(raceId) {
-  return `v1:race:msgwatermark:${raceId}:USER`;
+function raceMessagesVersion(raceId, kind, audience = "ALL", team = null) {
+  return `v1:race:msgver:${raceId}:${raceMessageIdentity(kind, audience, team)}`;
+}
+
+function raceMessageWatermark(raceId, audience = "ALL", team = null) {
+  return `v1:race:msgwatermark:${raceId}:${raceMessageIdentity("USER", audience, team)}`;
 }
 
 const MESSAGE_KINDS = ["USER", "SYSTEM"];
@@ -288,9 +301,15 @@ const MESSAGE_KINDS = ["USER", "SYSTEM"];
 /** Both list keys + both version keys for a race — the full invalidation set. */
 function raceMessagesAllKeys(raceId) {
   return [
-    ...MESSAGE_KINDS.map((k) => raceMessages(raceId, k)),
-    ...MESSAGE_KINDS.map((k) => raceMessagesVersion(raceId, k)),
-    raceMessageWatermark(raceId),
+    raceMessages(raceId, "SYSTEM"),
+    raceMessagesVersion(raceId, "SYSTEM"),
+    ...[["ALL", null], ["TEAM", "TEAM_A"], ["TEAM", "TEAM_B"]].flatMap(
+      ([audience, team]) => [
+        raceMessages(raceId, "USER", audience, team),
+        raceMessagesVersion(raceId, "USER", audience, team),
+        raceMessageWatermark(raceId, audience, team),
+      ],
+    ),
   ];
 }
 

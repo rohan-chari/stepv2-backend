@@ -36,6 +36,12 @@ const TABLES_IN_ORDER = [
   "operational_email_alerts",
   "race_join_requests",
   "race_share_links",
+  "race_rematch_receipts",
+  "race_rematch_notification_episodes",
+  "race_series_renewal_jobs",
+  "race_series_create_receipts",
+  "race_series_subscriptions",
+  "race_series",
   "app_review_prompt_attempts",
   "global_event_capture_artifacts",
   "global_event_summary_work",
@@ -178,6 +184,12 @@ async function cleanDatabase() {
     DO $$
     DECLARE table_name text;
     BEGIN
+      -- RaceSeries.current_race_id and Race.series_id intentionally form a
+      -- durable cycle. Break the nullable occurrence edge before ordered
+      -- deletion; this database is disposable and every row is removed below.
+      UPDATE races
+         SET series_id = NULL,
+             series_predecessor_race_id = NULL;
       FOREACH table_name IN ARRAY ARRAY[${tableLiterals}]
       LOOP
         EXECUTE format('DELETE FROM %I', table_name);

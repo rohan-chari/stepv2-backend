@@ -284,7 +284,7 @@ describe("C1 catalogs/config — §8 test 2 parity (cold cache ≡ flag off)", (
       "expected an app settings key"
     );
     assert.ok(
-      keys.some((k) => k.includes("v1:balance")),
+      keys.some((k) => k.includes("v2:balance")),
       "expected a balance config key"
     );
     assert.ok(

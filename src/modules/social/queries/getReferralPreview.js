@@ -1,5 +1,6 @@
 const { prisma } = require("../../../db");
 const { normalizeReferralCode } = require("../../../shared/lib/referralCode");
+const { safePublicDisplayName } = require("../../../shared/lib/displayNameValidator");
 const {
   REFEREE_REWARD_COINS,
   REFERRER_REWARD_COINS,
@@ -102,7 +103,7 @@ function buildGetReferralPreview(dependencies = {}) {
     }
 
     return {
-      inviterName: referrer.displayName ?? null,
+      inviterName: safePublicDisplayName(referrer.displayName),
       inviterAvatar: referrer.profilePhotoUrl ?? null,
       // What the NEW user earns for finishing their first qualifying race.
       rewardCoins: REFEREE_REWARD_COINS,

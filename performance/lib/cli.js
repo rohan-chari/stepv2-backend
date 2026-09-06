@@ -1,8 +1,9 @@
-const COMMANDS = new Set(["smoke", "scan", "certify", "compare", "reset", "refresh-data"]);
+const COMMANDS = new Set(["smoke", "scan", "certify", "compare", "reset", "refresh-data", "global-event-sync"]);
 
 function usage() {
   return [
-    "usage: ./perf <smoke|scan|certify|compare|reset|refresh-data> [options]",
+    "usage: ./perf <smoke|scan|certify|compare|reset|refresh-data|global-event-sync> [options]",
+    "  ./perf global-event-sync <fixture|smoke|run|cleanup> [--run-id=…] [--config=…]",
     "  ./perf smoke [--workload=home-open|races-tab-open] [--target=lima] [--score-shape=production|placement-churn] [--background=normal|off] [--cache=warm|cold]",
     "  ./perf scan [--workload=home-open|races-tab-open] [--target=lima] [--rates=5,10,...] [--score-shape=production|placement-churn] [--background=normal|off] [--cache=warm|cold]",
   ].join("\n");
@@ -22,6 +23,13 @@ function parseCli(argv = []) {
   if (!COMMANDS.has(command)) throw new Error(usage());
   const result = { command, target: "lima", background: "normal", cache: "warm",
     rates: null, scoreShape: null, workload: "home-open", keepRunning: false };
+  if (command === "global-event-sync") {
+    const [subcommand, ...rest] = tokens;
+    if (!["fixture", "smoke", "run", "cleanup"].includes(subcommand)) throw new Error(usage());
+    result.subcommand = subcommand;
+    result.globalEventSyncArgs = rest;
+    return result;
+  }
   for (const token of tokens) {
     if (token === "--keep-running") { result.keepRunning = true; continue; }
     const match = token.match(/^--([a-z-]+)=(.*)$/);

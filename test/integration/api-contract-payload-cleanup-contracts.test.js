@@ -225,9 +225,11 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     assert.deepEqual(Object.keys(me).sort(), ["contract", "user"]);
     assert.deepEqual(Object.keys(me.user).sort(), [
       "autoJoinFeaturedRaces",
+      "capabilities",
       "characterPowersEnabled",
       "coins",
       "displayName",
+      "displayNameRequiresRename",
       "email",
       "featureFlags",
       "firstName",
@@ -245,11 +247,18 @@ describe("API page-payload cleanup — locked additive contracts", () => {
       "referredByCode",
       "renameChipDismissedAt",
       "renameChipShownCount",
+      "shopTutorialCompletedAt",
       "tutorialOnboardingSeen",
     ]);
     assert.equal(me.user.id, user.id);
     assert.equal(me.user.email, "compact@example.com");
     assert.equal(me.user.coins, 123);
+    assert.equal(me.user.displayNameRequiresRename, false);
+    assert.equal(me.user.shopTutorialCompletedAt, null);
+    assert.deepEqual(me.user.capabilities, {
+      recurringRacesV1: true,
+      teamChatV1: true,
+    });
 
     const sessionResponse = await get("/auth/session?view=shell-v1", token);
     assert.equal(sessionResponse.status, 200);
@@ -285,10 +294,14 @@ describe("API page-payload cleanup — locked additive contracts", () => {
       "avgPerDayWeek",
       "avgPerDayYear",
       "contract",
+      "firstPlaceWins",
+      "podiumFinishes",
+      "racesCompeted",
       "streak",
       "thisMonth",
       "thisWeek",
       "thisYear",
+      "winRate",
     ]);
 
     const rewardResponse = await get(

@@ -6,6 +6,7 @@ const {
   upgradedDuration,
   formatDuration,
 } = require("../../powerups/powerupUpgrades");
+const { safePublicDisplayName } = require("../../../shared/lib/displayNameValidator");
 
 const V1_PROJECTOR_HANDLER_NAMES = Object.freeze({
   FRIEND_REQUEST_SENT_V1: "FRIEND_REQUEST_SENT",
@@ -102,10 +103,28 @@ const V1_PROJECTOR_HANDLERS = Object.freeze({
       `${await actorName(p.accepterId)} accepted your friend request`,
       { type: "FRIEND_REQUEST_ACCEPTED", route: "friends" });
   },
-  async RACE_INVITE_SENT_V1({ p, actorName }) {
+  async RACE_INVITE_SENT_V1({ p, actorName, loadRematchEpisode }) {
+    let raceId = p.raceId;
+    if (p.rematchEpisodeId) {
+      const episode = await loadRematchEpisode(p.rematchEpisodeId);
+      if (!episode || episode.closedAt) return { suppressed: "REMATCH_EPISODE_CLOSED" };
+      if (Number(p.rematchEpisodeRevision) !== episode.revision) {
+        return { suppressed: "STALE_REMATCH_EPISODE_REVISION" };
+      }
+      raceId = episode.latestRaceId;
+      if (!raceId) return { suppressed: "REMATCH_EPISODE_TARGET_UNAVAILABLE" };
+    }
     return intent("RACE_INVITE_SENT", "Race Invite",
       `${await actorName(p.creatorUserId)} invited you to a race: ${p.raceName}`,
-      { type: "RACE_INVITE_SENT", route: "race_detail", params: { raceId: p.raceId } });
+      {
+        type: "RACE_INVITE_SENT",
+        route: "race_detail",
+        params: { raceId },
+        ...(p.rematchEpisodeId ? {
+          rematchEpisodeId: p.rematchEpisodeId,
+          rematchEpisodeRevision: p.rematchEpisodeRevision,
+        } : {}),
+      });
   },
   async RACE_INVITE_ACCEPTED_V1({ p, actorName }) {
     return intent("RACE_INVITE_ACCEPTED", "Race Update",
@@ -295,8 +314,9 @@ const V1_PROJECTOR_HANDLERS = Object.freeze({
   },
   async RACE_MESSAGE_SENT_V1({ p }) {
     const preview = p.body?.length > 120 ? `${p.body.slice(0, 117)}…` : p.body;
+    const senderName = safePublicDisplayName(p.senderName) || "Someone";
     return intent("race_message", p.raceName || "Race chat",
-      `${p.senderName || "Someone"}: ${preview}`,
+      `${senderName}: ${preview}`,
       {
         type: "race_message", route: "race_detail", params: { raceId: p.raceId },
         raceId: p.raceId, messageId: p.messageId,
@@ -404,7 +424,7 @@ function buildTypedV1Projection(dependencies = {}) {
       const user = userModel?.findById
         ? await userModel.findById(userId)
         : await prisma.user.findUnique({ where: { id: userId }, select: { displayName: true } });
-      return user?.displayName || "Someone";
+      return safePublicDisplayName(user?.displayName) || "Someone";
     } catch {
       // Display-name decoration has always been best-effort. The durable Inbox
       // submit below remains the required infrastructure boundary and errors
@@ -418,6 +438,19 @@ function buildTypedV1Projection(dependencies = {}) {
     return raceModel.findUnique({
       where: { id: raceId },
       select: { status: true, endsAt: true, name: true },
+    });
+  }
+
+  async function loadRematchEpisode(episodeId) {
+    if (!episodeId || !prisma.raceRematchNotificationEpisode) return null;
+    return prisma.raceRematchNotificationEpisode.findUnique({
+      where: { id: episodeId },
+      select: {
+        latestRaceId: true,
+        revision: true,
+        providerAcceptedAt: true,
+        closedAt: true,
+      },
     });
   }
 
@@ -455,7 +488,7 @@ function buildTypedV1Projection(dependencies = {}) {
     try {
       result = await handler({
         event, p, audience, recipientUserId: audience.recipientId,
-        projection, current, copyAt, actorName, loadRace,
+        projection, current, copyAt, actorName, loadRace, loadRematchEpisode,
       });
     } catch (error) {
       if (!error.code) error.code = "TYPED_V1_HANDLER_FAILED";
@@ -475,6 +508,7 @@ function buildTypedV1Projection(dependencies = {}) {
       payload: result.payload,
       deliveryKey: projection.deliveryKey,
       availableAt,
+      ...(p.rematchEpisodeId ? { replaceExisting: true } : {}),
       ...(endsAt && endsAt > new Date(availableAt) ? { expiresAt: endsAt } : {}),
       ...(scheduledEntitlement ? {
         sourceRef: p.entitlementId,

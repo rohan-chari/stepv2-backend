@@ -21,6 +21,9 @@ const AUTH_SHELL_FIELDS = [
   "incomingFriendRequests",
   "characterPowersEnabled",
   "featureFlags",
+  "capabilities",
+  "shopTutorialCompletedAt",
+  "displayNameRequiresRename",
 ];
 
 function serializeAuthShellUser(user) {
@@ -49,6 +52,11 @@ function serializeAuthShellUser(user) {
   result.featureFlags = user.featureFlags && typeof user.featureFlags === "object"
     ? user.featureFlags
     : {};
+  result.capabilities = user.capabilities && typeof user.capabilities === "object"
+    ? user.capabilities
+    : {};
+  result.shopTutorialCompletedAt = user.shopTutorialCompletedAt ?? null;
+  result.displayNameRequiresRename = user.displayNameRequiresRename === true;
   return result;
 }
 

@@ -107,6 +107,8 @@ function createShopRouter(dependencies = {}) {
       // never learn these skus (the catalog filters them), but a stale/replayed
       // request must not slip a wave-5 item into an unsupported client.
       if (
+        req.body?.powerupType !== "DECOY" &&
+        req.body?.sku !== "POWERUP_DECOY" &&
         (POWERUPS5_GATED_TYPES.includes(req.body?.powerupType) ||
           POWERUPS5_SKUS.includes(req.body?.sku)) &&
         !req.clientFeatures.has("powerups5")
@@ -125,7 +127,7 @@ function createShopRouter(dependencies = {}) {
       if (error.name === "PowerupPurchaseError") {
         return res
           .status(error.statusCode || 400)
-          .json({ error: error.message });
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Powerup purchase error:", error);
       res.status(500).json({ error: "Internal server error" });

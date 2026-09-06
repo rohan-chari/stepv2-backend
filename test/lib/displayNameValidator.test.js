@@ -7,6 +7,8 @@ const {
   normalizeToCharset,
   DISPLAY_NAME_MIN_LENGTH,
   DISPLAY_NAME_MAX_LENGTH,
+  sanitizePublicUserPresentation,
+  containsDisplayNameProfanity,
 } = require("../../src/shared/lib/displayNameValidator");
 
 test("exports the locked min/max lengths", () => {
@@ -80,6 +82,34 @@ test("rejects profanity", () => {
   const result = validateDisplayName("asshole");
   assert.equal(result.isValid, false);
   assert.equal(result.error, "Display name contains inappropriate language");
+});
+
+test("public-name sanitizing preserves non-plain JSON values", () => {
+  class WireValue {
+    constructor(value) {
+      this.value = value;
+    }
+    toJSON() {
+      return this.value;
+    }
+  }
+  const amount = new WireValue("12.34");
+  const result = sanitizePublicUserPresentation({
+    displayName: "f_u_c_k",
+    amount,
+  });
+  assert.equal(result.displayName, "Name unavailable");
+  assert.equal(result.amount, amount);
+  assert.equal(JSON.stringify(result), '{"displayName":"Name unavailable","amount":"12.34"}');
+});
+
+test("profanity predicate catches reviewed evasions without broad near-match blocking", () => {
+  for (const value of ["GiulioGuiFuckUBish", "f_u_c_k_runner", "FvckRunner", "sh1thead"]) {
+    assert.equal(containsDisplayNameProfanity(value), true, value);
+  }
+  for (const value of ["AssistantCoach", "ClassicRunner", "ScunthorpeRunner", "DickensWalker"]) {
+    assert.equal(containsDisplayNameProfanity(value), false, value);
+  }
 });
 
 test("rejects a non-string input", () => {

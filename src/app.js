@@ -23,6 +23,7 @@ const { createRankedRouter } = require("./modules/ranked");
 const {
   createRacesRouter,
   createRaceJoinRequestsRouter,
+  createRaceSeriesRouter,
 } = require("./modules/races");
 const { createTournamentsRouter } = require("./modules/tournaments");
 const { createReferralsRouter } = require("./modules/social");
@@ -87,6 +88,9 @@ const { eventSurgeTelemetry: defaultEventSurgeTelemetry } = require("./shared/ob
 const {
   readCapacityResolutionReadiness,
 } = require("./shared/observability/capacityResolutionReadiness");
+const {
+  sanitizePublicUserPresentation,
+} = require("./shared/lib/displayNameValidator");
 
 const SMALL_LAUNCH_RESPONSE_BYTES = 8 * 1024;
 
@@ -152,6 +156,15 @@ function createApp(dependencies = {}) {
   // characters to TestFlight viewers. Prod is the default for anything that
   // omits the header, so no shipped binary sees an asset it lacks.
   app.use(extractReleaseChannel);
+  // Frozen clients cannot participate in forced rename. Keep the owner's raw
+  // value on `/auth`, but make every other JSON presentation safe even when it
+  // originated in a legacy snapshot or a warm shared cache.
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/auth")) return next();
+    const json = res.json.bind(res);
+    res.json = (body) => json(sanitizePublicUserPresentation(body));
+    return next();
+  });
   app.use((dependencies.eventSurgeTelemetry || defaultEventSurgeTelemetry).middleware());
   app.use(
     createApiContractTelemetry({ logger: dependencies.logger || console })
@@ -178,6 +191,7 @@ function createApp(dependencies = {}) {
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
   app.use("/ranked", createRankedRouter(dependencies));
   app.use("/races", createRacesRouter(dependencies));
+  app.use("/race-series", createRaceSeriesRouter(dependencies));
   app.use("/race-join-requests", createRaceJoinRequestsRouter(dependencies));
   app.use("/tournaments", createTournamentsRouter(dependencies));
   app.use("/referrals", createReferralsRouter(dependencies));

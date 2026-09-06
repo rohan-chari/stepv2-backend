@@ -1,4 +1,5 @@
 const { Tournament } = require("../models/tournament");
+const { safePublicDisplayName } = require("../../../shared/lib/displayNameValidator");
 
 // Public, UNAUTHENTICATED preview of a shared tournament (web landing page
 // GET /t/:token and the app's GET /tournaments/share/:token). Display-safe
@@ -30,7 +31,7 @@ function buildGetSharedTournamentPreview(dependencies = {}) {
         (t.seed ? t.seed.championPrizeCoins ?? null : null),
       host: t.creator
         ? {
-            displayName: t.creator.displayName ?? null,
+            displayName: safePublicDisplayName(t.creator.displayName),
             profilePhotoUrl: t.creator.profilePhotoUrl ?? null,
           }
         : null,

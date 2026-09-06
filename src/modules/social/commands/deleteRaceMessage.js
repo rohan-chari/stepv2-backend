@@ -24,7 +24,7 @@ async function deleteRaceMessage({ userId, raceId, messageId }) {
 
   const isSender = message.senderId && message.senderId === userId;
   const isCreator = race.creatorId === userId;
-  if (!isSender && !isCreator) {
+  if (!isSender && (!isCreator || message.audience === "TEAM")) {
     throw new DeleteRaceMessageError("Not authorized to delete", 403);
   }
 
@@ -32,10 +32,13 @@ async function deleteRaceMessage({ userId, raceId, messageId }) {
   // C2 invalidation: a soft-deleted row must disappear from the cached list.
   // The marker advances off the deletion instant, which is strictly newer than
   // any row already in the list.
-  await raceMessagesCache.invalidateKind(raceId, "USER", {
-    id: messageId,
-    createdAt: new Date(),
-  });
+  await raceMessagesCache.invalidateKind(
+    raceId,
+    "USER",
+    { id: messageId, createdAt: new Date() },
+    message.audience || "ALL",
+    message.audience === "TEAM" ? message.team : null,
+  );
   return { success: true };
 }
 

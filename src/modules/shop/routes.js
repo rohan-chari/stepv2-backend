@@ -13,6 +13,10 @@ const {
 const {
   getShopBootstrap: defaultGetShopBootstrap,
 } = require("./queries/getShopBootstrap");
+const {
+  completeShopTutorial: defaultCompleteShopTutorial,
+} = require("./commands/completeShopTutorial");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
 
 function createShopBootstrapRouter(dependencies = {}) {
   const router = Router();
@@ -20,6 +24,8 @@ function createShopBootstrapRouter(dependencies = {}) {
   const settings = dependencies.appSettings || defaultAppSettings;
   const getShopBootstrap =
     dependencies.getShopBootstrap || defaultGetShopBootstrap;
+  const completeShopTutorial =
+    dependencies.completeShopTutorial || defaultCompleteShopTutorial;
 
   router.use(requireAuth);
   router.use(extractReleaseChannel);
@@ -48,6 +54,9 @@ function createShopBootstrapRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+  router.post("/tutorial/complete", asyncHandler(async (req, res) => {
+    res.json(await completeShopTutorial({ userId: req.user.id }));
+  }));
   return router;
 }
 

@@ -9,6 +9,9 @@ const {
 const {
   scheduleBoundedBatchDrain,
 } = require("../../../shared/batching/boundedBatchDrain");
+const {
+  safePublicDisplayName,
+} = require("../../../shared/lib/displayNameValidator");
 
 const TTL_SECONDS = 3600;
 const GENERATION_TTL_SECONDS = 7200;
@@ -44,7 +47,7 @@ function project(user) {
   if (!user) return null;
   return {
     id: user.id,
-    displayName: user.displayName ?? null,
+    displayName: safePublicDisplayName(user.displayName),
     profilePhotoUrl: user.profilePhotoUrl ?? null,
     equippedAccessories: (user.equippedAccessories ?? []).map((accessory) => ({
       shopItem: accessory.shopItem,

@@ -3,8 +3,8 @@
 const dotenv = require("dotenv");
 dotenv.config();
 
-const crypto = require("node:crypto");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
@@ -618,9 +618,18 @@ function startBackend(settings) {
   ].join(" ");
   const root = repo(settings);
   const resources = capacityResourcePlan(settings);
+  const lockfilePath = path.join(root, "package-lock.json");
+  if (!fs.existsSync(lockfilePath)) throw new Error(`capacity backend requires package-lock.json: ${lockfilePath}`);
+  const dependencyLockHash = crypto.createHash("sha256").update(fs.readFileSync(lockfilePath)).digest("hex");
   // Recreate on every guarded start. Reusing a same-profile container could
   // preserve a prior CAPACITY_RUN_ID while lifecycle state names a new run.
-  shell(settings, `docker rm -f ${name} >/dev/null 2>&1 || true && docker volume create ${name}-node-modules >/dev/null && docker run -d --name ${name} --restart unless-stopped --network host --cpus=${resources.backendCpu} --memory=${resources.backendMemoryGb}g -v ${JSON.stringify(root)}:/workspace:ro -v ${name}-node-modules:/workspace/node_modules -w /workspace ${env} node:22 bash -lc 'npm ci --ignore-scripts && npx prisma generate && npx prisma migrate deploy && node scripts/capacity-cluster.js' && for attempt in $(seq 1 120); do curl -fsS --max-time 2 http://127.0.0.1:3000/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`);
+  // Dependencies are immutable inputs to a capacity run. Reuse a verified
+  // node_modules volume when present so a start does not spend the entire
+  // lifecycle timeout reinstalling packages; an empty/corrupt volume still
+  // self-heals with npm ci. This is capacity-provider behavior only and does
+  // not change the production runtime.
+  const dependencyBootstrap = `expected=\"${dependencyLockHash}\"; actual=$(sha256sum /workspace/package-lock.json | cut -d\" \" -f1); installed=$(cat /workspace/node_modules/.capacity-package-lock-hash 2>/dev/null || true); if [ \"$actual\" != \"$expected\" ] || [ \"$installed\" != \"$expected\" ] || [ ! -f /workspace/node_modules/@prisma/client/package.json ]; then npm ci --ignore-scripts; printf \"%s\" \"$expected\" > /workspace/node_modules/.capacity-package-lock-hash; fi`;
+  shell(settings, `docker rm -f ${name} >/dev/null 2>&1 || true && docker volume create ${name}-node-modules >/dev/null && docker run -d --name ${name} --restart unless-stopped --network host --cpus=${resources.backendCpu} --memory=${resources.backendMemoryGb}g -v ${JSON.stringify(root)}:/workspace:ro -v ${name}-node-modules:/workspace/node_modules -w /workspace ${env} node:22 bash -lc '${dependencyBootstrap} && npx prisma generate && npx prisma migrate deploy && node scripts/capacity-cluster.js' && for attempt in $(seq 1 120); do curl -fsS --max-time 2 http://127.0.0.1:3000/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`);
 }
 
 function stopBackend(settings) {

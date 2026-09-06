@@ -25,7 +25,7 @@ function buildGetRaceMessageStreams(dependencies = {}) {
   const settings = dependencies.appSettings || defaultAppSettings;
   const raceModel = dependencies.Race || defaultRaceModel;
 
-  async function getAccessContext(userId, raceId, leanAccessEnabled) {
+  async function getAccessContext(userId, raceId, leanAccessEnabled, audience) {
     const race = leanAccessEnabled &&
         typeof raceModel.findMessageAccessContext === "function"
       ? await raceModel.findMessageAccessContext(raceId, userId)
@@ -36,10 +36,14 @@ function buildGetRaceMessageStreams(dependencies = {}) {
         seededBucketId: true,
         tournamentId: true,
         powerupsEnabled: true,
+        isTeamRace: true,
+        status: true,
         participants: {
           select: {
             userId: true,
             status: true,
+            team: true,
+            forfeitedAt: true,
             user: { select: { displayName: true } },
           },
         },
@@ -60,6 +64,16 @@ function buildGetRaceMessageStreams(dependencies = {}) {
       throw error;
     }
     const mine = race.participants.find((participant) => participant.userId === userId);
+    if (
+      audience === "TEAM" &&
+      (!race.isTeamRace || mine?.status !== "ACCEPTED" || mine?.forfeitedAt ||
+        !["TEAM_A", "TEAM_B"].includes(mine?.team))
+    ) {
+      const error = new Error("Team chat is unavailable.");
+      error.statusCode = 403;
+      error.code = "TEAM_CHAT_UNAVAILABLE";
+      throw error;
+    }
     const directAccess =
       mine && (!race.seededBucketId || mine.status === "ACCEPTED");
     const tournamentAccess =
@@ -73,12 +87,12 @@ function buildGetRaceMessageStreams(dependencies = {}) {
     return race;
   }
 
-  async function getWatermark(raceId) {
+  async function getWatermark(raceId, audience, team) {
     const enabled = await isStrictFlagEnabled(
       settings,
       "apiRaceChatWatermarkCacheV1Enabled"
     );
-    return cache.getWatermark({ raceId, enabled });
+    return cache.getWatermark({ raceId, enabled, audience, team });
   }
 
   return async function getRaceMessageStreams({
@@ -86,7 +100,21 @@ function buildGetRaceMessageStreams(dependencies = {}) {
     raceId,
     includeUser,
     limit,
+    audience = "ALL",
+    teamChatCapable = false,
   }) {
+    if (audience !== "ALL" && audience !== "TEAM") {
+      const error = new Error("Audience must be ALL or TEAM");
+      error.statusCode = 400;
+      error.code = "INVALID_REQUEST";
+      throw error;
+    }
+    if (audience === "TEAM" && teamChatCapable !== true) {
+      const error = new Error("Update the app to use team chat.");
+      error.statusCode = 400;
+      error.code = "UPDATE_REQUIRED";
+      throw error;
+    }
     const leanAccessEnabled = await isStrictFlagEnabled(
       settings,
       "raceMessageLeanAccessV1Enabled"
@@ -94,21 +122,28 @@ function buildGetRaceMessageStreams(dependencies = {}) {
     const accessContext = await getAccessContext(
       userId,
       raceId,
-      leanAccessEnabled
+      leanAccessEnabled,
+      audience,
     );
     const requested = { USER: includeUser, SYSTEM: true };
+    const mine = accessContext.participants.find((participant) => participant.userId === userId);
+    const team = audience === "TEAM" ? mine?.team ?? null : null;
     const pageLimit = normalizeTopSnapshotLimit(limit);
     const userPromise = includeUser
       ? getRaceMessages(userId, raceId, {
           kind: "USER",
           limit: pageLimit,
           accessContext,
+          audience,
+          teamChatCapable,
         })
-      : getWatermark(raceId);
+      : getWatermark(raceId, audience, team);
     const systemPromise = getRaceMessages(userId, raceId, {
       kind: "SYSTEM",
       limit: pageLimit,
       accessContext,
+      audience,
+      teamChatCapable,
     });
     const [userResult, systemResult] = await Promise.allSettled([
       userPromise,
@@ -149,6 +184,8 @@ function buildGetRaceMessageStreams(dependencies = {}) {
 
     return {
       contract: "race-message-streams-v1",
+      audience,
+      team,
       requested,
       resolved: { USER: userResolved, SYSTEM: systemResolved },
       streams: {

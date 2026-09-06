@@ -58,7 +58,7 @@ const POWERUP_STACKING_GUIDE = Object.freeze({
   DECOY: rule("BLOCKED", "CONDITIONAL", "Only one Decoy can be active. Defense resolves Mirror before Decoy, then Compression Socks; the next eligible targeted attack redirects or is absorbed."),
   POWER_OUTAGE: rule("LIMITED", "CONDITIONAL", "Repeated casts are accepted and consumed while already-outaged recipients are skipped. It can coexist with Signal Jammer; Umbrella and Compression Socks can prevent it."),
   UMBRELLA: rule("BLOCKED", "CONDITIONAL", "Duplicate Umbrellas add no benefit. Umbrella separately blocks eligible area attacks such as Rainstorm and Power Outage, but not targeted attacks."),
-  RALLY_FLAG: rule("EXTENDS", "CONDITIONAL", "Repeated casts merge each teammate window to the later expiry and do not add another multiplier row. Freeze, Rainstorm, Coin Flip, and Wrong Turn precedence still applies."),
+  RALLY_FLAG: rule("BLOCKED", "CONDITIONAL", "A team with a live Rally Flag cannot raise another until the active window ends. Freeze, Rainstorm, Coin Flip, and Wrong Turn precedence still applies."),
   DRILL_SERGEANT: rule("LIMITED", "CONDITIONAL", "Each eligible dare has its own target and deadline. Its eventual penalty is a separate impact and defenses are resolved when the dare is cast."),
   PIGGY_BANK: rule("BLOCKED", "ALLOWED", "Only one Piggy Bank can be active. It tracks its own coin window and can coexist with step-scoring effects."),
   BOUNTY: rule("LIMITED", "ALLOWED", "A bounty is a race-end objective tied to its target. It can coexist with scoring effects and does not itself change step rate."),

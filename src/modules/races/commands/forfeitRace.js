@@ -65,6 +65,7 @@ const {
 const {
   invalidateRaceProgress,
 } = require("../services/raceProgressSnapshot");
+const raceMessagesCache = require("../../social/services/raceMessagesCache");
 const {
   lockFundedExposureUsers,
 } = require("../services/fundedExposure");
@@ -565,7 +566,12 @@ function buildForfeitRace(dependencies = {}) {
       winnerTeam: collapse.collapsed ? collapse.winnerTeam : null,
     });
 
-    await invalidateRaceProgress(raceId);
+    await Promise.allSettled([
+      invalidateRaceProgress(raceId),
+      // TEAM access is membership-state dependent. Drop both private channel
+      // fragments/watermarks as soon as a participant forfeits.
+      raceMessagesCache.invalidateRace(raceId),
+    ]);
     await invalidateHomeActiveGlobalEvent([userId]);
 
     // Team collapse completes the race inline; an ACTIVE-only worker would

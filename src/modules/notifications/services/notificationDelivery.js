@@ -70,6 +70,7 @@ function normalizeNotificationIntent(input = {}) {
     sourceRevision: Number.isInteger(input.sourceRevision) && input.sourceRevision >= 0
       ? input.sourceRevision
       : 0,
+    replaceExisting: input.replaceExisting === true,
   };
 }
 
@@ -230,6 +231,7 @@ function buildNotificationIntentService(dependencies = {}) {
         payload: intent.payload,
         now: current,
         tx,
+        ...(intent.replaceExisting ? { replaceExisting: true } : {}),
         ...(intent.expiresAt ? { expiresAt: intent.expiresAt } : {}),
       });
       return { kind: "IMMEDIATE", alertId: alert?.id || null };

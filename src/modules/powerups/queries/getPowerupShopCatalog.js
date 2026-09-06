@@ -81,6 +81,10 @@ function buildGetPowerupShopCatalog(deps = {}) {
     // drift. VISIBILITY only, layered on top of the row's testOnly
     // release-channel gate which findActive already applied (§9.2).
     const visibleItems = items.filter((item) =>
+      // R21 is permanent policy, not only a migration-time catalog edit. This
+      // also keeps a stale shared catalog or an old admin-restored row from
+      // re-advertising a purchase the command correctly rejects.
+      item.powerupType !== "DECOY" &&
       isPowerupVisibleToClient(item.powerupType, {
         supportsJammer,
         supportsPowerups2,

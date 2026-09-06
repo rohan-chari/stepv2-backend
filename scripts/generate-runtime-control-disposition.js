@@ -147,6 +147,7 @@ const envMetadata = {
   CAPACITY_EXPECTED_COMMIT_SHA: ["capacity_local_config", null, "capacity load reports must identify the expected checked-out commit", "capacity_local", null],
   CAPACITY_LIVE_MANIFEST_PATH: ["capacity_local_config", null, "absolute path to the live capacity manifest used for start drift checks", "capacity_local", null],
   CAPACITY_SCRUB_ATTESTATION_HASH: ["capacity_local_config", null, "hash of the snapshot-bound scrub attestation", "capacity_local", null],
+  CAPACITY_SCRUB_ATTESTATION_PATH: ["capacity_local_config", null, "absolute path to the snapshot-bound scrub attestation", "capacity_local", null],
   CAPACITY_SCRUB_ATTESTATION_SECRET: ["capacity_local_secret", null, "run-only secret used to verify the scrub attestation", "capacity_local", null],
   CAPACITY_SNAPSHOT_HASH: ["capacity_local_config", null, "hash of the approved scrubbed capacity snapshot", "capacity_local", null],
   CAPACITY_STATE_DIR: ["capacity_local_config", null, "absolute state directory for disposable capacity runs", "capacity_local", null],

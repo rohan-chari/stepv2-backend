@@ -86,6 +86,12 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       lastName: null,
       nameSetupOnboardingRequired: false,
       nameSetupCompletedAt: null,
+      shopTutorialCompletedAt: null,
+      displayNameRequiresRename: false,
+      capabilities: {
+        recurringRacesV1: true,
+        teamChatV1: true,
+      },
       featureFlags: {
         bannerAdsEnabled: true,
         dualBoxBannersEnabled: false,

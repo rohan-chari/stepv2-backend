@@ -112,6 +112,9 @@ function buildGrantAdReward(dependencies = {}) {
       typeof customData === "string"
         ? customData.match(POWERUP_UNLOCK_CUSTOM_DATA_RE)
         : null;
+    if (unlockMatch && String(unlockMatch[2]).toUpperCase() === "POWERUP_DECOY") {
+      return { granted: false, reason: "powerup_not_for_sale" };
+    }
     const shopUnlockMatch =
       typeof customData === "string"
         ? customData.match(SHOP_UNLOCK_CUSTOM_DATA_RE)

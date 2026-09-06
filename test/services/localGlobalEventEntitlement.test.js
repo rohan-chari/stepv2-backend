@@ -505,40 +505,86 @@ test("materialization cursor advances past a full page of ended timezone candida
   assert.deepEqual(created, users.slice(110).map((user) => user.id));
 });
 
+function setBasedMaterializationFake(users) {
+  const occurredAt = new Date("2098-08-25T10:00:00.000Z");
+  const events = users.map((user, index) => {
+    const entitlementId = `entitlement-${String(index).padStart(3, "0")}`;
+    return {
+      id: `event-${String(index).padStart(3, "0")}`,
+      eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlementId}:0`,
+      eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1",
+      schemaVersion: 1,
+      aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+      aggregateId: entitlementId,
+      occurredAt,
+      availableAt: occurredAt,
+      payload: {
+        eventId: EVENT.id,
+        entitlementId,
+        userId: user.id,
+        multiplier: EVENT.multiplier,
+        startsAt: "2098-08-26T14:00:00.000Z",
+        endsAt: "2098-08-26T14:30:00.000Z",
+        scheduleRevision: 0,
+        timezone: user.globalEventTimezone,
+      },
+      audience: [{ recipientId: user.id, ordinal: 0, facts: {} }],
+    };
+  });
+  let materializeStatements = 0;
+  let receiptStatements = 0;
+  const tx = {
+    async $queryRawUnsafe(_sql, inputJson) {
+      const input = JSON.parse(inputJson);
+      if (Object.hasOwn(input[0] || {}, "eventKey")) {
+        receiptStatements += 1;
+        assert.equal(input.length, users.length);
+        return input.map((row) => ({ event_key: row.eventKey }));
+      }
+      materializeStatements += 1;
+      assert.equal(input.length, users.length);
+      return [{
+        created: users.length,
+        selected: users.length,
+        events: users.length,
+        eventKeys: events.map((event) => event.eventKey),
+        conflicts: 0,
+      }];
+    },
+    domainEventOutbox: {
+      async findMany({ where }) {
+        assert.deepEqual(where.eventKey.in, events.map((event) => event.eventKey));
+        return events;
+      },
+    },
+    globalStepEventEntitlement: {
+      async createMany() {
+        throw new Error("set-based path must not call createMany");
+      },
+    },
+  };
+  return {
+    tx,
+    get materializeStatements() { return materializeStatements; },
+    get receiptStatements() { return receiptStatements; },
+  };
+}
+
 test("production materialization writes one bounded entitlement/event page instead of per-user transactions", async () => {
   const users = Array.from({ length: 100 }, (_, index) => ({
     id: `batch-user-${String(index).padStart(3, "0")}`,
     timezone: "America/New_York",
     globalEventTimezone: "America/New_York",
   }));
-  const entitlements = [];
-  const domainEvents = [];
-  const audiences = [];
-  const tx = {
-    globalStepEventEntitlement: {
-      async createMany({ data }) {
-        entitlements.push(...data.map((row, index) => ({
-          id: `entitlement-${index}`, scheduleRevision: 0, ...row,
-        })));
-        return { count: data.length };
-      },
-      async findMany() { return entitlements; },
-    },
-    domainEventOutbox: {
-      async createMany({ data }) {
-        domainEvents.push(...data.map((row, index) => ({ id: `event-${index}`, ...row })));
-        return { count: data.length };
-      },
-      async findMany() { return domainEvents; },
-    },
-    domainEventAudience: {
-      async createMany({ data }) { audiences.push(...data); return { count: data.length }; },
-    },
-  };
+  const fake = setBasedMaterializationFake(users);
+  let transactions = 0;
   const client = {
     raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
-    globalStepEventEntitlement: tx.globalStepEventEntitlement,
-    async $transaction(work) { return work(tx); },
+    globalStepEventEntitlement: fake.tx.globalStepEventEntitlement,
+    async $transaction(work) {
+      transactions += 1;
+      return work(fake.tx);
+    },
   };
   const page = await materializeEntitlementsForActiveRacers({
     ...EVENT, eventDay: "2098-08-26", localStartMinute: 600,
@@ -548,9 +594,9 @@ test("production materialization writes one bounded entitlement/event page inste
     generationUsable: async () => true,
     recordCounters: async () => {},
   });
-  assert.equal(entitlements.length, 100);
-  assert.equal(domainEvents.length, 100);
-  assert.equal(audiences.length, 100);
+  assert.equal(transactions, 1);
+  assert.equal(fake.materializeStatements, 1);
+  assert.equal(fake.receiptStatements, 1);
   assert.equal(page.created, 100);
   assert.equal(page.nextCursor, "batch-user-099");
   assert.equal(page.exhausted, false);
@@ -562,21 +608,11 @@ test("production materialization persists a 500-user page with one set-based sta
     timezone: "America/New_York",
     globalEventTimezone: "America/New_York",
   }));
-  let statements = 0;
-  const tx = {
-    async $queryRawUnsafe(_sql, preparedJson) {
-      statements += 1;
-      assert.equal(JSON.parse(preparedJson).length, 500);
-      return [{ created: 500, selected: 500, events: 500, conflicts: 0 }];
-    },
-    globalStepEventEntitlement: {
-      async createMany() { throw new Error("set-based path must not call createMany"); },
-    },
-  };
+  const fake = setBasedMaterializationFake(users);
   const client = {
     raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
-    globalStepEventEntitlement: tx.globalStepEventEntitlement,
-    async $transaction(work) { return work(tx); },
+    globalStepEventEntitlement: fake.tx.globalStepEventEntitlement,
+    async $transaction(work) { return work(fake.tx); },
   };
 
   const page = await materializeEntitlementsForActiveRacers({
@@ -588,7 +624,8 @@ test("production materialization persists a 500-user page with one set-based sta
     recordCounters: async () => {},
   });
 
-  assert.equal(statements, 1);
+  assert.equal(fake.materializeStatements, 1);
+  assert.equal(fake.receiptStatements, 1);
   assert.equal(page.created, 500);
   assert.equal(page.nextCursor, "set-user-499");
   assert.equal(page.exhausted, false);

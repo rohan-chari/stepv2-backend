@@ -3,6 +3,12 @@ const { parseCli } = require("./cli");
 
 async function main(argv = process.argv.slice(2), dependencies = {}) {
   const cli = parseCli(argv);
+  if (cli.command === "global-event-sync") {
+    const script = path.resolve(dependencies.repository || path.join(__dirname, "../.."), "scripts/global-event-sync-capacity.js");
+    const run = dependencies.runGlobalEventSync || ((args) => require("node:child_process").execFileSync(process.execPath, [script, cli.subcommand, ...args], { stdio: "inherit" }));
+    await run(cli.globalEventSyncArgs || []);
+    return { exitCode: 0, globalEventSync: true };
+  }
   if (cli.workload === "races-tab-open" && cli.cache !== "warm") {
     throw new Error("the first Races-tab workload is a warm-cache profile");
   }

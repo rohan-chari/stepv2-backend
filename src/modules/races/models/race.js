@@ -365,9 +365,16 @@ const Race = {
         seededBucketId: true,
         tournamentId: true,
         powerupsEnabled: true,
+        isTeamRace: true,
+        status: true,
         participants: {
           where: { userId },
-          select: { userId: true, status: true },
+          select: {
+            userId: true,
+            status: true,
+            team: true,
+            forfeitedAt: true,
+          },
           take: 1,
         },
         tournament: {

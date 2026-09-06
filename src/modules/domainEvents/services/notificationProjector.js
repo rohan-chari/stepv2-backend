@@ -21,6 +21,7 @@ const {
   V1_PROJECTOR_HANDLER_NAMES,
   buildTypedV1Projection,
 } = require("../../notifications/services/domainEventV1Projection");
+const { safePublicDisplayName } = require("../../../shared/lib/displayNameValidator");
 
 const EXPANSION_BATCH_SIZE = 100;
 const PROJECTION_BATCH_SIZE = 50;
@@ -200,9 +201,11 @@ function buildNotificationProjector(dependencies = {}) {
       if (recent) return { status: "SUPPRESSED", reason: "RECIPIENT_DAILY_CAP" };
       let actorName = p.stealthed === true ? "???" : p.actorName;
       if (!actorName && p.actorUserId) {
-        actorName = (await repo.loadUserDisplayName(tx, p.actorUserId))?.displayName;
+        actorName = safePublicDisplayName(
+          (await repo.loadUserDisplayName(tx, p.actorUserId))?.displayName,
+        );
       }
-      actorName ||= "Someone";
+      actorName = safePublicDisplayName(actorName) || "Someone";
       const multiplier = Number.isFinite(Number(p.multiplier)) ? Number(p.multiplier) : null;
       const title = "🔥 Someone's heating up";
       const body = `${actorName}'s multiplier is stacked at ${multiplier != null ? `${multiplier}x` : "a high multiplier"}. Slow them down or catch up!`;

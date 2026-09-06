@@ -30,9 +30,9 @@ function applyCursor(where, cursor) {
 }
 
 const RaceMessage = {
-  async create({ raceId, senderId, body, kind = "USER" }) {
+  async create({ raceId, senderId, body, kind = "USER", audience = "ALL", team = null }) {
     return prisma.raceMessage.create({
-      data: { raceId, senderId, body, kind },
+      data: { raceId, senderId, body, kind, audience, team },
       include: senderInclude,
     });
   },
@@ -44,8 +44,13 @@ const RaceMessage = {
     });
   },
 
-  async findByRace(raceId, { cursor, limit = 50 } = {}) {
-    const where = { raceId, deletedAt: null };
+  async findByRace(raceId, { cursor, limit = 50, audience = "ALL", team = null } = {}) {
+    const where = {
+      raceId,
+      deletedAt: null,
+      audience,
+      ...(audience === "TEAM" ? { team } : {}),
+    };
     applyCursor(where, cursor);
     return prisma.raceMessage.findMany({
       where,

@@ -1,3 +1,7 @@
+const {
+  containsDisplayNameProfanity,
+} = require("../../../shared/lib/displayNameValidator");
+
 // The one serializer for authenticated own-user envelopes. Raw Prisma rows are
 // never spread directly onto the wire: private normalized search text and
 // server bookkeeping stay private, while additive identity capability fields
@@ -27,6 +31,8 @@ function serializeAuthenticatedUser(user) {
     nameSetupOnboardingRequired:
       user?.nameSetupOnboardingRequired === true,
     nameSetupCompletedAt: user?.nameSetupCompletedAt ?? null,
+    shopTutorialCompletedAt: user?.shopTutorialCompletedAt ?? null,
+    displayNameRequiresRename: containsDisplayNameProfanity(user?.displayName),
   };
 }
 

@@ -4,6 +4,9 @@ const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const {
   isTournamentParticipant,
 } = require("../../tournaments/services/tournamentAccess");
+const {
+  sanitizeDisplayNameSnapshots,
+} = require("../../../shared/lib/displayNameValidator");
 
 async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerups4 = false } = {}) {
   const race = await Race.findById(raceId);
@@ -41,13 +44,12 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
     }
   }
 
-  // Build name lookup for stealthed users
-  const stealthedNames = new Map();
-  if (stealthedUserIds.size > 0) {
-    for (const p of race.participants) {
-      if (stealthedUserIds.has(p.userId) && p.user?.displayName) {
-        stealthedNames.set(p.userId, p.user.displayName);
-      }
+  // Event descriptions snapshot names in prose, so keep the raw lookup long
+  // enough to replace both stealthed and legacy-profane principals safely.
+  const participantNames = new Map();
+  for (const p of race.participants) {
+    if (p.user?.displayName) {
+      participantNames.set(p.userId, p.user.displayName);
     }
   }
 
@@ -102,13 +104,12 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
         e.metadata?.decoyOwnerUserId,
         e.metadata?.redirectedUserId,
       ].filter(Boolean));
-      for (const principalId of namedPrincipalIds) {
-        if (!stealthedUserIds.has(principalId)) continue;
-        const realName = stealthedNames.get(principalId);
-        if (realName && description.includes(realName)) {
-          description = description.replaceAll(realName, "???");
-        }
-      }
+      description = sanitizeDisplayNameSnapshots(
+        description,
+        namedPrincipalIds,
+        participantNames,
+        stealthedUserIds,
+      );
 
       return {
         id: e.id,

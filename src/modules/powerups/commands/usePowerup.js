@@ -78,6 +78,7 @@ const {
 } = require("../constants/expiryEffectTypes");
 const { uniqueTypesIfTrailMixUsed } = require("../services/trailMix");
 const ACTIVE_IMPACT_EXPIRY_TYPE_SET = new Set(ACTIVE_IMPACT_EXPIRY_TYPES);
+const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence");
 
 async function applyImmediatePenalty(
   participantModel,
@@ -2095,6 +2096,23 @@ function buildUsePowerup(dependencies = {}) {
         (p) => p.team === myParticipant.team && isAliveTarget(p)
       );
       const flagStart = now();
+      const activeFlags = await effectModel.findActiveForRace(raceId);
+      const beneficiaryIds = new Set(beneficiaries.map((row) => row.id));
+      const alreadyActive = (activeFlags || []).some((effect) =>
+        effect.type === "RALLY_FLAG" &&
+        effect.status === "ACTIVE" &&
+        beneficiaryIds.has(effect.targetParticipantId) &&
+        (!effect.startsAt || new Date(effect.startsAt) <= flagStart) &&
+        effect.expiresAt && new Date(effect.expiresAt) > flagStart
+      );
+      if (alreadyActive) {
+        throw new PowerupUseError(
+          "Your team already has an active Rally Flag.",
+          409,
+          "RALLY_FLAG_ACTIVE",
+          { retainHeld: true },
+        );
+      }
       const flagEnd = new Date(flagStart.getTime() + RALLY_FLAG_DURATION_MS);
       let ownEffect = null;
       for (const b of beneficiaries) {
@@ -4671,6 +4689,7 @@ function buildUsePowerup(dependencies = {}) {
         // required ascending userId order. Locking all accepted rows is a safe
         // conservative superset for fan-out/reflection paths whose final
         // recipients are defense-dependent.
+        await acquireRaceWriteFence(tx, args.raceId);
         await tx.$queryRaw`
           SELECT id FROM races WHERE id = ${args.raceId} FOR UPDATE
         `;

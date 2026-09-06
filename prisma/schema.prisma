@@ -129,6 +129,9 @@ model User {
   // keep the default. The job itself ships dark behind
   // STEP_MILESTONE_REMINDERS_DISABLED, so defaulting true sends nothing on its own.
   stepMilestoneRemindersEnabled     Boolean                         @default(true) @map("step_milestone_reminders_enabled")
+  // First-visit real-Shop tutorial completion. NULL means the carrying backend
+  // supports shop_v1 and the account has not completed it yet.
+  shopTutorialCompletedAt           DateTime?                       @map("shop_tutorial_completed_at")
   // Batch 2026-08-08 item 9: admin visibility into the app-version spread.
   // Sticky-written from X-App-Version in requireAuth, but ONLY when the version
   // changed or the stored lastSeenAt is on an earlier UTC day — never per
@@ -203,31 +206,36 @@ model User {
   // Batch 2026-08-08 item 7: in-app suggestion box. Cascade-deleted with the
   // account (see the FK on Suggestion) and explicitly listed in
   // deleteUserAccount's deletion set.
-  suggestions                 Suggestion[]
-  feedbackEmailAttempts       FeedbackEmailAttempt[]
-  raceEffectImpacts           RaceEffectImpact[]
-  raceImpactEvents            RaceImpactEvent[]
-  umbrellaInterceptions       RaceUmbrellaInterception[]
-  activeRaceImpactWork        ActiveRaceImpactWork[]
-  activeRaceEffectImpacts     ActiveRaceEffectImpact[]
-  globalEventRaceImpacts      GlobalEventRaceImpact[]
-  globalEventUserSummaries    GlobalEventUserSummary[]
-  globalEventSummaryWork      GlobalEventSummaryWork[]
-  globalEventCaptureArtifacts GlobalEventCaptureArtifact[]
-  globalStepEventEntitlements GlobalStepEventEntitlement[]
-  appReviewPromptAttempts     AppReviewPromptAttempt[]
-  inboxAlerts                 InboxAlert[]
-  notificationSchedules       NotificationSchedule[]
+  suggestions                  Suggestion[]
+  feedbackEmailAttempts        FeedbackEmailAttempt[]
+  raceEffectImpacts            RaceEffectImpact[]
+  raceImpactEvents             RaceImpactEvent[]
+  umbrellaInterceptions        RaceUmbrellaInterception[]
+  activeRaceImpactWork         ActiveRaceImpactWork[]
+  activeRaceEffectImpacts      ActiveRaceEffectImpact[]
+  globalEventRaceImpacts       GlobalEventRaceImpact[]
+  globalEventUserSummaries     GlobalEventUserSummary[]
+  globalEventSummaryWork       GlobalEventSummaryWork[]
+  globalEventCaptureArtifacts  GlobalEventCaptureArtifact[]
+  globalStepEventEntitlements  GlobalStepEventEntitlement[]
+  appReviewPromptAttempts      AppReviewPromptAttempt[]
+  inboxAlerts                  InboxAlert[]
+  notificationSchedules        NotificationSchedule[]
   notificationScheduleReceipts NotificationScheduleReceipt[]
-  feedbackThreads             FeedbackThread[]
-  raceShareLinksShared        RaceShareLink[]              @relation("RaceShareLinkSharer")
-  raceJoinRequestsShared      RaceJoinRequest[]            @relation("RaceJoinRequestSharer")
-  raceJoinRequestsRequested   RaceJoinRequest[]            @relation("RaceJoinRequestRequester")
-  raceJoinRequestsCreated     RaceJoinRequest[]            @relation("RaceJoinRequestCreator")
-  raceJoinRequestsResponded   RaceJoinRequest[]            @relation("RaceJoinRequestResponder")
-  seededBucketAssignments     SeededRaceBucketAssignment[]
-  seededRaceWindowMemberships SeededRaceWindowMembership[]
-  giveawayEntrants            GiveawayEntrant[]
+  feedbackThreads              FeedbackThread[]
+  raceShareLinksShared         RaceShareLink[]                  @relation("RaceShareLinkSharer")
+  raceJoinRequestsShared       RaceJoinRequest[]                @relation("RaceJoinRequestSharer")
+  raceJoinRequestsRequested    RaceJoinRequest[]                @relation("RaceJoinRequestRequester")
+  raceJoinRequestsCreated      RaceJoinRequest[]                @relation("RaceJoinRequestCreator")
+  raceJoinRequestsResponded    RaceJoinRequest[]                @relation("RaceJoinRequestResponder")
+  seededBucketAssignments      SeededRaceBucketAssignment[]
+  seededRaceWindowMemberships  SeededRaceWindowMembership[]
+  giveawayEntrants             GiveawayEntrant[]
+  rematchReceiptsRequested     RaceRematchReceipt[]             @relation("RematchRequester")
+  rematchNotificationEpisodes  RaceRematchNotificationEpisode[]
+  raceSeriesCreated            RaceSeries[]                     @relation("RaceSeriesCreator")
+  raceSeriesSubscriptions      RaceSeriesSubscription[]
+  raceSeriesCreateReceipts     RaceSeriesCreateReceipt[]        @relation("RaceSeriesReceiptCreator")
 
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
@@ -1550,6 +1558,19 @@ enum RaceTeam {
   TEAM_B @map("team_b")
 }
 
+enum RaceMessageAudience {
+  ALL
+  TEAM
+}
+
+enum RaceSeriesRenewalJobState {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED_RETRYABLE
+  FAILED_TERMINAL
+}
+
 enum SeededRaceBucketStatus {
   PENDING
   ACTIVE
@@ -1730,48 +1751,196 @@ model Race {
   // A private Daily/Weekly bucket's immutable identity. Nullable and unique so
   // all historical/global seeded races continue on the legacy stream.
   seededBucketId                String?          @unique @map("seeded_bucket_id")
+  rematchSourceRaceId           String?          @map("rematch_source_race_id")
+  rematchRootRaceId             String?          @map("rematch_root_race_id")
+  seriesId                      String?          @map("series_id") @db.Uuid
+  seriesGeneration              Int?             @map("series_generation")
+  seriesPredecessorRaceId       String?          @unique @map("series_predecessor_race_id")
+  settlementCompletedAt         DateTime?        @map("settlement_completed_at")
+  recurringPayoutMinRawSteps    Int?             @map("recurring_payout_min_raw_steps")
+  recurringPayoutPolicyVersion  Int?             @map("recurring_payout_policy_version")
   createdAt                     DateTime         @default(now()) @map("created_at")
   updatedAt                     DateTime         @updatedAt @map("updated_at")
 
-  creator                      User?                         @relation("raceCreator", fields: [creatorId], references: [id])
-  seed                         RaceSeed?                     @relation(fields: [seedId], references: [id])
-  winner                       User?                         @relation("raceWinner", fields: [winnerUserId], references: [id])
-  tournament                   Tournament?                   @relation(fields: [tournamentId], references: [id])
-  participants                 RaceParticipant[]
-  powerups                     RacePowerup[]
-  activeEffects                RaceActiveEffect[]
-  powerupEvents                RacePowerupEvent[]
-  messages                     RaceMessage[]
-  payoutDoubleOfferItems       RacePayoutDoubleOfferItem[]
-  resolutionJob                RaceResolutionJobV2?
-  placementTransitionJob       RacePlacementTransitionJob?
-  resolutionPostTasks          RaceResolutionPostTask[]
-  resolutionPostTaskReceipts   RaceResolutionPostTaskReceipt[]
+  creator                          User?                                 @relation("raceCreator", fields: [creatorId], references: [id])
+  seed                             RaceSeed?                             @relation(fields: [seedId], references: [id])
+  winner                           User?                                 @relation("raceWinner", fields: [winnerUserId], references: [id])
+  tournament                       Tournament?                           @relation(fields: [tournamentId], references: [id])
+  participants                     RaceParticipant[]
+  powerups                         RacePowerup[]
+  activeEffects                    RaceActiveEffect[]
+  powerupEvents                    RacePowerupEvent[]
+  messages                         RaceMessage[]
+  payoutDoubleOfferItems           RacePayoutDoubleOfferItem[]
+  resolutionJob                    RaceResolutionJobV2?
+  placementTransitionJob           RacePlacementTransitionJob?
+  resolutionPostTasks              RaceResolutionPostTask[]
+  resolutionPostTaskReceipts       RaceResolutionPostTaskReceipt[]
   resolutionDeliveryIntentReceipts RaceResolutionDeliveryIntentReceipt[]
-  shareLinks                   RaceShareLink[]
-  joinRequests                 RaceJoinRequest[]
-  adminCommands                RaceAdminCommand[]
-  seededBucket                 SeededRaceBucket?             @relation("SeededBucketRace")
-  effectImpacts                RaceEffectImpact[]
-  impactEvents                 RaceImpactEvent[]
-  umbrellaInterceptions        RaceUmbrellaInterception[]
-  activeImpactWork             ActiveRaceImpactWork[]
-  activeEffectImpacts          ActiveRaceEffectImpact[]
-  globalEventImpacts           GlobalEventRaceImpact[]
-  globalEventCaptureArtifacts  GlobalEventCaptureArtifact[]
-  reviewPromptAttempts         AppReviewPromptAttempt[]
-  referralQualifications       Referral[]                    @relation("ReferralQualifyingRace")
-  referralQualificationIntents ReferralQualificationIntent[] @relation("ReferralQualificationIntentRace")
-  acceptedParticipantCount     RaceAcceptedParticipantCount?
+  shareLinks                       RaceShareLink[]
+  joinRequests                     RaceJoinRequest[]
+  adminCommands                    RaceAdminCommand[]
+  seededBucket                     SeededRaceBucket?                     @relation("SeededBucketRace")
+  effectImpacts                    RaceEffectImpact[]
+  impactEvents                     RaceImpactEvent[]
+  umbrellaInterceptions            RaceUmbrellaInterception[]
+  activeImpactWork                 ActiveRaceImpactWork[]
+  activeEffectImpacts              ActiveRaceEffectImpact[]
+  globalEventImpacts               GlobalEventRaceImpact[]
+  globalEventCaptureArtifacts      GlobalEventCaptureArtifact[]
+  reviewPromptAttempts             AppReviewPromptAttempt[]
+  referralQualifications           Referral[]                            @relation("ReferralQualifyingRace")
+  referralQualificationIntents     ReferralQualificationIntent[]         @relation("ReferralQualificationIntentRace")
+  acceptedParticipantCount         RaceAcceptedParticipantCount?
+  rematchSource                    Race?                                 @relation("RematchSource", fields: [rematchSourceRaceId], references: [id], onDelete: Restrict)
+  rematchDescendants               Race[]                                @relation("RematchSource")
+  rematchRoot                      Race?                                 @relation("RematchRoot", fields: [rematchRootRaceId], references: [id], onDelete: Restrict)
+  rematchRootDescendants           Race[]                                @relation("RematchRoot")
+  rematchReceiptsAsSource          RaceRematchReceipt[]                  @relation("RematchReceiptSource")
+  rematchReceiptAsNew              RaceRematchReceipt?                   @relation("RematchReceiptNewRace")
+  rematchEpisodesAsRoot            RaceRematchNotificationEpisode[]      @relation("RematchEpisodeRoot")
+  rematchEpisodesAsLatest          RaceRematchNotificationEpisode[]      @relation("RematchEpisodeLatest")
+  series                           RaceSeries?                           @relation("RaceSeriesOccurrences", fields: [seriesId], references: [id], onDelete: Restrict)
+  currentForSeries                 RaceSeries?                           @relation("RaceSeriesCurrentRace")
+  seriesPredecessor                Race?                                 @relation("RaceSeriesPredecessor", fields: [seriesPredecessorRaceId], references: [id], onDelete: Restrict)
+  seriesSuccessor                  Race?                                 @relation("RaceSeriesPredecessor")
+  renewalJobAsPredecessor          RaceSeriesRenewalJob?                 @relation("RaceSeriesRenewalPredecessor")
+  renewalJobAsTarget               RaceSeriesRenewalJob?                 @relation("RaceSeriesRenewalTarget")
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
+  @@unique([seriesId, seriesGeneration])
   @@index([creatorId])
   @@index([status])
   @@index([winnerUserId])
   @@index([isPublic, status])
   @@index([seedId, status])
   @@index([tournamentId, status])
+  @@index([rematchSourceRaceId])
+  @@index([rematchRootRaceId])
+  @@index([seriesId, status])
+  @@index([settlementCompletedAt])
   @@map("races")
+}
+
+model RaceRematchReceipt {
+  id             String    @id @default(uuid()) @db.Uuid
+  requesterId    String    @map("requester_id")
+  sourceRaceId   String    @map("source_race_id")
+  newRaceId      String?   @unique @map("new_race_id")
+  idempotencyKey String    @map("idempotency_key") @db.Uuid
+  requestDigest  String    @map("request_digest") @db.Char(64)
+  response       Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  requester  User  @relation("RematchRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  sourceRace Race  @relation("RematchReceiptSource", fields: [sourceRaceId], references: [id], onDelete: Restrict)
+  newRace    Race? @relation("RematchReceiptNewRace", fields: [newRaceId], references: [id], onDelete: Restrict)
+
+  @@unique([requesterId, idempotencyKey])
+  @@index([sourceRaceId])
+  @@map("race_rematch_receipts")
+}
+
+model RaceRematchNotificationEpisode {
+  id                 String    @id @default(uuid()) @db.Uuid
+  recipientId        String    @map("recipient_id")
+  rootRaceId         String    @map("root_race_id")
+  generation         Int
+  latestRaceId       String?   @map("latest_race_id")
+  revision           Int       @default(1)
+  providerAcceptedAt DateTime? @map("provider_accepted_at")
+  closedAt           DateTime? @map("closed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  recipient  User  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  rootRace   Race  @relation("RematchEpisodeRoot", fields: [rootRaceId], references: [id], onDelete: Restrict)
+  latestRace Race? @relation("RematchEpisodeLatest", fields: [latestRaceId], references: [id], onDelete: SetNull)
+
+  @@unique([recipientId, rootRaceId, generation])
+  @@index([rootRaceId])
+  @@map("race_rematch_notification_episodes")
+}
+
+model RaceSeries {
+  id             String    @id @default(uuid()) @db.Uuid
+  creatorId      String?   @map("creator_id")
+  enabled        Boolean   @default(true)
+  settings       Json
+  currentRaceId  String    @unique @map("current_race_id")
+  generation     Int       @default(0)
+  terminalReason String?   @map("terminal_reason")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+  endedAt        DateTime? @map("ended_at")
+
+  creator        User?                     @relation("RaceSeriesCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  currentRace    Race                      @relation("RaceSeriesCurrentRace", fields: [currentRaceId], references: [id], onDelete: Restrict)
+  races          Race[]                    @relation("RaceSeriesOccurrences")
+  subscriptions  RaceSeriesSubscription[]
+  createReceipts RaceSeriesCreateReceipt[]
+
+  @@index([creatorId, enabled])
+  @@map("race_series")
+}
+
+model RaceSeriesSubscription {
+  id             String    @id @default(uuid()) @db.Uuid
+  seriesId       String    @map("series_id") @db.Uuid
+  userId         String    @map("user_id")
+  active         Boolean   @default(true)
+  subscribedAt   DateTime  @default(now()) @map("subscribed_at")
+  unsubscribedAt DateTime? @map("unsubscribed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  series RaceSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, userId])
+  @@index([seriesId, active, subscribedAt, userId])
+  @@map("race_series_subscriptions")
+}
+
+model RaceSeriesCreateReceipt {
+  id             String   @id @default(uuid()) @db.Uuid
+  creatorId      String   @map("creator_id")
+  seriesId       String   @map("series_id") @db.Uuid
+  idempotencyKey String   @map("idempotency_key") @db.Uuid
+  requestDigest  String   @map("request_digest") @db.Char(64)
+  response       Json
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  creator User       @relation("RaceSeriesReceiptCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  series  RaceSeries @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+
+  @@unique([creatorId, idempotencyKey])
+  @@index([seriesId])
+  @@map("race_series_create_receipts")
+}
+
+model RaceSeriesRenewalJob {
+  id              String                    @id @default(uuid()) @db.Uuid
+  predecessorId   String                    @unique @map("predecessor_id")
+  targetRaceId    String?                   @unique @map("target_race_id")
+  state           RaceSeriesRenewalJobState @default(QUEUED)
+  attempts        Int                       @default(0)
+  leaseToken      String?                   @map("lease_token")
+  leaseGeneration Int                       @default(0) @map("lease_generation")
+  leaseExpiresAt  DateTime?                 @map("lease_expires_at")
+  retryAt         DateTime?                 @map("retry_at")
+  lastErrorCode   String?                   @map("last_error_code")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @default(now()) @updatedAt @map("updated_at")
+  terminalAt      DateTime?                 @map("terminal_at")
+
+  predecessor Race  @relation("RaceSeriesRenewalPredecessor", fields: [predecessorId], references: [id], onDelete: Restrict)
+  targetRace  Race? @relation("RaceSeriesRenewalTarget", fields: [targetRaceId], references: [id], onDelete: Restrict)
+
+  @@index([state, retryAt, createdAt])
+  @@index([leaseExpiresAt])
+  @@map("race_series_renewal_jobs")
 }
 
 enum RaceSeedCadence {
@@ -2434,18 +2603,21 @@ enum RaceMessageKind {
 }
 
 model RaceMessage {
-  id        String          @id @default(uuid())
-  raceId    String          @map("race_id")
-  senderId  String?         @map("sender_id")
-  kind      RaceMessageKind @default(USER)
-  body      String          @db.VarChar(500)
-  createdAt DateTime        @default(now()) @map("created_at")
-  deletedAt DateTime?       @map("deleted_at")
+  id        String              @id @default(uuid())
+  raceId    String              @map("race_id")
+  senderId  String?             @map("sender_id")
+  kind      RaceMessageKind     @default(USER)
+  body      String              @db.VarChar(500)
+  createdAt DateTime            @default(now()) @map("created_at")
+  deletedAt DateTime?           @map("deleted_at")
+  audience  RaceMessageAudience @default(ALL)
+  team      RaceTeam?
 
   race   Race  @relation(fields: [raceId], references: [id], onDelete: Cascade)
   sender User? @relation(fields: [senderId], references: [id])
 
   @@index([raceId, createdAt])
+  @@index([raceId, audience, team, createdAt])
   // Raw migration artifact (Prisma cannot model its partial predicate/order):
   // race_messages_user_watermark_idx on
   // (race_id, kind, created_at DESC, id DESC) WHERE deleted_at IS NULL.

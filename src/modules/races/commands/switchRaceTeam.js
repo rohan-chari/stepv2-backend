@@ -2,6 +2,13 @@ const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { isTeamSideFull } = require("../teamRaces");
+const {
+  prisma: defaultPrisma,
+  runInPrismaTransaction,
+  deferUntilAfterCommit,
+} = require("../../../db");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
+const raceMessagesCache = require("../../social/services/raceMessagesCache");
 
 // TR-203: free side switching while a team race is PENDING, subject to the
 // per-side cap; locked once ACTIVE. Exposed as PUT /races/:raceId/team.
@@ -18,9 +25,15 @@ function buildSwitchRaceTeam(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
+  const usesDefaultPersistence = !dependencies.Race && !dependencies.RaceParticipant;
 
   return async function switchRaceTeam({ userId, raceId, team }) {
-    const race = await raceModel.findById(raceId);
+    const mutate = async (tx = db) => {
+    if (usesDefaultPersistence) await acquireRaceWriteFence(tx, raceId);
+    const race = usesDefaultPersistence
+      ? await tx.race.findUnique({ where: { id: raceId }, include: { participants: true } })
+      : await raceModel.findById(raceId);
     if (!race) {
       throw new RaceTeamSwitchError("Race not found", 404);
     }
@@ -38,7 +51,9 @@ function buildSwitchRaceTeam(dependencies = {}) {
       throw new RaceTeamSwitchError("Team must be TEAM_A or TEAM_B", 400);
     }
 
-    const participant = await participantModel.findByRaceAndUser(raceId, userId);
+    const participant = usesDefaultPersistence
+      ? race.participants.find((row) => row.userId === userId)
+      : await participantModel.findByRaceAndUser(raceId, userId);
     if (!participant || participant.status !== "ACCEPTED") {
       throw new RaceTeamSwitchError("You are not in this race", 403);
     }
@@ -50,14 +65,22 @@ function buildSwitchRaceTeam(dependencies = {}) {
       throw new RaceTeamSwitchError("That team is full", 409, "TEAM_FULL");
     }
 
-    const updated = await participantModel.update(participant.id, { team });
+    const updated = usesDefaultPersistence
+      ? await tx.raceParticipant.update({ where: { id: participant.id }, data: { team } })
+      : await participantModel.update(participant.id, { team });
 
-    events.emit("RACE_TEAM_SWITCHED", {
+    await deferUntilAfterCommit(() => events.emit("RACE_TEAM_SWITCHED", {
       raceId,
       userId,
       team,
-    });
+    }));
 
+    return updated;
+    };
+    const updated = usesDefaultPersistence
+      ? await runInPrismaTransaction(mutate)
+      : await mutate();
+    await raceMessagesCache.invalidateRace(raceId);
     return updated;
   };
 }

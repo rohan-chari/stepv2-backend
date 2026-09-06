@@ -92,6 +92,7 @@ Object.assign(module.exports, require("./jobs/raceResolutionQueue"));
 Object.assign(module.exports, require("./jobs/raceResolutionQueueV2"));
 Object.assign(module.exports, require("./jobs/racePlacementTransitionWorker"));
 Object.assign(module.exports, require("./jobs/raceResolutionPostTaskRunner"));
+Object.assign(module.exports, require("./jobs/raceSeriesRenewal"));
 Object.assign(module.exports, require("./jobs/resolvedImpactBoundaryScheduler"));
 Object.assign(module.exports, require("./jobs/autoStartScheduledRaces"));
 Object.assign(module.exports, require("./jobs/placementRecompute"));
@@ -101,4 +102,5 @@ Object.assign(module.exports, require("./jobs/raceAdminCommandRunner"));
 Object.assign(module.exports, require("./jobs/fixedTeamPayoutMonitoring"));
 
 Object.assign(module.exports, require("./routes"));
+Object.assign(module.exports, require("./seriesRoutes"));
 Object.assign(module.exports, require("./joinRequestRoutes"));

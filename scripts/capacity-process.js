@@ -27,10 +27,18 @@ async function main() {
   ]);
   const capacityGlobalEventOnly = role === "cron" &&
     eventProfiles.has(process.env.CAPACITY_GLOBAL_EVENT_PROFILE);
+  const globalEventSyncProfiles = new Set([
+    "global-event-sync", "ordinary-sync", "eligible-nonoverlap", "eligible-overlap",
+    "android-periodic", "android-synchronized", "android-jittered", "foreground-five-minute",
+    "expedited-over-periodic", "mixed-production", "event-end-worst-case", "drain",
+  ]);
+  const capacityGlobalEventSync = role === "cron" &&
+    globalEventSyncProfiles.has(process.env.CAPACITY_GLOBAL_EVENT_PROFILE);
   const capacityHomeOpenIsolation = role === "cron" &&
     process.env.CAPACITY_GLOBAL_EVENT_PROFILE === "home-open";
   const server = startServer({
     capacityGlobalEventOnly,
+    capacityGlobalEventSync,
     capacityHomeOpenIsolation,
     reportCapacityResolutionWorker: role === "resolution"
       ? registerCapacityResolutionWorker

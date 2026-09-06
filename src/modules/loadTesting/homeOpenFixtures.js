@@ -309,7 +309,7 @@ async function aggregateSnapshotTopology(prisma) {
       incrementRows[0], FALLBACK_INCREMENT_DISTRIBUTION),
     placementShape: { sampleCount: Number(placementRows[0]?.sampleCount || 0),
       tieRate: Number(placementRows[0]?.tieRate || 0),
-      gapQuantiles: (placementRows[0]?.gapQuantiles || [0, 0, 0, 0]).map(Number) },
+      gapQuantiles: (placementRows[0]?.gapQuantiles || Array(4).fill(0)).map(Number) },
   };
 }
 

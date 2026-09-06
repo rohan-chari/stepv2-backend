@@ -887,6 +887,19 @@
       "rollbackValue": null
     },
     {
+      "id": "env:CAPACITY_SCRUB_ATTESTATION_PATH",
+      "name": "CAPACITY_SCRUB_ATTESTATION_PATH",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "absolute path to the snapshot-bound scrub attestation",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
       "id": "env:CAPACITY_SCRUB_ATTESTATION_SECRET",
       "name": "CAPACITY_SCRUB_ATTESTATION_SECRET",
       "kind": "string_environment",
