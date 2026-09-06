@@ -3151,7 +3151,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       );
       const alarm =
         claimableLagMs > QUEUE_LAG_ALARM_MS ||
-        (service.expiredRunningCount > 0 && lanes.active >= 2) ||
+        (service.expiredRunningCount > 0 && lanes.active >= (lanes.maxActive ?? 2)) ||
         (service.claimableCount > 0 &&
           noTerminalProgressAgeMs > RACE_RESOLUTION_WATCHDOG_MS);
       const level = alarm ? "warn" : "log";
@@ -3169,6 +3169,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           liveCount: service.liveCount,
           maintenanceCount: service.maintenanceCount,
           workLaneActive: lanes.active,
+          workLaneMaxActive: lanes.maxActive ?? null,
           workLaneQueuedCore: lanes.queuedCore,
           workLaneQueuedPost: lanes.queuedPost,
           lastTerminalAgeMs,
@@ -3190,6 +3191,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         liveCount: service.liveCount,
         maintenanceCount: service.maintenanceCount,
         workLaneActive: lanes.active,
+        workLaneMaxActive: lanes.maxActive ?? null,
         workLaneQueuedCore: lanes.queuedCore,
         workLaneQueuedPost: lanes.queuedPost,
         lastTerminalAgeMs,

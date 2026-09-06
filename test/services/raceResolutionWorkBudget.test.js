@@ -57,3 +57,49 @@ test("budget rejects unknown lane names", async () => {
   const budget = buildRaceResolutionWorkBudget();
   await assert.rejects(() => budget.run("delivery", async () => {}), /invalid lane/);
 });
+
+// Semaphore scheduling is an in-process property: hold handlers at a real
+// promise barrier rather than infer concurrency from HTTP response timing.
+test("configured three-slot budget runs three core/post handlers but not four", async () => {
+  const budget = buildRaceResolutionWorkBudget({ maxActive: 3 });
+  let release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  let active = 0;
+  let peak = 0;
+  const work = ["core", "post", "core", "post", "core"].map(lane => budget.run(lane, async () => {
+    active++;
+    peak = Math.max(peak, active);
+    await barrier;
+    active--;
+  }));
+  await new Promise(setImmediate);
+  try {
+    assert.equal(active, 3);
+    assert.equal(budget.snapshot().maxActive, 3);
+  } finally {
+    release();
+    await Promise.all(work);
+  }
+  assert.equal(peak, 3);
+  assert.equal(budget.snapshot().active, 0);
+});
+
+test("process startup honors concurrency 3 and returning the env to 2", () => {
+  const { execFileSync } = require("node:child_process");
+  const modulePath = require.resolve("../../src/modules/races/services/raceResolutionWorkBudget");
+  for (const [value, expected] of [["3",3], ["2",2], ["1",1], ["",2], ["garbage",2], ["1.5",2], ["99",2]]) {
+    const result = execFileSync(process.execPath, ["-e",
+      `console.log(require(${JSON.stringify(modulePath)}).raceResolutionWorkBudget.snapshot().maxActive)`], {
+      env: { ...process.env, ASYNC_RACE_RESOLUTION_CONCURRENCY: value }, encoding: "utf8",
+    });
+    assert.equal(result.trim(), String(expected), `setting ${JSON.stringify(value)}`);
+  }
+});
+
+test("failed work releases its slot at concurrency three", async () => {
+  const budget = buildRaceResolutionWorkBudget({ maxActive: 3 });
+  const results = await Promise.allSettled(Array.from({length: 9}, (_, i) =>
+    budget.run(i % 2 ? "post" : "core", async () => { if (i % 2) throw new Error("expected"); return i; })));
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 5);
+  assert.equal(budget.snapshot().active, 0);
+});

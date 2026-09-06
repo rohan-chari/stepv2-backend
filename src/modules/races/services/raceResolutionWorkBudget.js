@@ -1,7 +1,9 @@
 const DEFAULT_MAX_ACTIVE = 2;
 
 function buildRaceResolutionWorkBudget({ maxActive = DEFAULT_MAX_ACTIVE } = {}) {
-  const cap = Math.max(1, Math.min(2, Number(maxActive) || DEFAULT_MAX_ACTIVE));
+  const requested = Number(maxActive);
+  const cap = Number.isInteger(requested) && requested >= 1 && requested <= 3
+    ? requested : DEFAULT_MAX_ACTIVE;
   const queued = [];
   let active = 0;
   let sequence = 0;
@@ -58,6 +60,7 @@ function buildRaceResolutionWorkBudget({ maxActive = DEFAULT_MAX_ACTIVE } = {}) 
     },
     snapshot() {
       return {
+        maxActive: cap,
         active,
         queuedCore: queued.filter((waiter) => waiter.lane === "core").length,
         queuedPost: queued.filter((waiter) => waiter.lane === "post").length,
@@ -66,7 +69,12 @@ function buildRaceResolutionWorkBudget({ maxActive = DEFAULT_MAX_ACTIVE } = {}) 
   };
 }
 
-const raceResolutionWorkBudget = buildRaceResolutionWorkBudget();
+// One process-wide budget covers both core resolution and post tasks. Reuse
+// the scheduler's operational setting so a third claim has a real third slot.
+// Captured at startup; changing the deployment env requires a safe reload.
+const raceResolutionWorkBudget = buildRaceResolutionWorkBudget({
+  maxActive: process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY,
+});
 
 module.exports = {
   DEFAULT_MAX_ACTIVE,
