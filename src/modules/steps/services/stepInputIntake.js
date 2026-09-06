@@ -5,7 +5,9 @@ const {
 } = require("../../races/models/raceResolutionJobV2");
 const {
   lockScoringInputState,
-  readCanonicalSampleInput,
+  readSampleInputBounds,
+  scoringRevisionWatermark,
+  scoringRevisionIsCurrent,
   scoringBoundaryIsSafe,
   persistScoringInputState,
 } = require("./scoringInputVersion");
@@ -154,23 +156,25 @@ function buildStepInputIntake(dependencies = {}) {
           userId,
           samples,
           new Date(requestTimestamp).getTime(),
-          { noopSuppression: true, manageScoringVersion: false, returnCanonicalInput: true },
+          { noopSuppression: true, manageScoringVersion: false, classifyScoringDelta: true },
         ),
       );
     }
-    const canonicalInput = samplePersistence.canonicalInput || await measureStepTelemetryPhase(
-      "sample", () => readCanonicalSampleInput(tx, userId),
+    const canonicalInput = await measureStepTelemetryPhase(
+      "sample", () => readSampleInputBounds(tx, userId),
     );
     const decisionState = { ...scoringState, dbNow: canonicalInput.dbNow };
     const sampleScoringChanged =
-      !scoringBoundaryIsSafe(decisionState) ||
-      scoringState.scoringWatermark !== canonicalInput.scoringWatermark;
+      samplePersistence.scoringChanged === true ||
+      !scoringRevisionIsCurrent(userId, scoringState) ||
+      !scoringBoundaryIsSafe(decisionState);
     const scoringChanged = dailyStorageChanged || sampleScoringChanged;
     const storageChanged =
       dailyStorageChanged ||
       samplePersistence.storageChanged === true;
 
     const generation = resultingGeneration(scoringState, scoringChanged);
+    canonicalInput.scoringWatermark = scoringRevisionWatermark(userId, generation);
     const repairRequired = !generationsEqual(
       scoringState.sourceQueueSemanticsGeneration,
       generation

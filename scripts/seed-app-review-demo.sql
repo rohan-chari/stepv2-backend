@@ -140,6 +140,16 @@ BEGIN
     relationship_type = excluded.relationship_type,
     updated_at = now();
 
+  -- Invalidate and lock every affected input revision before raw source writes.
+  -- The next HTTP intake re-establishes its fingerprint and queue ownership.
+  INSERT INTO user_scoring_input_versions (user_id, generation, updated_at)
+  SELECT user_id, 1, CURRENT_TIMESTAMP
+  FROM unnest(ARRAY[demo_user_id, alex_id, maya_id, jordan_id]) AS source(user_id)
+  ORDER BY user_id
+  ON CONFLICT (user_id) DO UPDATE SET
+    generation = user_scoring_input_versions.generation + 1,
+    updated_at = CURRENT_TIMESTAMP;
+
   INSERT INTO steps (id, user_id, steps, step_goal, date, created_at)
   VALUES
     ('80000000-0000-4000-8000-000000000001', demo_user_id, 9400, 8000, today, now()),

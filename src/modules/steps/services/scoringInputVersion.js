@@ -63,6 +63,33 @@ function digestRows(rows) {
     .digest("hex");
 }
 
+// v1 is a content hash of every sample. v2 identifies a committed input
+// revision, not a content digest. The prefix fits the existing CHAR(64) fields
+// and makes old capture provenance distinguishable without rewriting it.
+function scoringRevisionWatermark(userId, generation) {
+  return `v2:${digestRows(["step-input-revision-v2", userId, String(generation)]).slice(0,61)}`;
+}
+
+function scoringRevisionIsCurrent(userId, state) {
+  return state?.generation != null &&
+    state.scoringWatermark === scoringRevisionWatermark(userId, state.generation);
+}
+
+async function readSampleInputBounds(client, userId) {
+  const [row] = await client.$queryRawUnsafe(`WITH decision_time AS MATERIALIZED (
+      SELECT clock_timestamp() AS at
+    ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS "dbNowMs",
+      (SELECT period_end FROM step_samples WHERE user_id=$1
+        AND period_end > (decision_time.at AT TIME ZONE 'UTC')
+        ORDER BY period_end LIMIT 1) AS "nextSampleBoundaryAt",
+      (SELECT period_end FROM step_samples WHERE user_id=$1
+        ORDER BY period_end DESC LIMIT 1) AS "canonicalCoverageThrough"
+    FROM decision_time`, userId);
+  return { dbNow: new Date(Number(row.dbNowMs)),
+    nextSampleBoundaryAt: row.nextSampleBoundaryAt,
+    canonicalCoverageThrough: row.canonicalCoverageThrough };
+}
+
 // Serialize no-op classification per user. The row lock makes daily and sample
 // writers compare/update one canonical watermark without write skew. Database
 // time is returned by the same read and is the only boundary clock used.
@@ -197,6 +224,9 @@ module.exports = {
   materializeAndReadScoringInputVersion,
   lockScoringInputState,
   readCanonicalSampleInput,
+  readSampleInputBounds,
+  scoringRevisionWatermark,
+  scoringRevisionIsCurrent,
   scoringBoundaryIsSafe,
   persistScoringInputState,
   stampSourceQueueSemanticsGeneration,

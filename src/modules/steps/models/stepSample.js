@@ -186,6 +186,7 @@ const StepSample = {
     manageScoringVersion = true,
     lockScoringInput = false,
     returnCanonicalInput = false,
+    classifyScoringDelta = false,
   } = {}) {
     if (!samples || samples.length === 0) {
       return {
@@ -328,6 +329,14 @@ const StepSample = {
       replacedStored.map(normalized).sort().every((value, index) =>
         value === kept.map((row) => normalized(row.raw)).sort()[index]
       );
+    const scoringKey = (row) => JSON.stringify([
+      new Date(row.periodStart ?? row.start).toISOString(),
+      new Date(row.periodEnd ?? row.end).toISOString(), Number(row.steps),
+    ]);
+    const oldScoringRows = replacedStored.map(scoringKey).sort();
+    const newScoringRows = kept.map(row => scoringKey(row.raw)).sort();
+    const scoringDelta = oldScoringRows.length !== newScoringRows.length ||
+      oldScoringRows.some((value, index) => value !== newScoringRows[index]);
     if (exactNoop) {
       const canonicalInput = (state || returnCanonicalInput)
         ? await readCanonicalSampleInput(client, userId)
@@ -349,7 +358,7 @@ const StepSample = {
     if (!manageScoringVersion) {
       return {
         storageChanged: true,
-        scoringChanged: true,
+        scoringChanged: classifyScoringDelta ? scoringDelta : true,
         ...(returnCanonicalInput
           ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
           : {}),
