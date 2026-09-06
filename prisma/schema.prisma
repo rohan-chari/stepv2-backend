@@ -1762,6 +1762,7 @@ model Race {
   reviewPromptAttempts         AppReviewPromptAttempt[]
   referralQualifications       Referral[]                    @relation("ReferralQualifyingRace")
   referralQualificationIntents ReferralQualificationIntent[] @relation("ReferralQualificationIntentRace")
+  acceptedParticipantCount     RaceAcceptedParticipantCount?
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
@@ -1926,6 +1927,17 @@ model TournamentParticipant {
   @@map("tournament_participants")
 }
 
+// Maintained transactionally by membership triggers, never by scoring workers.
+model RaceAcceptedParticipantCount {
+  raceId        String @id @map("race_id")
+  acceptedCount Int    @map("accepted_count")
+  race          Race   @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@map("race_accepted_participant_counts")
+}
+
+// Persisted standings use an expression/partial index defined in migration
+// 20260906010000; Prisma cannot represent that index's exact ordering.
 model RaceParticipant {
   id                                 String                @id @default(uuid())
   raceId                             String                @map("race_id")

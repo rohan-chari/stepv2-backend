@@ -201,14 +201,17 @@ const RaceParticipant = {
   },
 
   // Persisted, bounded fallback for a page projection miss/outage. The
-  // ranking order mirrors compareParticipantsForPlacement and computes the
-  // total/placement in SQL without materializing the race roster in Node.
+  // Expression-index order mirrors compareParticipantsForPlacement. Only the
+  // requested page is ranked; OFFSET retains the legacy O(offset + limit) cost.
+  // Count and page share one statement snapshot. An empty page returns one
+  // count sentinel (participantId/userId null); consumers read totalCount before
+  // filtering that sentinel out of the participant list.
   async findPersistedProgressPage(raceId, { offset = 0, limit = 15 } = {}) {
     const safeOffset = Math.max(0, Math.floor(Number(offset) || 0));
     const safeLimit = Math.max(1, Math.min(50, Math.floor(Number(limit) || 1)));
     return prisma.$queryRawUnsafe(
       `
-      WITH ranked AS (
+      WITH page AS MATERIALIZED (
         SELECT
           rp.id AS "participantId",
           rp.user_id AS "userId",
@@ -219,24 +222,34 @@ const RaceParticipant = {
           rp.forfeited_at AS "forfeitedAt",
           rp.team,
           rp.placement,
-          rp.joined_at AS "joinedAt",
-          ROW_NUMBER() OVER (
-            ORDER BY
-              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END,
-              CASE WHEN rp.finished_at IS NOT NULL THEN rp.placement END ASC NULLS LAST,
-              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC NULLS LAST,
-              CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
-              rp.joined_at ASC,
-              rp.user_id ASC
-          )::int AS "computedPlacement",
-          COUNT(*) OVER ()::int AS "totalCount"
+          rp.joined_at AS "joinedAt"
         FROM race_participants rp
         WHERE rp.race_id = $1
           AND rp.status = 'accepted'::"RaceParticipantStatus"
+        ORDER BY
+          CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END,
+          CASE WHEN rp.finished_at IS NOT NULL THEN rp.placement END ASC NULLS LAST,
+          CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC NULLS LAST,
+          CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
+          rp.joined_at ASC,
+          rp.user_id ASC
+        OFFSET $2 LIMIT $3
+      ), ranked AS (
+        SELECT page.*, (ROW_NUMBER() OVER (
+          ORDER BY
+            CASE WHEN "finishedAt" IS NOT NULL THEN 0 ELSE 1 END,
+            CASE WHEN "finishedAt" IS NOT NULL THEN placement END ASC NULLS LAST,
+            CASE WHEN "finishedAt" IS NOT NULL THEN "finishedAt" END ASC NULLS LAST,
+            CASE WHEN "finishedAt" IS NULL THEN "totalSteps" END DESC NULLS LAST,
+            "joinedAt" ASC, "userId" ASC
+        ) + $2)::int AS "computedPlacement"
+        FROM page
       )
-      SELECT * FROM ranked
-      ORDER BY "computedPlacement"
-      OFFSET $2 LIMIT $3
+      SELECT ranked.*, COALESCE(counts.accepted_count, 0)::int AS "totalCount"
+      FROM (SELECT $1::text AS race_id) requested
+      LEFT JOIN race_accepted_participant_counts counts USING (race_id)
+      LEFT JOIN ranked ON true
+      ORDER BY ranked."computedPlacement"
       `,
       raceId,
       safeOffset,

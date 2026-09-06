@@ -124,6 +124,7 @@ function buildRaceMoneyView({
   completedTeamPayouts = null,
   heldPotCoins: suppliedHeldPotCoins = null,
   fundedProjectionPlayerCount = null,
+  participantSummary = null,
 }) {
   const rows = participants || race?.participants || [];
   const funded = race?.fundedPrize === true;
@@ -133,6 +134,8 @@ function buildRaceMoneyView({
   const completedQuick = completed
     ? quickSettlementParticipants(race, rows)
     : null;
+  const quickCompleted = completed && race?.creationSource === "QUICK_CREATE" &&
+    race?.startPolicy === "ON_MINIMUM_PARTICIPANTS";
   const payoutVersion = race?.payoutRoundingVersion ?? 0;
   const finalAwards = (rawPayouts) => buildPayoutPlan({
     payoutRoundingVersion: payoutVersion,
@@ -145,7 +148,7 @@ function buildRaceMoneyView({
   // Match completeRace exactly: for quick races only qualifying walkers rank;
   // otherwise every placed participant ranks, while a forfeiter never gets a
   // payout tier. This compacting is exclusive to the stamped new protocol.
-  const exitEligibleRecipientCount = !compactForExitPolicy
+  let exitEligibleRecipientCount = !compactForExitPolicy
     ? null
     : completed
       ? (completedQuick || rows).filter(
@@ -159,9 +162,20 @@ function buildRaceMoneyView({
             (p) => p.status === "ACCEPTED" && p.forfeitedAt == null
           ).length
         : null;
+  if (participantSummary && compactForExitPolicy) {
+    if (completed) {
+      exitEligibleRecipientCount = quickCompleted
+        ? participantSummary.completedQuickExitRecipientCount
+        : participantSummary.completedExitRecipientCount;
+    } else if (race?.status === "ACTIVE") {
+      exitEligibleRecipientCount = participantSummary.activeExitRecipientCount;
+    }
+  }
 
   if (!funded) {
-    const heldPotCoins = suppliedHeldPotCoins == null
+    const heldPotCoins = participantSummary
+      ? participantSummary.heldPotCoins
+      : suppliedHeldPotCoins == null
       ? rows.reduce(
           (sum, p) => (p.buyInStatus === "HELD" ? sum + (p.buyInAmount || 0) : sum),
           0
@@ -211,7 +225,7 @@ function buildRaceMoneyView({
 
   // Funded: nothing is ever held, and a completed race reads its STAMPED pool so
   // its numbers can never drift as the field changes afterwards.
-  const playerCount = completed
+  let playerCount = completed
     ? completedQuick
       ? completedQuick.length >= 2
         ? completedQuick.length
@@ -226,6 +240,15 @@ function buildRaceMoneyView({
         ? activeFundedProjectionPlayerCount(rows, acceptedCount)
         : Math.max(0, Number(fundedProjectionPlayerCount) || 0)
       : acceptedCount;
+  if (participantSummary && completed) {
+    playerCount = quickCompleted
+      ? (participantSummary.quickQualifierCount >= 2 ? participantSummary.quickQualifierCount : 0)
+      : race?.isTeamRace
+        ? participantSummary.teamSettlementPlayerCount
+        : participantSummary.settlementPlayerCount;
+  } else if (participantSummary && race?.status === "ACTIVE" && compactForExitPolicy) {
+    playerCount = participantSummary.activeFundedPlayerCount;
+  }
   // A positive-step forfeiter keeps the pool size but is never eligible for a
   // tier. Project the tier table over eligible finishers so the UI matches the
   // deterministic full redistribution that completeRace will perform.
@@ -234,14 +257,20 @@ function buildRaceMoneyView({
   const multBps = raceTeamPoolMultBps(race);
   const prizeStamp = resolveRacePrizeStamp(race);
   const fixedTeamStamp = resolveFixedTeamPayoutStamp(race);
-  const projectedFixedRecipientCount = !completed && fixedTeamStamp
-    ? teamPayoutRecipientCount != null
+  const summaryTeamRecipients = participantSummary
+    ? Math.max(participantSummary.teamARecipients, participantSummary.teamBRecipients)
+    : null;
+  const projectedRecipientCount = summaryTeamRecipients != null
+    ? summaryTeamRecipients
+    : teamPayoutRecipientCount != null
       ? teamPayoutRecipientCount
       : rows.length > 0
         ? projectedTeamRecipientCount(rows)
         : acceptedCount > 0
           ? 1
-          : 0
+          : 0;
+  const projectedFixedRecipientCount = !completed && fixedTeamStamp
+    ? projectedRecipientCount
     : null;
   const projectedFixedPlan = projectedFixedRecipientCount == null
     ? null
@@ -268,7 +297,9 @@ function buildRaceMoneyView({
       // Settlement persists the actual per-recipient award. Team winners all
       // have placement 1, so amount-desc is the stable tier representation and
       // keeps the top-stepper remainder first.
-      visiblePayouts = Array.isArray(completedTeamPayouts)
+      visiblePayouts = participantSummary
+        ? participantSummary.completedTeamPayouts
+        : Array.isArray(completedTeamPayouts)
         ? completedTeamPayouts.filter((amount) => (amount || 0) > 0)
         : rows
           .filter((participant) => (participant.payoutCoins || 0) > 0)
@@ -282,13 +313,7 @@ function buildRaceMoneyView({
         // Real HTTP projections carry the accepted roster and therefore use
         // the exact winning-side count. Lean/legacy callers that only supply
         // acceptedCount retain their historical single-liability fallback.
-        recipientCount: teamPayoutRecipientCount != null
-          ? teamPayoutRecipientCount
-          : rows.length > 0
-            ? projectedTeamRecipientCount(rows)
-            : acceptedCount > 0
-              ? 1
-              : 0,
+        recipientCount: projectedRecipientCount,
         prizeCoins: coins,
         payoutRoundingVersion: payoutVersion,
       })).awards.map((award) => award.awardCoins);
@@ -303,7 +328,9 @@ function buildRaceMoneyView({
     });
     const payoutPlan = finalAwards(rawPayouts);
     const completedV1Payouts = payoutVersion === 1 && completed
-      ? rows
+      ? participantSummary
+        ? participantSummary.completedV1Payouts
+        : rows
         .filter((p) => p.placement != null && (p.payoutCoins || 0) > 0)
         .sort((a, b) => a.placement - b.placement)
         .map((p) => p.payoutCoins)

@@ -147,11 +147,8 @@ async function enqueueRaceResolution(
   tx = null
 ) {
   if (!raceId) return null;
-  if (
-    tx == null &&
-    reason === "DISPLAY_REFRESH" &&
-    !(await claimDisplayRefreshAdmission(raceId))
-  ) return null;
+  // Admission belongs to the durable queue: a race-only Redis key cannot tell
+  // whether another viewer, timezone or source generation is already covered.
   const capacity = startCapacityPhase("resolution_enqueue");
   let capacityOutcome = "error";
   let result = null;
@@ -173,10 +170,9 @@ async function enqueueRaceResolution(
     })
   );
   queuedGenerationMerge = rollout.queuedGenerationMerge;
-  // Artifact reuse is independently rollable and must work with only its own
-  // flag enabled. The opaque ref is safe only for a pure display generation,
-  // so stamp that closed reason even while broader reason-aware scoping is off.
-  if (displayArtifact && reason === "DISPLAY_REFRESH") {
+  // DISPLAY_REFRESH is a closed identity regardless of legacy rollout flags.
+  // The durable coverage check needs it even when no artifact was available.
+  if (reason === "DISPLAY_REFRESH") {
     rollout.dirtyEnvelope = {
       reason: "DISPLAY_REFRESH",
       dirtyUserIds,

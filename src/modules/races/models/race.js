@@ -333,26 +333,17 @@ const Race = {
   },
 
   async findBootstrapAccessContext(id, userId) {
-    return prisma.race.findUnique({
+    const race = await prisma.race.findUnique({
       where: { id },
-      select: {
-        id: true,
-        status: true,
-        seededBucketId: true,
-        tournamentId: true,
-        // Required by the race-preview carve-out in loadBootstrapAccess
-        // (canReadRacePreview reads race.isPublic). /bootstrap is the FIRST call
-        // the race-detail screen makes, so without this column that gate 403s
-        // before getRaceDetails — which has isPublic via findDetailsCore's
-        // include — is ever reached.
-        isPublic: true,
+      include: {
+        ...detailsRelationInclude,
         participants: {
           where: { userId },
-          select: { userId: true, status: true },
           take: 1,
         },
         tournament: {
           select: {
+            id: true, name: true, bracketSize: true,
             participants: {
               where: { userId, status: "ACCEPTED" },
               select: { userId: true },
@@ -362,6 +353,8 @@ const Race = {
         },
       },
     });
+    if (race) Object.defineProperty(race, "_bootstrapReadViewer", { value: userId });
+    return race;
   },
 
   async findMessageAccessContext(id, userId) {

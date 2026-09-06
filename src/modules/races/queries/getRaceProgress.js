@@ -345,33 +345,24 @@ function buildGetRaceProgress(deps = {}) {
     hasInjectedDependencies,
     legacyReplayForTests,
   });
-  const refreshRequests = new Map();
-
   function requestWorkerRefresh({ raceId, userId, scoringTimeZone }) {
-    const currentTime = Date.now();
-    const current = refreshRequests.get(raceId);
-    if (current && current.expiresAt > currentTime) return current.promise;
-    const promise = Promise.resolve().then(() => enqueueRaceResolutionFn({
+    // The durable queue coalesces exact pending viewer work. A process-local
+    // race-only promise can suppress another viewer or cache a failed enqueue.
+    return Promise.resolve().then(() => enqueueRaceResolutionFn({
       raceId,
       userId,
       timeZone: scoringTimeZone,
       reason: "DISPLAY_REFRESH",
       priority: "IMMEDIATE",
     }));
-    const entry = { expiresAt: currentTime + 5_000, promise };
-    refreshRequests.set(raceId, entry);
-    promise.catch(() => {
-      if (refreshRequests.get(raceId) === entry) refreshRequests.delete(raceId);
-    });
-    return promise;
   }
 
-  function buildProgressMoney(race) {
+  function buildProgressMoney(race, participantSummary = null) {
     const participants = race?.participants || [];
-    const acceptedCount = participants.filter(
+    const acceptedCount = participantSummary?.acceptedCount ?? participants.filter(
       (participant) => participant.status === "ACCEPTED",
     ).length;
-    const money = buildRaceMoneyView({ race, participants, acceptedCount });
+    const money = buildRaceMoneyView({ race, participants, acceptedCount, participantSummary });
     const { payouts, payoutTiers } = serializePayouts(money.payouts);
     return {
       ...serializeTeamPayoutStamp(race),
@@ -1925,10 +1916,17 @@ function buildGetRaceProgress(deps = {}) {
       !requestedPage &&
       leanProjectionEnabled &&
       typeof raceModel.findProgressPageContext === "function";
-    let race = requestedPage || boundedLegacyContext
+    const bootstrapContext = resolvedContext?.bootstrapReadContext?.matches?.(raceId, userId)
+      ? resolvedContext.bootstrapReadContext : null;
+    const loadFullScoringContext = () => bootstrapContext
+      ? bootstrapContext.fullScoringContext()
+      : raceModel.findProgressScoringContext(raceId);
+    let race = bootstrapContext && (requestedPage || boundedLegacyContext)
+      ? bootstrapContext.core()
+      : requestedPage || boundedLegacyContext
       ? await raceModel.findProgressPageContext(raceId, userId)
       : (leanProjectionEnabled
-        ? await raceModel.findProgressScoringContext(raceId)
+        ? await loadFullScoringContext()
         : await raceModel.findById(raceId));
     if (!race) {
       const error = new Error("Race not found");
@@ -1949,7 +1947,7 @@ function buildGetRaceProgress(deps = {}) {
       // Null-timezone races score in the requester timezone and therefore
       // cannot share a page projection. Keep their established full path.
       race = leanProjectionEnabled
-        ? await raceModel.findProgressScoringContext(raceId)
+        ? await loadFullScoringContext()
         : await raceModel.findById(raceId);
     }
     let fullScoringContextLoaded = !boundedLegacyContext;
@@ -1964,9 +1962,9 @@ function buildGetRaceProgress(deps = {}) {
       const useLeanContext =
         (leanScoringContext || boundedLegacyContext) && canUseLeanContext;
       race = leanScoringContext && canUseLeanContext
-        ? await raceModel.findProgressScoringContext(raceId)
+        ? await loadFullScoringContext()
         : boundedLegacyContext && canUseLeanContext
-          ? await raceModel.findProgressScoringContext(raceId)
+          ? await loadFullScoringContext()
           : await raceModel.findById(raceId);
       fullScoringContextLoaded = true;
       if (race && useLeanContext) {
@@ -2109,13 +2107,14 @@ function buildGetRaceProgress(deps = {}) {
 
       if (!projectionRows) {
         projectionSource = "stale-fallback";
-        const persisted = typeof participantModel.findPersistedProgressPage === "function"
+        const persistedRows = typeof participantModel.findPersistedProgressPage === "function"
           ? await participantModel.findPersistedProgressPage(raceId, {
               offset: participantsOffset,
               limit: participantsLimit,
             })
           : [];
-        projectionTotal = Number(persisted[0]?.totalCount || 0);
+        projectionTotal = Number(persistedRows[0]?.totalCount || 0);
+        const persisted = persistedRows.filter((row) => row.participantId);
         const { start, safeLimit, hasMore, nextOffset } = clampOffsetLimit({
           offset: participantsOffset,
           limit: participantsLimit,
@@ -2221,7 +2220,7 @@ function buildGetRaceProgress(deps = {}) {
         asOf: projectionAsOf,
         projectionSource,
       };
-      if (projectionSource !== "authoritative") {
+      if (!isPublicPreview && projectionSource !== "authoritative") {
         await enqueueRaceResolutionFn({
           raceId,
           userId,
@@ -2538,13 +2537,22 @@ function buildGetRaceProgress(deps = {}) {
     let moneyRace = boundedLegacyContext && snapshot?.participants
       ? { ...race, participants: race._projectionParticipants }
       : race;
-    if (
+    let moneySummary = null;
+    if (pageScopedContext && !hasInjectedDependencies) {
+      const summary = bootstrapContext
+        ? await bootstrapContext.summary()
+        : await require("../services/raceParticipantReadSummary").loadRaceParticipantReadSummary(raceId);
+      // The existing solo progress money projection intentionally has no
+      // held-buyin fields. Preserve that historical wire value independently
+      // of details, whose aggregate includes outstanding HELD stakes.
+      moneySummary = race.fundedPrize === true ? summary : { ...summary, heldPotCoins: 0 };
+    } else if (
       pageScopedContext &&
       typeof raceModel.findProgressMoneyContext === "function"
     ) {
       moneyRace = (await raceModel.findProgressMoneyContext(raceId)) || race;
     }
-    const progressMoney = buildProgressMoney(moneyRace);
+    const progressMoney = buildProgressMoney(moneyRace, moneySummary);
     const response = await buildViewerResponse({
       snapshot,
       race,

@@ -1435,10 +1435,12 @@ function createRacesRouter(dependencies = {}) {
         supportsSeededRaceBuckets(req.clientFeatures),
       ];
       const detailPaging = raceDetailsPagingOptions(req);
+      const readContext = require("./services/raceBootstrapReadContext")
+        .createRaceBootstrapReadContext({ race: access.race, userId: req.user.id });
       if (access.race.status !== "ACTIVE") {
         const race = await capacity.measurePhase(
           "detailsProjectionHydration",
-          () => getRaceDetails(...detailArgs, null, detailPaging),
+          () => getRaceDetails(...detailArgs, null, { ...detailPaging, readContext }),
         );
         capacityHydratedIds = Array.isArray(race?.participants)
           ? race.participants.length
@@ -1452,7 +1454,7 @@ function createRacesRouter(dependencies = {}) {
           globalPowerupInventory: null,
         });
       }
-      const resolvedContext = {};
+      const resolvedContext = { bootstrapReadContext: readContext };
       const [progressResult, inventoryResult] = await Promise.allSettled([
         // Honours the same paging query as /progress. Old clients send no view
         // and are served the whole roster exactly as before.
@@ -1475,6 +1477,10 @@ function createRacesRouter(dependencies = {}) {
           error: inventoryResult.reason?.message || "unknown",
         });
       }
+      const omitParticipantPage = compactRequested &&
+        access.kind === "DIRECT_PARTICIPANT" && access.race.isTeamRace !== true &&
+        detailPaging.pagination?.capable === true && detailPaging.pagination?.view === "participants-v1" &&
+        progressResult.status === "fulfilled" && Array.isArray(progressResult.value?.participants);
       // The legacy progress query's fat race object remains a reusable preload.
       // A lean progress context is intentionally NOT a details preload: paged
       // bootstrap runs the existing details core/page projection so neither
@@ -1489,6 +1495,8 @@ function createRacesRouter(dependencies = {}) {
           {
             ...detailPaging,
             leanActive: access.race.status === "ACTIVE",
+            omitParticipantPage,
+            readContext,
           }
         ),
       );

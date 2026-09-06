@@ -14,6 +14,7 @@ const {
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 const { canReadRacePreview } = require("../services/canReadRacePreview");
 const userPresentationCache = require("../../social/services/userPresentationCache");
+const { loadRaceParticipantReadSummary } = require("../services/raceParticipantReadSummary");
 const {
   serializeTeamPayoutStamp,
 } = require("../services/teamWinnerReward");
@@ -72,6 +73,8 @@ async function getRaceDetails(
     // shape while replacing the all-participant cosmetic join with scalar
     // summaries plus the shared presentation cache.
     leanActive = false,
+    omitParticipantPage = false,
+    readContext = null,
   } = {}
 ) {
   const pagingCapable = pagination?.capable === true;
@@ -92,6 +95,8 @@ async function getRaceDetails(
   let serializedRows;
   let myParticipant;
   let participantsPagination = null;
+  let participantSummary = null;
+  const context = readContext?.matches?.(raceId, userId) ? readContext : null;
 
   // A preload is ONLY passed by the bootstrap handler's ACTIVE branch, where it
   // is getRaceProgress's `Race.findById` result — byte for byte the same fat
@@ -136,19 +141,20 @@ async function getRaceDetails(
     }));
     myParticipant = summaryRows.find((p) => p.userId === userId);
   } else if (pagingRequested && !sliceFromPreload) {
-    race = await Race.findDetailsCore(raceId);
+    race = context ? context.core() : await Race.findDetailsCore(raceId);
     if (!race) throw notFound();
     if (race.seededBucketId && !supportsBuckets) {
       const error = notFound();
       error.code = "RACE_NOT_FOUND";
       throw error;
     }
-    const [mine, summaries] = await Promise.all([
-      RaceParticipant.findByRaceAndUser(raceId, userId),
-      Race.findDetailsParticipantSummaries(raceId),
+    const [mine, summary] = await Promise.all([
+      context ? race.participants.find((p) => p.userId === userId) : RaceParticipant.findByRaceAndUser(raceId, userId),
+      context ? context.summary() : loadRaceParticipantReadSummary(raceId),
     ]);
     myParticipant = mine || undefined;
-    summaryRows = summaries;
+    participantSummary = summary;
+    summaryRows = [];
   } else {
     race = preloadedRace || (await Race.findById(raceId));
     if (!race) throw notFound();
@@ -217,21 +223,21 @@ async function getRaceDetails(
     const { start, safeLimit, hasMore, nextOffset } = clampOffsetLimit({
       offset: pagination.offset,
       limit: pagination.limit,
-      total: summaryRows.length,
+      total: participantSummary?.totalCount ?? summaryRows.length,
     });
     serializedRows = sliceFromPreload
       ? // Already sorted (joinedAt ASC, id ASC) above, so this slice returns
         // exactly the rows findDetailsParticipantPage would have, cosmetics
         // included — the preload hydrates them for the whole field.
         summaryRows.slice(start, start + safeLimit)
-      : await Race.findDetailsParticipantPage(raceId, {
+      : omitParticipantPage ? [] : await Race.findDetailsParticipantPage(raceId, {
           skip: start,
           take: safeLimit,
         });
     participantsPagination = {
       offset: start,
       limit: safeLimit,
-      total: summaryRows.length,
+      total: participantSummary?.totalCount ?? summaryRows.length,
       hasMore,
       nextOffset,
     };
@@ -258,11 +264,13 @@ async function getRaceDetails(
   // the `myParticipant` lookup — never from `serializedRows`, which may be one
   // page. Slicing is the last thing that happens to the response, not the first
   // thing that happens to the data: a page must never move a prize number.
-  const acceptedCount = summaryRows.filter(
+  const acceptedCount = participantSummary?.acceptedCount ?? summaryRows.filter(
     (p) => p.status === "ACCEPTED"
   ).length;
   const teamCounts =
-    race.isTeamRace === true ? acceptedTeamCounts(summaryRows) : null;
+    race.isTeamRace === true
+      ? participantSummary ? { TEAM_A: participantSummary.teamACount, TEAM_B: participantSummary.teamBCount } : acceptedTeamCounts(summaryRows)
+      : null;
   // Legacy buy-in pot OR app-funded prize pool, decided by race.fundedPrize.
   // Projected from the current field; a funded race's final pool is recomputed
   // from actual finishers at settlement and then stamped (completeRace).
@@ -270,6 +278,7 @@ async function getRaceDetails(
     race,
     participants: summaryRows,
     acceptedCount,
+    participantSummary,
   });
   const { payouts: legacyPayouts, payoutTiers } = serializePayouts(money.payouts);
 
@@ -418,7 +427,7 @@ async function getRaceDetails(
     // _inviteMore()'s "already in this race" filter, which therefore keeps
     // NOT re-offering someone who declined, exactly as it behaves today.
     // Changing that is a product decision, not a side effect of paging.
-    result.participantUserIds = summaryRows.map((p) => p.userId);
+    result.participantUserIds = participantSummary?.participantUserIds ?? summaryRows.map((p) => p.userId);
   }
   // Omitted for clients that did not advertise the protocol, preserving their
   // historical detail shape. Capable clients receive null or a known action.

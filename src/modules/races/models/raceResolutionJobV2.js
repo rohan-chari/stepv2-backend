@@ -53,6 +53,35 @@ function normalizeQueuePriority(value) {
   return QUEUE_PRIORITIES.includes(value) ? value : "LIVE";
 }
 
+// Shared by the parallel read fast path and the upsert's conflict-row guard.
+// Only pending pure display work can cover a request. Processing-only viewer
+// scope is deliberately excluded: an in-flight snapshot may predate this GET.
+// Source/mixed reasons always retain the existing enqueue/generation behavior.
+function displayRefreshCoveredSql(job, incoming) {
+  return `(
+    ${incoming}.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb
+    AND ${job}.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb
+    AND NOT ${job}.full_trigger_seed_only
+    AND (
+      (${job}.state = 'queued'::"RaceResolutionJobState"
+        AND (${job}.lease_expires_at IS NULL OR ${job}.lease_expires_at <= $2::timestamp)
+        AND (${job}.processing_generation IS NULL OR ${job}.processing_generation < ${job}.generation))
+      OR (${job}.state = 'running'::"RaceResolutionJobState"
+        AND ${job}.processing_generation IS NOT NULL
+        AND ${job}.generation > ${job}.processing_generation)
+    )
+    AND ${job}.resolution_time_zone IS NOT DISTINCT FROM ${incoming}.resolution_time_zone
+    AND ${job}.display_artifact_id IS NOT DISTINCT FROM ${incoming}.display_artifact_id
+    AND ${job}.display_artifact_digest IS NOT DISTINCT FROM ${incoming}.display_artifact_digest
+    AND ${job}.display_artifact_schema IS NOT DISTINCT FROM ${incoming}.display_artifact_schema
+    AND jsonb_typeof(${job}.triggered_by_user_ids) = 'array'
+    AND NOT jsonb_path_exists(${job}.triggered_by_user_ids, '$[*] ? (@.type() != "string" || @ == "")')
+    AND ${job}.triggered_by_user_ids @> ${incoming}.triggered_by_user_ids
+    AND ${job}.dirty_participant_ids = ${incoming}.dirty_participant_ids
+    AND ${job}.dirty_powerup_types = ${incoming}.dirty_powerup_types
+  )`;
+}
+
 function mergeClaimDirty(locked, promotedProcessingReasons = null) {
   const stable = (left, right, cap) => {
     const values = [...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])];
@@ -717,6 +746,40 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         };
       });
 
+      // Most repeated reads take a shared lock, allowing sibling viewers whose
+      // pending scope is already included to proceed in parallel without a row
+      // rewrite. A claim/source enqueue cannot cross this coverage check. The
+      // same predicate below handles concurrent first-read INSERT conflicts.
+      if (bypassDebounce !== true && rowsIn.length === 1 && rowsIn[0].dirtyReasons.length === 1 &&
+          rowsIn[0].dirtyReasons[0] === "DISPLAY_REFRESH") {
+        const input = rowsIn[0];
+        const covered = await tx.$queryRawUnsafe(
+          `SELECT ${jobColumns("job.")}
+           FROM race_resolution_jobs_v2 job
+           CROSS JOIN jsonb_to_record($3::jsonb) AS incoming(
+             dirty_reasons jsonb, triggered_by_user_ids jsonb,
+             dirty_participant_ids jsonb, dirty_powerup_types jsonb,
+             resolution_time_zone text, display_artifact_id text,
+             display_artifact_digest text, display_artifact_schema integer
+           )
+           WHERE job.race_id = $1 AND ${displayRefreshCoveredSql("job", "incoming")}
+           FOR SHARE OF job`,
+          input.raceId,
+          now,
+          JSON.stringify({
+            dirty_reasons: input.dirtyReasons,
+            triggered_by_user_ids: input.triggered,
+            dirty_participant_ids: input.dirtyParticipantIds,
+            dirty_powerup_types: input.dirtyPowerupTypes,
+            resolution_time_zone: input.resolutionTimeZone,
+            display_artifact_id: input.artifactId,
+            display_artifact_digest: input.artifactDigest,
+            display_artifact_schema: input.artifactSchema,
+          }),
+        );
+        if (covered.length === 1) return [normalizeRow(covered[0])];
+      }
+
       if (queuedGenerationMerge === true && rowsIn.some((row) =>
         row.dirtyReasons.includes("FULL"))) {
         const byRaceId = new Map();
@@ -1030,6 +1093,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                    OR race_resolution_jobs_v2.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb)
               THEN EXCLUDED.display_artifact_schema ELSE NULL END,
           updated_at = $2::timestamp
+        WHERE $4::boolean OR NOT ${displayRefreshCoveredSql("race_resolution_jobs_v2", "EXCLUDED")}
         RETURNING ${jobColumns()}
         `,
         JSON.stringify(rowsIn),
@@ -1045,6 +1109,20 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       for (const row of rows) {
         const normalized = normalizeRow(row);
         if (normalized) byRaceId.set(normalized.raceId, normalized);
+      }
+      // ON CONFLICT ... WHERE may have found coverage after another first GET
+      // won the insert. Return that durable row so the caller still publishes
+      // a wakeup (including when the original writer's wakeup was lost).
+      const coveredIds = ordered.filter((raceId) => !byRaceId.has(raceId));
+      if (coveredIds.length) {
+        const covered = await tx.$queryRawUnsafe(
+          `SELECT ${jobColumns()} FROM race_resolution_jobs_v2 WHERE race_id = ANY($1::text[])`,
+          coveredIds,
+        );
+        for (const row of covered) {
+          const normalized = normalizeRow(row);
+          if (normalized) byRaceId.set(normalized.raceId, normalized);
+        }
       }
       return ordered.map((raceId) => byRaceId.get(raceId) || null);
     },
