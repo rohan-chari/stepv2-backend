@@ -1485,7 +1485,9 @@ function buildResolveRaceState(dependencies = {}) {
             stepsModel,
             stepSampleModel,
             raceActiveEffectModel,
-            powerupEventModel,
+            // Ordinary resolution never consumes the historical event timeline.
+            // Settlement requests it separately for finish-time interpolation;
+            // keep powerupEventModel here only for new consequence writes below.
             strictWorkerMode: strictScoringPrefetch,
             deferredSampleLoading: strictScoringPrefetch,
             ...(useProcessScoringInputCache
