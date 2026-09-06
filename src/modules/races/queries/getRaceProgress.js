@@ -1978,8 +1978,12 @@ function buildGetRaceProgress(deps = {}) {
       }
       return race;
     }
+    // Team columns need the complete roster, but the scalar scoring context
+    // loaded above already contains it. A paging request must not discard that
+    // context and reload every participant's user/accessory graph. Presentation
+    // is hydrated after masking, just as on the unpaged lean team path.
     let usingLeanProjection =
-      (leanProjectionEnabled && !requestedPage || pageScopedContext) &&
+      (leanProjectionEnabled && (!requestedPage || race.isTeamRace === true) || pageScopedContext) &&
       race.status === "ACTIVE";
     if (leanProjectionEnabled && !usingLeanProjection) {
       race = await raceModel.findById(raceId);
@@ -2323,7 +2327,11 @@ function buildGetRaceProgress(deps = {}) {
         } else {
           await requestWorkerRefresh({ raceId, userId, scoringTimeZone });
           let waited = null;
-          if ((await redisCache.healthStatus()) === "ok") {
+          // Team rooms render the whole stored roster immediately on a cold
+          // read. The durable refresh above still owns authoritative scoring;
+          // waiting for its snapshot adds a second to opening the room without
+          // improving the persisted fallback we can already return safely.
+          if (race.isTeamRace !== true && (await redisCache.healthStatus()) === "ok") {
             waited = await snapshotStore.waitForSnapshot(
               raceId,
               scoringTimeZone,
