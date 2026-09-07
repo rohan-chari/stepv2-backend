@@ -4,7 +4,7 @@ const {
 } = require("../../../shared/batching/boundedBatchDrain");
 
 const READ_SQL = `
-  WITH requested AS (
+WITH requested AS (
     SELECT * FROM jsonb_to_recordset($1::jsonb) AS request(
       "userId" text,
       "at" timestamptz
@@ -24,10 +24,8 @@ const READ_SQL = `
     JOIN global_step_events event
       ON event.id=entitlement.event_id
      AND event.schedule_mode='LOCAL_ENTITLEMENTS'
-    JOIN global_event_race_impacts impact
-      ON impact.event_id=entitlement.event_id
-     AND impact.user_id=requested."userId"
-     AND ($2::text IS NULL OR impact.race_id=$2::text)
+    WHERE EXISTS (SELECT 1
+    FROM global_event_race_impacts impact
     JOIN races race
       ON race.id=impact.race_id
      AND race.status::text='active'
@@ -37,6 +35,10 @@ const READ_SQL = `
      AND participant.status::text='accepted'
      AND participant.forfeited_at IS NULL
      AND participant.finished_at IS NULL
+    WHERE impact.event_id=entitlement.event_id
+      AND impact.user_id=requested."userId"
+      AND ($2::text IS NULL OR impact.race_id=$2::text)
+    )
    ORDER BY requested."userId",entitlement.starts_at DESC`;
 
 function createViewerActiveEventReadBatch() {

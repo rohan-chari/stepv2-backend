@@ -2038,6 +2038,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             now: sourceFenceNow,
             balanceConfigVersion: sourceFenceConfig.version,
             client: tx,
+            includePresentation: false,
           });
           const deadline = sourceInputFingerprint?.validUntil
             ? new Date(sourceInputFingerprint.validUntil).getTime()

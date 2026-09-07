@@ -30,7 +30,7 @@ async function findEligibleByRace({
   const hasCompleteSuppliedMemberships = suppliedMemberships !== null &&
     suppliedMembershipIds.size === ids.length &&
     ids.every((id) => suppliedMembershipIds.has(id));
-  const [legacyEvents, impacts, memberships] = await Promise.all([
+  const [legacyEvents, entitlements, memberships] = await Promise.all([
     client.globalStepEvent.findMany({
       where: {
         scheduleMode: LEGACY_GLOBAL,
@@ -39,9 +39,16 @@ async function findEligibleByRace({
       },
       orderBy: { startsAt: "asc" },
     }),
-    client.globalEventRaceImpact.findMany({
-      where: { raceId, userId: { in: ids } },
-      select: { id: true, eventId: true, userId: true, status: true },
+    client.globalStepEventEntitlement.findMany({
+      where: {
+        userId: { in: ids },
+        startsAt: { lt: new Date(rangeEnd) },
+        endsAt: { gt: new Date(rangeStart) },
+        startOutcome: { in: ELIGIBLE_OUTCOMES },
+        event: { scheduleMode: LOCAL_ENTITLEMENTS },
+      },
+      include: { event: true },
+      orderBy: { startsAt: "asc" },
     }),
     hasCompleteSuppliedMemberships
       ? Promise.resolve(suppliedMemberships)
@@ -54,23 +61,17 @@ async function findEligibleByRace({
   ]);
   for (const id of ids) map.get(id).push(...legacyEvents);
 
+  const eventIds = [...new Set(entitlements.map((row) => row.eventId))];
+  const impacts = eventIds.length === 0 ? [] : await client.globalEventRaceImpact.findMany({
+    where: { raceId, userId: { in: ids }, eventId: { in: eventIds } },
+    select: { id: true, eventId: true, userId: true, status: true },
+  });
   const impactByEventUser = new Map(
     impacts.map((impact) => [`${impact.eventId}:${impact.userId}`, impact])
   );
   const joinedAtByUser = new Map(
     memberships.map((row) => [row.userId, row.joinedAt])
   );
-  const entitlements = await client.globalStepEventEntitlement.findMany({
-    where: {
-      userId: { in: ids },
-      startsAt: { lt: new Date(rangeEnd) },
-      endsAt: { gt: new Date(rangeStart) },
-      startOutcome: { in: ELIGIBLE_OUTCOMES },
-      event: { scheduleMode: LOCAL_ENTITLEMENTS },
-    },
-    include: { event: true },
-    orderBy: { startsAt: "asc" },
-  });
   for (const entitlement of entitlements) {
     const eventUserKey = `${entitlement.eventId}:${entitlement.userId}`;
     const impact = impactByEventUser.get(eventUserKey);

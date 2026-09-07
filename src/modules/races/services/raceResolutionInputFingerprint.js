@@ -7,6 +7,8 @@ async function buildRaceResolutionInputFingerprint({
   now = new Date(),
   balanceConfigVersion = null,
   client = defaultPrisma,
+  // Only full-digest validation may omit names; closure digests include them.
+  includePresentation = true,
 } = {}) {
   if (!raceId || !client || typeof client.$queryRawUnsafe !== "function") return null;
   // Global-event lookahead. This was `now + 5s`, which selected only events
@@ -59,13 +61,13 @@ async function buildRaceResolutionInputFingerprint({
           'placement', participant.placement,
           'lastNotifiedPlacement', participant.last_notified_placement,
           'highMultiplierNotifiedAt', EXTRACT(EPOCH FROM participant.high_multiplier_notified_at) * 1000,
-          'user', jsonb_build_object('id', person.id, 'displayName', person.display_name),
+          ${includePresentation ? "'user', jsonb_build_object('id', person.id, 'displayName', person.display_name)," : ""}
           'totalsUpdatedAt', EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000
         ) ORDER BY participant.id) FILTER (WHERE participant.id IS NOT NULL), '[]'::jsonb)
           AS participants
        FROM races race
        LEFT JOIN race_participants participant ON participant.race_id=race.id
-       LEFT JOIN users person ON person.id=participant.user_id
+       ${includePresentation ? "LEFT JOIN users person ON person.id=participant.user_id" : ""}
        WHERE race.id=$1
        GROUP BY race.id`,
       raceId
