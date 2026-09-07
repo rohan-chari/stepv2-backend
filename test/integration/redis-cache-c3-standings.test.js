@@ -358,8 +358,8 @@ async function grantAndUse(user, raceId, type) {
   return res;
 }
 
-async function rawSnapshot(raceId) {
-  const value = await probe.get(`${ENV_PREFIX}${cacheKeys.raceProgress(raceId)}`);
+async function rawSnapshot(raceId, schemaVersion = snapshotStore.SCHEMA_VERSION) {
+  const value = await probe.get(`${ENV_PREFIX}${cacheKeys.raceProgress(raceId, schemaVersion)}`);
   return value ? JSON.parse(value) : null;
 }
 
@@ -531,6 +531,8 @@ describe("display artifact reuse", () => {
     await drain();
     await probe.flushdb();
     await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", true);
+    // Redis is only one cache layer; this must be a cold read in the HTTP process too.
+    snapshotStore.__resetLocalReadCache();
     const response = await progress(alice, raceId);
     assert.deepEqual(response, baseline, "canonical artifact snapshot must match deployed display bytes");
     const queued = await prisma.raceResolutionJobV2.findUnique({ where: { raceId } });
@@ -927,6 +929,8 @@ describe("C3 standings — §8 test 5 (stampede)", () => {
     assert.ok(stale);
     stale.asOf = new Date(Date.now() - snapshotStore.SOFT_TTL_MS - 1000).toISOString();
     await probe.set(key, JSON.stringify(stale), "EX", 60);
+    // Expose the deliberately aged Redis value instead of the local fresh copy.
+    snapshotStore.__resetLocalReadCache();
     snapshotStore.__resetCounters();
 
     const startedAt = Date.now();
@@ -1243,7 +1247,12 @@ describe("C3 standings — invalidation hooks", () => {
 
     await drain();
 
-    const stored = await rawSnapshot(raceId);
+    const { buildRaceResolutionPostTaskRunner } = require("../../src/modules/races/jobs/raceResolutionPostTaskRunner");
+    const postTasks = buildRaceResolutionPostTaskRunner();
+    for (let i = 0; i < 50; i++) {
+      if (!(await postTasks.snapshotTick())) break;
+    }
+    const stored = await rawSnapshot(raceId, snapshotStore.LEAN_SCHEMA_VERSION);
     assert.ok(stored, "the worker's post-commit hook must SET the snapshot");
     assert.equal(stored.source, "worker");
     assert.equal(stored.v, snapshotStore.LEAN_SCHEMA_VERSION);

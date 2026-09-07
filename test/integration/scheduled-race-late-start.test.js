@@ -110,6 +110,11 @@ async function buildPendingScheduledRace({ scheduledAgoMs, interval = 3000 }) {
   await prisma.domainEventOutbox.deleteMany({
     where: { aggregateType: "RACE", aggregateId: raceId },
   });
+  // The immutable receipt also records that original start. Rewinding only
+  // the outbox leaves a completed occurrence attached to this pre-start fixture.
+  await prisma.domainEventReceipt.deleteMany({
+    where: { aggregateType: "RACE", aggregateId: raceId },
+  });
 
   return { alice, bob, raceId, scheduledStartAt };
 }
