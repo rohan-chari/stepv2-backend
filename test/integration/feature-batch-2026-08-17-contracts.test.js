@@ -224,8 +224,12 @@ describe("2026-08-17 additive contracts", () => {
     assert.equal(list.status, 200);
     const listed = (await list.json()).threads.find((row) => row.id === thread.id);
     assert.equal(listed.displayName, "RenamedName");
+    assert.equal(listed.createdAt, thread.createdAt.toISOString());
+    assert.equal(listed.lastStaffReplyAt, null);
+    assert.equal(listed.hasUnreadStaffReply, false);
     assert.deepEqual(Object.keys(listed).sort(), [
-      "displayName", "id", "lastMessageAt", "preview", "suggestionId", "userUnread",
+      "createdAt", "displayName", "hasUnreadStaffReply", "id", "lastMessageAt",
+      "lastStaffReplyAt", "preview", "suggestionId", "userUnread",
     ]);
     assert.equal("email" in listed, false);
     assert.equal("profilePhotoUrl" in listed, false);

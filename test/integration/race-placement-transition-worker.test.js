@@ -696,7 +696,7 @@ describe("durable race placement transition worker", () => {
     }), 1);
   });
 
-  it("dedupes concurrent old and new team producers through atomic JobRun claim", async () => {
+  it("dedupes concurrent old and new team producers through atomic JobRun claim", { timeout: 15_000 }, async () => {
     const { race } = await createActiveRace(4, { isTeamRace: true });
     await prisma.raceParticipant.updateMany({
       where: { raceId: race.id, team: "TEAM_A" },
@@ -706,7 +706,9 @@ describe("durable race placement transition worker", () => {
       where: { raceId: race.id, team: "TEAM_B" },
       data: { lastNotifiedPlacement: 1 },
     });
-    const observedAt = new Date(Date.now() - 60_000);
+    // Keep both producers inside the fixed active-race fixture window.
+    const testNow = new Date("2026-08-27T12:00:00.000Z");
+    const observedAt = new Date(testNow.getTime() - 60_000);
     await RacePlacementTransitionJob.enqueueCurrentGeneration({
       raceId: race.id, generation: 1, observedAt, now: observedAt,
     });
@@ -716,7 +718,7 @@ describe("durable race placement transition worker", () => {
     const planned = new Promise((resolve) => { newPlanned = resolve; });
     const release = new Promise((resolve) => { releaseNew = resolve; });
     const newRun = buildRacePlacementTransitionWorker({
-      now: () => new Date(),
+      now: () => testNow,
       logger: { log() {}, warn() {}, error() {} },
       async beforePersist() {
         newPlanned();

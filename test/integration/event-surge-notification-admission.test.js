@@ -100,7 +100,7 @@ describe("event-start durable notification admission", () => {
       now: startsAt, maximumRows: 100,
     });
     assert.deepEqual(released, {
-      examined: 1, materialized: 1, expired: 0, nextScheduleAt: null,
+      examined: 1, materialized: 1, expired: 0, deferred: 0, nextScheduleAt: null,
     });
     const alert = await prisma.inboxAlert.findFirstOrThrow({});
     const outbox = await prisma.inboxDeliveryOutbox.findFirstOrThrow({});

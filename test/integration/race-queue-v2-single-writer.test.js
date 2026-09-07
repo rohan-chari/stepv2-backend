@@ -20,6 +20,7 @@ process.env.RACE_QUEUE_V2_QUIET_PERIOD_MS = "0";
 process.env.RACE_RESOLVE_DEBOUNCE_MS = "0";
 
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { runInPrismaTransaction } = require("../../src/db");
 const {
   buildRaceResolutionWorkerV2,
   supersededRunMayDiscard,
@@ -455,26 +456,25 @@ describe("5a — one bulk writer per race", () => {
 
     const allowRollCommit = deferred();
     const rollReadyToCommit = deferred();
-    const originalTransaction = prisma.$transaction;
-    prisma.$transaction = (operation, options) => originalTransaction(async (tx) => {
-      const result = await operation(tx);
+    // The real transaction scope holds the roll's writes until the competing
+    // worker reaches them; mutating the shared Prisma proxy recurses into itself.
+    const rolling = runInPrismaTransaction(async () => {
+      const result = await rollPowerup({
+        raceId,
+        participantId: participant.id,
+        userId: alice.userId,
+        currentSteps: 3100,
+        effectiveSteps: 3100,
+        nextBoxAtSteps: 2000,
+        powerupStepInterval: 2000,
+        displayName: participant.user.displayName,
+        powerupSlots: participant.powerupSlots,
+      });
       rollReadyToCommit.resolve();
       await allowRollCommit.promise;
       return result;
-    }, options);
-    const rolling = rollPowerup({
-      raceId,
-      participantId: participant.id,
-      userId: alice.userId,
-      currentSteps: 3100,
-      effectiveSteps: 3100,
-      nextBoxAtSteps: 2000,
-      powerupStepInterval: 2000,
-      displayName: participant.user.displayName,
-      powerupSlots: participant.powerupSlots,
     });
     await rollReadyToCommit.promise;
-    prisma.$transaction = originalTransaction;
 
     const transactionFailure = { error: null };
     const worker = makeWorker({ prisma: prismaCapturingWorkerTransaction(transactionFailure) });

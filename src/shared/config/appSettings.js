@@ -850,10 +850,6 @@ function buildAppSettings(dependencies = {}) {
       create: { key: ACTIVE_COMPETITION_LIMIT_KEY, value },
     });
     cache = null;
-    if (Object.prototype.hasOwnProperty.call(values, "adminMetricsV2TelemetryEnabled")) {
-      require("../../modules/analytics/services/activeAdminMetricsEpochCache")
-        .activeAdminMetricsEpochCache.clear(prisma);
-    }
     try {
       const invalidated = await derivedCache.invalidate({
         keys: [cacheKeys.appSettingsKey],

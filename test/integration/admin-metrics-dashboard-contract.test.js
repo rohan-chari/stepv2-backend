@@ -8,6 +8,8 @@ const {
   request,
 } = require("./setup");
 
+const { appSettings } = require("../../src/shared/config/appSettings");
+
 const DASHBOARD_SECTIONS = [
   "dashboard-summary",
   "dashboard-growth",
@@ -47,6 +49,9 @@ describe("admin metrics dashboard v2 — locked HTTP contract", () => {
         },
       },
     });
+    // Exercise the legacy disabled contract explicitly after permanent launch.
+    await appSettings.setFlag("adminMetricsV2DashboardEnabled", false);
+    await appSettings.setFlag("adminMetricsV2TelemetryEnabled", false);
     admin = await createTestUser({
       email: process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com",
     });
@@ -145,7 +150,7 @@ describe("admin metrics dashboard v2 — locked HTTP contract", () => {
   });
 
   for (const section of DASHBOARD_SECTIONS) {
-    it(`${section} returns the exact default-off dashboard envelope`, async () => {
+    it(`${section} returns the exact legacy-disabled dashboard envelope`, async () => {
       const response = await request(
         server.baseUrl,
         "GET",

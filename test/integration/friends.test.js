@@ -206,6 +206,7 @@ describe("friend request flow", () => {
           {
             id: bob.userId,
             displayName: "BobRunner",
+            discoverableName: null,
             profilePhotoUrl: null,
             friendshipId: acceptedFriendship.id,
             teamRaceEligible: false,
