@@ -775,7 +775,14 @@ async function prefetchRaceScoringModelsImpl({
       .filter(Boolean);
     if (!bounds.length) return;
     mergeSampleTimelines(samplesByUser, await loadSampleBounds(bounds));
-    for (const bound of bounds) cachePreparedUser(bound.userId);
+    for (const bound of bounds) {
+      // A successful empty read proves coverage too. Keep it under the same
+      // input-generation, time-range, TTL, and capacity guards as nonempty data.
+      if (!samplesByUser.has(bound.userId)) {
+        samplesByUser.set(bound.userId, new CompactSampleTimeline());
+      }
+      cachePreparedUser(bound.userId);
+    }
   };
   const sampleRowsPromise = deferredSampleLoading
     ? Promise.resolve(samplesByUser)
