@@ -498,3 +498,39 @@ test("powerup compatibility polling cannot regress to a 10ms database loop", () 
   assert.match(source, /setTimeout\(resolve,\s*Math\.min\(250,\s*remainingMs\)\)/);
   assert.match(source, /if \(remainingMs <= 0\) break/);
 });
+
+// Injected clock/error timing is deterministic here; HTTP integration scenarios
+// cover actual claim SQL, new-work recovery, and parallel race processing.
+test("queued claim refreshes lease time after a slow failed claim and next tick retries", async () => {
+  let clock = Date.now();
+  const initial = clock;
+  const claimTimes = [];
+  const failure = new Error("transient claim failure");
+  const worker = makeWorker(countingSettings([false]), {
+    bootAt: 0,
+    now: () => new Date(clock),
+    prisma: {
+      async $queryRawUnsafe() {
+        const error = new Error("old queue absent");
+        error.code = "42P01";
+        throw error;
+      },
+    },
+    RaceResolutionJobV2: {
+      async claimNext({ now }) {
+        claimTimes.push(now.getTime());
+        if (claimTimes.length === 1) {
+          await new Promise((resolve) => setImmediate(resolve));
+          clock += 60_000;
+          throw failure;
+        }
+        return null;
+      },
+    },
+    raceResolutionWorkBudget: { async run(_lane, fn) { return fn(); } },
+  });
+  await assert.rejects(worker.tick({ concurrencyOverride: 3 }), (error) => error === failure);
+  assert.deepEqual(claimTimes, [initial, initial + 60_000]);
+  assert.equal(await worker.tick({ concurrencyOverride: 3 }), 0);
+  assert.deepEqual(claimTimes, [initial, initial + 60_000, initial + 60_000]);
+});
