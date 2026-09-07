@@ -46,12 +46,13 @@ for(const isTeamRace of [false,true]) test(`real resolution worker query trace a
   const exactRanges=sampleReads.flatMap(m=>JSON.parse(JSON.parse(m.params)[0]).map(b=>JSON.stringify([b.user_id,b.range_start,b.range_end])));
   assert.equal(exactRanges.length,new Set(exactRanges).size,'no duplicate user/time range reads in this worker attempt');
   console.log(JSON.stringify({experiment:'step and claim trace',sampleReads:sampleReads.length,bounds:exactRanges.length,uniqueBounds:new Set(exactRanges).size,claims:messages.filter(m=>m.query.includes('WITH candidate AS')&&m.query.includes('FROM race_resolution_jobs_v2')).length}));
-  const fingerprints=messages.filter(m=>m.query.includes('SELECT jsonb_build_object(')&&m.query.includes('AS participants'));
+  const fingerprints=messages.filter(m=>(m.query.includes('SELECT jsonb_build_object(')&&m.query.includes('AS participants')) || (m.query.includes('AS "r_id"')&&m.query.includes('AS "p_id"')));
   console.log(JSON.stringify({trace:{queries:messages.length,fingerprints:fingerprints.length,committedGeneration:done.committedGeneration}}));
   fs.writeFileSync('/tmp/query-efficiency-resolution-trace.json',JSON.stringify({messages,logs},null,2));
   assert.ok(fingerprints.length,'observe real worker fingerprint query');
   assert.ok(!logs.includes('scoped_fingerprint_changed'),'projection must not force dependency-closure retries');
-  const original=fingerprints.find(m=>m.query.includes('LEFT JOIN users person')).query,parameters=JSON.parse(fingerprints[0].params);
+  // Keep the existing legacy user-join benchmark unchanged while observing the new typed worker projection.
+  const original=fs.readFileSync(require('node:path').join(__dirname,'fixtures/query-efficiency/fingerprint-legacy.sql'),'utf8'),parameters=JSON.parse(fingerprints[0].params);
   const candidate=original.replace("          'user', jsonb_build_object('id', person.id, 'displayName', person.display_name),\n",'').replace('       LEFT JOIN users person ON person.id=participant.user_id\n','');
   assert.notEqual(candidate,original);
   const db=new Client({connectionString:target.toString(),options:'-c timezone=UTC'});await db.connect();

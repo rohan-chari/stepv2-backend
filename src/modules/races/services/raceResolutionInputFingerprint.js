@@ -26,50 +26,45 @@ async function buildRaceResolutionInputFingerprint({
   const horizon = new Date(now.getTime() + GLOBAL_EVENT_LOOKAHEAD_MS);
   const [raceRows, inputs, effects, eventRows] = await Promise.all([
     client.$queryRawUnsafe(
-      `SELECT jsonb_build_object(
-          'id', race.id,
-          'name', race.name,
-          'scheduledStartAt', EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000,
-          'teamAName', race.team_a_name,
-          'teamBName', race.team_b_name,
-          'status', UPPER(race.status::text),
-          'startedAt', EXTRACT(EPOCH FROM race.started_at) * 1000,
-          'endsAt', EXTRACT(EPOCH FROM race.ends_at) * 1000,
-          'timezone', race.timezone,
-          'targetSteps', race.target_steps,
-          'timeBased', race.time_based,
-          'powerupsEnabled', race.powerups_enabled,
-          'powerupStepInterval', race.powerup_step_interval,
-          'isTeamRace', race.is_team_race,
-          'teamSize', race.team_size
-        ) AS race,
-        COALESCE(jsonb_agg(jsonb_build_object(
-          'id', participant.id,
-          'userId', participant.user_id,
-          'status', UPPER(participant.status::text),
-          'totalSteps', participant.total_steps,
-          'rawSteps', participant.raw_steps,
-          'bonusSteps', participant.bonus_steps,
-          'maxBonusSteps', participant.max_bonus_steps,
-          'nextBoxAtSteps', participant.next_box_at_steps,
-          'powerupSlots', participant.powerup_slots,
-          'finishedAt', EXTRACT(EPOCH FROM participant.finished_at) * 1000,
-          'finishTotalSteps', participant.finish_total_steps,
-          'forfeitedAt', EXTRACT(EPOCH FROM participant.forfeited_at) * 1000,
-          'joinedAt', EXTRACT(EPOCH FROM participant.joined_at) * 1000,
-          'team', UPPER(participant.team::text),
-          'placement', participant.placement,
-          'lastNotifiedPlacement', participant.last_notified_placement,
-          'highMultiplierNotifiedAt', EXTRACT(EPOCH FROM participant.high_multiplier_notified_at) * 1000,
-          ${includePresentation ? "'user', jsonb_build_object('id', person.id, 'displayName', person.display_name)," : ""}
-          'totalsUpdatedAt', EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000
-        ) ORDER BY participant.id) FILTER (WHERE participant.id IS NOT NULL), '[]'::jsonb)
-          AS participants
+      `SELECT race.id AS "r_id",
+       race.name AS "r_name",
+       (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS "r_scheduledStartAt",
+       race.team_a_name AS "r_teamAName",
+       race.team_b_name AS "r_teamBName",
+       UPPER(race.status::text) AS "r_status",
+       (EXTRACT(EPOCH FROM race.started_at) * 1000)::float8 AS "r_startedAt",
+       (EXTRACT(EPOCH FROM race.ends_at) * 1000)::float8 AS "r_endsAt",
+       race.timezone AS "r_timezone",
+       race.target_steps AS "r_targetSteps",
+       race.time_based AS "r_timeBased",
+       race.powerups_enabled AS "r_powerupsEnabled",
+       race.powerup_step_interval AS "r_powerupStepInterval",
+       race.is_team_race AS "r_isTeamRace",
+       race.team_size AS "r_teamSize",
+       participant.id AS "p_id",
+       participant.user_id AS "p_userId",
+       UPPER(participant.status::text) AS "p_status",
+       participant.total_steps AS "p_totalSteps",
+       participant.raw_steps AS "p_rawSteps",
+       participant.bonus_steps AS "p_bonusSteps",
+       participant.max_bonus_steps AS "p_maxBonusSteps",
+       participant.next_box_at_steps AS "p_nextBoxAtSteps",
+       participant.powerup_slots AS "p_powerupSlots",
+       (EXTRACT(EPOCH FROM participant.finished_at) * 1000)::float8 AS "p_finishedAt",
+       participant.finish_total_steps AS "p_finishTotalSteps",
+       (EXTRACT(EPOCH FROM participant.forfeited_at) * 1000)::float8 AS "p_forfeitedAt",
+       (EXTRACT(EPOCH FROM participant.joined_at) * 1000)::float8 AS "p_joinedAt",
+       UPPER(participant.team::text) AS "p_team",
+       participant.placement AS "p_placement",
+       participant.last_notified_placement AS "p_lastNotifiedPlacement",
+       (EXTRACT(EPOCH FROM participant.high_multiplier_notified_at) * 1000)::float8 AS "p_highMultiplierNotifiedAt",
+       (EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000)::float8 AS "p_totalsUpdatedAt"
+       ${includePresentation ? ', person.id AS "u_id", person.display_name AS "u_displayName"' : ""}
        FROM races race
        LEFT JOIN race_participants participant ON participant.race_id=race.id
        ${includePresentation ? "LEFT JOIN users person ON person.id=participant.user_id" : ""}
        WHERE race.id=$1
-       GROUP BY race.id`,
+       ORDER BY participant.id`,
       raceId
     ),
     client.$queryRawUnsafe(
@@ -189,8 +184,23 @@ async function buildRaceResolutionInputFingerprint({
     ),
   ]);
 
-  const raceRow = raceRows[0];
-  if (!raceRow?.race || !Array.isArray(raceRow.participants)) return null;
+  if (!raceRows[0]?.r_id) return null;
+  // Keep race + roster in one SQL snapshot, but assemble their JSON in Node.
+  // Explicit SQL aliases define the same payload keys as the former jsonb
+  // projection. Epoch expressions are float8, so Prisma returns JSON numbers
+  // rather than Decimal objects. The LEFT JOIN sentinel is not a participant.
+  const project = (row, prefix) => Object.fromEntries(
+    Object.entries(row)
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, value]) => [key.slice(prefix.length), value])
+  );
+  const raceRow = {
+    race: project(raceRows[0], "r_"),
+    participants: raceRows.filter((row) => row.p_id != null).map((row) => ({
+      ...project(row, "p_"),
+      ...(includePresentation ? { user: project(row, "u_") } : {}),
+    })),
+  };
   for (const input of inputs || []) {
     if (input.generation == null && (input.hasSteps === true || input.hasSamples === true)) {
       return null;
