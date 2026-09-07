@@ -1,3 +1,4 @@
+const { SETTLEMENT_EFFECT_TYPES } = require("./raceScoringEffectTypes");
 const { prisma: defaultPrisma } = require("../../../db");
 const { digestPayload } = require("./raceResolutionDisplayArtifact");
 
@@ -25,6 +26,10 @@ async function buildRaceResolutionInputFingerprint({
     client.$queryRawUnsafe(
       `SELECT jsonb_build_object(
           'id', race.id,
+          'name', race.name,
+          'scheduledStartAt', EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000,
+          'teamAName', race.team_a_name,
+          'teamBName', race.team_b_name,
           'status', UPPER(race.status::text),
           'startedAt', EXTRACT(EPOCH FROM race.started_at) * 1000,
           'endsAt', EXTRACT(EPOCH FROM race.ends_at) * 1000,
@@ -50,12 +55,17 @@ async function buildRaceResolutionInputFingerprint({
           'finishTotalSteps', participant.finish_total_steps,
           'forfeitedAt', EXTRACT(EPOCH FROM participant.forfeited_at) * 1000,
           'joinedAt', EXTRACT(EPOCH FROM participant.joined_at) * 1000,
-          'team', participant.team,
+          'team', UPPER(participant.team::text),
+          'placement', participant.placement,
+          'lastNotifiedPlacement', participant.last_notified_placement,
+          'highMultiplierNotifiedAt', EXTRACT(EPOCH FROM participant.high_multiplier_notified_at) * 1000,
+          'user', jsonb_build_object('id', person.id, 'displayName', person.display_name),
           'totalsUpdatedAt', EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000
         ) ORDER BY participant.id) FILTER (WHERE participant.id IS NOT NULL), '[]'::jsonb)
           AS participants
        FROM races race
        LEFT JOIN race_participants participant ON participant.race_id=race.id
+       LEFT JOIN users person ON person.id=participant.user_id
        WHERE race.id=$1
        GROUP BY race.id`,
       raceId
@@ -89,28 +99,26 @@ async function buildRaceResolutionInputFingerprint({
       raceId,
       now
     ),
-    // Schema 2 (dependency-closure spec rule 7): the closure graph needs the
-    // EXPIRED LEECH/HITCHHIKE rows too — leechTransfers.js and
-    // hitchhikeCopies.js both read status IN (ACTIVE, EXPIRED), so an EXPIRED
-    // row is still a live scoring input and a fingerprint that ignores it can
-    // report "unchanged" across a real graph transition. Folded into the SAME
-    // query rather than a fifth one so the race-scoped query count (and every
-    // injected test client's result ordering) is unchanged. The enum's DB
-    // labels are lowercase (`active_effect` / `expired_effect`); type labels
-    // are lowercase too, hence UPPER(type::text) in the filter.
+    // Load the complete scoring effect input once for this protected attempt.
+    // Expired local modifiers still affect steps earned during their windows;
+    // expired Leech/Hitchhike links additionally remain part of the graph.
     client.$queryRawUnsafe(
       `SELECT id, target_participant_id AS "targetParticipantId",
          target_user_id AS "targetUserId", source_user_id AS "sourceUserId",
          powerup_id AS "powerupId", UPPER(type::text) AS type,
-         UPPER(status::text) AS status, starts_at AS "startsAt",
-         expires_at AS "expiresAt", metadata, updated_at AS "updatedAt"
+         CASE status WHEN 'active_effect' THEN 'ACTIVE'
+           WHEN 'expired_effect' THEN 'EXPIRED' ELSE UPPER(status::text) END AS status,
+         starts_at AS "startsAt",
+         expires_at AS "expiresAt", metadata, updated_at AS "updatedAt",
+         race_id AS "raceId", created_at AS "createdAt"
        FROM race_active_effects
        WHERE race_id=$1
          AND (status='active_effect'
               OR (status='expired_effect'
-                  AND UPPER(type::text) IN ('LEECH', 'HITCHHIKE')))
+                  AND UPPER(type::text) = ANY($2::text[])))
        ORDER BY id`,
-      raceId
+      raceId,
+      [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"]
     ),
     client.$queryRawUnsafe(
       `WITH race_window AS (
@@ -200,26 +208,31 @@ async function buildRaceResolutionInputFingerprint({
   const nextSampleBoundary = boundaries.length
     ? new Date(Math.min(...boundaries.map((value) => value.getTime())))
     : null;
-  // The effect read now returns two populations. `activeEffects` stays
+  // The effect read returns active and historical inputs. `activeEffects` stays
   // ACTIVE-only because its shipped consumer is computeArtifactReuseDeadline
   // (getRaceProgress.js), which enumerates startsAt/expiresAt boundaries and
   // would pull an already-elapsed boundary out of an EXPIRED row. The closure
   // planner consumes `expiredScoringEffects` separately.
   const events = (eventRows || []).filter((row) => row?.id);
   const allEffects = effects || [];
-  const expiredScoringEffects = allEffects.filter((row) => row.status === "EXPIRED");
+  const expiredScoringEffects = allEffects.filter((row) =>
+    row.status === "EXPIRED" && ["LEECH", "HITCHHIKE"].includes(row.type));
+  const historicalScoringEffects = allEffects.filter((row) =>
+    row.status === "EXPIRED" && !["LEECH", "HITCHHIKE"].includes(row.type));
   const activeEffects = allEffects.filter((row) => row.status !== "EXPIRED");
   const payload = {
-    // schema 2: EXPIRED LEECH/HITCHHIKE rows are digested. The bump changes
-    // every digest, which is exactly the intended invalidation — an in-flight
-    // display artifact carrying a schema-1 digest simply mismatches and the
-    // job falls back to FULL. Nothing parses the digest, so nothing crashes.
-    schema: 3,
+    // Schema 4 protects the complete lean roster and historical scoring
+    // effects reused by the compute adapters. Older display-artifact digests
+    // mismatch and fall back to fresh computation during rolling deployment.
+    schema: 4,
     race: raceRow.race,
-    participants: raceRow.participants,
+    // Names are presentation data: artifact commands rebind them at commit.
+    // A rename must not invalidate an otherwise identical scoring artifact.
+    participants: raceRow.participants.map(({ user, ...scoring }) => scoring),
     inputs: normalizedInputs,
     effects: activeEffects,
     expiredScoringEffects,
+    historicalScoringEffects,
     events: events || [],
     balanceConfigVersion: balanceConfigVersion == null
       ? "code-default"
@@ -232,6 +245,7 @@ async function buildRaceResolutionInputFingerprint({
     nextSampleBoundary,
     activeEffects,
     expiredScoringEffects,
+    historicalScoringEffects,
     globalEvents: events || [],
     globalBoundaryScheduleCurrent:
       eventRows?.[0]?.globalBoundaryScheduleCurrent === true,
@@ -246,9 +260,10 @@ async function buildRaceResolutionInputFingerprint({
     // per-user generations separately so unrelated uploaders can be excluded
     // from a bounded closure fence without inventing a second database read.
     inputs: normalizedInputs,
+    scoringEffects: allEffects,
     // Provenance is deliberately outside the digest: fence reads use a later
     // clock, while the immutable scoring facts must still hash identically.
-    scoringReadSnapshot: { schema: 1, raceId, asOf: now.getTime(), through: horizon.getTime() },
+    scoringReadSnapshot: { schema: 1, raceId, asOf: now.getTime(), through: horizon.getTime(), effectsComplete: true, raceComplete: true },
   };
 }
 

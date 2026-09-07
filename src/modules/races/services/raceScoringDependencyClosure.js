@@ -809,6 +809,12 @@ function buildClosureFingerprintDigest(fingerprint, {
     inputs,
     effects: fingerprint.activeEffects || [],
     expiredScoringEffects: fingerprint.expiredScoringEffects || [],
+    // Historical local modifiers affect only their target's earned steps.
+    // Fence the reused history for this closure, without invalidating it for
+    // an unrelated participant's historical modifier correction.
+    historicalScoringEffects: (fingerprint.historicalScoringEffects || []).filter(
+      row => closure.has(row.targetParticipantId),
+    ),
     events,
     balanceConfigVersion: balanceConfigVersion == null
       ? "code-default"

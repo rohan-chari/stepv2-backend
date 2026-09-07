@@ -54,8 +54,8 @@ async function insertSamplesOn(client, userId, samples) {
   await client.$executeRawUnsafe(sql, ...params);
 }
 
-async function replaceSamplesOn(client, userId, samples) {
-  if (!samples || samples.length === 0) return;
+async function replaceSamplesOn(client, userId, samples, replacementWindows = samples) {
+  if (!replacementWindows || replacementWindows.length === 0) return;
   const values = [];
   const params = [];
   let p = 1;
@@ -83,20 +83,24 @@ async function replaceSamplesOn(client, userId, samples) {
   const ends = p++;
   params.push(
     userId,
-    samples.map((sample) => new Date(sample.periodStart).toISOString()),
-    samples.map((sample) => new Date(sample.periodEnd).toISOString()),
+    replacementWindows.map((sample) => new Date(sample.periodStart).toISOString()),
+    replacementWindows.map((sample) => new Date(sample.periodEnd).toISOString()),
   );
-  await client.$executeRawUnsafe(
-    `WITH deleted AS (
-       DELETE FROM step_samples stored
+  const deleteSql = `DELETE FROM step_samples stored
        USING unnest($${starts}::timestamp[], $${ends}::timestamp[])
          AS input_window(period_start,period_end)
        WHERE stored.user_id=$${deleteUser}
          AND stored.period_end > input_window.period_start
          AND stored.period_start < input_window.period_end
          AND NOT (stored.period_start = ANY($${starts}::timestamp[]))
-       RETURNING stored.id
-     )
+       RETURNING stored.id`;
+  // All kept windows participate in overlap cleanup, including unchanged rows.
+  if (samples.length === 0) {
+    await client.$executeRawUnsafe(deleteSql, ...params);
+    return;
+  }
+  await client.$executeRawUnsafe(
+    `WITH deleted AS (${deleteSql})
      INSERT INTO step_samples
        (id,user_id,period_start,period_end,steps,source_name,source_id,
         source_device_id,device_model,recording_method,metadata,created_at)
@@ -106,7 +110,14 @@ async function replaceSamplesOn(client, userId, samples) {
        source_name=EXCLUDED.source_name,source_id=EXCLUDED.source_id,
        source_device_id=EXCLUDED.source_device_id,
        device_model=EXCLUDED.device_model,
-       recording_method=EXCLUDED.recording_method,metadata=EXCLUDED.metadata`,
+       recording_method=EXCLUDED.recording_method,metadata=EXCLUDED.metadata
+     WHERE (step_samples.period_end, step_samples.steps, step_samples.source_name,
+            step_samples.source_id, step_samples.source_device_id, step_samples.device_model,
+            step_samples.recording_method, step_samples.metadata)
+       IS DISTINCT FROM
+           (EXCLUDED.period_end, EXCLUDED.steps, EXCLUDED.source_name,
+            EXCLUDED.source_id, EXCLUDED.source_device_id, EXCLUDED.device_model,
+            EXCLUDED.recording_method, EXCLUDED.metadata)`,
     ...params,
   );
 }
@@ -325,9 +336,10 @@ const StepSample = {
     const replacedStored = stored.filter((row) => kept.some((incomingRow) =>
       row.end > incomingRow.start && row.start < incomingRow.end
     ));
+    const incomingNormalized = kept.map((row) => normalized(row.raw)).sort();
     const exactNoop = replacedStored.length === kept.length &&
       replacedStored.map(normalized).sort().every((value, index) =>
-        value === kept.map((row) => normalized(row.raw)).sort()[index]
+        value === incomingNormalized[index]
       );
     const scoringKey = (row) => JSON.stringify([
       new Date(row.periodStart ?? row.start).toISOString(),
@@ -351,10 +363,14 @@ const StepSample = {
       return { storageChanged: false, scoringChanged: false, ...(returnCanonicalInput ? { canonicalInput } : {}) };
     }
 
-    // Rule 3: delete every stored sample overlapping ANY kept incoming window in
-    // one set-based DELETE (parallel-array unnest), then batch-insert the kept
-    // samples.
-    await replaceSamplesOn(client, userId, kept.map((i) => i.raw));
+    // The intake holds the user's scoring lock across this read and write.
+    // Compare against that snapshot so mixed batches submit only changed rows,
+    // while retaining every kept window for Rule 3's overlap cleanup.
+    const storedByStart = new Map(stored.map(row => [row.start, normalized(row)]));
+    const changedSamples = kept.filter(row =>
+      storedByStart.get(row.start) !== normalized(row.raw)
+    ).map(row => row.raw);
+    await replaceSamplesOn(client, userId, changedSamples, kept.map(row => row.raw));
     if (!manageScoringVersion) {
       return {
         storageChanged: true,

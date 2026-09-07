@@ -513,7 +513,12 @@ async function prefetchRaceScoringModelsImpl({
   // the same immutable input-version entry instead of missing by milliseconds.
   const coverageCeilingMs = Math.ceil(currentTime.getTime() / DAY_MS) * DAY_MS;
   const sampleRangeEnd = new Date(coverageCeilingMs + 7 * DAY_MS);
-  const dailyRangeStart = new Date(earliestStartMs - 3 * DAY_MS);
+  // Cache coverage is independent of an individual race's minute-level start.
+  // Scorers still apply their exact race/join window to the shared timeline.
+  const cacheStartMs = scoringInputCache
+    ? Math.floor(earliestStartMs / DAY_MS) * DAY_MS
+    : earliestStartMs;
+  const dailyRangeStart = new Date(cacheStartMs - 3 * DAY_MS);
   const dailyRangeEnd = new Date(coverageCeilingMs + 3 * DAY_MS);
   const scoringIds = Array.isArray(scoringParticipantIds)
     ? new Set(scoringParticipantIds)
@@ -548,8 +553,9 @@ async function prefetchRaceScoringModelsImpl({
       : sampleRangeStart;
     return {
       userId,
-      rangeStart:
-        joinedAt.getTime() > sampleRangeStart.getTime()
+      rangeStart: scoringInputCache
+        ? new Date(Math.floor(Math.max(joinedAt.getTime(), earliestStartMs) / DAY_MS) * DAY_MS)
+        : joinedAt.getTime() > sampleRangeStart.getTime()
           ? joinedAt
           : sampleRangeStart,
       rangeEnd: sampleRangeEnd,

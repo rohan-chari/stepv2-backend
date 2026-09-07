@@ -1791,6 +1791,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             const reusedModels = protectedPlan?.digest === planningFingerprint?.digest
               ? planningInputModels({
                 fingerprint: planningFingerprint, validUntil: protectedPlan?.validUntil,
+                raceActiveEffectModel: capture.effects,
+                raceModel,
                 scoringInputVersionModel: defaultPrisma.userScoringInputVersion,
               }) : {};
             const computeStartedAt = Date.now();
