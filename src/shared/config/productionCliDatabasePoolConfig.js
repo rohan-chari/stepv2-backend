@@ -2,6 +2,7 @@ const path = require("node:path");
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const AUTHORIZED_PRODUCTION_DATABASE_COMMANDS = Object.freeze({
+  "race-effects:backfill-deadlines": "scripts/backfill-race-effect-deadlines.js",
   "balance:drift": "scripts/balance-drift-report.js",
   "powerups:copy:sync": "scripts/powerup-copy-sync.js",
   "referral-contest:catch-up": "scripts/referral-contest-ledger-catch-up.js",

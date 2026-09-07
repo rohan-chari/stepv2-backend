@@ -73,6 +73,7 @@ function makeProgressDeps(activeEffects) {
   const race = { id: "race-1", status: "ACTIVE", targetSteps: 100000, startedAt: RACE_START, endsAt: new Date("2026-04-06T13:00:00.000Z"), powerupsEnabled: true, powerupStepInterval: 5000, participants: ps };
   const stepsByUser = Object.fromEntries(ps.map((p) => [p.userId, p._steps]));
   return {
+    enqueueRaceResolution: async () => null,
     imposterEnabled: () => false,
     Race: { async findById() { return race; } },
     StepSample: { async sumStepsInWindow(userId, windowStart) { return windowStart.getTime() === RACE_START.getTime() ? (stepsByUser[userId] || 0) : 0; } },

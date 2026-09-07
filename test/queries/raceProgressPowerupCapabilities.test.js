@@ -62,6 +62,7 @@ function makeDeps(effects) {
   const participants = [me, rival];
 
   return {
+    enqueueRaceResolution: async () => null,
     Race: {
       async findById() {
         return {

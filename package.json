@@ -52,7 +52,8 @@
     "load-test:k6:event-open": "node scripts/k6-event-open.js",
     "load-test:k6:home-open": "node scripts/k6-home-open.js",
     "cohort:repair": "node scripts/repair-signup-seeded-cohort.js",
-    "team-payouts:repair": "node scripts/repair-open-fixed-team-payouts.js"
+    "team-payouts:repair": "node scripts/repair-open-fixed-team-payouts.js",
+    "race-effects:backfill-deadlines": "node scripts/backfill-race-effect-deadlines.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

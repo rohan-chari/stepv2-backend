@@ -1525,11 +1525,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         "planSettings",
         () => isStrictFlagEnabled(settings, "raceResolutionBurstCoalescingV1Enabled")
       );
-      const postTasksEnabled = await phaseTimer.measure(
+      let postTasksEnabled = job.processingDirtyReasons?.some(reason => ["EFFECT_BOUNDARY","DISPLAY_REFRESH"].includes(reason)) === true || await phaseTimer.measure(
         "planSettings",
         () => isStrictFlagEnabled(settings, "raceResolutionPostTasksV1Enabled")
       );
-      const atomicPostTaskHandoff = Boolean(
+      let atomicPostTaskHandoff = Boolean(
         postTasksEnabled &&
         postTaskHandoff?.supportsAtomicDurableCreate === true &&
         typeof postTaskHandoff.createDurable === "function"
@@ -1568,6 +1568,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       let committedPostTaskId = null;
 
       for (;;) {
+        // A newer boundary/display envelope can be adopted after computation.
+        // Upgrade its durable handoff before preparing the next fenced attempt.
+        postTasksEnabled ||= job.processingDirtyReasons?.some(reason =>
+          ["EFFECT_BOUNDARY","DISPLAY_REFRESH"].includes(reason)) === true;
+        atomicPostTaskHandoff = Boolean(postTasksEnabled &&
+          postTaskHandoff?.supportsAtomicDurableCreate === true &&
+          typeof postTaskHandoff.createDurable === "function");
         let artifactPayload = null;
         let stepSyncScope = null;
         let capture = null;

@@ -7,6 +7,7 @@ datasource db {
 }
 
 model User {
+  raceProgressRefreshIntents RaceProgressRefreshIntent[]
   id                                String                          @id @default(uuid())
   // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
   // Both are nullable+unique so a pure-Google user has no appleId and vice versa.
@@ -1609,6 +1610,9 @@ model FundedExposureGuard {
 }
 
 model Race {
+  effectDeadlines RaceEffectDeadline[]
+  snapshotRepairIntents RaceSnapshotRepairIntent[]
+  progressRefreshIntents RaceProgressRefreshIntent[]
   id                            String           @id @default(uuid())
   creatorId                     String?          @map("creator_id")
   seedId                        String?          @map("seed_id")
@@ -2510,6 +2514,7 @@ model PowerupUpgradeEvent {
 }
 
 model RaceActiveEffect {
+  deadline RaceEffectDeadline?
   id                  String             @id @default(uuid())
   raceId              String             @map("race_id")
   targetParticipantId String             @map("target_participant_id")
@@ -3586,6 +3591,7 @@ model RaceResolutionJobV2 {
   raceId                          String                 @unique @map("race_id")
   generation                      Int                    @default(1)
   processingGeneration            Int?                   @map("processing_generation")
+  committedGeneration             Int                    @default(0) @map("committed_generation")
   resolutionTimeZone              String?                @map("resolution_time_zone") @db.VarChar(255)
   processingTimeZone              String?                @map("processing_time_zone") @db.VarChar(255)
   state                           RaceResolutionJobState @default(QUEUED)
@@ -3892,4 +3898,49 @@ model DomainEventNotificationProjection {
   @@index([status, availableAt, id], map: "domain_event_notification_projections_status_available_at_id_id")
   @@index([leaseToken])
   @@map("domain_event_notification_projections")
+}
+
+// These internal queues use SQL for lock-order-sensitive operations.
+model RaceEffectDeadline {
+ effect RaceActiveEffect @relation(fields:[effectId], references:[id], onDelete:Cascade)
+ race Race @relation(fields:[raceId], references:[id], onDelete:Cascade)
+ effectId String @id @map("effect_id")
+ raceId String @map("race_id")
+ deadlineAt DateTime @map("deadline_at")
+ revision String @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+ dispatchedRevision String? @map("dispatched_revision") @db.Uuid
+ dispatchedGeneration Int? @map("dispatched_generation")
+ dispatchedAt DateTime? @map("dispatched_at")
+ createdAt DateTime @default(now()) @map("created_at")
+ updatedAt DateTime @default(now()) @map("updated_at")
+ @@index([raceId, deadlineAt], map: "race_effect_deadlines_race_idx")
+ @@map("race_effect_deadlines")
+}
+model RaceSnapshotRepairIntent {
+ race Race @relation(fields:[raceId], references:[id], onDelete:Cascade)
+ taskId String @id @map("task_id")
+ raceId String @map("race_id")
+ sourceGeneration Int @map("source_generation")
+ attemptCount Int @default(0) @map("attempt_count")
+ availableAt DateTime @default(now()) @map("available_at")
+ leaseToken String? @map("lease_token") @db.Uuid
+ leaseExpiresAt DateTime? @map("lease_expires_at")
+ terminalAt DateTime? @map("terminal_at")
+ createdAt DateTime @default(now()) @map("created_at")
+ @@map("race_snapshot_repair_intents")
+}
+model RaceProgressRefreshIntent {
+ race Race @relation(fields:[raceId], references:[id], onDelete:Cascade)
+ user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+ raceId String @map("race_id")
+ userId String @map("user_id")
+ requestId String @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("request_id")
+ requestedAt DateTime @default(now()) @map("requested_at")
+ availableAt DateTime @default(now()) @map("available_at")
+ minimumCommittedGeneration Int @map("minimum_committed_generation")
+ resolutionTimeZone String? @map("resolution_time_zone")
+ scope Json @default("{}")
+ @@id([raceId,userId])
+ @@index([availableAt,raceId],map:"race_progress_refresh_due_idx")
+ @@map("race_progress_refresh_intents")
 }

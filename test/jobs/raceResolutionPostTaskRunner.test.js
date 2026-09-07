@@ -8,7 +8,7 @@ const {
   scheduleRaceResolutionPostTaskRunner,
 } = require("../../src/modules/races/jobs/raceResolutionPostTaskRunner");
 
-test("runner attempts immutable intents in state/snapshot/nudge order and continues after ambiguity", async () => {
+test("runner publishes snapshot before ordered immutable intents and continues after ambiguity", async () => {
   const calls = [];
   const completed = [];
   const model = {
@@ -36,7 +36,7 @@ test("runner attempts immutable intents in state/snapshot/nudge order and contin
 
   await runner.tick();
   assert.deepEqual(calls, [
-    "begin:i0", "deliver:i0", "begin:snapshot", "publish:snapshot",
+    "begin:snapshot", "publish:snapshot", "begin:i0", "deliver:i0",
     "begin:i1", "deliver:i1", "finish",
   ]);
   assert.equal(completed.find((value) => value.id === "i0").state, "ambiguous_at_most_once");

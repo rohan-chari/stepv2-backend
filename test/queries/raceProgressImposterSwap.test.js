@@ -63,6 +63,7 @@ function makeDeps(activeEffects, { participants } = {}) {
   const stepsByUser = Object.fromEntries(ps.map((p) => [p.userId, p._steps]));
 
   return {
+    enqueueRaceResolution: async () => null,
     Race: { async findById() { return race; } },
     StepSample: {
       // Return each user's full step total in the "start day" window so the

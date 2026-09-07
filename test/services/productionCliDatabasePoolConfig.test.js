@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, "../..");
 
 test("only audited deploy-time database commands receive the bounded maintenance pool", () => {
   assert.deepEqual(AUTHORIZED_PRODUCTION_DATABASE_COMMANDS, {
+    "race-effects:backfill-deadlines": "scripts/backfill-race-effect-deadlines.js",
     "balance:drift": "scripts/balance-drift-report.js",
     "powerups:copy:sync": "scripts/powerup-copy-sync.js",
     "referral-contest:catch-up": "scripts/referral-contest-ledger-catch-up.js",

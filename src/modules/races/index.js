@@ -104,3 +104,6 @@ Object.assign(module.exports, require("./jobs/fixedTeamPayoutMonitoring"));
 Object.assign(module.exports, require("./routes"));
 Object.assign(module.exports, require("./seriesRoutes"));
 Object.assign(module.exports, require("./joinRequestRoutes"));
+
+Object.assign(module.exports, require("./models/raceEffectDeadline"));
+Object.assign(module.exports, require("./jobs/raceEffectDeadlineScheduler"));

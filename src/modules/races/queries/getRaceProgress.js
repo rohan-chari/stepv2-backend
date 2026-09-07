@@ -2105,7 +2105,11 @@ function buildGetRaceProgress(deps = {}) {
       let projectionRows = cachedProjection?.rows || null;
       let projectionAsOf = cachedProjection?.asOf || null;
       let projectionGeneration = cachedProjection?.generation || null;
-      let projectionSource = "authoritative";
+      let projectionSource = cachedProjection && !snapshotStore.isFresh({
+        v: snapshotStore.SCHEMA_VERSION,
+        asOf: cachedProjection.asOf,
+        nextEffectBoundaryAt: cachedProjection.index?.nextEffectBoundaryAt,
+      }, now().getTime()) ? "stale-fallback" : "authoritative";
       let projectionTotal = cachedProjection?.total || null;
       let projectionRace = cachedProjection?.index?.race || null;
 

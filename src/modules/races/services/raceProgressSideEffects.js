@@ -239,7 +239,11 @@ function buildRaceProgressPostCommit(dependencies = {}) {
         typeof raceResolutionJobModel.findByRaceId === "function"
       ) {
         const current = await raceResolutionJobModel.findByRaceId(raceId);
-        if (!current || Number(current.generation) !== Number(sourceGeneration)) return false;
+        if (!current || Number(current.generation) !== Number(sourceGeneration)) {
+          const proven=await require('../models/raceResolutionPostTask').RaceResolutionPostTask
+            .hasSuccessfulPublication({raceId,minimumGeneration:Number(sourceGeneration)+1});
+          return {status:proven ? "superseded" : "failed"};
+        }
       }
       // Lazy require: getRaceProgress pulls in most of the race module, and the
       // worker is constructed at process start.
@@ -252,19 +256,21 @@ function buildRaceProgressPostCommit(dependencies = {}) {
         baseAdjustedByParticipantId:
           result?.baseAdjustedByParticipantId || null,
       });
-      if (!snapshot) return false;
+      if (!snapshot) return {status:"failed"};
       snapshot.source = "worker";
+      snapshot.generation = sourceGeneration;
       if (sourceGeneration != null) {
         const projection = buildRaceProgressPageProjection({
           raceId,
           generation: sourceGeneration,
           scoringTimeZone: snapshot.scoringTimeZone || timeZone || "UTC",
           asOf: snapshot.asOf,
+          nextEffectBoundaryAt: snapshot.nextEffectBoundaryAt,
           race: snapshot.race,
           participants: snapshot.participants,
           sourceParticipants: result?.race?.participants || [],
         });
-        await publishRaceProgressPageProjection({
+        const pagePublished = await publishRaceProgressPageProjection({
           raceId,
           generation: sourceGeneration,
           snapshot: projection,
@@ -281,13 +287,18 @@ function buildRaceProgressPostCommit(dependencies = {}) {
             return current?.generation;
           },
         });
+        if (!pagePublished) {
+          const proven=await require('../models/raceResolutionPostTask').RaceResolutionPostTask
+            .hasSuccessfulPublication({raceId,minimumGeneration:Number(sourceGeneration)+1});
+          return {status:proven ? "superseded" : "failed"};
+        }
       }
-      return await snapshotStore.writeSnapshot(raceId, snapshot);
+      return {status: await snapshotStore.writeSnapshot(raceId, snapshot) ? "published" : "failed"};
     } catch (error) {
       // Logged and ignored by contract: the previous snapshot ages out of
       // freshness within 15s and the next reader rebuilds it.
       logger.error(`[C3] snapshot publish failed (race ${raceId}):`, error);
-      return false;
+      return {status:"failed"};
     }
   }
 
@@ -312,7 +323,7 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     // Durable preparation is a Postgres recovery contract, not a Redis
     // optimization. It must always produce its generation-keyed command and
     // fail closed if a required notification decision cannot be prepared.
-    if (!prepareOnly && !(await enabled())) return;
+    if (!prepareOnly && deferEffectExpiry && !(await enabled())) return;
     // With v2 event materialization enabled, an ordinary score generation must
     // not consume a due source before the durable EFFECT_BOUNDARY claim can
     // calculate and commit its event. The boundary run performs the normal

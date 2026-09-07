@@ -1,4 +1,5 @@
 const APPROVED_METRICS = new Set([
+  "race_effect_expiry_stage_seconds",
   "global_summary_capture_lookup_total",
   "global_summary_capture_lookup_per_sync",
   "global_summary_capture_mutable_scope_total",

@@ -64,14 +64,8 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
   const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
   const isSuperseded =
     dependencies.isSuperseded ||
-    (async (task) => {
-      const job = await jobModel.findByRaceId(task.raceId);
-      return Boolean(
-        job &&
-          Number(job.processingGeneration) > Number(task.sourceGeneration) &&
-          job.lastCompletedAt
-      );
-    });
+    (async (task) => typeof model.hasSuccessfulPublication === "function" &&
+      model.hasSuccessfulPublication({raceId:task.raceId,minimumGeneration:Number(task.sourceGeneration)+1}));;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const env = dependencies.env || process.env;
@@ -122,7 +116,9 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       return;
     }
     try {
+      const providerStarted=Date.now();
       const result = await deliverIntent(intent, { attemptId });
+      require('../services/raceEffectExpiryTelemetry').observeExpiryStage('notification_provider',Date.now()-providerStarted);
       await model.completeIntent({
         id: intent.id,
         state: result?.accepted === true ? "accepted" : "rejected_no_retry",
@@ -153,11 +149,13 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     // reclaimed with snapshot_state still pending and expiry is retried from
     // the authoritative generation payload.
     if (effectExpiryParticipantSteps) {
+      const consequenceStarted=Date.now();
       await expireEffects({
         raceId: task.raceId,
         participantSteps: effectExpiryParticipantSteps,
         taskFence: { taskId: task.id, leaseToken: task.leaseToken },
       });
+      require('../services/raceEffectExpiryTelemetry').observeExpiryStage('consequence',Date.now()-consequenceStarted,{raceId:task.raceId,generation:task.sourceGeneration});
     }
     const attemptId = await model.beginSnapshot({
       taskId: task.id,
@@ -170,11 +168,14 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       return;
     }
     try {
+      const publicationStarted=Date.now();
       const published = await publishSnapshot(snapshotCommand, task, { attemptId });
+      require('../services/raceEffectExpiryTelemetry').observeExpiryStage('snapshot_publication',Date.now()-publicationStarted,{raceId:task.raceId,generation:task.sourceGeneration});
       await model.completeSnapshot({
         taskId: task.id,
-        state: published === false ? "failed_no_retry" : "succeeded",
-        errorCode: published === false ? "SNAPSHOT_NOT_PUBLISHED" : null,
+        state: published?.status === "superseded" ? "skipped_superseded" :
+          (published === false || published?.status === "failed") ? "failed_no_retry" : "succeeded",
+        errorCode: (published === false || published?.status === "failed") ? "SNAPSHOT_NOT_PUBLISHED" : null,
         now: now(),
       });
     } catch {
@@ -196,8 +197,8 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     const afterSnapshot = intents.filter((intent) =>
       ["NUDGE", "STEP_SYNC"].includes(intent.kind)
     );
-    for (const intent of beforeSnapshot) await processIntent(intent);
     await processSnapshot(task);
+    for (const intent of beforeSnapshot) await processIntent(intent);
     for (const intent of afterSnapshot) await processIntent(intent);
     const state = await model.finish({
       taskId: task.id,
@@ -211,6 +212,31 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
   return {
     isDisabled() {
       return postTaskWorkerDisabled(env);
+    },
+    // Independent bounded lane: provider I/O on preceding tasks cannot delay
+    // publication. The existing task lease fences both lanes; only snapshots
+    // are processed here, then normal ordered notification delivery resumes.
+    async snapshotTick() {
+      if (
+        postTaskWorkerDisabled(env) ||
+        typeof model.claimSnapshotNext !== "function"
+      )
+        return null;
+      const task = await model.claimSnapshotNext({ now: now() });
+      if (!task) return null;
+      try {
+        await processSnapshot(task);
+      } finally {
+        await model.releaseSnapshotLease({
+          taskId: task.id,
+          leaseToken: task.leaseToken,
+          now: now(),
+        });
+        await redisCache.publishDurableQueueWakeup("post-task", {
+          workKind: "ordinary",
+        });
+      }
+      return task.id;
     },
     async tick() {
       if (postTaskWorkerDisabled(env)) return null;
@@ -237,10 +263,14 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       }
     },
     async isReady({ positiveCacheMs = 0 } = {}) {
-      if (postTaskWorkerDisabled(env) || !lastSuccessfulClaimProbeAt) return false;
+      if (postTaskWorkerDisabled(env) || !lastSuccessfulClaimProbeAt)
+        return false;
       const currentTime = now();
       if (currentTime.getTime() < positiveReadinessCachedUntilMs) return true;
-      if (currentTime.getTime() - lastSuccessfulClaimProbeAt.getTime() > 60_000) {
+      if (
+        currentTime.getTime() - lastSuccessfulClaimProbeAt.getTime() >
+        60_000
+      ) {
         invalidateReadinessCache();
         return false;
       }
@@ -251,10 +281,12 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
         invalidateReadinessCache();
         throw error;
       }
-      const ready = Number(health?.oldestPendingLagMs || 0) < 30_000 &&
+      const ready =
+        Number(health?.oldestPendingLagMs || 0) < 30_000 &&
         Number(health?.expiredAttemptCount || 0) === 0;
       if (ready && positiveCacheMs > 0) {
-        positiveReadinessCachedUntilMs = currentTime.getTime() +
+        positiveReadinessCachedUntilMs =
+          currentTime.getTime() +
           Math.min(1000, Math.max(0, Number(positiveCacheMs) || 0));
       } else if (!ready) {
         invalidateReadinessCache();
@@ -272,12 +304,16 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       const before = new Date(now().getTime() - retentionMs);
       let deleted = 0;
       for (let batch = 0; batch < cleanupMaxBatches; batch += 1) {
-        const pageResult = await cleanupBudget.runPage(() => model.cleanupTerminal({
-          before, limit: cleanupBatchSize,
-        }));
+        const pageResult = await cleanupBudget.runPage(() =>
+          model.cleanupTerminal({
+            before,
+            limit: cleanupBatchSize,
+          }),
+        );
         const pageDeleted = pageResult.rows;
         deleted += pageDeleted;
-        if (!pageResult.allowedContinue || pageDeleted < cleanupBatchSize) break;
+        if (!pageResult.allowedContinue || pageDeleted < cleanupBatchSize)
+          break;
         if (batch + 1 < cleanupMaxBatches) await yieldToEventLoop();
       }
       return deleted;
@@ -381,6 +417,19 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   coordinator.start({ drainOnStart: dependencies.drainOnStart !== false }).catch((error) => (dependencies.logger || console).error(
     "[RACE_RESOLUTION_POST_TASK] wake coordinator failed", error,
   ));
+  let snapshotsRunning = false;
+  const snapshotInterval = setInterval(async () => {
+    if (snapshotsRunning) return;
+    snapshotsRunning = true;
+    try {
+      for (let i=0;i<100;i++) {
+        if (!(await runner.snapshotTick())) break;
+        await yieldToEventLoop();
+      }
+    } catch (error) { (dependencies.logger || console).error("[RACE_SNAPSHOT] lane failed",error); }
+    finally { snapshotsRunning = false; }
+  },1000);
+  snapshotInterval.unref?.();
   const interval = null;
   const runCleanup = () => {
     if (cleanupRunning) return cleanupRunning;
@@ -403,6 +452,7 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   return {
     interval, cleanup, qualificationRecovery, runner, runCleanup, coordinator,
     async stop() {
+      clearInterval(snapshotInterval);
       clearInterval(cleanup);
       clearInterval(qualificationRecovery);
       await coordinator.stop();

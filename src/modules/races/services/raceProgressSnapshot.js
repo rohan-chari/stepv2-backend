@@ -75,6 +75,8 @@ function clearLocalRace(raceId) {
 // Top-level envelope.
 const SNAPSHOT_FIELDS = [
   "v", // schema version
+  "nextEffectBoundaryAt",
+  "generation",
   "asOf", // ISO instant the shared state was computed
   "scoringTimeZone", // the tz the totals were bucketed in (see cacheKeys note)
   "source", // "replay" | "worker" | "persisted" — diagnostics only
@@ -216,6 +218,7 @@ function buildSnapshot({
   schemaVersion = SCHEMA_VERSION,
 }) {
   const snapshot = {
+    nextEffectBoundaryAt: nextEffectBoundary(activeEffects),
     v: schemaVersion,
     asOf: (asOf instanceof Date ? asOf : new Date(asOf)).toISOString(),
     scoringTimeZone,
@@ -258,15 +261,31 @@ function bump(key) {
 
 // ── lifecycle ───────────────────────────────────────────────────────────────
 
+function nextEffectBoundary(effects) {
+  let earliest = Infinity;
+  for (const effect of effects || []) {
+    if (effect.status && effect.status !== "ACTIVE") continue;
+    const deadline =
+      effect.expiresAt == null ? NaN : new Date(effect.expiresAt).getTime();
+    if (Number.isFinite(deadline)) earliest = Math.min(earliest, deadline);
+  }
+  return Number.isFinite(earliest) ? new Date(earliest).toISOString() : null;
+}
 function isFresh(snapshot, nowMs = Date.now()) {
   if (
     !snapshot ||
     ![SCHEMA_VERSION, LEAN_SCHEMA_VERSION].includes(snapshot.v) ||
     !snapshot.asOf
-  ) return false;
+  )
+    return false;
   const asOf = new Date(snapshot.asOf).getTime();
   if (!Number.isFinite(asOf)) return false;
-  return nowMs - asOf <= SOFT_TTL_MS;
+  const boundary =
+    snapshot.nextEffectBoundaryAt || nextEffectBoundary(snapshot.activeEffects);
+  return (
+    nowMs - asOf <= SOFT_TTL_MS &&
+    (!boundary || nowMs < new Date(boundary).getTime())
+  );
 }
 
 /** A snapshot computed in a different scoring tz is not valid for this viewer. */
@@ -311,11 +330,33 @@ async function readSupportedSnapshot(raceId) {
  * step 9 / spec item 4).
  */
 async function writeSnapshot(raceId, snapshot) {
-  const ok = await redisCache.setJSON(
-    cacheKeys.raceProgress(raceId, snapshot?.v),
-    snapshot,
-    PHYSICAL_TTL_SECONDS
-  );
+  const key = cacheKeys.raceProgress(raceId, snapshot?.v);
+  let ok;
+  if (Number.isSafeInteger(snapshot?.generation) && snapshot.generation > 0) {
+    const result = await redisCache.evalLua(
+      `
+      local value=redis.call('GET',KEYS[1])
+      if value then
+        local current=cjson.decode(value)
+        if tonumber(current.generation or 0)>tonumber(ARGV[1]) then return 0 end
+      end
+      redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]);return 1`,
+      [key],
+      [snapshot.generation, JSON.stringify(snapshot), PHYSICAL_TTL_SECONDS],
+    );
+    ok = result?.ok && Number(result.result) === 1;
+  } else {
+    // Legacy unversioned publishers must not overwrite a newer worker value.
+    const result = await redisCache.evalLua(
+      `
+      local value=redis.call('GET',KEYS[1])
+      if value and tonumber(cjson.decode(value).generation or 0)>0 then return 0 end
+      redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]);return 1`,
+      [key],
+      [JSON.stringify(snapshot), PHYSICAL_TTL_SECONDS],
+    );
+    ok = result?.ok && Number(result.result) === 1;
+  }
   if (ok) {
     localReads.set(localReadKey(raceId, snapshot.v), {
       expiresAt: Date.now() + LOCAL_READ_TTL_MS,
@@ -405,6 +446,7 @@ module.exports = {
   buildSnapshot,
   assertAllowlisted,
   isFresh,
+  nextEffectBoundary,
   matchesTimeZone,
   readSnapshot,
   readSupportedSnapshot,

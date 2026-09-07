@@ -57,6 +57,7 @@ function makeDeps(activeEffects) {
   };
 
   return {
+    enqueueRaceResolution: async () => null,
     Race: { async findById() { return race; } },
     StepSample: { async sumStepsInWindow() { return 0; } },
     Steps: {

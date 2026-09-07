@@ -70,6 +70,7 @@ const {
   scheduleRaceResolutionPostTaskRunner,
   scheduleRaceSeriesRenewal,
   scheduleResolvedImpactBoundaryScheduler,
+  scheduleRaceEffectDeadlineScheduler,
   scheduleRaceAdminCommandRunner,
 } = require("./modules/races");
 const {
@@ -162,6 +163,7 @@ function startServer({
     scheduleResolutionPostTasks = scheduleRaceResolutionPostTaskRunner,
   scheduleRaceSeriesRenewal:
     scheduleRecurringRaceRenewal = scheduleRaceSeriesRenewal,
+  scheduleEffectDeadlines = scheduleRaceEffectDeadlineScheduler,
   scheduleResolvedImpactBoundaries:
     scheduleImpactBoundaries = scheduleResolvedImpactBoundaryScheduler,
   scheduleRaceAdminCommands:
@@ -248,6 +250,7 @@ function startServer({
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
+        retainStopHandle(scheduleEffectDeadlines());
         retainStopHandle(scheduleRecurringRaceRenewal());
         if (!raceResolutionPostTaskWorkerDisabled()) {
           retainStopHandle(scheduleResolutionPostTasks());
@@ -397,6 +400,7 @@ function startServer({
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
+      retainStopHandle(scheduleEffectDeadlines());
         retainStopHandle(scheduleRecurringRaceRenewal());
       }
       // Delivery/publication groups are durable and drain independently of the

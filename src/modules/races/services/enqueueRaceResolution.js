@@ -147,8 +147,43 @@ async function enqueueRaceResolution(
   tx = null
 ) {
   if (!raceId) return null;
+  // Gate repair is read-origin viewer convergence. The display plan retains
+  // triggered users, so their gate repair runs after covered expiry commits.
+  if (reason === "POWERUP_GATE_REPAIR") reason = "DISPLAY_REFRESH";
   // Admission belongs to the durable queue: a race-only Redis key cannot tell
   // whether another viewer, timezone or source generation is already covered.
+  if (
+    reason === "DISPLAY_REFRESH" ||
+    (reason === "EFFECT_BOUNDARY" && queuePriority === "RECOVERY")
+  ) {
+    try {
+      const { admitExpiryRefresh } = require("../models/raceProgressRefreshIntent");
+      const covered = await admitExpiryRefresh(
+        { raceId, userId, timeZone, dirtyUserIds },
+        tx,
+      );
+      if (covered) {
+        if (!tx) {
+          await redisCache.publishDurableQueueWakeup("resolution", {
+            workKind: "ordinary",
+          });
+        }
+        return covered;
+      }
+    } catch (error) {
+      if (tx) throw error;
+      // A busy C0 fence already owns this overdue effect. Retrying through the
+      // normal enqueue would invalidate it; independent scheduling converges.
+      const { isBusyRaceJobError } = require("../models/raceEffectDeadline");
+      if (!isBusyRaceJobError(error)) {
+        console.error(`[RACE_RESOLUTION_V2] admission failed (race ${raceId}):`, error);
+      }
+      // Preserve the established best-effort read contract on infrastructure
+      // failure. Source transactions still throw above; durable scheduling and
+      // the next read retry convergence without invalidating an unknown fence.
+      return null;
+    }
+  }
   const capacity = startCapacityPhase("resolution_enqueue");
   let capacityOutcome = "error";
   let result = null;

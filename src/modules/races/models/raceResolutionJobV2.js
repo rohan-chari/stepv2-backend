@@ -226,6 +226,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       {
         raceId,
         userId = null,
+        triggeredUserIds = null,
         resolutionTimeZone = null,
         now = new Date(),
         dirtyEnvelope = null,
@@ -242,6 +243,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         {
           raceIds: [raceId],
           userId,
+          triggeredUserIdsByRaceId: triggeredUserIds ? new Map([[raceId,triggeredUserIds]]) : null,
           resolutionTimeZone,
           now,
           dirtyEnvelopeByRaceId: new Map([[raceId, dirtyEnvelope]]),

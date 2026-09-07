@@ -165,16 +165,19 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       });
     },
 
-    async create({
-      raceId,
-      sourceGeneration,
-      snapshotCommand,
-      intents,
-      resolveIntents = null,
-      fastHandoff = false,
-      recordPhaseTiming = null,
-      now = new Date(),
-      }, tx = null) {
+    async create(
+      {
+        raceId,
+        sourceGeneration,
+        snapshotCommand,
+        intents,
+        resolveIntents = null,
+        fastHandoff = false,
+        recordPhaseTiming = null,
+        now = new Date(),
+      },
+      tx = null,
+    ) {
       const measure = async (name, operation) => {
         if (typeof recordPhaseTiming !== "function") return operation();
         const startedAt = process.hrtime.bigint();
@@ -184,7 +187,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
           try {
             recordPhaseTiming(
               name,
-              Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+              Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6),
             );
           } catch {}
         }
@@ -197,13 +200,16 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
         validatePostTaskPayload({ snapshotCommand, intents: [] });
         const id = crypto.randomUUID();
         const dedupeKey = `v1:post-delivery:${raceId}:${sourceGeneration}`;
-        const completedReceipt = await client.raceResolutionPostTaskReceipt.findUnique({
-          where: { raceId_sourceGeneration: { raceId, sourceGeneration } },
-          select: { dedupeKey: true, terminalState: true, completedAt: true },
-        });
+        const completedReceipt =
+          await client.raceResolutionPostTaskReceipt.findUnique({
+            where: { raceId_sourceGeneration: { raceId, sourceGeneration } },
+            select: { dedupeKey: true, terminalState: true, completedAt: true },
+          });
         if (completedReceipt) {
           if (completedReceipt.dedupeKey !== dedupeKey) {
-            const error = new Error("post-task receipt immutable identity mismatch");
+            const error = new Error(
+              "post-task receipt immutable identity mismatch",
+            );
             error.code = "POST_TASK_RECEIPT_COLLISION";
             throw error;
           }
@@ -216,9 +222,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
             completedAt: completedReceipt.completedAt,
           };
         }
-        const task = await measure(
-          "taskInsert",
-          () => client.$queryRawUnsafe(
+        const task = await measure("taskInsert", () =>
+          client.$queryRawUnsafe(
             `INSERT INTO race_resolution_post_tasks (
                id, race_id, source_generation, dedupe_key, state, requested_at,
                not_before_at, snapshot_state, snapshot_command, payload_bytes,
@@ -226,25 +231,33 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              ) VALUES ($1,$2,$3,$4,'queued',$5,$5,'pending',$6::jsonb,$7,$8,$5,$5)
              ON CONFLICT (race_id, source_generation) DO NOTHING
              RETURNING id`,
-            id, raceId, sourceGeneration, dedupeKey, now,
+            id,
+            raceId,
+            sourceGeneration,
+            dedupeKey,
+            now,
             JSON.stringify(snapshotCommand),
             fastHandoff ? jsonBytes(snapshotCommand) : 0,
-            0
-          )
+            0,
+          ),
         );
         if (task.length === 0) {
           const existing = await client.$queryRawUnsafe(
             `SELECT id FROM race_resolution_post_tasks
              WHERE race_id=$1 AND source_generation=$2`,
             raceId,
-            sourceGeneration
+            sourceGeneration,
           );
           return { created: false, id: existing[0]?.id || null };
         }
-        const decidedIntents = typeof resolveIntents === "function"
-          ? await measure("resolveIntents", () => resolveIntents(client))
-          : intents;
-        const payload = validatePostTaskPayload({ snapshotCommand, intents: decidedIntents });
+        const decidedIntents =
+          typeof resolveIntents === "function"
+            ? await measure("resolveIntents", () => resolveIntents(client))
+            : intents;
+        const payload = validatePostTaskPayload({
+          snapshotCommand,
+          intents: decidedIntents,
+        });
         // The winning insert already carries the final snapshot command and its
         // exact bytes. With no resolved intents there is nothing left to amend.
         if (fastHandoff && payload.intents.length === 0) {
@@ -258,9 +271,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
           }));
           // One database round trip: finalize the owner row and insert its
           // immutable intents in the same statement/transaction.
-          await measure(
-            "intentInsert",
-            () => client.$executeRawUnsafe(
+          await measure("intentInsert", () =>
+            client.$executeRawUnsafe(
               `WITH finalized AS (
                  UPDATE race_resolution_post_tasks
                  SET payload_bytes=$2, intent_count=$3, updated_at=$4
@@ -284,14 +296,13 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
               payload.payloadBytes,
               payload.intentCount,
               now,
-              JSON.stringify(rows)
-            )
+              JSON.stringify(rows),
+            ),
           );
           return { created: true, id, dedupeKey, ...payload };
         }
-        await measure(
-          "taskUpdate",
-          () => client.$executeRawUnsafe(
+        await measure("taskUpdate", () =>
+          client.$executeRawUnsafe(
             `UPDATE race_resolution_post_tasks
              SET snapshot_command=$2::jsonb, payload_bytes=$3, intent_count=$4, updated_at=$5
              WHERE id=$1`,
@@ -299,8 +310,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
             JSON.stringify(payload.snapshotCommand),
             payload.payloadBytes,
             payload.intentCount,
-            now
-          )
+            now,
+          ),
         );
         if (payload.intents.length > 0) {
           const rows = payload.intents.map((intent) => ({
@@ -308,9 +319,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
             taskId: id,
             ...intent,
           }));
-          await measure(
-            "intentInsert",
-            () => client.$executeRawUnsafe(
+          await measure("intentInsert", () =>
+            client.$executeRawUnsafe(
               `INSERT INTO race_resolution_delivery_intents (
                  id, task_id, ordinal, kind, recipient_user_id, payload,
                  payload_bytes, delivery_key_hash, cooldown_claim_id, state,
@@ -325,8 +335,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
                  "deliveryKeyHash" text, "cooldownClaimId" text
                )`,
               JSON.stringify(rows),
-              now
-            )
+              now,
+            ),
           );
         }
         return { created: true, id, dedupeKey, ...payload };
@@ -334,6 +344,36 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       return tx ? insert(tx) : prisma.$transaction(insert);
     },
 
+    async hasSuccessfulPublication({raceId,minimumGeneration}) {
+      const rows=await prisma.$queryRawUnsafe(`SELECT 1 FROM race_resolution_post_tasks
+        WHERE race_id=$1 AND source_generation>=$2 AND snapshot_state='succeeded'
+        UNION ALL SELECT 1 FROM race_resolution_post_task_receipts
+        WHERE race_id=$1 AND source_generation>=$2 AND snapshot_state='succeeded' LIMIT 1`,raceId,minimumGeneration);
+      return rows.length>0;
+    },
+    async claimSnapshotNext({ now = new Date() } = {}) {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id FROM race_resolution_post_tasks
+        WHERE snapshot_state='pending' AND ((state='queued' AND not_before_at<=$1)
+        OR (state='running' AND lease_expires_at<=$1))
+        ORDER BY requested_at,id LIMIT 16`,
+        now,
+      );
+      for (const row of rows) {
+        const task = await this.claimById({ id: row.id, now });
+        if (task) return task;
+      }
+      return null;
+    },
+    async releaseSnapshotLease({ taskId, leaseToken, now = new Date() }) {
+      return prisma.$executeRawUnsafe(
+        `UPDATE race_resolution_post_tasks SET state='queued',
+        lease_token=NULL,lease_expires_at=NULL,updated_at=$3 WHERE id=$1 AND lease_token=$2`,
+        taskId,
+        leaseToken,
+        now,
+      );
+    },
     async claimNext({ now = new Date(), leaseMs = LEASE_MS } = {}) {
       const leaseToken = crypto.randomUUID();
       return prisma.$transaction(async (tx) => {
@@ -365,7 +405,9 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              task.snapshot_state AS "snapshotState",
              task.snapshot_command AS "snapshotCommand",
              task.lease_token AS "leaseToken"`,
-          now, new Date(now.getTime() + leaseMs), leaseToken
+          now,
+          new Date(now.getTime() + leaseMs),
+          leaseToken,
         );
         const task = rows[0];
         if (!task) return null;
@@ -376,7 +418,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              SET snapshot_state='ambiguous_at_most_once', snapshot_completed_at=$2,
                  snapshot_error_code='LEASE_RECOVERY', updated_at=$2
              WHERE id=$1`,
-            task.id, now
+            task.id,
+            now,
           );
           task.snapshotState = "ambiguous_at_most_once";
         }
@@ -415,7 +458,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
           id,
           now,
           new Date(now.getTime() + leaseMs),
-          leaseToken
+          leaseToken,
         );
         const task = rows[0];
         if (!task) return null;
@@ -427,7 +470,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
                  snapshot_error_code='LEASE_RECOVERY', updated_at=$2
              WHERE id=$1`,
             task.id,
-            now
+            now,
           );
           task.snapshotState = "ambiguous_at_most_once";
         }
@@ -440,7 +483,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
         `SELECT id, ordinal, kind, recipient_user_id AS "recipientUserId", payload, state
          FROM race_resolution_delivery_intents
          WHERE task_id=$1 ORDER BY ordinal ASC`,
-        taskId
+        taskId,
       );
     },
 
@@ -450,13 +493,26 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
         `UPDATE race_resolution_delivery_intents
          SET state='attempting', attempt_id=$2, attempted_at=$3, updated_at=$3
          WHERE id=$1 AND state='pending'
-         RETURNING id`, id, attemptId, now
+         RETURNING id`,
+        id,
+        attemptId,
+        now,
       );
       return rows.length ? attemptId : null;
     },
 
-    async completeIntent({ id, state, providerDisposition = null, errorCode = null, now = new Date() }) {
-      if (!["accepted", "rejected_no_retry", "ambiguous_at_most_once"].includes(state)) {
+    async completeIntent({
+      id,
+      state,
+      providerDisposition = null,
+      errorCode = null,
+      now = new Date(),
+    }) {
+      if (
+        !["accepted", "rejected_no_retry", "ambiguous_at_most_once"].includes(
+          state,
+        )
+      ) {
         throw new TypeError("invalid terminal intent state");
       }
       await prisma.$transaction(async (tx) => {
@@ -470,7 +526,11 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              intent.kind AS "intentKind", task.race_id AS "raceId",
              task.source_generation AS "sourceGeneration",
              task.dedupe_key AS "taskDedupeKey"`,
-          id, state, providerDisposition, errorCode, now
+          id,
+          state,
+          providerDisposition,
+          errorCode,
+          now,
         );
         if (rows[0]) {
           await recordIntentReceipt(tx, {
@@ -489,27 +549,43 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
          SET snapshot_state='attempting', snapshot_attempt_id=$3,
              snapshot_attempted_at=$4, updated_at=$4
          WHERE id=$1 AND lease_token=$2 AND snapshot_state='pending'
-         RETURNING id`, taskId, leaseToken, attemptId, now
+         RETURNING id`,
+        taskId,
+        leaseToken,
+        attemptId,
+        now,
       );
       return rows.length ? attemptId : null;
     },
 
-    async completeSnapshot({ taskId, state, errorCode = null, now = new Date() }) {
-      if (!SNAPSHOT_STATES.includes(state) || ["pending", "attempting"].includes(state)) {
+    async completeSnapshot({
+      taskId,
+      state,
+      errorCode = null,
+      now = new Date(),
+    }) {
+      if (
+        !SNAPSHOT_STATES.includes(state) ||
+        ["pending", "attempting"].includes(state)
+      ) {
         throw new TypeError("invalid terminal snapshot state");
       }
       await prisma.$executeRawUnsafe(
         `UPDATE race_resolution_post_tasks
          SET snapshot_state=$2, snapshot_error_code=$3,
              snapshot_completed_at=$4, updated_at=$4
-         WHERE id=$1 AND snapshot_state='attempting'`, taskId, state, errorCode, now
+         WHERE id=$1 AND snapshot_state='attempting'`,
+        taskId,
+        state,
+        errorCode,
+        now,
       );
     },
 
     async finish({ taskId, leaseToken, now = new Date() }) {
       return prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRawUnsafe(
-        `WITH failures AS (
+        const rows = await tx.$queryRawUnsafe(
+          `WITH failures AS (
            SELECT COUNT(*)::int AS count
            FROM race_resolution_delivery_intents
            WHERE task_id=$1 AND state IN ('rejected_no_retry','ambiguous_at_most_once')
@@ -553,27 +629,36 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
             WHERE NOT EXISTS (SELECT 1 FROM receipt)
          ) SELECT (SELECT COUNT(*)::int FROM finished) AS "finishedCount",
                   (SELECT terminal_state FROM validated LIMIT 1) AS state`,
-        taskId, leaseToken, now
-      );
-      if (Number(rows[0]?.finishedCount || 0) === 1 && !rows[0]?.state) {
-        const error = new Error("post-task receipt immutable identity mismatch");
-        error.code = "POST_TASK_RECEIPT_COLLISION";
-        throw error;
-      }
-      return rows[0]?.state || null;
+          taskId,
+          leaseToken,
+          now,
+        );
+        if (Number(rows[0]?.finishedCount || 0) === 1 && !rows[0]?.state) {
+          const error = new Error(
+            "post-task receipt immutable identity mismatch",
+          );
+          error.code = "POST_TASK_RECEIPT_COLLISION";
+          throw error;
+        }
+        return rows[0]?.state || null;
       });
     },
 
     async cleanupTerminal({ before, limit = 500 }) {
       const bounded = Math.max(0, Math.min(500, Number(limit) || 0));
-      if (!(before instanceof Date) || Number.isNaN(before.getTime()) || bounded === 0) {
+      if (
+        !(before instanceof Date) ||
+        Number.isNaN(before.getTime()) ||
+        bounded === 0
+      ) {
         return 0;
       }
-      return prisma.$transaction(async (client) => {
-        await client.$executeRawUnsafe("SET LOCAL lock_timeout='100ms'");
-        await client.$executeRawUnsafe("SET LOCAL statement_timeout='2s'");
-        const rows = await client.$queryRawUnsafe(
-        `WITH candidates AS MATERIALIZED (
+      return prisma.$transaction(
+        async (client) => {
+          await client.$executeRawUnsafe("SET LOCAL lock_timeout='100ms'");
+          await client.$executeRawUnsafe("SET LOCAL statement_timeout='2s'");
+          const rows = await client.$queryRawUnsafe(
+            `WITH candidates AS MATERIALIZED (
            SELECT task.id, task.race_id, task.source_generation, task.dedupe_key,
              task.state, task.snapshot_state, task.intent_count, task.completed_at
            FROM race_resolution_post_tasks task
@@ -617,12 +702,17 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
               candidate.dedupe_key, candidate.state, candidate.snapshot_state,
               candidate.intent_count, candidate.completed_at
            ON CONFLICT (race_id,source_generation) DO NOTHING
-           RETURNING race_id, source_generation, dedupe_key
+           RETURNING *
          ), doomed AS (
            SELECT candidate.id
            FROM candidates candidate
            WHERE EXISTS (
-               SELECT 1 FROM race_resolution_post_task_receipts receipt
+               SELECT 1 FROM (
+                 -- Data-modifying CTE writes are visible through RETURNING,
+                 -- not a sibling scan of the base table in this statement.
+                 SELECT * FROM race_resolution_post_task_receipts
+                 UNION ALL SELECT * FROM task_receipts
+               ) receipt
                WHERE receipt.race_id=candidate.race_id
                  AND receipt.source_generation=candidate.source_generation
                  AND receipt.dedupe_key=candidate.dedupe_key
@@ -660,11 +750,13 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
          USING doomed
          WHERE task.id=doomed.id
          RETURNING task.id`,
-        before,
-        bounded
+            before,
+            bounded,
+          );
+          return rows.length;
+        },
+        { timeout: 3_000, maxWait: 2_000 },
       );
-        return rows.length;
-      }, { timeout: 3_000, maxWait: 2_000 });
     },
 
     async readinessSnapshot({ now = new Date() } = {}) {
@@ -687,11 +779,17 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
                 AND task.lease_expires_at IS NOT NULL
                 AND task.lease_expires_at <= $1)
            )::int AS "expiredAttemptCount"`,
-        now
+        now,
       );
       return {
-        oldestPendingLagMs: Math.max(0, Number(rows[0]?.oldestPendingLagMs || 0)),
-        expiredAttemptCount: Math.max(0, Number(rows[0]?.expiredAttemptCount || 0)),
+        oldestPendingLagMs: Math.max(
+          0,
+          Number(rows[0]?.oldestPendingLagMs || 0),
+        ),
+        expiredAttemptCount: Math.max(
+          0,
+          Number(rows[0]?.expiredAttemptCount || 0),
+        ),
       };
     },
   };
