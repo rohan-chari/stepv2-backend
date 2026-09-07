@@ -404,14 +404,18 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              task.requested_at AS "requestedAt",
              task.snapshot_state AS "snapshotState",
              task.snapshot_command AS "snapshotCommand",
-             task.lease_token AS "leaseToken"`,
+             task.lease_token AS "leaseToken",
+             EXISTS (SELECT 1 FROM race_resolution_delivery_intents intent
+                     WHERE intent.task_id=task.id) AS "hasIntents"`,
           now,
           new Date(now.getTime() + leaseMs),
           leaseToken,
         );
         const task = rows[0];
         if (!task) return null;
-        await terminalizeAttemptingIntentsForRecovery(tx, task.id, now);
+        if (task.hasIntents !== false) {
+          await terminalizeAttemptingIntentsForRecovery(tx, task.id, now);
+        }
         if (task.snapshotState === "attempting") {
           await tx.$executeRawUnsafe(
             `UPDATE race_resolution_post_tasks
@@ -454,7 +458,9 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              task.requested_at AS "requestedAt",
              task.snapshot_state AS "snapshotState",
              task.snapshot_command AS "snapshotCommand",
-             task.lease_token AS "leaseToken"`,
+             task.lease_token AS "leaseToken",
+             EXISTS (SELECT 1 FROM race_resolution_delivery_intents intent
+                     WHERE intent.task_id=task.id) AS "hasIntents"`,
           id,
           now,
           new Date(now.getTime() + leaseMs),
@@ -462,7 +468,9 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
         );
         const task = rows[0];
         if (!task) return null;
-        await terminalizeAttemptingIntentsForRecovery(tx, task.id, now);
+        if (task.hasIntents !== false) {
+          await terminalizeAttemptingIntentsForRecovery(tx, task.id, now);
+        }
         if (task.snapshotState === "attempting") {
           await tx.$executeRawUnsafe(
             `UPDATE race_resolution_post_tasks
@@ -582,7 +590,11 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       );
     },
 
-    async finish({ taskId, leaseToken, now = new Date() }) {
+    async finish({ taskId, leaseToken, now = new Date(), snapshotCompletion = null }) {
+      if (snapshotCompletion != null && (
+        !SNAPSHOT_STATES.includes(snapshotCompletion.state) ||
+        ["pending", "attempting"].includes(snapshotCompletion.state)
+      )) throw new TypeError("invalid terminal snapshot state");
       return prisma.$transaction(async (tx) => {
         const rows = await tx.$queryRawUnsafe(
           `WITH failures AS (
@@ -595,12 +607,16 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
            WHERE task_id=$1 AND state IN ('pending','attempting')
          ), finished AS (
          UPDATE race_resolution_post_tasks task
-         SET state=CASE WHEN failures.count > 0 OR task.snapshot_state IN ('failed_no_retry','ambiguous_at_most_once')
+         SET state=CASE WHEN failures.count > 0 OR COALESCE($4::text,task.snapshot_state) IN ('failed_no_retry','ambiguous_at_most_once')
                         THEN 'succeeded_with_failures' ELSE 'succeeded' END,
+             snapshot_state=COALESCE($4::text,task.snapshot_state),
+             snapshot_error_code=CASE WHEN $4::text IS NULL THEN task.snapshot_error_code ELSE $5::text END,
+             snapshot_completed_at=CASE WHEN $4::text IS NULL THEN task.snapshot_completed_at ELSE $3 END,
              completed_at=$3, lease_expires_at=NULL, lease_token=NULL, updated_at=$3
          FROM failures, pending
          WHERE task.id=$1 AND task.lease_token=$2 AND pending.count=0
-           AND task.snapshot_state NOT IN ('pending','attempting')
+           AND (($4::text IS NULL AND task.snapshot_state NOT IN ('pending','attempting'))
+             OR ($4::text IS NOT NULL AND task.snapshot_state='attempting'))
          RETURNING task.race_id, task.source_generation, task.dedupe_key,
            task.state, task.snapshot_state, task.intent_count, failures.count
          ), receipt AS (
@@ -632,6 +648,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
           taskId,
           leaseToken,
           now,
+          snapshotCompletion?.state ?? null,
+          snapshotCompletion?.errorCode ?? null,
         );
         if (Number(rows[0]?.finishedCount || 0) === 1 && !rows[0]?.state) {
           const error = new Error(
