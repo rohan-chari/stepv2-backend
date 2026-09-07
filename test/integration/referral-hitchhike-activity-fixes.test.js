@@ -617,6 +617,10 @@ describe("referral rules, final-target Hitchhike, and activity clarity", () => {
       stats: {
         racePodiums: { first: 1, second: 1, third: 1 },
         avgStepsPerDay: 4000,
+        racesCompeted: 0,
+        firstPlaceWins: 0,
+        podiumFinishes: 0,
+        winRate: 0,
       },
     });
   });

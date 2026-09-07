@@ -137,6 +137,10 @@ describe("GET /friends/:userId/profile", () => {
       stats: {
         racePodiums: { first: 1, second: 1, third: 1 },
         avgStepsPerDay: 4_000,
+        racesCompeted: 0,
+        firstPlaceWins: 0,
+        podiumFinishes: 0,
+        winRate: 0,
       },
     });
   });
@@ -210,6 +214,10 @@ describe("GET /friends/:userId/profile", () => {
     assert.deepEqual(body.stats, {
       racePodiums: { first: 0, second: 0, third: 0 },
       avgStepsPerDay: 2_001,
+      racesCompeted: 0,
+      firstPlaceWins: 0,
+      podiumFinishes: 0,
+      winRate: 0,
     });
   });
 });
