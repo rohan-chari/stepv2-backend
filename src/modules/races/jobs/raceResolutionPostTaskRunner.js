@@ -175,7 +175,7 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
         taskId: task.id,
         state: published?.status === "superseded" ? "skipped_superseded" :
           (published === false || published?.status === "failed") ? "failed_no_retry" : "succeeded",
-        errorCode: (published === false || published?.status === "failed") ? "SNAPSHOT_NOT_PUBLISHED" : null,
+        errorCode: (published === false || published?.status === "failed") ? (published?.errorCode || "SNAPSHOT_NOT_PUBLISHED") : null,
         now: now(),
       });
     } catch {

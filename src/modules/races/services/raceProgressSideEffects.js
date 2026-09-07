@@ -242,7 +242,11 @@ function buildRaceProgressPostCommit(dependencies = {}) {
         if (!current || Number(current.generation) !== Number(sourceGeneration)) {
           const proven=await require('../models/raceResolutionPostTask').RaceResolutionPostTask
             .hasSuccessfulPublication({raceId,minimumGeneration:Number(sourceGeneration)+1});
-          return {status:proven ? "superseded" : "failed"};
+          return proven ? { status: "superseded" } : {
+            status: "failed",
+            errorCode: Number(current?.generation) > Number(sourceGeneration)
+              ? "SNAPSHOT_GENERATION_ADVANCED" : "SNAPSHOT_NOT_PUBLISHED",
+          };
         }
       }
       // Lazy require: getRaceProgress pulls in most of the race module, and the
@@ -270,7 +274,9 @@ function buildRaceProgressPostCommit(dependencies = {}) {
           participants: snapshot.participants,
           sourceParticipants: result?.race?.participants || [],
         });
+        let generationAdvanced = false;
         const pagePublished = await publishRaceProgressPageProjection({
+          onGenerationAdvanced: () => { generationAdvanced = true; },
           raceId,
           generation: sourceGeneration,
           snapshot: projection,
@@ -290,7 +296,13 @@ function buildRaceProgressPostCommit(dependencies = {}) {
         if (!pagePublished) {
           const proven=await require('../models/raceResolutionPostTask').RaceResolutionPostTask
             .hasSuccessfulPublication({raceId,minimumGeneration:Number(sourceGeneration)+1});
-          return {status:proven ? "superseded" : "failed"};
+          return proven ? { status: "superseded" } : {
+            status: "failed",
+            // Only an explicit generation fence rejection gets this code;
+            // Redis/lock failures retain their original classification.
+            errorCode: generationAdvanced
+              ? "SNAPSHOT_GENERATION_ADVANCED" : "SNAPSHOT_NOT_PUBLISHED",
+          };
         }
       }
       return {status: await snapshotStore.writeSnapshot(raceId, snapshot) ? "published" : "failed"};
