@@ -203,7 +203,7 @@ async function createActiveRace(owner, others, name, extra = {}) {
   await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
     token: owner.token,
   });
-  const start = new Date(Date.now() - 8 * HOUR_MS);
+  const start = extra.startedAt || new Date(Date.now() - 8 * HOUR_MS);
   await prisma.race.update({
     where: { id: raceId },
     data: {
@@ -1373,14 +1373,9 @@ async function armBoxAndMint(user, raceId, threshold = 4000) {
     where: { raceId, userId: user.userId },
   });
   const added = sampleAt(5, 2000);
-  await prisma.stepSample.create({
-    data: {
-      userId: user.userId,
-      periodStart: new Date(added.periodStart),
-      periodEnd: new Date(added.periodEnd),
-      steps: added.steps,
-    },
-  });
+  // Public intake also updates the committed source records used by C0;
+  // inserting only step_samples leaves the authoritative totals unchanged.
+  assert.equal((await postSamples(user, [added])).status, 200);
   await prisma.raceParticipant.updateMany({
     where: { raceId, userId: user.userId },
     data: { nextBoxAtSteps: threshold },
@@ -1472,15 +1467,16 @@ describe("C3 standings — box-mint toast (spec v9 item 2)", () => {
     const alice = await createUser("TwoRaceAlice");
     const bob = await createUser("TwoRaceBob");
     const raceA = await createActiveRace(alice, [bob], "MintRaceA");
-    const raceB = await createActiveRace(alice, [bob], "MintRaceB");
+    // Public step intake reaches both races. B starts after the historical
+    // samples so this fixture deliberately mints only A's pending toast.
+    const raceB = await createActiveRace(alice, [bob], "MintRaceB", {
+      startedAt: new Date(Date.now() - 4 * HOUR_MS),
+    });
     await postSamples(alice, [sampleAt(6, 2600)]);
     await drain();
     await progress(alice, raceA);
     await progress(alice, raceB);
-    // Those reads enqueue their own C0 generations. Settle them before adding
-    // the next source sample, otherwise race B legitimately observes that
-    // later sample too and mints its own (second) toast during armBoxAndMint's
-    // broad queue drain.
+    // Settle the generations enqueued by those initial reads.
     await drain();
 
     // Mint in A only.

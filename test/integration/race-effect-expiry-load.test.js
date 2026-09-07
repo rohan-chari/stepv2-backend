@@ -1,4 +1,9 @@
 process.env.PRISMA_QUERY_EVENTS_ENABLED = "true";
+// Bootstrap only the instrumented local test DB before choosing the deployed
+// HTTP path. Query-event capture is intentionally prohibited on live prod DBs.
+const { appSettings } = require("../../src/shared/config/appSettings");
+process.env.NODE_ENV = "production";
+process.env.STEPS_PROCESS_ROLE = "http";
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { performance } = require("node:perf_hooks");
@@ -8,7 +13,6 @@ const { startTestRedis } = require("./redisTestServer");
 const { cleanDatabase, createTestUser, getSharedServer, prisma, request } = require("./setup");
 const redisCache = require("../../src/shared/cache/redisCache");
 const derivedCache = require("../../src/shared/cache/derivedCache");
-const { appSettings } = require("../../src/shared/config/appSettings");
 let capturedQueries = null;
 prisma.$on("query", (event) => { if (capturedQueries) capturedQueries.push(event); });
 
@@ -126,7 +130,7 @@ async function observeThroughHttp(fixture) {
 async function drainThroughWorkers(fixture, { deadline, requirePublication = true } = {}) {
   const { buildRaceResolutionWorkerV2 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
   const { buildRaceResolutionPostTaskRunner } = require("../../src/modules/races/jobs/raceResolutionPostTaskRunner");
-  const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
+  const worker = buildRaceResolutionWorkerV2({ bootAt: 0, processRole: "resolution" });
   const post = buildRaceResolutionPostTaskRunner();
   const observed = new Map();
   const start = performance.now();
