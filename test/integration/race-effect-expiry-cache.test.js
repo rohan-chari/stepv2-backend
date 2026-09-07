@@ -148,6 +148,40 @@ describe("deadline cache and API compatibility with production worker ownership"
     await redis.close();
     await liveRedis?.close();
   });
+  for (const status of ["COMPLETED", "CANCELLED"])
+    it(`${status} snapshot failures stop repairing instead of creating an endless refresh loop`, async () => {
+      // Real HTTP powerup intake queues the race; it ends before the worker
+      // publishes its snapshot, exactly as in the production incident.
+      const f = await fixture();
+      await prisma.race.update({ where: { id: f.race.id }, data: { status } });
+      const worker = buildRaceResolutionWorkerV2({ bootAt: 0, processRole: "resolution" });
+      const post = buildRaceResolutionPostTaskRunner();
+      await worker.processRace({ raceId: f.race.id });
+      await post.tick();
+      const failed = await prisma.raceResolutionPostTask.findFirstOrThrow({
+        where: { raceId: f.race.id, snapshotErrorCode: "SNAPSHOT_NOT_PUBLISHED" },
+      });
+      const repair = await prisma.raceSnapshotRepairIntent.findUniqueOrThrow({
+        where: { taskId: failed.id },
+      });
+      assert.equal(repair.terminalAt, null, "real publication failure created durable repair");
+      const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+      const tasksBefore = await prisma.raceResolutionPostTask.count({ where: { raceId: f.race.id } });
+      const scheduler = buildRaceEffectDeadlineScheduler();
+      for (let i = 0; i < 3; i++) {
+        await scheduler.recover();
+        await scheduler.tick();
+        await worker.processOne();
+        await post.tick();
+      }
+      const after = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+      assert.equal(after.generation, before.generation, "terminal repair must not enqueue another generation");
+      assert.equal(await prisma.raceResolutionPostTask.count({ where: { raceId: f.race.id } }), tasksBefore,
+        "repeated recovery must not create more failed publications");
+      assert.ok((await prisma.raceSnapshotRepairIntent.findUniqueOrThrow({ where: { taskId: failed.id } })).terminalAt);
+      const response = await read(f);
+      assert.ok(response, "existing progress HTTP contract remains available after repair drains");
+    });
   for (const team of [false, true])
     it(`expired effect converges through ${team ? "team" : "full, compact and paged"} HTTP with live Redis`, async () => {
       const f = await fixture({ team });
