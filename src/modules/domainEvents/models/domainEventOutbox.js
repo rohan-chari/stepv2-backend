@@ -834,27 +834,42 @@ async function completeNoDevicePlacementProjectionsBatch({
        RETURNING projection.id,projection.domain_event_id
      ), candidate_parents AS MATERIALIZED (
        SELECT DISTINCT domain_event_id FROM completed_projections
+     ), finishable_parents AS MATERIALIZED (
+       -- Statistics can estimate one active row while a backlog has thousands.
+       -- Keep each completion check correlated to the claimed batch's parents;
+       -- OFFSET 0 prevents flattening into repeated scans of all active events.
+       SELECT eligible.id,eligible.terminal_status
+         FROM candidate_parents parent
+         CROSS JOIN LATERAL (
+           SELECT event.id,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM domain_event_notification_projections failed
+                     WHERE failed.domain_event_id=event.id
+                       AND failed.status='FAILED_TERMINAL'
+                  ) THEN 'FAILED_TERMINAL' ELSE 'COMPLETED' END AS terminal_status
+             FROM domain_event_outbox event
+            WHERE event.id=parent.domain_event_id
+              AND event.expansion_completed_at IS NOT NULL
+              AND event.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+              AND NOT EXISTS (
+                SELECT 1 FROM domain_event_notification_projections remaining
+                 WHERE remaining.domain_event_id=event.id
+                   AND remaining.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM completed_projections completed
+                      WHERE completed.id=remaining.id
+                   )
+              )
+            OFFSET 0
+         ) eligible
      ), completed_events AS (
        UPDATE domain_event_outbox event
-          SET status=CASE WHEN EXISTS (
-                SELECT 1 FROM domain_event_notification_projections failed
-                 WHERE failed.domain_event_id=event.id
-                   AND failed.status='FAILED_TERMINAL'
-              ) THEN 'FAILED_TERMINAL' ELSE 'COMPLETED' END,
+          SET status=parent.terminal_status,
               completed_at=$1,lease_token=NULL,lease_until=NULL,updated_at=$1
-         FROM candidate_parents parent
-        WHERE event.id=parent.domain_event_id
+         FROM finishable_parents parent
+        WHERE event.id=parent.id
           AND event.expansion_completed_at IS NOT NULL
           AND event.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
-          AND NOT EXISTS (
-            SELECT 1 FROM domain_event_notification_projections remaining
-             WHERE remaining.domain_event_id=event.id
-               AND remaining.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
-               AND NOT EXISTS (
-                 SELECT 1 FROM completed_projections completed
-                  WHERE completed.id=remaining.id
-               )
-          )
        RETURNING event.id
      )
      SELECT count(*)::int AS processed FROM completed_projections`,
