@@ -126,3 +126,47 @@ An additional candidate full run against the separate profile database was
 abandoned: one existing CLI test requires the exact integration database name,
 and concurrent suites shared local Redis. Those results are not a release gate.
 The final release run uses the repository's standard integration command alone.
+
+## Final release verification
+
+- Standard isolated integration run: **2,867 tests; 2,835 passed, 31 failed,
+  one existing skipped test**. All 31 failures have baseline reproductions;
+  no assertion was modified, removed or newly skipped. The new regressions and
+  the protected rename/artifact test passed in this run.
+- Three open-bucket failures were absent from the earlier baseline run but
+  reproduced in a targeted baseline run near the local midnight boundary.
+  The tied-standings failure also reproduced on baseline. These are excluded
+  under the user's explicit instruction to ship without unrelated fixes.
+- Final unit run after the rename correction: **3,353 passed, zero failures**.
+- Final read-only review: no blockers or issues. The existing rename/artifact
+  regression passed after the review's requested verification.
+- Final paired performance run: three alternating baseline/candidate runs,
+  sequentially with no integration suite running alongside them. Every profile
+  passed its persisted-data assertions.
+
+| Median local measurement | Baseline | Candidate |
+| --- | ---: | ---: |
+| Three race jobs, no history: summed SQL duration | 133.22 ms | 133.13 ms |
+| Three race jobs, historical effects: summed SQL duration | 116.23 ms | 114.93 ms |
+| Three race jobs, no history: elapsed | 200.70 ms | 193.54 ms |
+| Three race jobs, historical effects: elapsed | 174.61 ms | 194.84 ms |
+| 288-sample upload, one changed: submitted tuples | 288 | 1 |
+| Same upload: physically changed sample rows | 288 | 1 |
+| Same upload: summed SQL duration | 10.63 ms | 3.82 ms |
+| Same upload: elapsed | 109.37 ms | 11.82 ms |
+
+The historical-effect scenario trades approximately 20 ms of local application
+elapsed time for fewer queries and complete historical-input validation; measured
+SQL time is similar. This is compatible with using application CPU headroom, but
+is not evidence for a specific production DB CPU percentage. The clearest
+measured database saving is changed-only sample persistence. Total race query
+counts vary by one incidental query between runs; the targeted 4-to-2 history,
+9-to-0 roster and 5-to-1 prefetch reductions remain stable.
+
+Readiness: implementation, regression review, baseline failure classification,
+compatibility review and local performance verification are complete. Changes
+are on `perf/race-resolution-input-reuse`. No production deploy has occurred.
+Raw logs are retained in the local `step-prod-audit` temporary evidence directory:
+`memory-release-full-isolated.log`, `memory-baseline-full.log`,
+`memory-open-baseline.log`, `memory-difference-baseline.log`,
+`memory-release-unit.log`, and `memory-isolated-*-{baseline,candidate}.log`.

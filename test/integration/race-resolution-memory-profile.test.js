@@ -73,3 +73,33 @@ for (const historyPerParticipant of [0, 12]) it(`profiles 40 runners across thre
     scoringPrefetchQueries: completed.reduce((n, x) => n + (x.computePhaseQueryCount?.scoringPrefetch || 0), 0),
     fenceRejections: completed.reduce((n, x) => n + x.closureFenceRejections + x.sourceInputFenceRejections, 0) }));
 });
+it("profiles a day of five-minute samples with only one changed interval", async () => {
+  const account = await createTestUser();
+  const day = new Date(); day.setUTCDate(day.getUTCDate() - 2); day.setUTCHours(0, 0, 0, 0);
+  const samples = Array.from({ length: 288 }, (_, i) => ({
+    periodStart: new Date(+day + i * 300000).toISOString(),
+    periodEnd: new Date(+day + (i + 1) * 300000).toISOString(), steps: 5,
+  }));
+  async function upload(rows) {
+    const response = await request(baseUrl, "POST", "/steps/sync-v2", { token: account.token,
+      headers: { "Idempotency-Key": randomUUID(), "X-Timezone": "UTC" },
+      body: { date: day.toISOString().slice(0, 10), steps: rows.reduce((sum, row) => sum + row.steps, 0), samples: rows } });
+    assert.equal(response.status, 202, JSON.stringify(await response.json()));
+  }
+  await upload(samples);
+  const before = await prisma.$queryRawUnsafe('SELECT id,xmin::text FROM step_samples WHERE user_id=$1', account.user.id);
+  const versions = new Map(before.map(row => [row.id, row.xmin]));
+  const queries = []; capture = queries; const start = performance.now();
+  try { await upload(samples.map((row, i) => ({ ...row, steps: i === 287 ? 6 : row.steps }))); }
+  finally { capture = null; }
+  const elapsedMs = performance.now() - start;
+  const after = await prisma.$queryRawUnsafe('SELECT id,xmin::text,steps FROM step_samples WHERE user_id=$1 ORDER BY period_start', account.user.id);
+  assert.equal(after.length, 288);
+  assert.ok(after.slice(0, 287).every(row => row.steps === 5));
+  assert.equal(after[287].steps, 6);
+  console.log("MEMORY_INTAKE_PROFILE " + JSON.stringify({ samples: 288,
+    submittedTuples: queries.filter(q => q.query.includes("INSERT INTO step_samples"))
+      .reduce((sum, q) => sum + (q.query.match(/gen_random_uuid\(\)/g) || []).length, 0),
+    changedPhysicalRows: after.filter(row => versions.get(row.id) !== row.xmin).length,
+    queries: queries.length, summedQueryDurationMs: queries.reduce((sum, q) => sum + q.duration, 0), elapsedMs }));
+});
