@@ -449,6 +449,9 @@ describe("duplicate live Leech repair CLI", () => {
 
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
+        // The shared Prisma proxy now scopes these observations to this
+        // transaction; refresh its statistics snapshot before each lock probe.
+        await tx.$executeRawUnsafe("SELECT pg_stat_clear_snapshot()");
         const waiting = await prisma.$queryRaw`
           SELECT 1
           FROM pg_stat_activity
@@ -459,6 +462,7 @@ describe("duplicate live Leech repair CLI", () => {
         if (waiting.length > 0) break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
+      await tx.$executeRawUnsafe("SELECT pg_stat_clear_snapshot()");
       const waiting = await prisma.$queryRaw`
         SELECT 1
         FROM pg_stat_activity
