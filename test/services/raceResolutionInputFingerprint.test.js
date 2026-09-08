@@ -6,7 +6,7 @@ const {
 } = require("../../src/modules/races/services/raceResolutionInputFingerprint");
 
 function fakeClient({ race = {}, inputs = [], effects = [], events = [] } = {}) {
-  const results = [[{ race: { id: "r1", ...race }, participants: [] }], inputs, effects, events];
+  const results = [[{ r_id: "r1", ...Object.fromEntries(Object.entries(race).map(([key,value])=>["r_"+key,value])), p_id: null }], inputs, effects, events];
   let index = 0;
   return {
     async $queryRawUnsafe() { return results[index++]; },
@@ -89,7 +89,7 @@ test("schema 2 digests EXPIRED leech/hitchhike rows and splits them from the act
 test("the global-event query looks AHEAD, not only at events already started", async () => {
   const now = new Date("2026-08-13T12:00:00.000Z");
   const calls = [];
-  const results = [[{ race: { id: "r1" }, participants: [] }], [], [], []];
+  const results = [[{ r_id: "r1", p_id: null }], [], [], []];
   let index = 0;
   const client = {
     async $queryRawUnsafe(sql, ...params) {
@@ -125,7 +125,7 @@ test("the fingerprint exposes the participant rows the trail-mine projection nee
 
 test("the fingerprint uses a current maintained boundary and retains guarded source fallbacks", async () => {
   const calls = [];
-  const results = [[{ race: { id: "r1" }, participants: [] }], [], [], []];
+  const results = [[{ r_id: "r1", p_id: null }], [], [], []];
   let index = 0;
   const client = {
     async $queryRawUnsafe(sql, ...params) {
@@ -166,4 +166,38 @@ test("missing source token with existing steps/samples fails closed", async () =
     }),
   });
   assert.equal(value, null);
+});
+
+// Empty/missing raw projections and exact encoding cannot be observed through
+// an authenticated progress response for a race with no participants.
+test("an empty LEFT JOIN roster is not a participant, and missing race stays null", async () => {
+  for (const present of [true, false]) {
+    let call = 0;
+    const value = await buildRaceResolutionInputFingerprint({
+      raceId: "r1",
+      client: { async $queryRawUnsafe() { return call++ === 0 && present ? [{ r_id: "r1", r_startedAt: null, p_id: null, u_id: null, u_displayName: null }] : []; } },
+    });
+    if (!present) assert.equal(value, null);
+    else {
+      assert.deepEqual(value.race, { id: "r1", startedAt: null });
+      assert.deepEqual(value.participants, []);
+      assert.equal(value.participantCount, 0);
+    }
+  }
+});
+
+test("typed presentation modes preserve scoring digest and numeric/null encoding", async () => {
+  const build = async includePresentation => {
+    let call = 0;
+    return buildRaceResolutionInputFingerprint({
+      raceId: "r1", includePresentation,
+      client: { async $queryRawUnsafe() {
+        return call++ === 0 ? [{ r_id: "r1", r_startedAt: 1788782400123, p_id: "p1", p_finishedAt: null, p_totalSteps: 0, p_joinedAt: 1788782400456, ...(includePresentation ? { u_id: "u1", u_displayName: "旧名 🦫" } : {}) }] : [];
+      } },
+    });
+  };
+  const withNames = await build(true), withoutNames = await build(false);
+  assert.equal(withNames.digest, withoutNames.digest);
+  assert.deepEqual(withNames.participants, [{ id: "p1", finishedAt: null, totalSteps: 0, joinedAt: 1788782400456, user: { id: "u1", displayName: "旧名 🦫" } }]);
+  assert.deepEqual(withoutNames.participants, [{ id: "p1", finishedAt: null, totalSteps: 0, joinedAt: 1788782400456 }]);
 });

@@ -987,7 +987,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
               OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
               OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
-                  AND race_resolution_jobs_v2.state <> 'succeeded')
+                  AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running'))
               OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
               OR EXCLUDED.dirty_reasons ? 'FULL'
               OR (jsonb_array_length(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) > 1000
@@ -1015,7 +1015,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
               OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
               OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
-                  AND race_resolution_jobs_v2.state <> 'succeeded')
+                  AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running'))
               OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
               OR EXCLUDED.dirty_reasons ? 'FULL'
               OR (jsonb_array_length(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) > 64

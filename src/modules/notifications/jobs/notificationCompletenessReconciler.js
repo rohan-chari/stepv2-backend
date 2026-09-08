@@ -152,10 +152,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
               AND (
                 NOT EXISTS (
                   SELECT 1 FROM inbox_alerts alert
-                   WHERE alert.user_id=schedule.recipient_user_id
-                     AND alert.source_key=schedule.delivery_key
-                ) OR NOT EXISTS (
-                  SELECT 1 FROM inbox_alerts alert
                   JOIN inbox_delivery_outbox outbox ON outbox.alert_id=alert.id AND outbox.kind='PUSH'
                    WHERE alert.user_id=schedule.recipient_user_id
                      AND alert.source_key=schedule.delivery_key

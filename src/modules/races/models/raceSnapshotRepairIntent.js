@@ -58,16 +58,15 @@ async function drainSnapshotRepairs() {
   let repaired = 0;
   for (const row of rows) {
     try {
-      // Live progress snapshots intentionally do not exist after a race ends.
-      // A queued publication can finish after settlement/cancellation; treating
-      // its missing snapshot as repairable creates an endless generation loop.
-      // Drain historical/old-worker failures too, without changing active-race
-      // publication recovery or replaying any scoring/notification work.
-      const terminal = await prisma.$queryRawUnsafe(
-        `SELECT 1 FROM races WHERE id=$1 AND status IN ('completed','cancelled')`,
+      // Live snapshots exist only for active races. Pending races cannot
+      // publish one either: retrying their historical failures creates the
+      // same endless generation loop as a race that has already ended.
+      // Retire this attempt; a later race start queues its own new generation.
+      const inapplicable = await prisma.$queryRawUnsafe(
+        `SELECT 1 FROM races WHERE id=$1 AND status <> 'active'`,
         row.race_id,
       );
-      if (terminal.length) {
+      if (inapplicable.length) {
         await prisma.$executeRawUnsafe(
           `UPDATE race_snapshot_repair_intents SET terminal_at=clock_timestamp(),lease_token=NULL,lease_expires_at=NULL WHERE task_id=$1 AND lease_token=$2::uuid`,
           row.task_id,

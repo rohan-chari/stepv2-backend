@@ -1,0 +1,353 @@
+{
+  "baseCommit": "eaea1e842813bec5da868aaca2e32007cd6c610e",
+  "environment": "dedicated localhost PostgreSQL test database; UTC sessions; sequential integration execution",
+  "result": {
+    "tests": 31,
+    "passed": 30,
+    "failed": 1,
+    "skipped": 0,
+    "knownBaselineFailure": "home-suggested-races: leaves every legacy endpoint byte-compatible"
+  },
+  "limitations": [
+    "Fixture measurements are not production CPU forecasts.",
+    "Notification paging experiment was rejected; only redundant predicate removal is implemented.",
+    "Query counts are scoped to observed integration paths."
+  ],
+  "measurements": [
+    {
+      "experiment": "active event",
+      "comparisons": [
+        {
+          "beforeMs": 1.772,
+          "afterMs": 0.075,
+          "beforeHits": 3038,
+          "afterHits": 111
+        },
+        {
+          "beforeMs": 1.54,
+          "afterMs": 0.086,
+          "beforeHits": 3038,
+          "afterHits": 111
+        },
+        {
+          "beforeMs": 1.724,
+          "afterMs": 0.072,
+          "beforeHits": 3038,
+          "afterHits": 111
+        }
+      ]
+    },
+    {
+      "experiment": "enrollment",
+      "comparisons": [
+        {
+          "beforeMs": 7.576,
+          "afterMs": 2.348,
+          "beforeRows": 5990,
+          "afterRows": 500
+        },
+        {
+          "beforeMs": 7.93,
+          "afterMs": 2.545,
+          "beforeRows": 5990,
+          "afterRows": 500
+        },
+        {
+          "beforeMs": 8.637,
+          "afterMs": 2.448,
+          "beforeRows": 5990,
+          "afterRows": 500
+        }
+      ]
+    },
+    {
+      "experiment": "event history",
+      "comparisons": [
+        {
+          "beforeMs": 0.068,
+          "afterMs": 0.006,
+          "beforeHits": 44,
+          "afterHits": 3,
+          "beforeRows": 1000,
+          "afterRows": 1
+        },
+        {
+          "beforeMs": 0.06,
+          "afterMs": 0.004,
+          "beforeHits": 44,
+          "afterHits": 3,
+          "beforeRows": 1000,
+          "afterRows": 1
+        },
+        {
+          "beforeMs": 0.062,
+          "afterMs": 0.006,
+          "beforeHits": 44,
+          "afterHits": 3,
+          "beforeRows": 1000,
+          "afterRows": 1
+        }
+      ]
+    },
+    {
+      "experiment": "notification bounded cycle",
+      "comparisons": [
+        {
+          "beforeMs": 1.087,
+          "afterMs": 1.08,
+          "beforeHits": 195,
+          "afterHits": 150
+        },
+        {
+          "beforeMs": 1.321,
+          "afterMs": 1.069,
+          "beforeHits": 195,
+          "afterHits": 150
+        },
+        {
+          "beforeMs": 1.058,
+          "afterMs": 1.067,
+          "beforeHits": 195,
+          "afterHits": 150
+        }
+      ],
+      "pages": 5
+    },
+    {
+      "experiment": "notification redundant existence check",
+      "comparisons": [
+        {
+          "beforeMs": 1.133,
+          "afterMs": 0.718,
+          "beforeHits": 195,
+          "afterHits": 137
+        },
+        {
+          "beforeMs": 1.077,
+          "afterMs": 0.71,
+          "beforeHits": 195,
+          "afterHits": 137
+        },
+        {
+          "beforeMs": 1.076,
+          "afterMs": 0.703,
+          "beforeHits": 195,
+          "afterHits": 137
+        }
+      ]
+    },
+    {
+      "experiment": "duplicate intake",
+      "initialGeneration": 1,
+      "repeatedGeneration": 1,
+      "queries": 8
+    },
+    {
+      "experiment": "step and claim trace",
+      "sampleReads": 1,
+      "bounds": 1,
+      "uniqueBounds": 1,
+      "claims": 6
+    },
+    {
+      "trace": {
+        "queries": 102,
+        "fingerprints": 2,
+        "committedGeneration": 1
+      }
+    },
+    {
+      "experiment": "fence projection",
+      "comparisons": [
+        {
+          "beforeMs": 3.175,
+          "afterMs": 1.863,
+          "beforeHits": 309,
+          "afterHits": 9
+        },
+        {
+          "beforeMs": 2.958,
+          "afterMs": 1.84,
+          "beforeHits": 309,
+          "afterHits": 9
+        },
+        {
+          "beforeMs": 2.317,
+          "afterMs": 1.357,
+          "beforeHits": 309,
+          "afterHits": 9
+        }
+      ]
+    },
+    {
+      "experiment": "duplicate intake",
+      "initialGeneration": 1,
+      "repeatedGeneration": 1,
+      "queries": 8
+    },
+    {
+      "experiment": "step and claim trace",
+      "sampleReads": 4,
+      "bounds": 100,
+      "uniqueBounds": 100,
+      "claims": 3
+    },
+    {
+      "trace": {
+        "queries": 161,
+        "fingerprints": 3,
+        "committedGeneration": 1
+      }
+    },
+    {
+      "experiment": "fence projection",
+      "comparisons": [
+        {
+          "beforeMs": 1.864,
+          "afterMs": 1.268,
+          "beforeHits": 312,
+          "afterHits": 12
+        },
+        {
+          "beforeMs": 1.881,
+          "afterMs": 0.823,
+          "beforeHits": 312,
+          "afterHits": 12
+        },
+        {
+          "beforeMs": 0.974,
+          "afterMs": 0.768,
+          "beforeHits": 312,
+          "afterHits": 12
+        }
+      ]
+    },
+    {
+      "experiment": "standings projection",
+      "comparisons": [
+        {
+          "beforeSortKb": 1583,
+          "afterSortKb": 1458,
+          "beforeMs": 7.721,
+          "afterMs": 6.36,
+          "beforeHits": 263,
+          "afterHits": 263,
+          "beforeTemp": 0,
+          "afterTemp": 0
+        },
+        {
+          "beforeSortKb": 1583,
+          "afterSortKb": 1458,
+          "beforeMs": 7.514,
+          "afterMs": 6.533,
+          "beforeHits": 263,
+          "afterHits": 263,
+          "beforeTemp": 0,
+          "afterTemp": 0
+        },
+        {
+          "beforeSortKb": 1583,
+          "afterSortKb": 1458,
+          "beforeMs": 7.091,
+          "afterMs": 6.603,
+          "beforeHits": 263,
+          "afterHits": 263,
+          "beforeTemp": 0,
+          "afterTemp": 0
+        },
+        {
+          "beforeSortKb": 1583,
+          "afterSortKb": 1458,
+          "beforeMs": 7.281,
+          "afterMs": 6.201,
+          "beforeHits": 263,
+          "afterHits": 263,
+          "beforeTemp": 0,
+          "afterTemp": 0
+        },
+        {
+          "beforeSortKb": 1583,
+          "afterSortKb": 1458,
+          "beforeMs": 7.224,
+          "afterMs": 6.819,
+          "beforeHits": 263,
+          "afterHits": 263,
+          "beforeTemp": 0,
+          "afterTemp": 0
+        }
+      ]
+    },
+    {
+      "experiment": "public suggestions",
+      "scenario": "mostly-full",
+      "comparisons": [
+        {
+          "beforeMs": 7.952,
+          "afterMs": 0.873,
+          "beforeHits": 389,
+          "afterHits": 103
+        },
+        {
+          "beforeMs": 7.842,
+          "afterMs": 0.83,
+          "beforeHits": 389,
+          "afterHits": 103
+        },
+        {
+          "beforeMs": 6.9,
+          "afterMs": 0.837,
+          "beforeHits": 389,
+          "afterHits": 103
+        }
+      ]
+    },
+    {
+      "experiment": "public suggestions",
+      "scenario": "mostly-open",
+      "comparisons": [
+        {
+          "beforeMs": 3.728,
+          "afterMs": 0.426,
+          "beforeHits": 306,
+          "afterHits": 79
+        },
+        {
+          "beforeMs": 3.949,
+          "afterMs": 0.425,
+          "beforeHits": 306,
+          "afterHits": 79
+        },
+        {
+          "beforeMs": 4.358,
+          "afterMs": 0.43,
+          "beforeHits": 306,
+          "afterHits": 79
+        }
+      ]
+    },
+    {
+      "experiment": "public suggestions",
+      "scenario": "unlimited",
+      "comparisons": [
+        {
+          "beforeMs": 4.013,
+          "afterMs": 0.452,
+          "beforeHits": 303,
+          "afterHits": 116
+        },
+        {
+          "beforeMs": 4.042,
+          "afterMs": 0.437,
+          "beforeHits": 303,
+          "afterHits": 116
+        },
+        {
+          "beforeMs": 3.735,
+          "afterMs": 0.516,
+          "beforeHits": 303,
+          "afterHits": 116
+        }
+      ]
+    }
+  ]
+}

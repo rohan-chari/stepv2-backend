@@ -164,10 +164,12 @@ function buildRaceProgressPageProjection({
   return { index, chunks, participantBuckets };
 }
 
-async function currentGenerationIsValid(currentGeneration, generation) {
+async function currentGenerationIsValid(currentGeneration, generation, onGenerationAdvanced) {
   if (typeof currentGeneration !== "function") return true;
   try {
-    return Number(await currentGeneration()) === Number(generation);
+    const current = Number(await currentGeneration());
+    if (current > Number(generation)) onGenerationAdvanced?.();
+    return current === Number(generation);
   } catch {
     return false;
   }
@@ -178,6 +180,7 @@ async function publishRaceProgressPageProjectionUnlocked({
   generation,
   snapshot,
   currentGeneration,
+  onGenerationAdvanced,
   ttlSeconds = TTL_SECONDS,
   allowSupersededComplete = false,
 }) {
@@ -186,7 +189,7 @@ async function publishRaceProgressPageProjectionUnlocked({
   if (!redisCache.isEnabled()) return false;
   if (
     !allowSupersededComplete &&
-    !(await currentGenerationIsValid(currentGeneration, safeGeneration))
+    !(await currentGenerationIsValid(currentGeneration, safeGeneration, onGenerationAdvanced))
   ) return false;
 
   const existing = await redisCache.getJSON(cacheKeys.raceProgressIndex(raceId));
@@ -224,7 +227,7 @@ async function publishRaceProgressPageProjectionUnlocked({
   }
   if (
     !allowSupersededComplete &&
-    !(await currentGenerationIsValid(currentGeneration, safeGeneration))
+    !(await currentGenerationIsValid(currentGeneration, safeGeneration, onGenerationAdvanced))
   ) return false;
   for (let offset = 0; offset < entries.length; offset += PUBLISH_BATCH_SIZE) {
     const batch = entries.slice(offset, offset + PUBLISH_BATCH_SIZE);
@@ -249,7 +252,7 @@ async function publishRaceProgressPageProjectionUnlocked({
   }
   return allowSupersededComplete
     ? true
-    : currentGenerationIsValid(currentGeneration, safeGeneration);
+    : currentGenerationIsValid(currentGeneration, safeGeneration, onGenerationAdvanced);
 }
 
 async function publishRaceProgressPageProjection(options) {

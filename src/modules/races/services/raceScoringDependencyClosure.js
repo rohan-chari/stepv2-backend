@@ -1175,6 +1175,19 @@ async function buildRaceScoringDependencyClosure({
       job.processingDirtyReasons
     );
   const triggeringUsers = new Set(job.processingTriggeredByUserIds);
+  // An older writer could retain an uploader but drop its participant from a
+  // pending envelope while another claim was running. A nonempty partial
+  // scope is not proof of complete source-input coverage: fail closed rather
+  // than mark that uploader's unprojected input as successfully processed.
+  if (sourceInputPending) {
+    const sourceIds = new Set(sourceParticipantIds);
+    for (const userId of triggeringUsers) {
+      const participantId = participantIdByUserId.get(userId);
+      if (participantId && !sourceIds.has(participantId)) {
+        return fallback(CLOSURE_FALLBACK_REASONS.UPLOADER_SNAPSHOT_INCOHERENT);
+      }
+    }
+  }
   for (const participantId of sourceParticipantIds) {
     const participant = acceptedById.get(participantId);
     const token = new Date(participant?.totalsUpdatedAt || 0);

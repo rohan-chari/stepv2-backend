@@ -139,7 +139,7 @@ async function findRowsForUserRangesOn(
   }));
   const limit = Math.max(1, Math.min(50_000, Number(maxRows) || 50_000));
   return client.$queryRawUnsafe(
-    `WITH requested AS MATERIALIZED (
+    `/* steps:prepared-read:v1 */ WITH requested AS MATERIALIZED (
        SELECT input.user_id,
               input.range_start,
               input.range_end,

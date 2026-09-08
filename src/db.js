@@ -88,6 +88,8 @@ const pool = new pg.Pool({
     : { ssl: { rejectUnauthorized: false } }),
 });
 
+require("./shared/database/preparedReadQueries").installPreparedReadQueries(pool);
+
 let poolWaitMsTotal = 0;
 let poolWaitCount = 0;
 let poolWaitMsMax = 0;

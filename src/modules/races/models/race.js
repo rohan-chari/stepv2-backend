@@ -1076,7 +1076,7 @@ const Race = {
           return prisma.$queryRaw`
       WITH accepted AS (
         SELECT
-          rp.*,
+          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,
           ROW_NUMBER() OVER (
             PARTITION BY rp.race_id
             ORDER BY
@@ -1443,6 +1443,37 @@ const Race = {
       : Prisma.empty;
 
     return prisma.$queryRaw`
+      -- Count eligible races in one pass; materialize rosters only for the
+      -- final page. Capacity filtering must stay before the page limit.
+WITH eligible AS MATERIALIZED (
+ SELECT r.*
+      FROM races r
+      LEFT JOIN users creator ON creator.id = r.creator_id
+      WHERE r.is_public = TRUE
+        AND r.status IN ('pending'::"RaceStatus", 'active'::"RaceStatus")
+        AND r.tournament_id IS NULL
+        AND (r.creator_id IS NULL OR creator.is_review_account = FALSE)
+        AND NOT (r.status = 'pending'::"RaceStatus" AND r.seed_id IS NOT NULL)
+        ${seedPredicate}
+        ${teamPredicate}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM race_participants mine
+          WHERE mine.race_id = r.id AND mine.user_id = ${userId}
+        )
+), counts AS MATERIALIZED (
+ SELECT rp.race_id, COUNT(*) AS accepted_count
+ FROM race_participants rp JOIN eligible e ON e.id=rp.race_id
+ WHERE rp.status='accepted'::"RaceParticipantStatus"
+ GROUP BY rp.race_id
+), candidates AS MATERIALIZED (
+ SELECT r.*, COALESCE(parts.accepted_count,0) AS accepted_count
+ FROM eligible r LEFT JOIN counts parts ON parts.race_id=r.id
+ WHERE r.max_participants IS NULL OR COALESCE(parts.accepted_count,0)<r.max_participants
+      ORDER BY r.created_at DESC, r.id ASC
+      LIMIT ${limit}
+    )
+
       SELECT
         r.id,
         r.name,
@@ -1478,13 +1509,11 @@ const Race = {
         r.creation_source AS "creationSource",
         r.start_policy AS "startPolicy",
         r.created_at AS "createdAt",
-        COALESCE(parts.accepted_count, 0)::int AS "acceptedCount",
+        r.accepted_count::int AS "acceptedCount",
         COALESCE(parts.rows, '[]'::jsonb) AS participants
-      FROM races r
-      LEFT JOIN users creator ON creator.id = r.creator_id
+ FROM candidates r
       LEFT JOIN LATERAL (
         SELECT
-          COUNT(*) FILTER (WHERE rp.status = 'accepted'::"RaceParticipantStatus") AS accepted_count,
           JSONB_AGG(
             JSONB_BUILD_OBJECT(
               'userId', rp.user_id,
@@ -1501,25 +1530,7 @@ const Race = {
         FROM race_participants rp
         WHERE rp.race_id = r.id
       ) parts ON TRUE
-      WHERE r.is_public = TRUE
-        AND r.status IN ('pending'::"RaceStatus", 'active'::"RaceStatus")
-        AND r.tournament_id IS NULL
-        AND (r.creator_id IS NULL OR creator.is_review_account = FALSE)
-        AND NOT (r.status = 'pending'::"RaceStatus" AND r.seed_id IS NOT NULL)
-        ${seedPredicate}
-        ${teamPredicate}
-        AND NOT EXISTS (
-          SELECT 1
-          FROM race_participants mine
-          WHERE mine.race_id = r.id AND mine.user_id = ${userId}
-        )
-        AND (
-          r.max_participants IS NULL
-          OR COALESCE(parts.accepted_count, 0) < r.max_participants
-        )
-      ORDER BY r.created_at DESC, r.id ASC
-      LIMIT ${limit}
-    `;
+ ORDER BY r.created_at DESC, r.id ASC`;
   },
 
   // Lean variant of findPublicPending: the SAME where clause, but selecting only

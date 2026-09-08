@@ -182,6 +182,62 @@ describe("deadline cache and API compatibility with production worker ownership"
       const response = await read(f);
       assert.ok(response, "existing progress HTTP contract remains available after repair drains");
     });
+  it("pending historical snapshot failures drain once and HTTP start still publishes an active snapshot", async () => {
+    const viewer = await createTestUser();
+    const other = await createTestUser();
+    const race = await prisma.race.create({ data: {
+      creatorId: viewer.user.id, name: "Pending snapshot repair", status: "PENDING",
+      targetSteps: 200000, timezone: "UTC", powerupsEnabled: true,
+      powerupStepInterval: 5000,
+      participants: { create: [viewer, other].map(({ user }) => ({ userId: user.id, status: "ACCEPTED" })) },
+    } });
+    // A durable DISPLAY_REFRESH admitted by an older release. The real worker,
+    // publisher and database trigger reproduce production's pending-race loop.
+    await prisma.raceResolutionJobV2.create({ data: {
+      raceId: race.id, generation: 1, state: "QUEUED", requestedAt: new Date(),
+      notBeforeAt: new Date(0), resolutionTimeZone: "UTC",
+      dirtyReasons: ["DISPLAY_REFRESH"], queuePriority: "MAINTENANCE",
+    } });
+    const worker = buildRaceResolutionWorkerV2({ bootAt: 0, processRole: "resolution" });
+    const post = buildRaceResolutionPostTaskRunner();
+    const scheduler = buildRaceEffectDeadlineScheduler();
+    await worker.processRace({ raceId: race.id });
+    await post.snapshotTick();
+    await post.tick();
+    const failed = await prisma.raceResolutionPostTask.findFirstOrThrow({
+      where: { raceId: race.id, snapshotErrorCode: "SNAPSHOT_NOT_PUBLISHED" },
+    });
+    assert.equal((await prisma.raceSnapshotRepairIntent.findUniqueOrThrow({
+      where: { taskId: failed.id },
+    })).terminalAt, null, "real failed publication must create the historical repair");
+    const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: race.id } });
+    const tasksBefore = await prisma.raceResolutionPostTask.count({ where: { raceId: race.id } });
+    for (let i = 0; i < 3; i++) {
+      await scheduler.recover();
+      await scheduler.tick();
+      await worker.processOne();
+      await post.snapshotTick();
+      await post.tick();
+    }
+    const after = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: race.id } });
+    assert.equal(after.generation, before.generation, "pending repair must not enqueue another generation");
+    assert.equal(await prisma.raceResolutionPostTask.count({ where: { raceId: race.id } }), tasksBefore,
+      "repeated recovery must not create more impossible snapshots");
+    assert.equal(await prisma.raceSnapshotRepairIntent.count({ where: { raceId: race.id, terminalAt: null } }), 0);
+    const lobby = await read({ race, viewer });
+    assert.ok(lobby, "pending HTTP progress remains available");
+
+    const started = await request(server.baseUrl, "POST", `/races/${race.id}/start`, { token: viewer.token });
+    assert.equal(started.status, 200, JSON.stringify(await started.json()));
+    await worker.processRace({ raceId: race.id });
+    await post.snapshotTick();
+    await post.tick();
+    assert.equal((await prisma.race.findUniqueOrThrow({ where: { id: race.id } })).status, "ACTIVE");
+    assert.ok(await prisma.raceResolutionPostTask.findFirst({
+      where: { raceId: race.id, sourceGeneration: { gt: before.generation }, snapshotState: "succeeded" },
+    }), "HTTP race start must still publish a new active-race snapshot");
+    assert.ok(await read({ race, viewer }), "active HTTP progress remains available");
+  });
   for (const team of [false, true])
     it(`expired effect converges through ${team ? "team" : "full, compact and paged"} HTTP with live Redis`, async () => {
       const f = await fixture({ team });
@@ -464,7 +520,7 @@ describe("deadline cache and API compatibility with production worker ownership"
       false,
     );
   });
-  it("new viewers are durably deferred while a real boundary worker computes, then admitted after committed expiry", async () => {
+  it("preexisting viewer intents survive a boundary worker while new reads stay read-only", async () => {
     const f = await fixture();
     const other = await createTestUser();
     await prisma.raceParticipant.create({
@@ -497,10 +553,15 @@ describe("deadline cache and API compatibility with production worker ownership"
     const claimed = await prisma.raceResolutionJobV2.findUniqueOrThrow({
       where: { raceId: f.race.id },
     });
+    // Compatibility fixture: an intent persisted by the previous release.
+    // New GETs must neither create nor mutate that durable recovery obligation.
+    await prisma.raceProgressRefreshIntent.create({data:{raceId:f.race.id,userId:other.user.id,resolutionTimeZone:"UTC",minimumCommittedGeneration:claimed.processingGeneration}});
     try {
+      const intentBefore = await prisma.raceProgressRefreshIntent.findMany({where:{raceId:f.race.id}});
       await Promise.all(
         Array.from({ length: 20 }, () => read({ ...f, viewer: other })),
       );
+      assert.deepEqual(await prisma.raceProgressRefreshIntent.findMany({where:{raceId:f.race.id}}),intentBefore);
       const during = await prisma.raceResolutionJobV2.findUniqueOrThrow({
         where: { raceId: f.race.id },
       });
@@ -542,8 +603,8 @@ describe("deadline cache and API compatibility with production worker ownership"
           },
         })
       ).nextBoxAtSteps,
-      0,
-      "unrequested viewer gate remains pending until its followup",
+      5000,
+      "the FULL worker initializes gates without requiring a viewer followup",
     );
     await buildRaceResolutionWorkerV2({
       bootAt: 0,
@@ -652,6 +713,8 @@ describe("deadline cache and API compatibility with production worker ownership"
       where: { id: f.effect.id },
       data: { expiresAt: new Date(Date.now() - 10) },
     });
+    // An old persisted intent must still drain after this rollout.
+    await prisma.raceProgressRefreshIntent.create({data:{raceId:f.race.id,userId:other.user.id,resolutionTimeZone:"UTC",minimumCommittedGeneration:0}});
     let release, locked;
     const hold = new Promise((r) => (release = r));
     const acquired = new Promise((r) => (locked = r));
@@ -718,6 +781,8 @@ describe("deadline cache and API compatibility with production worker ownership"
     });
     const scheduler = buildRaceEffectDeadlineScheduler();
     await scheduler.tick();
+    // Simulate an intent left by the previous release, not created by this GET.
+    await prisma.raceProgressRefreshIntent.create({data:{raceId:f.race.id,userId:other.user.id,resolutionTimeZone:"UTC",minimumCommittedGeneration:0}});
     await read({ ...f, viewer: other });
     const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({
       where: { raceId: f.race.id },

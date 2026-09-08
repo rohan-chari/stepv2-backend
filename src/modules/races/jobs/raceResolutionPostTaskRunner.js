@@ -138,7 +138,12 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     }
   }
 
-  async function processSnapshot(task) {
+  async function processSnapshot(task, { deferCompletion = false } = {}) {
+    const complete = async (completion) => {
+      if (deferCompletion) return completion;
+      await model.completeSnapshot({ taskId: task.id, ...completion, now: now() });
+      return null;
+    };
     if (task.snapshotState && task.snapshotState !== "pending") return;
     const {
       effectExpiryParticipantSteps = null,
@@ -164,43 +169,44 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     });
     if (!attemptId) return;
     if (await isSuperseded(task)) {
-      await model.completeSnapshot({ taskId: task.id, state: "skipped_superseded", now: now() });
-      return;
+      return complete({ state: "skipped_superseded" });
     }
     try {
       const publicationStarted=Date.now();
       const published = await publishSnapshot(snapshotCommand, task, { attemptId });
       require('../services/raceEffectExpiryTelemetry').observeExpiryStage('snapshot_publication',Date.now()-publicationStarted,{raceId:task.raceId,generation:task.sourceGeneration});
-      await model.completeSnapshot({
-        taskId: task.id,
+      return await complete({
         state: published?.status === "superseded" ? "skipped_superseded" :
           (published === false || published?.status === "failed") ? "failed_no_retry" : "succeeded",
-        errorCode: (published === false || published?.status === "failed") ? "SNAPSHOT_NOT_PUBLISHED" : null,
-        now: now(),
+        errorCode: (published === false || published?.status === "failed") ? (published?.errorCode || "SNAPSHOT_NOT_PUBLISHED") : null,
       });
     } catch {
-      await model.completeSnapshot({
-        taskId: task.id,
+      return await complete({
         state: "ambiguous_at_most_once",
         errorCode: "SNAPSHOT_IO_AMBIGUOUS",
-        now: now(),
       });
     }
   }
 
   async function processClaimedTask(task) {
     if (!task) return null;
-    const intents = await model.listIntents(task.id);
+    // The claim's indexed existence probe is authoritative even when a legacy
+    // intent_count is stale. Unknown metadata keeps the normal delivery path.
+    const emptyIntents = task.hasIntents === false;
+    const intents = emptyIntents ? [] : await model.listIntents(task.id);
     const beforeSnapshot = intents.filter((intent) =>
       ["STATE_NOTIFICATION", "EFFECT_NOTIFICATION"].includes(intent.kind)
     );
     const afterSnapshot = intents.filter((intent) =>
       ["NUDGE", "STEP_SYNC"].includes(intent.kind)
     );
-    await processSnapshot(task);
+    const snapshotCompletion = await processSnapshot(task, {
+      deferCompletion: emptyIntents,
+    });
     for (const intent of beforeSnapshot) await processIntent(intent);
     for (const intent of afterSnapshot) await processIntent(intent);
     const state = await model.finish({
+      ...(snapshotCompletion ? { snapshotCompletion } : {}),
       taskId: task.id,
       leaseToken: task.leaseToken,
       now: now(),
@@ -224,17 +230,35 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
         return null;
       const task = await model.claimSnapshotNext({ now: now() });
       if (!task) return null;
+      let terminal = false;
       try {
-        await processSnapshot(task);
+        // The claim uses an indexed EXISTS probe, not the legacy intent_count.
+        // A snapshot-only task can persist its completion and receipt now,
+        // without requeueing itself for a second delivery-lane claim.
+        const emptyIntents = task.hasIntents === false;
+        const completion = await processSnapshot(task, { deferCompletion: emptyIntents });
+        if (emptyIntents && completion) {
+          terminal = Boolean(await model.finish({
+            taskId: task.id, leaseToken: task.leaseToken,
+            snapshotCompletion: completion, now: now(),
+          }));
+          // Defensively retain the publication outcome if new delivery work
+          // prevents terminalization. Its ordinary lane must not republish.
+          if (!terminal) await model.completeSnapshot({
+            taskId: task.id, ...completion, now: now(),
+          });
+        }
       } finally {
-        await model.releaseSnapshotLease({
-          taskId: task.id,
-          leaseToken: task.leaseToken,
-          now: now(),
-        });
-        await redisCache.publishDurableQueueWakeup("post-task", {
-          workKind: "ordinary",
-        });
+        if (!terminal) {
+          await model.releaseSnapshotLease({
+            taskId: task.id,
+            leaseToken: task.leaseToken,
+            now: now(),
+          });
+          await redisCache.publishDurableQueueWakeup("post-task", {
+            workKind: "ordinary",
+          });
+        }
       }
       return task.id;
     },

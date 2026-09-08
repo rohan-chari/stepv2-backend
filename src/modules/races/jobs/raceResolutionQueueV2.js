@@ -1268,7 +1268,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   // mid-flight on participant rows because the loser is turned away at the
   // job-row lock before its first participant write. The held job-row lock also
   // serializes this against raceExpiry, which acquires the same row.
-  async function processOneUnbudgeted({ raceId = null } = {}) {
+  async function processOneUnbudgeted({ raceId = null, claimBatch = null } = {}) {
     if (!productionExecutionRole) return null;
     const phaseTimer = createRaceResolutionPhaseTimer(monotonicNow, {
       emit: emitLiveDiagnostic,
@@ -1302,13 +1302,26 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // race-keyed job row.
     if (!raceId) await promoteFullScopeTriggersOnce(phaseTimer);
 
-    const job = await phaseTimer.measure("claim", () => jobModel.claimNext({
-        now: currentTime,
-        leaseMs,
-        leaseToken: newLeaseToken(),
-        raceId,
-        force: raceId != null,
-    }));
+    const claim = () => jobModel.claimNext({
+      now: now(),
+      leaseMs,
+      leaseToken: newLeaseToken(),
+      raceId,
+      force: raceId != null,
+    });
+    const job = await phaseTimer.measure("claim", () => {
+      if (!claimBatch || raceId != null) return claim();
+      // Serialize only the short claim operation. Successful jobs still run
+      // concurrently; one empty result ends probing for this tick only.
+      const pending = claimBatch.tail.then(async () => {
+        if (claimBatch.exhausted) return null;
+        const claimed = await claim();
+        if (!claimed) claimBatch.exhausted = true;
+        return claimed;
+      });
+      claimBatch.tail = pending.catch(() => {});
+      return pending;
+    });
     if (!job) return null;
     const startMs = Date.now();
     const attemptUuid = crypto.randomUUID();
@@ -1987,6 +2000,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const attemptedBoxSyncResults = [];
         const attemptedPowerupEvents = [];
         let attemptedPostTaskId = null;
+        let summaryWorkChanged = false;
         await phaseTimer.measure("transaction", () => prisma.$transaction(async (tx) => {
         // (i) fence
         const fenced = await phaseTimer.measure(
@@ -2038,6 +2052,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             now: sourceFenceNow,
             balanceConfigVersion: sourceFenceConfig.version,
             client: tx,
+            includePresentation: false,
           });
           const deadline = sourceInputFingerprint?.validUntil
             ? new Date(sourceInputFingerprint.validUntil).getTime()
@@ -2206,7 +2221,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const triggeringBoxRepairUsers = new Set(orderedTriggeringUserIds);
         const boxInterval = Number(result?.race?.powerupStepInterval || 0);
         const isTriggeredGateRepair = (participant) =>
-          triggeringBoxRepairUsers.has(participant.userId) &&
+          (fullBoxScope || triggeringBoxRepairUsers.has(participant.userId)) &&
           boxInterval > 0 &&
           (!(participant.nextBoxAtSteps > 0) ||
             participant.nextBoxAtSteps % boxInterval !== 0);
@@ -2226,6 +2241,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 userId: true,
                 nextBoxAtSteps: true,
                 powerupSlots: true,
+                boxProgressSteps: true,
               },
               orderBy: [{ userId: "asc" }, { id: "asc" }],
             })
@@ -2255,9 +2271,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // user/id order before either write path runs. This prevents a narrow
         // job from taking later box row P2 and subsequently waiting on earlier
         // score row P1 while a request holds P1 and waits on P2.
+        // Persist the same canonical box quantity this job uses for awards.
+        // Read requests must never reconstruct it from source samples.
+        const boxProgressWrites = boxCandidates.flatMap(participant => {
+          const value = boxByUser[participant.userId];
+          if (!Number.isFinite(value)) return [];
+          const boxProgressSteps = Math.max(0, Math.round(value));
+          return participant.boxProgressSteps === boxProgressSteps ? [] :
+            [{ id: participant.id, boxProgressSteps }];
+        });
         const participantRowLockIds = [...new Set([
           ...initiallySelectedBoxCandidates.map((participant) => participant.id),
           ...participantWrites.map((write) => write.participantId),
+          ...boxProgressWrites.map(write => write.id),
         ])];
         const lockedParticipantRows = participantRowLockIds.length > 0
           ? await tx.$queryRawUnsafe(
@@ -2320,6 +2346,16 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
         // (ii) participant rows, ascending userId
         await phaseTimer.measure("participantWrites", async () => {
+          if (boxProgressWrites.length > 0) await tx.$executeRawUnsafe(
+            `UPDATE race_participants participant
+                SET box_progress_steps=changed."boxProgressSteps"
+               FROM jsonb_to_recordset($1::jsonb) AS changed(id text,"boxProgressSteps" integer)
+              WHERE participant.id=changed.id AND participant.race_id=$2
+                AND participant.status='accepted' AND participant.finished_at IS NULL
+                AND participant.forfeited_at IS NULL
+                AND participant.box_progress_steps IS DISTINCT FROM changed."boxProgressSteps"`,
+            JSON.stringify(boxProgressWrites), job.raceId,
+          );
           if (bulkWritesEnabled) {
             await writeParticipantsBulk(tx, participantWrites, now());
           } else for (const write of participantWrites) {
@@ -2420,6 +2456,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               sourceResolutionGeneration: job.processingGeneration,
               now: currentTime,
             });
+            summaryWorkChanged = persistedSummary.finalized > 0 ||
+              persistedSummary.terminalized > 0 || persistedSummary.readinessUpdated > 0;
             coordinatedOptimizationMetrics.increment(
               "global_summary_race_resolution_artifacts_total",
               {},
@@ -2593,7 +2631,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           if (placementHandoffGeneration != null) {
             await publishDurableQueueWakeup("placement");
           }
-          await publishDurableQueueWakeup("summary");
+          // Only committed summary changes warrant a drain. Recovery and
+          // capture-maintenance deadlines remain owned by the summary scheduler.
+          if (summaryWorkChanged) await publishDurableQueueWakeup("summary");
           if (committedPostTaskId) {
             await publishDurableQueueWakeup("post-task");
           }
@@ -3082,9 +3122,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     }
   }
 
-  async function processOne() {
+  async function processOne({ claimBatch = null } = {}) {
     if (!productionExecutionRole) return null;
-    return workBudget.run("core", () => processOneUnbudgeted());
+    return workBudget.run("core", () => processOneUnbudgeted({ claimBatch }));
   }
 
   // Compatibility bridge for request paths whose historical contract requires
@@ -3142,7 +3182,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     const concurrency = concurrencyOverride == null
       ? effectiveResolutionConcurrency()
       : Math.min(MAX_RESOLUTION_CONCURRENCY, Math.max(1, Number(concurrencyOverride) || 1));
-    return runBoundedRaceResolutionJobs(concurrency, processOne);
+    const claimBatch = { tail: Promise.resolve(), exhausted: false };
+    return runBoundedRaceResolutionJobs(concurrency, () => processOne({ claimBatch }));
   }
 
   async function logQueueLagInternal() {

@@ -1292,8 +1292,9 @@ async function persistCapturedSummaryImpactsForRace(tx, {
     });
     terminalized += updated.count;
   }
-  await refreshSummaryReadinessForRace(tx, { raceId, now });
+  const readinessUpdated = await refreshSummaryReadinessForRace(tx, { raceId, now });
   return {
+    readinessUpdated,
     finalized,
     terminalized,
     artifactCount: artifacts.length,
