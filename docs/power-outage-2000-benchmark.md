@@ -2,6 +2,35 @@
 
 Measured locally on 2026-09-08. These are local measurements, not production timings.
 
+## Production deployment
+
+Deployed on 2026-09-08 at approximately 13:14 UTC after explicit user approval.
+Production revision: `3b241ff`, branch `release/power-outage-2000`, tag
+`power-outage-2000-deployed-20260908`. Rollback anchor:
+`pre-power-outage-2000-20260908` (`409154a`).
+
+The isolated release starts from the previous production revision and contains
+only this optimization, its integration test and this report. `main` already
+contains unrelated billing work; do not fast-forward production to `main`
+without separate authorization for that work. The optimization is also present
+on `main` (`fee37be`).
+
+Before deployment, the isolated release was checked with its own dependencies,
+generated Prisma client and a freshly migrated local `steps_outage_release_test`
+database: 77/79 focused integration tests passed, with only the two pre-existing
+failures documented below. All four new tests passed; requests took 336–351 ms
+and 54 SQL statements on that production baseline, with the same 1,025 affected
+recipients. No schema, dependency, copy or balance change was deployed.
+
+The guarded rolling reload completed and saved the verified topology: two HTTP
+workers, one resolution worker, one cron worker; aggregate pool budget 32.
+Staging stayed stopped. Local/public API health and marketing home/privacy/support
+checks passed. New HTTP and resolution error-log bytes were zero during the
+post-deploy check. The cron log contained scheduled-race eligibility rejections
+for races lacking enough accepted participants. Copy was already synchronized,
+and referral-contest catch-up reported zero missing rows. Existing live Decoy
+balance overrides were observed by the read-only drift check and preserved.
+
 ## Result
 
 Final fixture: one caster plus 2,000 accepted recipients in an active seven-day,
