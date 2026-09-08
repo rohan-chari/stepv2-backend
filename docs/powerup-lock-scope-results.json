@@ -1,0 +1,876 @@
+{
+  "baselineCommit": "3b241ffbb3bfcbaeea5153d18f1efd6e69a293a4",
+  "candidateUsePowerupBlob": "7dd432f9c2d627eb8ee15323cfecd9cac170cb86",
+  "environment": {
+    "node": "24.16.0",
+    "postgresql": "16.14",
+    "database": "localhost dedicated *_test",
+    "httpProcesses": 1,
+    "resolutionWorkerRunning": false
+  },
+  "limitations": [
+    "Synthetic500ms unrelated-row hold is a lock-dependency proof, not production latency.",
+    "Commit time is first observed USED polling upper bound, not exact database commit time.",
+    "Uncontended sweep is one warmup and three measured sequential rounds; no throughput or significance claim."
+  ],
+  "blockedBefore": [
+    {
+      "type": "PROTEIN_SHAKE",
+      "scenario": "direct",
+      "commitMs": 618.569792,
+      "responseMs": 626.045667,
+      "releasedMs": 561.875458,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "TRAIL_MIX",
+      "scenario": "direct",
+      "commitMs": 556.409125,
+      "responseMs": 558.1788339999999,
+      "releasedMs": 532.2530840000001,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "RUNNERS_HIGH",
+      "scenario": "direct",
+      "commitMs": 564.6089580000003,
+      "responseMs": 561.509916,
+      "releasedMs": 531.5576249999999,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "STEALTH_MODE",
+      "scenario": "direct",
+      "commitMs": 556.7841250000001,
+      "responseMs": 557.9642079999999,
+      "releasedMs": 532.7430410000002,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "COMPRESSION_SOCKS",
+      "scenario": "direct",
+      "commitMs": 553.0018339999997,
+      "responseMs": 546.3085839999999,
+      "releasedMs": 531.343042,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "MIRROR",
+      "scenario": "direct",
+      "commitMs": 554.610709,
+      "responseMs": 555.8384169999999,
+      "releasedMs": 531.3400839999999,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "UMBRELLA",
+      "scenario": "direct",
+      "commitMs": 552.5298750000002,
+      "responseMs": 553.9857080000002,
+      "releasedMs": 528.792958,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "DECOY",
+      "scenario": "direct",
+      "commitMs": 556.7145,
+      "responseMs": 560.4884579999998,
+      "releasedMs": 532.8529580000004,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "CAMPFIRE_REST",
+      "scenario": "direct",
+      "commitMs": 550.7524999999996,
+      "responseMs": 553.8035829999999,
+      "releasedMs": 529.0032499999998,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 564.604542,
+      "responseMs": 562.6940000000004,
+      "releasedMs": 529.8787499999999,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 561.1127500000002,
+      "responseMs": 560.9794169999996,
+      "releasedMs": 529.0791250000002,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 561.7637089999998,
+      "responseMs": 557.46425,
+      "releasedMs": 528.4052499999998,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 554.2977919999994,
+      "responseMs": 552.526417000001,
+      "releasedMs": 531.6286249999994,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 553.1093330000003,
+      "responseMs": 554.0763749999987,
+      "releasedMs": 530.1359579999989,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 550.4405000000006,
+      "responseMs": 551.1617910000004,
+      "releasedMs": 528.653875,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 574.0580419999987,
+      "responseMs": 570.9442920000001,
+      "releasedMs": 528.4807499999988,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 552.730708000001,
+      "responseMs": 552.2900829999999,
+      "releasedMs": 531.4426249999997,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 553.7345829999995,
+      "responseMs": 554.6119579999995,
+      "releasedMs": 530.5660829999997,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 553.6182500000014,
+      "responseMs": 555.6213750000006,
+      "releasedMs": 530.4935830000013,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 555.4062919999997,
+      "responseMs": 558.3460830000004,
+      "releasedMs": 532.2640420000007,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 558.8649590000005,
+      "responseMs": 549.2538339999992,
+      "releasedMs": 534.485999999999,
+      "committedWhileLocked": false,
+      "blockedQueries": [
+        "\n    SELECT id\n    FROM race_participants\n    WHERE race_id = $1\n      AND status = 'accepted'::\"RaceParticipantStatus\"\n    ORDER BY user_id ASC\n    FOR UPDATE\n  "
+      ]
+    }
+  ],
+  "blockedAfter": [
+    {
+      "type": "PROTEIN_SHAKE",
+      "scenario": "direct",
+      "commitMs": 77.26441699999998,
+      "responseMs": 83.38204200000001,
+      "releasedMs": 77.26554199999998,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "TRAIL_MIX",
+      "scenario": "direct",
+      "commitMs": 33.911542,
+      "responseMs": 29.331833999999958,
+      "releasedMs": 33.91308399999997,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "RUNNERS_HIGH",
+      "scenario": "direct",
+      "commitMs": 33.979582999999934,
+      "responseMs": 27.972415999999953,
+      "releasedMs": 33.98149999999998,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "STEALTH_MODE",
+      "scenario": "direct",
+      "commitMs": 32.717500000000086,
+      "responseMs": 26.692457999999988,
+      "releasedMs": 32.71883300000002,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "COMPRESSION_SOCKS",
+      "scenario": "direct",
+      "commitMs": 33.85562500000003,
+      "responseMs": 26.73025000000007,
+      "releasedMs": 33.85679200000004,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "MIRROR",
+      "scenario": "direct",
+      "commitMs": 34.66679199999999,
+      "responseMs": 27.400582999999983,
+      "releasedMs": 34.66829199999995,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "UMBRELLA",
+      "scenario": "direct",
+      "commitMs": 35.878333,
+      "responseMs": 27.62129099999993,
+      "releasedMs": 35.87941599999999,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "DECOY",
+      "scenario": "direct",
+      "commitMs": 35.03141599999992,
+      "responseMs": 26.758290999999986,
+      "releasedMs": 35.0324159999999,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "CAMPFIRE_REST",
+      "scenario": "direct",
+      "commitMs": 33.87741699999992,
+      "responseMs": 27.812708999999927,
+      "releasedMs": 33.87870899999996,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 35.16037499999993,
+      "responseMs": 35.746083999999996,
+      "releasedMs": 35.16149999999993,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 34.34958400000005,
+      "responseMs": 30.610833999999954,
+      "releasedMs": 34.350459,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 43.799749999999904,
+      "responseMs": 35.644833999999946,
+      "releasedMs": 43.800624999999854,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SHORTCUT",
+      "scenario": "direct",
+      "commitMs": 32.562417000000096,
+      "responseMs": 27.659167000000025,
+      "releasedMs": 32.56329200000005,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 36.77170799999999,
+      "responseMs": 30.751500000000078,
+      "releasedMs": 36.77254200000016,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 34.69729200000006,
+      "responseMs": 27.60850000000005,
+      "releasedMs": 34.69804199999999,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 32.912250000000085,
+      "responseMs": 31.43837499999995,
+      "releasedMs": 32.912874999999985,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "DETOUR_SIGN",
+      "scenario": "direct",
+      "commitMs": 34.58279199999993,
+      "responseMs": 27.46550000000002,
+      "releasedMs": 34.58358399999997,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 34.644833999999946,
+      "responseMs": 29.787124999999833,
+      "releasedMs": 34.64770899999985,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 34.39195799999993,
+      "responseMs": 32.86875000000009,
+      "releasedMs": 34.392916000000014,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 33.15862500000003,
+      "responseMs": 31.748458000000028,
+      "releasedMs": 33.159415999999965,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    },
+    {
+      "type": "SIGNAL_JAMMER",
+      "scenario": "direct",
+      "commitMs": 34.96941700000002,
+      "responseMs": 24.415166999999883,
+      "releasedMs": 34.970417,
+      "committedWhileLocked": true,
+      "blockedQueries": []
+    }
+  ],
+  "uncontendedBefore": [
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 67.92166700000001,
+      "queryCount": 39,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 15.864833000000033,
+      "queryCount": 34,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 14.194000000000017,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 9.942458000000045,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 10.264042000000018,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 14.510666999999955,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 9.521082999999976,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 8.58945799999998,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 8.922124999999994,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 9.103875000000016,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 8.706375000000037,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 10.592624999999998,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 36.91300000000001,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 20.724667000000068,
+      "queryCount": 34,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 20.423083999999903,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 18.884624999999915,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 18.366833000000042,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 21.85745799999995,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 17.39320799999996,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 17.083707999999888,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 19.906582999999955,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 17.773749999999836,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 20.150041999999985,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 18.804125000000113,
+      "queryCount": 38,
+      "status": 200
+    }
+  ],
+  "uncontendedAfter": [
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 67.023417,
+      "queryCount": 39,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 15.233417000000031,
+      "queryCount": 34,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 15.8559580000001,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 9.578916999999933,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 9.677291999999966,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 14.79112500000008,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 9.043124999999918,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 8.461332999999968,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 11.301958000000013,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "PROTEIN_SHAKE",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 10.10837499999991,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "TRAIL_MIX",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 9.083250000000021,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 4,
+      "type": "SHORTCUT",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 12.343792000000008,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 42.363166999999976,
+      "queryCount": 38,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 20.464582999999948,
+      "queryCount": 34,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 0,
+      "warmup": true,
+      "elapsedMs": 22.48087499999997,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 18.014249999999947,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 17.113708000000088,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 1,
+      "warmup": false,
+      "elapsedMs": 21.314208000000008,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 15.227916999999934,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 16.065958000000137,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 2,
+      "warmup": false,
+      "elapsedMs": 19.88387499999999,
+      "queryCount": 46,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "PROTEIN_SHAKE",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 15.583499999999958,
+      "queryCount": 32,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "TRAIL_MIX",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 17.944750000000113,
+      "queryCount": 33,
+      "status": 200
+    },
+    {
+      "size": 2000,
+      "type": "SHORTCUT",
+      "round": 3,
+      "warmup": false,
+      "elapsedMs": 18.331249999999955,
+      "queryCount": 46,
+      "status": 200
+    }
+  ]
+}
