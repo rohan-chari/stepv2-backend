@@ -894,11 +894,14 @@ describe("global event summary expiry v2 HTTP contract", () => {
     assert.equal(retainedArtifact.payloadDigest, firstArtifact.payloadDigest);
     assert.deepEqual(retainedArtifact.payload, firstArtifact.payload);
 
+    const summaryWakes = [];
     const raceWorker = buildRaceResolutionWorkerV2({
+      publishDurableQueueWakeup: async (queue) => { summaryWakes.push(queue); return true; },
       bootAt: 0,
       logger: { log() {}, error() {} },
     });
     assert.ok(await raceWorker.processRace({ raceId: race.id }));
+    assert.ok(summaryWakes.includes("summary"), "committed summary impacts must wake recap delivery");
     assert.deepEqual(await tick(), { upserts: 1 });
     assert.deepEqual(await tick(), { upserts: 0 });
     const impact = await prisma.globalEventRaceImpact.findUnique({

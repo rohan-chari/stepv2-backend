@@ -2000,6 +2000,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const attemptedBoxSyncResults = [];
         const attemptedPowerupEvents = [];
         let attemptedPostTaskId = null;
+        let summaryWorkChanged = false;
         await phaseTimer.measure("transaction", () => prisma.$transaction(async (tx) => {
         // (i) fence
         const fenced = await phaseTimer.measure(
@@ -2455,6 +2456,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               sourceResolutionGeneration: job.processingGeneration,
               now: currentTime,
             });
+            summaryWorkChanged = persistedSummary.finalized > 0 ||
+              persistedSummary.terminalized > 0 || persistedSummary.readinessUpdated > 0;
             coordinatedOptimizationMetrics.increment(
               "global_summary_race_resolution_artifacts_total",
               {},
@@ -2628,7 +2631,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           if (placementHandoffGeneration != null) {
             await publishDurableQueueWakeup("placement");
           }
-          await publishDurableQueueWakeup("summary");
+          // Only committed summary changes warrant a drain. Recovery and
+          // capture-maintenance deadlines remain owned by the summary scheduler.
+          if (summaryWorkChanged) await publishDurableQueueWakeup("summary");
           if (committedPostTaskId) {
             await publishDurableQueueWakeup("post-task");
           }

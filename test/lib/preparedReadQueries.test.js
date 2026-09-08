@@ -52,3 +52,21 @@ test('propagates query failures without automatic replay', async () => {
   await assert.rejects(client.query({ text, values: ['x'] }), error);
   assert.equal(attempts, 1);
 });
+
+test('selected queue writes reuse names and never replay an aborted transaction', async () => {
+  const { client, calls } = fixture();
+  const text = '/* steps:prepared-query:v1 */ UPDATE queue SET lease_token=$1 WHERE id=$2 RETURNING id';
+  client.query({ text, values: ['first-token', 1] });
+  client.query({ text, values: ['second-token', 2] });
+  assert.match(calls[0][0].name, /^steps_query_v1_[a-f0-9]{48}$/);
+  assert.equal(calls[0][0].name, calls[1][0].name);
+  assert.deepEqual(calls[1][0].values, ['second-token', 2]);
+  const pool = new EventEmitter();
+  installPreparedReadQueries(pool);
+  const error = Object.assign(new Error('transaction aborted'), { code: '40001' });
+  let attempts = 0;
+  const failing = { query() { attempts++; return Promise.reject(error); } };
+  pool.emit('connect', failing);
+  await assert.rejects(failing.query({ text, values: ['token', 1] }), error);
+  assert.equal(attempts, 1);
+});

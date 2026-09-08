@@ -1,9 +1,10 @@
 const { createHash } = require('node:crypto');
 
-// Only explicitly selected, parameterized reads use protocol-level preparation.
+// Only explicitly selected, parameterized reads and queue queries are prepared.
 // PgBouncer transaction pools MUST enable max_prepared_statements before this
 // code is deployed. SQL comments are permanent query annotations, not flags.
 const PREFIX = '/* steps:prepared-read:v1 */';
+const QUEUE_PREFIX = '/* steps:prepared-query:v1 */';
 const MAX_STATEMENTS = 128;
 
 function installPreparedReadQueries(pool) {
@@ -16,10 +17,10 @@ function installPreparedReadQueries(pool) {
     const prototype = Object.getPrototypeOf(client);
     client.query = (config, ...args) => {
       if (config && typeof config === 'object' && !config.name &&
-          typeof config.text === 'string' && config.text.startsWith(PREFIX)) {
+          typeof config.text === 'string' && (config.text.startsWith(PREFIX) || config.text.startsWith(QUEUE_PREFIX))) {
         let name = names.get(config.text);
         if (!name && names.size < MAX_STATEMENTS) {
-          name = 'steps_read_v1_' + createHash('sha256')
+          name = (config.text.startsWith(PREFIX) ? 'steps_read_v1_' : 'steps_query_v1_') + createHash('sha256')
             .update(config.text).digest('hex').slice(0, 48);
           names.set(config.text, name);
         }

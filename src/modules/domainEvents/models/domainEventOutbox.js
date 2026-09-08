@@ -153,7 +153,7 @@ async function claimEvents({
   const leaseUntil = new Date(now.getTime() + leaseMs);
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRawUnsafe(
-      `WITH candidate_ids AS MATERIALIZED (
+      `/* steps:prepared-query:v1 */ WITH candidate_ids AS MATERIALIZED (
          SELECT id,occurred_at,due_at FROM (
            (SELECT event.id,event.occurred_at,event.available_at AS due_at
               FROM domain_event_outbox event
@@ -213,7 +213,7 @@ async function loadEventContext(prisma, id) {
 
 async function nextDueAt(prisma = defaultPrisma, now = new Date()) {
   const [row = {}] = await prisma.$queryRawUnsafe(
-    `WITH projection_lane AS MATERIALIZED (
+    `/* steps:prepared-query:v1 */ WITH projection_lane AS MATERIALIZED (
        SELECT next_token_at
          FROM notification_release_lanes
         WHERE admission_class='${SCHEDULED_PROJECTION_LANE}'
@@ -377,7 +377,7 @@ async function claimProjections({
   const leaseUntil = new Date(now.getTime() + leaseMs);
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRawUnsafe(
-      `WITH stranded_candidates AS MATERIALIZED (
+      `/* steps:prepared-query:v1 */ WITH stranded_candidates AS MATERIALIZED (
          SELECT stranded.id
            FROM domain_event_outbox stranded
           WHERE stranded.status='PROJECTING'
@@ -508,7 +508,7 @@ async function projectScheduledEntitlementEventsBatch({
   // claim simply join the deterministic first-attempt queue on its next tick.
   const rows = await prisma.$transaction(async (tx) => {
     const [gate] = await tx.$queryRawUnsafe(
-      `SELECT pg_try_advisory_xact_lock(
+      `/* steps:prepared-query:v1 */ SELECT pg_try_advisory_xact_lock(
          hashtextextended('global-event-scheduled-entitlement-projector-v1',0)
        ) AS acquired`,
     );
@@ -525,7 +525,7 @@ async function projectScheduledEntitlementEventsBatch({
       now,
     );
     const [lane] = await tx.$queryRawUnsafe(
-      `SELECT next_token_at AS "nextTokenAt"
+      `/* steps:prepared-query:v1 */ SELECT next_token_at AS "nextTokenAt"
          FROM notification_release_lanes
         WHERE admission_class=$1
         FOR UPDATE`,
@@ -543,7 +543,7 @@ async function projectScheduledEntitlementEventsBatch({
       now,
     );
     const projected = await tx.$queryRawUnsafe(
-    `WITH due_ids AS MATERIALIZED (
+    `/* steps:prepared-query:v1 */ WITH due_ids AS MATERIALIZED (
        SELECT event.id
          FROM domain_event_outbox event
         WHERE event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
@@ -762,7 +762,7 @@ async function completeNoDevicePlacementProjectionsBatch({
 } = {}) {
   const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
   const [row = {}] = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
-    `WITH candidate_ids AS MATERIALIZED (
+    `/* steps:prepared-query:v1 */ WITH candidate_ids AS MATERIALIZED (
        SELECT projection.id
          FROM domain_event_notification_projections projection
          JOIN domain_event_outbox event ON event.id=projection.domain_event_id
@@ -891,7 +891,7 @@ async function expandPureSilentPlacementEventsBatch({
 } = {}) {
   const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
   const [row = {}] = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
-    `WITH candidate_ids AS MATERIALIZED (
+    `/* steps:prepared-query:v1 */ WITH candidate_ids AS MATERIALIZED (
        SELECT event.id
          FROM domain_event_outbox event
         WHERE event.event_type='PLACEMENT_CHANGED_V1'
@@ -991,7 +991,7 @@ async function finishProjection(prisma, {
 
 async function finishEventIfTerminal(prisma, eventId, now = new Date()) {
   const rows = await prisma.$queryRawUnsafe(
-    `WITH candidate AS MATERIALIZED (
+    `/* steps:prepared-query:v1 */ WITH candidate AS MATERIALIZED (
        SELECT event.id,event.failed_projection_count,event.projection_counts_valid_at
          FROM domain_event_outbox event
         WHERE event.id=$1::uuid
