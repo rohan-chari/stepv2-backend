@@ -362,6 +362,9 @@ async function aggregateReadyWork(prisma, work, current, options = {}) {
   return result.committed && result.nonzero;
 }
 
+// PROCESSING may have no lease after a retry/budget release or recovery repair.
+// Keep that indexed available-at branch separate from crashed workers' expired
+// leases so retry backoff and live capture/worker leases remain authoritative.
 async function claimActiveWork(prisma, current, batchSize, leaseMs) {
   return prisma.$transaction(async (tx) => {
     const leaseToken = crypto.randomUUID();
@@ -370,6 +373,10 @@ async function claimActiveWork(prisma, current, batchSize, leaseMs) {
          SELECT id,due_at FROM (
            (SELECT id,available_at AS due_at FROM global_event_summary_work
              WHERE status='QUEUED' AND available_at <= $1 AND lease_until IS NULL
+             ORDER BY available_at,id LIMIT $2)
+           UNION ALL
+           (SELECT id,available_at AS due_at FROM global_event_summary_work
+             WHERE status='PROCESSING' AND lease_until IS NULL AND available_at <= $1
              ORDER BY available_at,id LIMIT $2)
            UNION ALL
            (SELECT id,lease_until AS due_at FROM global_event_summary_work
@@ -402,6 +409,8 @@ async function claimActiveWork(prisma, current, batchSize, leaseMs) {
           WHERE (work.status='QUEUED' AND work.available_at <= $1
                    AND work.lease_until IS NULL)
              OR (work.status='PROCESSING' AND work.lease_until <= $1)
+             OR (work.status='PROCESSING' AND work.lease_until IS NULL
+                   AND work.available_at <= $1)
              OR (work.status='WAITING_RACES' AND work.ready_at IS NOT NULL
                    AND work.available_at <= $1
                    AND COALESCE(work.lease_until,'-infinity'::timestamptz) <= $1)
@@ -480,6 +489,8 @@ async function nextSummaryDueAt(prisma = defaultPrisma) {
          WHERE status='QUEUED' AND lease_until IS NULL),
        (SELECT MIN(lease_until) FROM global_event_summary_work
          WHERE status='PROCESSING' AND lease_until IS NOT NULL),
+       (SELECT MIN(available_at) FROM global_event_summary_work
+         WHERE status='PROCESSING' AND lease_until IS NULL),
        (SELECT MIN(available_at) FROM global_event_summary_work
          WHERE status='WAITING_RACES' AND ready_at IS NOT NULL
            AND lease_until IS NULL),
