@@ -1,4 +1,14 @@
 const { RacePowerup } = require("../models/racePowerup");
+const powerupRandomScope = new (require('node:async_hooks').AsyncLocalStorage)();
+// Only the local durable-command experiment supplies this scope. Ordinary
+// requests retain their captured RNG; retrying a durable command reuses draws.
+const withPowerupRandom = (random, work) => powerupRandomScope.run(random, work);
+const powerupPostScope = new (require('node:async_hooks').AsyncLocalStorage)();
+const withPowerupPostTasks = (capture, work) => powerupPostScope.run(capture, work);
+function deferPowerupPost(kind, handler, args) {
+  const capture = powerupPostScope.getStore();
+  return capture ? capture(kind, args) : deferUntilAfterCommit(() => handler(...args));
+}
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
@@ -1184,9 +1194,7 @@ function buildUsePowerup(dependencies = {}) {
       : defaultEnqueueRaceResolution;
   const enqueueRaceResolution = hasInjectedDeps
     ? immediateEnqueueRaceResolution
-    : (...args) => deferUntilAfterCommit(
-        () => immediateEnqueueRaceResolution(...args)
-      );
+    : (...args) => deferPowerupPost('resolution', immediateEnqueueRaceResolution, args);
   // As elsewhere in C0: an EXPLICITLY injected resolveRaceState still drives the
   // inline path (it is the seam for exercising it, and the path stays live
   // behind the `inlineRaceResolutionFallback` lever). The production singleton
@@ -1214,18 +1222,15 @@ function buildUsePowerup(dependencies = {}) {
       : defaultRepairRacePowerupInventory);
   const repairRacePowerupInventory = hasInjectedDeps
     ? immediateRepairRacePowerupInventory
-    : (...args) => deferUntilAfterCommit(
-        () => immediateRepairRacePowerupInventory(...args)
-      );
+    : (...args) => deferPowerupPost('inventory', immediateRepairRacePowerupInventory, args);
   const immediateInvalidateRaceProgress =
     dependencies.invalidateRaceProgress || defaultInvalidateRaceProgress;
   const invalidateRaceProgress = hasInjectedDeps
     ? immediateInvalidateRaceProgress
-    : (...args) => deferUntilAfterCommit(
-        () => immediateInvalidateRaceProgress(...args)
-      );
+    : (...args) => deferPowerupPost('invalidation', immediateInvalidateRaceProgress, args);
   const now = dependencies.now || (() => new Date());
-  const random = dependencies.random || Math.random;
+  const capturedRandom = dependencies.random || Math.random;
+  const random = () => (powerupRandomScope.getStore() || capturedRandom)();
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   const immediateEvaluateHighMultiplierAlert = Object.prototype.hasOwnProperty.call(
     dependencies,
@@ -4890,4 +4895,7 @@ module.exports = {
   luckyMinRarity,
   lockPowerupUseParticipants,
   applyPotionEnemyAttack,
+  refundRedeemedOnRejection,
+  withPowerupRandom,
+  withPowerupPostTasks,
 };

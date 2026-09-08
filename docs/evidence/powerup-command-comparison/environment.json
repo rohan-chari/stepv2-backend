@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-08T14:37:28.831Z",
+  "node": "v24.16.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpuModel": "Apple M5",
+  "logicalCpus": 10,
+  "totalMemory": 17179869184,
+  "postgres": "PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit",
+  "redis": "Redis server v=8.10.0 sha=00000000:1 malloc=libc bits=64 build=80fd3081013fc32b",
+  "experimentalTestsPaused": true,
+  "productionServicesStarted": false
+}

@@ -329,6 +329,35 @@ function isInPrismaTransactionScope() {
   return Boolean(prismaScope.getStore());
 }
 
+// Local comparison adapter: keep the real command's singleton delegates and
+// transaction callbacks while a scoped client plans safe batched operations.
+// This is never selected by application startup or a release flag.
+function withScopedPrismaClient(client, work) {
+  const scope = prismaScope.getStore();
+  if (!scope) throw new Error('An existing transaction is required');
+  return prismaScope.run({ ...scope, client }, work);
+}
+
+async function withPrismaSavepoint(work) {
+  const scope = prismaScope.getStore();
+  if (!scope) throw new Error('An existing transaction is required');
+  const name = `experiment_${require('node:crypto').randomUUID().replaceAll('-', '')}`;
+  await scope.client.$executeRawUnsafe(`SAVEPOINT ${name}`);
+  const child = { ...scope, afterCommit: [], afterRollback: [] };
+  try {
+    const result = await prismaScope.run(child, work);
+    await scope.client.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`);
+    scope.afterCommit.push(...child.afterCommit);
+    scope.afterRollback.push(...child.afterRollback);
+    return result;
+  } catch (error) {
+    await scope.client.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${name}`);
+    await scope.client.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`);
+    await runAfterTransactionTasks(child.afterRollback, 'rollback');
+    throw error;
+  }
+}
+
 async function runInPrismaTransaction(work, options = {}) {
   const existing = prismaScope.getStore();
   if (existing) return work(existing.client);
@@ -377,5 +406,7 @@ module.exports = {
   deferUntilAfterCommit,
   deferUntilAfterRollback,
   isInPrismaTransactionScope,
+  withScopedPrismaClient,
+  withPrismaSavepoint,
   runAfterCommitTasks,
 };
