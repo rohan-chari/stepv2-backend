@@ -1,0 +1,101 @@
+{
+  "selectedSourceSha256": "015eda3d1a45dfffba27496124151d7676cd5d25b00f87a77b723b594b4405d1",
+  "integration": {
+    "newEnrollment": {
+      "pass": 8,
+      "fail": 0
+    },
+    "realCronQueryEfficiency": {
+      "pass": 1,
+      "fail": 0
+    },
+    "localEntitlements": {
+      "pass": 27,
+      "fail": 2
+    },
+    "reliability": {
+      "pass": 34,
+      "fail": 1
+    },
+    "total": {
+      "pass": 70,
+      "fail": 3
+    }
+  },
+  "units": {
+    "schedulerSuites": {
+      "pass": 18,
+      "fail": 0
+    },
+    "localEntitlementService": {
+      "pass": 13,
+      "fail": 3
+    },
+    "total": {
+      "pass": 31,
+      "fail": 3
+    }
+  },
+  "unchangedBaselineConfirmation": {
+    "localEntitlements": {
+      "pass": 27,
+      "fail": 2
+    },
+    "reliability": {
+      "pass": 34,
+      "fail": 1
+    },
+    "localEntitlementService": {
+      "pass": 13,
+      "fail": 3
+    }
+  },
+  "existingFailures": [
+    {
+      "file": "test/integration/global-event-reliability.test.js",
+      "line": 1406,
+      "expected": "IMMEDIATE",
+      "actual": "COALESCE"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "line": 1365,
+      "expected": "FULL",
+      "actual": "DEPENDENCY_CLOSURE"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "line": 1594,
+      "expected": 1,
+      "actual": 2
+    },
+    {
+      "file": "test/services/localGlobalEventEntitlement.test.js",
+      "line": 465,
+      "error": "prisma.$queryRawUnsafe is not a function"
+    },
+    {
+      "file": "test/services/localGlobalEventEntitlement.test.js",
+      "line": 573,
+      "error": "prisma.$queryRawUnsafe is not a function"
+    },
+    {
+      "file": "test/services/localGlobalEventEntitlement.test.js",
+      "line": 605,
+      "error": "prisma.$queryRawUnsafe is not a function"
+    }
+  ],
+  "testSafety": {
+    "database": "local disposable PostgreSQL18 *_test",
+    "newTestsAndBenchmarksRedis": "explicit empty string",
+    "legacyCacheTestsRedis": "isolated local Redis db15; REDIS_URL and LOCAL_REDIS_TEST_URL explicit"
+  },
+  "productionChanged": false,
+  "existingAssertionsModified": false,
+  "newSchemaMigration": false,
+  "cleanup": {
+    "isolatedPostgresStopped": true,
+    "isolatedRedisStopped": true,
+    "productionAndStagingUntouched": true
+  }
+}
