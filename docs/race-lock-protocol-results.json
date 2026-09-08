@@ -1,0 +1,39 @@
+{
+  "kind": "SQL semantics, not gameplay or speed proof",
+  "checks": 7,
+  "evidence": [
+    {
+      "name": "current race guard serializes disjoint uses",
+      "result": "blocked",
+      "sqlstate": "55P03"
+    },
+    {
+      "name": "shared guards admit both disjoint player sets concurrently",
+      "result": "granted"
+    },
+    {
+      "name": "exclusive scoring/outage guard waits for local uses",
+      "result": "blocked",
+      "sqlstate": "55P03"
+    },
+    {
+      "name": "overlapping target still waits",
+      "result": "blocked",
+      "sqlstate": "55P03"
+    },
+    {
+      "name": "shared lifecycle guard blocks non-key status updates",
+      "result": "blocked",
+      "sqlstate": "55P03"
+    },
+    {
+      "name": "upgrading a shared guard is not a concurrency escape",
+      "result": "blocked",
+      "sqlstate": "55P03"
+    },
+    {
+      "name": "KEY SHARE permits a non-key writer and is too weak as the general guard",
+      "result": "granted"
+    }
+  ]
+}

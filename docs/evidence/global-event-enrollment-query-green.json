@@ -1,0 +1,112 @@
+{
+  "version": "PostgreSQL 18.4 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit",
+  "dimensions": {
+    "history": 30000,
+    "historicalUsers": 30000,
+    "active": 1000,
+    "activeMemberships": 2500,
+    "activeRaces": 160,
+    "historicalRaces": 600,
+    "missing": 0
+  },
+  "tick": {
+    "elapsedMs": 21.62829099999999,
+    "queryCount": 18,
+    "counts": {
+      "SELECT": 12,
+      "INSERT": 0,
+      "UPDATE": 0,
+      "DELETE": 0,
+      "WITH": 2,
+      "BEGIN": 0,
+      "COMMIT": 4,
+      "ROLLBACK": 0,
+      "OTHER": 0
+    }
+  },
+  "actual": {
+    "planningMs": 0.158,
+    "executionMs": 3.52,
+    "hits": 748,
+    "reads": 0,
+    "buffers": 748,
+    "tempRead": 0,
+    "tempWritten": 0,
+    "rows": 0,
+    "visits": [
+      {
+        "relation": "race_participants",
+        "type": "Seq Scan",
+        "rows": 32500,
+        "loops": 1,
+        "removed": 0
+      },
+      {
+        "relation": "races",
+        "type": "Bitmap Heap Scan",
+        "rows": 160,
+        "loops": 1,
+        "removed": 0
+      },
+      {
+        "relation": "global_step_event_entitlements",
+        "type": "Seq Scan",
+        "rows": 1000,
+        "loops": 1,
+        "removed": 1000
+      },
+      {
+        "relation": "users",
+        "type": "Seq Scan",
+        "rows": 1,
+        "loops": 1,
+        "removed": 0
+      }
+    ]
+  },
+  "baseline": {
+    "planningMs": 0.274,
+    "executionMs": 8.959,
+    "hits": 35099,
+    "reads": 0,
+    "buffers": 35099,
+    "tempRead": 0,
+    "tempWritten": 0,
+    "rows": 0,
+    "visits": [
+      {
+        "relation": "race_participants",
+        "type": "Index Scan",
+        "rows": 32500,
+        "loops": 1,
+        "removed": 0
+      },
+      {
+        "relation": "races",
+        "type": "Index Scan",
+        "rows": 0.21,
+        "loops": 760,
+        "removed": 1
+      },
+      {
+        "relation": "global_step_event_entitlements",
+        "type": "Index Only Scan",
+        "rows": 1000,
+        "loops": 1,
+        "removed": 0
+      },
+      {
+        "relation": "users",
+        "type": "Seq Scan",
+        "rows": 1,
+        "loops": 1,
+        "removed": 0
+      }
+    ]
+  },
+  "testResult": {
+    "passed": 8,
+    "failed": 0,
+    "selectedSourceSha256": "015eda3d1a45dfffba27496124151d7676cd5d25b00f87a77b723b594b4405d1"
+  }
+}

@@ -1,0 +1,2064 @@
+{
+  "phase": "after",
+  "recordedAt": "2026-09-08T17:35:09.577Z",
+  "version": "PostgreSQL 18.4 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit",
+  "settings": [
+    {
+      "name": "effective_cache_size",
+      "setting": "524288",
+      "unit": "8kB"
+    },
+    {
+      "name": "max_parallel_workers_per_gather",
+      "setting": "2",
+      "unit": null
+    },
+    {
+      "name": "random_page_cost",
+      "setting": "4",
+      "unit": null
+    },
+    {
+      "name": "seq_page_cost",
+      "setting": "1",
+      "unit": null
+    },
+    {
+      "name": "shared_buffers",
+      "setting": "16384",
+      "unit": "8kB"
+    },
+    {
+      "name": "work_mem",
+      "setting": "4096",
+      "unit": "kB"
+    }
+  ],
+  "sourceSha256": "015eda3d1a45dfffba27496124151d7676cd5d25b00f87a77b723b594b4405d1",
+  "baselineSqlSha256": "51f557acac6f907232354f5862ec198a11d7aee410a6120380434590111a57d0",
+  "candidateSqlSha256": "bc349dc0e93426c06a072ff840e1ef7309794449f14cead4133ac39ea065998b",
+  "head": "ba6cfc33586afd7a3bcea88d610a16e5e0a81d8c",
+  "measurement": "root shared hits + reads; EXPLAIN execution is not CPU; 1 warmup + 5 alternating pairs",
+  "cases": [
+    {
+      "name": "large-active",
+      "dimensions": {
+        "history": 30000,
+        "historicalUsers": 30000,
+        "active": 10000,
+        "activeMemberships": 25000,
+        "activeRaces": 160,
+        "historicalRaces": 600,
+        "missing": 10000
+      },
+      "runtime": {
+        "elapsedMs": 5123.132833,
+        "queryCount": 309,
+        "leadingSqlVerbs": {
+          "SELECT": 170,
+          "INSERT": 27,
+          "UPDATE": 0,
+          "DELETE": 0,
+          "WITH": 82,
+          "BEGIN": 0,
+          "COMMIT": 30,
+          "ROLLBACK": 0,
+          "OTHER": 0
+        },
+        "capturedSqlSha256": "bc349dc0e93426c06a072ff840e1ef7309794449f14cead4133ac39ea065998b",
+        "pages": [
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              null
+            ],
+            "durationMs": 14.564875000000029
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "0be17dfe-48ba-dbfd-c548-4ade00f33ad7"
+            ],
+            "durationMs": 12.795416999999816
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "18fecab1-7f53-2e3e-8789-50fc0b8e8091"
+            ],
+            "durationMs": 12.004374999999982
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "2599877c-1587-a647-9c1a-0528f59ce65f"
+            ],
+            "durationMs": 17.865708000000268
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "32049cf8-a2b0-1fc6-c3e3-a1e638041f85"
+            ],
+            "durationMs": 12.258249999999862
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "3eea1654-54bf-d663-9b54-846da07b7771"
+            ],
+            "durationMs": 12.064499999999953
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "4b5f9b68-c9b2-005a-34d6-b78bec627cb0"
+            ],
+            "durationMs": 18.463166
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "58700fbf-a516-e28e-78d1-77c7377795da"
+            ],
+            "durationMs": 11.370332999999846
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "659011e5-ced9-5397-137a-ccec0a2048fe"
+            ],
+            "durationMs": 11.543042000000241
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "72b153e1-f3d3-3ce5-f39b-4499dfce398b"
+            ],
+            "durationMs": 11.276832999999897
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "7fc78311-2b23-ece3-72e4-1c34413f15fa"
+            ],
+            "durationMs": 11.10754199999974
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "8c4702c2-ef30-9440-828e-48188664374f"
+            ],
+            "durationMs": 10.974708000000646
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "9808360e-1aef-3ab4-4f05-ac9b30f94e04"
+            ],
+            "durationMs": 10.806540999999925
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "a4c9a7be-1347-48ba-ea1d-2af2bf06620e"
+            ],
+            "durationMs": 10.97899999999936
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "b0cc2abd-4ca1-0132-46ab-070141642299"
+            ],
+            "durationMs": 10.613125000000764
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "bfecc659-efb7-f346-5fd7-bcf9da06138f"
+            ],
+            "durationMs": 10.222249999999804
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "cc888047-55c8-363c-e380-e2e2ac90ad1e"
+            ],
+            "durationMs": 6.744625000000269
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "d9f8572e-a34f-5990-89ea-8b4f10db95d6"
+            ],
+            "durationMs": 4.4777500000000146
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "e71a31b9-6abf-c4a9-ab28-56af6f94dd5a"
+            ],
+            "durationMs": 4.508499999999913
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "f30f513e-1be9-17ca-e34d-a269e51d4b54"
+            ],
+            "durationMs": 3.7718340000001263
+          },
+          {
+            "params": [
+              "enrollment-2098-01-03",
+              500,
+              "ffffd2e2-84ad-6225-9f96-6d98c08dbd18"
+            ],
+            "durationMs": 0.4522080000006099
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              null
+            ],
+            "durationMs": 13.334749999999985
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              "0be17dfe-48ba-dbfd-c548-4ade00f33ad7"
+            ],
+            "durationMs": 12.712749999999687
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              "18fecab1-7f53-2e3e-8789-50fc0b8e8091"
+            ],
+            "durationMs": 13.208625000000211
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              "2599877c-1587-a647-9c1a-0528f59ce65f"
+            ],
+            "durationMs": 12.436416999999892
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              "32049cf8-a2b0-1fc6-c3e3-a1e638041f85"
+            ],
+            "durationMs": 12.52179199999955
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              "3eea1654-54bf-d663-9b54-846da07b7771"
+            ],
+            "durationMs": 12.411916999999448
+          },
+          {
+            "params": [
+              "enrollment-2098-01-04",
+              500,
+              "4b5f9b68-c9b2-005a-34d6-b78bec627cb0"
+            ],
+            "durationMs": 11.948041999999987
+          }
+        ],
+        "firstTickEntitlements": 13500,
+        "firstTickObligations": 13500,
+        "budgetExceeded": true,
+        "candidateSelectExceededBudget": false,
+        "firstTickParentCounts": [
+          {
+            "_count": {
+              "_all": 10000
+            },
+            "eventId": "enrollment-2098-01-03"
+          },
+          {
+            "_count": {
+              "_all": 3500
+            },
+            "eventId": "enrollment-2098-01-04"
+          }
+        ],
+        "followupTicks": [
+          {
+            "elapsedMs": 1969.8329580000009,
+            "queryCount": 161,
+            "leadingSqlVerbs": {
+              "SELECT": 90,
+              "INSERT": 13,
+              "UPDATE": 0,
+              "DELETE": 0,
+              "WITH": 41,
+              "BEGIN": 0,
+              "COMMIT": 17,
+              "ROLLBACK": 0,
+              "OTHER": 0
+            },
+            "candidatePages": 15
+          }
+        ],
+        "finalEntitlements": 20000,
+        "cumulativeElapsedMs": 7092.9657910000005,
+        "cumulativeQueryCount": 470,
+        "finalObligations": 20000,
+        "finalParentCounts": [
+          {
+            "_count": {
+              "_all": 10000
+            },
+            "eventId": "enrollment-2098-01-03"
+          },
+          {
+            "_count": {
+              "_all": 10000
+            },
+            "eventId": "enrollment-2098-01-04"
+          }
+        ],
+        "queryShape": "approved"
+      },
+      "comparisons": [
+        {
+          "pageSize": 100,
+          "cursor": null,
+          "rows": 100,
+          "pass": true,
+          "ratio": 0.8036715961244263,
+          "median": {
+            "baselineBuffers": 1961,
+            "candidateBuffers": 1576,
+            "baselineExecutionMs": 0.447,
+            "candidateExecutionMs": 11.361,
+            "baselinePlanningMs": 0.182,
+            "candidatePlanningMs": 0.135
+          },
+          "samples": [
+            {
+              "baseline": {
+                "planningMs": 0.219,
+                "executionMs": 0.432,
+                "hits": 1961,
+                "reads": 0,
+                "buffers": 1961,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 525,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.35,
+                    "loops": 343,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.135,
+                "executionMs": 11.421,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.182,
+                "executionMs": 0.447,
+                "hits": 1961,
+                "reads": 0,
+                "buffers": 1961,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 525,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.35,
+                    "loops": 343,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.181,
+                "executionMs": 11.361,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.135,
+                "executionMs": 0.399,
+                "hits": 1961,
+                "reads": 0,
+                "buffers": 1961,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 525,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.35,
+                    "loops": 343,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.122,
+                "executionMs": 11.207,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.218,
+                "executionMs": 0.502,
+                "hits": 1961,
+                "reads": 0,
+                "buffers": 1961,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 525,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.35,
+                    "loops": 343,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.141,
+                "executionMs": 11.47,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.156,
+                "executionMs": 0.45,
+                "hits": 1961,
+                "reads": 0,
+                "buffers": 1961,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 525,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.35,
+                    "loops": 343,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.124,
+                "executionMs": 11.312,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "pageSize": 100,
+          "cursor": "7fca8302-00d8-747e-92c8-7c96b2b363bb",
+          "rows": 100,
+          "pass": true,
+          "ratio": 0.7852516193323368,
+          "median": {
+            "baselineBuffers": 2007,
+            "candidateBuffers": 1576,
+            "baselineExecutionMs": 0.492,
+            "candidateExecutionMs": 7.799,
+            "baselinePlanningMs": 0.161,
+            "candidatePlanningMs": 0.14
+          },
+          "samples": [
+            {
+              "baseline": {
+                "planningMs": 0.196,
+                "executionMs": 0.505,
+                "hits": 2007,
+                "reads": 0,
+                "buffers": 2007,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 549,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.33,
+                    "loops": 350,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 250,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.124,
+                "executionMs": 7.724,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.161,
+                "executionMs": 0.492,
+                "hits": 2007,
+                "reads": 0,
+                "buffers": 2007,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 549,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.33,
+                    "loops": 350,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 250,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.14,
+                "executionMs": 7.722,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.14,
+                "executionMs": 0.468,
+                "hits": 2007,
+                "reads": 0,
+                "buffers": 2007,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 549,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.33,
+                    "loops": 350,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 250,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.14,
+                "executionMs": 7.799,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.191,
+                "executionMs": 0.545,
+                "hits": 2007,
+                "reads": 0,
+                "buffers": 2007,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 549,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.33,
+                    "loops": 350,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 250,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.178,
+                "executionMs": 8.005,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.132,
+                "executionMs": 0.477,
+                "hits": 2007,
+                "reads": 0,
+                "buffers": 2007,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 549,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.33,
+                    "loops": 350,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 250,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.119,
+                "executionMs": 7.825,
+                "hits": 1576,
+                "reads": 0,
+                "buffers": 1576,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 100,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Index Scan",
+                    "rows": 1,
+                    "loops": 100,
+                    "removed": 0
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "pageSize": 500,
+          "cursor": null,
+          "rows": 500,
+          "pass": true,
+          "ratio": 0.34878182817365816,
+          "median": {
+            "baselineBuffers": 5459,
+            "candidateBuffers": 1904,
+            "baselineExecutionMs": 5.889,
+            "candidateExecutionMs": 16.06,
+            "baselinePlanningMs": 0.202,
+            "candidatePlanningMs": 0.156
+          },
+          "samples": [
+            {
+              "baseline": {
+                "planningMs": 0.227,
+                "executionMs": 5.854,
+                "hits": 5459,
+                "reads": 0,
+                "buffers": 5459,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2594,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.23,
+                    "loops": 704,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.14,
+                "executionMs": 15.955,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.196,
+                "executionMs": 5.915,
+                "hits": 5459,
+                "reads": 0,
+                "buffers": 5459,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2594,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.23,
+                    "loops": 704,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.172,
+                "executionMs": 16.229,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.146,
+                "executionMs": 5.761,
+                "hits": 5459,
+                "reads": 0,
+                "buffers": 5459,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2594,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.23,
+                    "loops": 704,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.141,
+                "executionMs": 16.41,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.202,
+                "executionMs": 6.201,
+                "hits": 5459,
+                "reads": 0,
+                "buffers": 5459,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2594,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.23,
+                    "loops": 704,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.182,
+                "executionMs": 16.06,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.233,
+                "executionMs": 5.889,
+                "hits": 5459,
+                "reads": 0,
+                "buffers": 5459,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2594,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.23,
+                    "loops": 704,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.156,
+                "executionMs": 16.001,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 55000,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 10000,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "pageSize": 500,
+          "cursor": "7fca8302-00d8-747e-92c8-7c96b2b363bb",
+          "rows": 500,
+          "pass": true,
+          "ratio": 0.3421998562185478,
+          "median": {
+            "baselineBuffers": 5564,
+            "candidateBuffers": 1904,
+            "baselineExecutionMs": 6.27,
+            "candidateExecutionMs": 12.675,
+            "baselinePlanningMs": 0.211,
+            "candidatePlanningMs": 0.165
+          },
+          "samples": [
+            {
+              "baseline": {
+                "planningMs": 0.211,
+                "executionMs": 6.27,
+                "hits": 5564,
+                "reads": 0,
+                "buffers": 5564,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2678,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.22,
+                    "loops": 712,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1249,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.165,
+                "executionMs": 12.62,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.232,
+                "executionMs": 6.398,
+                "hits": 5564,
+                "reads": 0,
+                "buffers": 5564,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2678,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.22,
+                    "loops": 712,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1249,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.188,
+                "executionMs": 12.785,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.163,
+                "executionMs": 6,
+                "hits": 5564,
+                "reads": 0,
+                "buffers": 5564,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2678,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.22,
+                    "loops": 712,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1249,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.141,
+                "executionMs": 12.675,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.233,
+                "executionMs": 6.29,
+                "hits": 5564,
+                "reads": 0,
+                "buffers": 5564,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2678,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.22,
+                    "loops": 712,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1249,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.189,
+                "executionMs": 12.683,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            },
+            {
+              "baseline": {
+                "planningMs": 0.184,
+                "executionMs": 6.05,
+                "hits": 5564,
+                "reads": 0,
+                "buffers": 5564,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Index Scan",
+                    "rows": 2678,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Index Scan",
+                    "rows": 0.22,
+                    "loops": 712,
+                    "removed": 1
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 1249,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              },
+              "candidate": {
+                "planningMs": 0.137,
+                "executionMs": 12.529,
+                "hits": 1904,
+                "reads": 0,
+                "buffers": 1904,
+                "tempRead": 0,
+                "tempWritten": 0,
+                "rows": 500,
+                "visits": [
+                  {
+                    "relation": "race_participants",
+                    "type": "Seq Scan",
+                    "rows": 27513,
+                    "loops": 1,
+                    "removed": 27487
+                  },
+                  {
+                    "relation": "races",
+                    "type": "Bitmap Heap Scan",
+                    "rows": 160,
+                    "loops": 1,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "global_step_event_entitlements",
+                    "type": "Seq Scan",
+                    "rows": 0,
+                    "loops": 4999,
+                    "removed": 0
+                  },
+                  {
+                    "relation": "users",
+                    "type": "Seq Scan",
+                    "rows": 40000,
+                    "loops": 1,
+                    "removed": 0
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

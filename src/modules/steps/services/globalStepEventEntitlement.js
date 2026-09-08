@@ -439,30 +439,31 @@ async function materializeEntitlementsForActiveRacers(event, {
       ? { candidates: 0, created: 0, nextCursor: afterUserId, exhausted: true }
       : 0;
   }
-  // Page unique users in PostgreSQL. Prisma's distinct+take path fetched all
-  // qualifying participant rows before deduplicating users in the application.
+  // Materialize distinct active users before the entitlement anti-join. LIMIT
+  // follows that anti-join so enrolled users cannot consume or truncate a page.
   const candidateUsers = await prisma.$queryRawUnsafe(
-    `WITH enrollment_candidates AS MATERIALIZED (
-       SELECT DISTINCT participant.user_id
-       FROM race_participants participant
-       JOIN races race ON race.id=participant.race_id
-       WHERE participant.status='accepted'
-         AND participant.forfeited_at IS NULL
-         AND participant.finished_at IS NULL
-         AND race.status='active'
-         AND ($3::text IS NULL OR participant.user_id>$3)
-         AND NOT EXISTS (
-           SELECT 1 FROM global_step_event_entitlements entitlement
-           WHERE entitlement.event_id=$1
-             AND entitlement.user_id=participant.user_id
-         )
-       ORDER BY participant.user_id LIMIT $2
-     )
-     SELECT person.id,person.timezone,
-            person.global_event_timezone AS "globalEventTimezone"
-     FROM enrollment_candidates candidate
-     JOIN users person ON person.id=candidate.user_id
-     ORDER BY person.id`,
+    `WITH active_users AS MATERIALIZED (
+  SELECT DISTINCT participant.user_id
+    FROM races race
+    JOIN race_participants participant ON participant.race_id = race.id
+   WHERE race.status = 'active'
+     AND participant.status = 'accepted'
+     AND participant.forfeited_at IS NULL
+     AND participant.finished_at IS NULL
+     AND ($3::text IS NULL OR participant.user_id > $3)
+), enrollment_candidates AS MATERIALIZED (
+  SELECT active.user_id FROM active_users active
+   WHERE NOT EXISTS (
+     SELECT 1 FROM global_step_event_entitlements entitlement
+      WHERE entitlement.event_id = $1 AND entitlement.user_id = active.user_id
+   )
+   ORDER BY active.user_id LIMIT $2
+)
+SELECT person.id, person.timezone,
+       person.global_event_timezone AS "globalEventTimezone"
+  FROM enrollment_candidates candidate
+  JOIN users person ON person.id = candidate.user_id
+ ORDER BY person.id`,
     event.id,
     batchSize,
     afterUserId,
