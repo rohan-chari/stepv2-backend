@@ -345,17 +345,6 @@ function buildGetRaceProgress(deps = {}) {
     hasInjectedDependencies,
     legacyReplayForTests,
   });
-  function requestWorkerRefresh({ raceId, userId, scoringTimeZone }) {
-    // The durable queue coalesces exact pending viewer work. A process-local
-    // race-only promise can suppress another viewer or cache a failed enqueue.
-    return Promise.resolve().then(() => enqueueRaceResolutionFn({
-      raceId,
-      userId,
-      timeZone: scoringTimeZone,
-      reason: "DISPLAY_REFRESH",
-      priority: "IMMEDIATE",
-    }));
-  }
 
   function buildProgressMoney(race, participantSummary = null) {
     const participants = race?.participants || [];
@@ -1245,25 +1234,26 @@ function buildGetRaceProgress(deps = {}) {
       ? new Map()
       : buildViewerDisplayPlacementMap(rankEntries, maskedUserIds);
 
-    // Roll powerups for the requesting user if they crossed a threshold.
-    // Spectators (no myParticipant) never earn powerups — skip the whole block.
+    // Display the requesting participant's committed box state. Production
+    // minting and canonical progress calculation belong to the queue.
     let powerupData = null;
     let balanceConfigSnapshot = null;
     if (myParticipant && snapRace.powerupsEnabled && snapRace.powerupStepInterval) {
-      // Box progress tracks RAW walked steps — immune to every buff/debuff
-      // multiplier. It buckets calendar days in boxTz = raceTimeZone(race,
-      // "UTC"): the race's canonical persisted tz if set, else the literal
-      // constant "UTC" — never the request tz. When boxTz === the leaderboard's
-      // scoring tz we REUSE the snapshot's `baseAdjusted` so box and leaderboard
-      // agree by construction. A non-ACCEPTED requester, a null-tz race, and the
-      // persisted fallback (which has no baseAdjusted) all recompute here for
-      // THIS USER ONLY. Lazy require breaks the getRaceProgress <->
-      // raceStateResolution import cycle.
+      // Only the retained injected/legacy test seam reconstructs box steps.
+      // Production uses the queue's canonical value regardless of request tz.
       const boxTz = raceTimeZone(race, "UTC");
       const myEntry = viewerEntries.find((e) => e.participantId === myParticipant.id);
       const reusedLeaderboardBase = myEntry ? myEntry.baseAdjusted : null;
+      const committedBoxParticipant = workerOwnedRefresh &&
+        typeof participantModel.findById === "function"
+          ? (await participantModel.findById(myParticipant.id)) || myParticipant
+          : myParticipant;
       let myBoxBaseAdjusted;
-      if (scoringTimeZone === boxTz && reusedLeaderboardBase != null) {
+      if (workerOwnedRefresh) {
+        // The queue persists its actual box-award input. rawSteps is not a
+        // substitute: it may be high-watered or use a different calendar.
+        myBoxBaseAdjusted = 0;
+      } else if (scoringTimeZone === boxTz && reusedLeaderboardBase != null) {
         myBoxBaseAdjusted = reusedLeaderboardBase;
       } else {
         const { calculateBaseAdjusted } = require("../services/raceStateResolution");
@@ -1277,12 +1267,14 @@ function buildGetRaceProgress(deps = {}) {
           raceEndsAt: race.endsAt,
         }));
       }
-      const myBoxEffectiveSteps = computeBoxEffectiveSteps({
+      const myBoxEffectiveSteps = workerOwnedRefresh
+        ? Math.max(0, Number(committedBoxParticipant.boxProgressSteps) || 0)
+        : computeBoxEffectiveSteps({
         baseAdjusted: myBoxBaseAdjusted,
         bonusSteps: myParticipant.bonusSteps || 0,
         maxBonusSteps: myParticipant.maxBonusSteps || 0,
       });
-      const preSyncParticipant =
+      const preSyncParticipant = workerOwnedRefresh ? committedBoxParticipant :
         typeof participantModel.findById === "function"
           ? await participantModel.findById(myParticipant.id)
           : myParticipant;
@@ -1291,11 +1283,8 @@ function buildGetRaceProgress(deps = {}) {
       const interval = snapRace.powerupStepInterval;
       const gateNeedsRepair =
         !(persistedGate > 0) || persistedGate % interval !== 0;
-      // Phase D step 8: the box-gate sync WRITES race_participants
-      // (nextBoxAtSteps, maxBonusSteps) and mints RacePowerup rows, so with the
-      // flag on it belongs to the worker, which runs it for every triggering
-      // user of the claimed job — and the progress poll's enqueue makes THIS
-      // viewer one of them.
+      // The queue initializes/repairs gates and awards boxes. A GET consumes
+      // its recent-mint notification without scheduling another calculation.
       //
       // The mint delta (`newMysteryBoxes`/`newQueuedBoxes`) is what drives the
       // client's "You earned a mystery box!" toast, so it cannot simply go
@@ -1311,7 +1300,7 @@ function buildGetRaceProgress(deps = {}) {
             boxEffectiveSteps: myBoxEffectiveSteps,
           })
         : await recentBoxMintsStore.consume({ userId, raceId });
-      if (gateNeedsRepair) {
+      if (gateNeedsRepair && !workerOwnedRefresh) {
         await enqueueRaceResolutionFn({
           raceId,
           userId,
@@ -1358,7 +1347,7 @@ function buildGetRaceProgress(deps = {}) {
       }
 
       // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
-      const freshParticipant = gateNeedsRepair
+      const freshParticipant = workerOwnedRefresh ? preSyncParticipant : gateNeedsRepair
         ? preSyncParticipant
         : await participantModel.findById(myParticipant.id);
       const mySlots = freshParticipant?.powerupSlots || 3;
@@ -1372,7 +1361,7 @@ function buildGetRaceProgress(deps = {}) {
       if (nextBoxAtSteps > 0) {
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
-        const effectiveSteps = computeBoxEffectiveSteps({
+        const effectiveSteps = workerOwnedRefresh ? myBoxEffectiveSteps : computeBoxEffectiveSteps({
           baseAdjusted: myBoxBaseAdjusted,
           bonusSteps: bonusNow,
           maxBonusSteps: maxBonus,
@@ -2228,7 +2217,7 @@ function buildGetRaceProgress(deps = {}) {
         asOf: projectionAsOf,
         projectionSource,
       };
-      if (!isPublicPreview && projectionSource !== "authoritative") {
+      if (!workerOwnedRefresh && !isPublicPreview && projectionSource !== "authoritative") {
         await enqueueRaceResolutionFn({
           raceId,
           userId,
@@ -2316,42 +2305,11 @@ function buildGetRaceProgress(deps = {}) {
         snapshotStore.__bump("snapshotHits");
         snapshot = usable;
       } else if (workerOwnedRefresh) {
-        // A production HTTP worker never replays a whole race. The dedicated
-        // resolution process owns refreshes, so a valid stale snapshot is
-        // served immediately and a true cold read waits briefly for its
-        // durable refresh before using persisted columns.
-        if (usable) {
-          snapshotStore.__bump("staleServes");
-          snapshot = usable;
-          void requestWorkerRefresh({ raceId, userId, scoringTimeZone })
-            .catch((error) => logger.warn?.(
-              "Race progress worker refresh enqueue failed",
-              { raceId, error: error?.message || "unknown" },
-            ));
-        } else {
-          await requestWorkerRefresh({ raceId, userId, scoringTimeZone });
-          let waited = null;
-          // Team rooms render the whole stored roster immediately on a cold
-          // read. The durable refresh above still owns authoritative scoring;
-          // waiting for its snapshot adds a second to opening the room without
-          // improving the persisted fallback we can already return safely.
-          if (race.isTeamRace !== true && (await redisCache.healthStatus()) === "ok") {
-            waited = await snapshotStore.waitForSnapshot(
-              raceId,
-              scoringTimeZone,
-              undefined,
-              snapshotSchemaVersion,
-            );
-          }
-          if (waited) {
-            snapshotStore.__bump("staleServes");
-            snapshot = waited;
-          } else {
-            snapshot = await loadPersistedState({
-              race: await ensureFullScoringContext(), raceId, scoringTimeZone,
-            });
-          }
-        }
+        // A display miss/expiry is not a scoring input. Return committed rows;
+        // step intake and mutation/boundary queues own calculation/publication.
+        snapshot = await loadPersistedState({
+          race: await ensureFullScoringContext(), raceId, scoringTimeZone,
+        });
       } else {
         let displayArtifactRef = null;
         // Miss or soft-expiry. Exactly ONE request rebuilds; the lock
@@ -2585,7 +2543,7 @@ function buildGetRaceProgress(deps = {}) {
       // gated on `myParticipant`, which they do not have), but this is the
       // response builder's own write seam and the read-only contract is worth
       // stating at it rather than relying on a guard two functions away.
-      syncPowerups: !cacheOn && !isPublicPreview,
+      syncPowerups: !workerOwnedRefresh && !cacheOn && !isPublicPreview,
       participantsView,
       participantsOffset,
       participantsLimit,

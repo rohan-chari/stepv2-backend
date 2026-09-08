@@ -2220,7 +2220,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const triggeringBoxRepairUsers = new Set(orderedTriggeringUserIds);
         const boxInterval = Number(result?.race?.powerupStepInterval || 0);
         const isTriggeredGateRepair = (participant) =>
-          triggeringBoxRepairUsers.has(participant.userId) &&
+          (fullBoxScope || triggeringBoxRepairUsers.has(participant.userId)) &&
           boxInterval > 0 &&
           (!(participant.nextBoxAtSteps > 0) ||
             participant.nextBoxAtSteps % boxInterval !== 0);
@@ -2240,6 +2240,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 userId: true,
                 nextBoxAtSteps: true,
                 powerupSlots: true,
+                boxProgressSteps: true,
               },
               orderBy: [{ userId: "asc" }, { id: "asc" }],
             })
@@ -2269,9 +2270,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // user/id order before either write path runs. This prevents a narrow
         // job from taking later box row P2 and subsequently waiting on earlier
         // score row P1 while a request holds P1 and waits on P2.
+        // Persist the same canonical box quantity this job uses for awards.
+        // Read requests must never reconstruct it from source samples.
+        const boxProgressWrites = boxCandidates.flatMap(participant => {
+          const value = boxByUser[participant.userId];
+          if (!Number.isFinite(value)) return [];
+          const boxProgressSteps = Math.max(0, Math.round(value));
+          return participant.boxProgressSteps === boxProgressSteps ? [] :
+            [{ id: participant.id, boxProgressSteps }];
+        });
         const participantRowLockIds = [...new Set([
           ...initiallySelectedBoxCandidates.map((participant) => participant.id),
           ...participantWrites.map((write) => write.participantId),
+          ...boxProgressWrites.map(write => write.id),
         ])];
         const lockedParticipantRows = participantRowLockIds.length > 0
           ? await tx.$queryRawUnsafe(
@@ -2334,6 +2345,16 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
         // (ii) participant rows, ascending userId
         await phaseTimer.measure("participantWrites", async () => {
+          if (boxProgressWrites.length > 0) await tx.$executeRawUnsafe(
+            `UPDATE race_participants participant
+                SET box_progress_steps=changed."boxProgressSteps"
+               FROM jsonb_to_recordset($1::jsonb) AS changed(id text,"boxProgressSteps" integer)
+              WHERE participant.id=changed.id AND participant.race_id=$2
+                AND participant.status='accepted' AND participant.finished_at IS NULL
+                AND participant.forfeited_at IS NULL
+                AND participant.box_progress_steps IS DISTINCT FROM changed."boxProgressSteps"`,
+            JSON.stringify(boxProgressWrites), job.raceId,
+          );
           if (bulkWritesEnabled) {
             await writeParticipantsBulk(tx, participantWrites, now());
           } else for (const write of participantWrites) {

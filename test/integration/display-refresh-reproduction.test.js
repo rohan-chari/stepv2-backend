@@ -97,12 +97,12 @@ for(const size of [10,100])it(`${size} participants: compare fresh and >15s-old 
  const stale=await measured(f);
  assert.equal(Object.entries(stale.queries).filter(([q])=>q.includes('race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"joined_at\" FROM')).reduce((n,[q,count])=>n+count,0),0,'no entitlement means no membership lookup');
  assert.deepEqual(stale.response,initial.response,'same source inputs preserve displayed totals');
- assert.ok(stale.attempts.some(e=>e.plan==='FULL'&&JSON.stringify(e.reasons)===JSON.stringify(['DISPLAY_REFRESH'])),'reproduce full display refresh');
+ assert.deepEqual(stale.attempts,[],'expired display cache must not trigger scoring');
  assert.ok(stale.attempts.every(e=>e.changedRows===0),'refresh has no participant total/bonus writes');
  await new Promise(r=>setTimeout(r,16050));
  const repeated=await measured(f);
  assert.deepEqual(repeated.response,initial.response);
- assert.ok(repeated.attempts.some(e=>e.plan==='FULL'&&JSON.stringify(e.reasons)===JSON.stringify(['DISPLAY_REFRESH'])),'a completed refresh does not prevent the next unchanged full refresh');
+ assert.deepEqual(repeated.attempts,[],'repeated unchanged reads must never trigger scoring');
  assert.ok(repeated.attempts.every(e=>e.changedRows===0));
  t.diagnostic(JSON.stringify({size,repeated:{...repeated,response:undefined},fresh:{...initial,response:undefined},stale:{...stale,response:undefined}}));
  await upload(f,125);await drain(f);

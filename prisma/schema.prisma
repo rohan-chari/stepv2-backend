@@ -2150,6 +2150,9 @@ model RaceParticipant {
   // never returned by any API — old app versions are unaffected.
   rawSteps                           Int?                  @map("raw_steps")
   baselineSteps                      Int                   @default(0) @map("baseline_steps")
+  // Canonical queue-computed box progress. Reads never replay step samples.
+  // Null means the participant has not yet been processed by this worker version.
+  boxProgressSteps                  Int?                  @map("box_progress_steps")
   nextBoxAtSteps                     Int                   @default(0) @map("next_box_at_steps")
   bonusSteps                         Int                   @default(0) @map("bonus_steps")
   maxBonusSteps                      Int                   @default(0) @map("max_bonus_steps")

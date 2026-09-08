@@ -464,7 +464,7 @@ describe("deadline cache and API compatibility with production worker ownership"
       false,
     );
   });
-  it("new viewers are durably deferred while a real boundary worker computes, then admitted after committed expiry", async () => {
+  it("preexisting viewer intents survive a boundary worker while new reads stay read-only", async () => {
     const f = await fixture();
     const other = await createTestUser();
     await prisma.raceParticipant.create({
@@ -497,10 +497,15 @@ describe("deadline cache and API compatibility with production worker ownership"
     const claimed = await prisma.raceResolutionJobV2.findUniqueOrThrow({
       where: { raceId: f.race.id },
     });
+    // Compatibility fixture: an intent persisted by the previous release.
+    // New GETs must neither create nor mutate that durable recovery obligation.
+    await prisma.raceProgressRefreshIntent.create({data:{raceId:f.race.id,userId:other.user.id,resolutionTimeZone:"UTC",minimumCommittedGeneration:claimed.processingGeneration}});
     try {
+      const intentBefore = await prisma.raceProgressRefreshIntent.findMany({where:{raceId:f.race.id}});
       await Promise.all(
         Array.from({ length: 20 }, () => read({ ...f, viewer: other })),
       );
+      assert.deepEqual(await prisma.raceProgressRefreshIntent.findMany({where:{raceId:f.race.id}}),intentBefore);
       const during = await prisma.raceResolutionJobV2.findUniqueOrThrow({
         where: { raceId: f.race.id },
       });
@@ -542,8 +547,8 @@ describe("deadline cache and API compatibility with production worker ownership"
           },
         })
       ).nextBoxAtSteps,
-      0,
-      "unrequested viewer gate remains pending until its followup",
+      5000,
+      "the FULL worker initializes gates without requiring a viewer followup",
     );
     await buildRaceResolutionWorkerV2({
       bootAt: 0,
@@ -652,6 +657,8 @@ describe("deadline cache and API compatibility with production worker ownership"
       where: { id: f.effect.id },
       data: { expiresAt: new Date(Date.now() - 10) },
     });
+    // An old persisted intent must still drain after this rollout.
+    await prisma.raceProgressRefreshIntent.create({data:{raceId:f.race.id,userId:other.user.id,resolutionTimeZone:"UTC",minimumCommittedGeneration:0}});
     let release, locked;
     const hold = new Promise((r) => (release = r));
     const acquired = new Promise((r) => (locked = r));
@@ -718,6 +725,8 @@ describe("deadline cache and API compatibility with production worker ownership"
     });
     const scheduler = buildRaceEffectDeadlineScheduler();
     await scheduler.tick();
+    // Simulate an intent left by the previous release, not created by this GET.
+    await prisma.raceProgressRefreshIntent.create({data:{raceId:f.race.id,userId:other.user.id,resolutionTimeZone:"UTC",minimumCommittedGeneration:0}});
     await read({ ...f, viewer: other });
     const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({
       where: { raceId: f.race.id },
