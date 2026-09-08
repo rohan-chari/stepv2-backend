@@ -1,5 +1,7 @@
 # Repeated display refresh reproduction
 
+Historical baseline. The implementation experiment and matched-control findings are in [guarded-display-experiment.md](guarded-display-experiment.md). On the experiment branch, the test now asserts guarded reuse and its invalidation cases; the original reproduction remains in commit 3466f77.
+
 Diagnostic against production code `441f307`, September 7, 2026 (EDT). No runtime change or production deployment.
 
 ## Result

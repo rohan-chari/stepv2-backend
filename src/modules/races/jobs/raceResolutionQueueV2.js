@@ -1092,6 +1092,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     const method = event?.event === "race_resolution_v2_watchdog" ? "error" : "log";
     (logger[method] || logger.log).call(logger, JSON.stringify(event));
   });
+  const committedDisplayCalculations = require('../services/committedDisplayCalculation')
+    .buildCommittedDisplayCalculationCache();
   const activeAttempts = new Map();
   let lastTerminalMonotonicAt = null;
   let lastExpiredRunningCount = null;
@@ -1596,7 +1598,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const sourceInputWork = containsSourceInputWork(
           job.processingDirtyReasons
         );
-        if (sourceInputWork) {
+        const displayInputWork = !forceFull && job.processingDirtyReasons?.length === 1 &&
+          job.processingDirtyReasons[0] === "DISPLAY_REFRESH";
+        if (sourceInputWork || displayInputWork) {
           if (!forceFull && closurePlan?.graphFingerprint && closurePlan?.validUntil) {
             // The closure planner already captured the exact canonical input
             // fingerprint. Source-input fencing intentionally shares it so a
@@ -1636,7 +1640,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 balanceConfigVersion: config.version,
               } : null;
           }
-          if (!sourceInputFingerprint?.digest) {
+          if (sourceInputWork && !sourceInputFingerprint?.digest) {
             const error = new Error("source-input fingerprint unavailable");
             error.code = "SOURCE_INPUT_SNAPSHOT_UNAVAILABLE";
             throw error;
@@ -1718,7 +1722,16 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
         }
 
-        if (artifactPayload) {
+        const pureDisplayRefresh = job.processingDirtyReasons?.length === 1 &&
+          job.processingDirtyReasons[0] === "DISPLAY_REFRESH";
+        const committedDisplay = !forceFull && !artifactPayload && pureDisplayRefresh &&
+          baseResolutionPlan === "FULL" && planningFingerprint &&
+          committedDisplayCalculations.get(job, planningFingerprint, now());
+        if (committedDisplay) {
+          resolutionPlan = "COMMITTED_DISPLAY";
+          capture = { writes: [] };
+          result = committedDisplay;
+        } else if (artifactPayload) {
           resolutionPlan = "ARTIFACT_REUSE";
           capture = { writes: artifactPayload.writes };
           result = artifactPayload.result;
@@ -1800,7 +1813,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             const useClosure = !forceFull && closurePlan != null;
             const protectedPlan = useClosure ? {
               digest: closurePlan.graphFingerprint, validUntil: closurePlan.validUntil,
-            } : sourceInputWork ? sourceInputFingerprint : null;
+            } : sourceInputFingerprint;
             const reusedModels = protectedPlan?.digest === planningFingerprint?.digest
               ? planningInputModels({
                 fingerprint: planningFingerprint, validUntil: protectedPlan?.validUntil,
@@ -2039,7 +2052,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         let sourceFenceNow = null;
         let sourceFenceConfig = null;
         let sourceFenceFingerprint = null;
-        if (sourceInputWork && !closureCommitting) {
+        if ((sourceInputWork || (displayInputWork && sourceInputFingerprint)) && !closureCommitting) {
           const dbClock = await tx.$queryRawUnsafe(
             `SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8
                AS "dbNowMs"`
@@ -2216,7 +2229,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // lock inversion and makes box consequences part of the race fence.
         const boxByUser = result?.boxEffectiveStepsByUser || {};
         const fullBoxScope =
-          resolutionPlan === "FULL" || resolutionPlan === "ARTIFACT_REUSE";
+          resolutionPlan === "FULL" || resolutionPlan === "ARTIFACT_REUSE" ||
+          resolutionPlan === "COMMITTED_DISPLAY";
         const triggeringBoxRepairUsers = new Set(orderedTriggeringUserIds);
         const boxInterval = Number(result?.race?.powerupStepInterval || 0);
         const isTriggeredGateRepair = (participant) =>
@@ -2602,6 +2616,18 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           !closureRejectedAtFence &&
           !sourceInputRejectedAtFence
         ) {
+          // Remember only a FULL, fenced, zero-score/side-write result. A later
+          // hit must match the complete fingerprint again and passes through
+          // the existing source-input fence, box recovery and durable handoff.
+          if (!superseded && pureDisplayRefresh && resolutionPlan === "FULL" &&
+              participantWrites.length === 0 && sideWrites.length === 0 &&
+              planningFingerprint?.digest && planningFingerprint.digest === sourceInputFingerprint?.digest) {
+            try {
+              committedDisplayCalculations.put(job, planningFingerprint, result, now());
+            } catch {
+              // Optional process-local witness; canonical work is committed.
+            }
+          }
           attempt.authoritativeCommitCompleted = true;
           committedPostTaskId = attemptedPostTaskId;
           if (placementHandoffGeneration != null) {
@@ -2746,6 +2772,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         [
           "FULL",
           "ARTIFACT_REUSE",
+          "COMMITTED_DISPLAY",
           "STEP_SYNC_COMMITTED",
           "STEP_SYNC_INCREMENTAL",
           "DEPENDENCY_CLOSURE",
