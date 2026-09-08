@@ -17,6 +17,7 @@ const {
 } = require("../../src/modules/steps/services/globalStepEventEntitlement");
 const {
   buildGlobalEventSummaryTick,
+  buildGlobalEventSummaryV2Tick,
   nextSummaryDueAt,
 } = require("../../src/modules/steps/jobs/globalEventSummary");
 const {
@@ -452,6 +453,101 @@ describe("global event summary expiry v2 HTTP contract", () => {
       state: "EXPIRED_UNDELIVERED",
       expiresAt: work.expiresAt.toISOString(),
     });
+  });
+
+  it("retries PROCESSING work after a budget release at its exact available time", async () => {
+    const owner = await createTestUser();
+    const event = await createEvent();
+    const now = new Date();
+    const retryAt = new Date(now.getTime() + 30_000);
+    const work = await prisma.globalEventSummaryWork.create({
+      data: { eventId: event.id, userId: owner.user.id, status: "QUEUED",
+        availableAt: now, expiresAt: new Date(now.getTime() + 120_000) },
+    });
+    // Exhaust the real worker's budget after claiming; no mocked queue methods.
+    await buildGlobalEventSummaryV2Tick({ prisma, now: () => now,
+      tickBudgetMs: -1, retryMs: 30_000 })();
+    const released = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { id: work.id } });
+    assert.equal(released.status, "PROCESSING");
+    assert.equal(released.leaseUntil, null);
+    assert.equal(released.leaseToken, null);
+    assert.equal(released.availableAt.toISOString(), retryAt.toISOString());
+    assert.equal((await nextSummaryDueAt(prisma))?.toISOString(), retryAt.toISOString());
+
+    await buildGlobalEventSummaryV2Tick({ prisma, now: () => new Date(retryAt.getTime() - 1) })();
+    assert.equal((await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { id: work.id } })).attemptCount, 1);
+    // A newly constructed worker must recover the persisted retry after restart.
+    await buildGlobalEventSummaryV2Tick({ prisma, now: () => retryAt })();
+    const retried = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { id: work.id } });
+    assert.equal(retried.attemptCount, 2);
+    assert.equal(retried.status, "WAITING_RACES");
+  });
+
+  it("recovers PROCESSING work when readiness recovery clears its expired lease", async () => {
+    const owner = await createTestUser();
+    const event = await createEvent();
+    const now = new Date();
+    const work = await prisma.globalEventSummaryWork.create({
+      data: { eventId: event.id, userId: owner.user.id, status: "PROCESSING",
+        availableAt: new Date(now.getTime() - 60_000),
+        expiresAt: new Date(now.getTime() - 1_000),
+        nextRecoveryAt: new Date(now.getTime() - 1_000),
+        leaseToken: randomUUID(), leaseUntil: new Date(now.getTime() - 1_000) },
+    });
+    const result = await buildGlobalEventSummaryV2Tick({ prisma, now: () => now })({ recovery: true });
+    assert.equal(result.expired, 1);
+    const expired = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { id: work.id } });
+    assert.equal(expired.status, "EXPIRED_UNDELIVERED");
+    assert.equal(expired.leaseToken, null);
+    assert.equal(expired.leaseUntil, null);
+  });
+
+  it("drains stranded PROCESSING summaries in bounded claims without stealing live leases or sending expired recaps", async () => {
+    const owner = await createTestUser();
+    const now = new Date();
+    const stranded = [];
+    for (let i = 0; i < 3; i++) {
+      const event = await createEvent();
+      stranded.push(await prisma.globalEventSummaryWork.create({
+        data: { eventId: event.id, userId: owner.user.id, status: "PROCESSING",
+          availableAt: new Date(now.getTime() - 60_000), expiresAt: new Date(now.getTime() - 1_000) },
+      }));
+    }
+    const liveEvent = await createEvent();
+    const live = await prisma.globalEventSummaryWork.create({
+      data: { eventId: liveEvent.id, userId: owner.user.id, status: "PROCESSING",
+        availableAt: new Date(now.getTime() - 60_000), expiresAt: new Date(now.getTime() + 120_000),
+        leaseToken: randomUUID(), leaseUntil: new Date(now.getTime() + 60_000) },
+    });
+    const options = { prisma, now: () => now, batchSize: 1 };
+    const first = await buildGlobalEventSummaryV2Tick(options)();
+    assert.equal(first.expired, 1);
+    assert.equal(await prisma.globalEventSummaryWork.count({ where: { status: "EXPIRED_UNDELIVERED" } }), 1);
+    await Promise.all([buildGlobalEventSummaryV2Tick(options)(), buildGlobalEventSummaryV2Tick(options)()]);
+    await buildGlobalEventSummaryV2Tick(options)();
+    for (const work of stranded) {
+      const expired = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { id: work.id } });
+      assert.equal(expired.status, "EXPIRED_UNDELIVERED");
+      assert.equal(expired.attemptCount, 1);
+      assert.equal(await prisma.jobRun.count({ where: {
+        jobName: `global_event_summary:${work.eventId}:${owner.user.id}:v2`,
+      } }), 1);
+      for (const headers of [{}, { "X-Client-Features": CAPABILITIES }]) {
+        const response = await request(server.baseUrl, "GET", `/home/global-event-summary-work/${work.id}`,
+          { token: owner.token, headers });
+        if (headers["X-Client-Features"]) {
+          assert.equal(response.status, 200);
+          assert.equal((await response.json()).state, "EXPIRED_UNDELIVERED");
+        } else {
+          assert.equal(response.status, 404);
+          assert.equal((await response.json()).code, "NOT_FOUND");
+        }
+      }
+    }
+    const protectedWork = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { id: live.id } });
+    assert.equal(protectedWork.attemptCount, 0);
+    assert.equal(protectedWork.leaseToken, live.leaseToken);
+    assert.equal(await prisma.globalEventUserSummary.count({}), 0);
   });
 
   it("claims ready summary work once with a token-fenced database lease", async () => {
