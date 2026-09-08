@@ -93,18 +93,34 @@ async function readSampleInputBounds(client, userId) {
 // Serialize no-op classification per user. The row lock makes daily and sample
 // writers compare/update one canonical watermark without write skew. Database
 // time is returned by the same read and is the only boundary clock used.
+// Existing rows need the lock, not a new tuple version. The insert fallback
+// still handles a concurrent creator invisible to this statement's snapshot:
+// ON CONFLICT waits and returns its committed state rather than an empty result.
 async function lockScoringInputState(client, userId) {
   const rows = await client.$queryRawUnsafe(
-    `INSERT INTO user_scoring_input_versions (user_id,generation,updated_at)
-     VALUES ($1,1,CURRENT_TIMESTAMP)
+    `WITH locked AS MATERIALIZED (
+       SELECT generation,
+         source_queue_semantics_generation AS "sourceQueueSemanticsGeneration",
+         scoring_watermark AS "scoringWatermark",
+         next_sample_boundary_at AS "nextSampleBoundaryAt",
+         false AS inserted
+       FROM user_scoring_input_versions WHERE user_id=$1
+       FOR NO KEY UPDATE
+     ), created AS (
+     INSERT INTO user_scoring_input_versions (user_id,generation,updated_at)
+     SELECT $1,1,CURRENT_TIMESTAMP
+     WHERE NOT EXISTS (SELECT 1 FROM locked)
      ON CONFLICT (user_id) DO UPDATE SET
        generation=user_scoring_input_versions.generation
      RETURNING generation,
        source_queue_semantics_generation AS "sourceQueueSemanticsGeneration",
        scoring_watermark AS "scoringWatermark",
        next_sample_boundary_at AS "nextSampleBoundaryAt",
-       (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS "dbNowMs",
-       (xmax = 0) AS inserted`,
+       (xmax = 0) AS inserted
+     )
+     SELECT state.*,
+       (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS "dbNowMs"
+     FROM (SELECT * FROM locked UNION ALL SELECT * FROM created) state`,
     userId
   );
   const row = rows[0] || {};
