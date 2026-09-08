@@ -44,11 +44,28 @@ or configuration changes were made. These plans are not a CPU benchmark.
 
 ## Release scope
 
-Not deployed. Cherry-pick this fix onto the current production release after
-fresh authorization; do not deploy unrelated unreleased main changes.
+The approved release plan isolates this fix on the current production release;
+do not deploy unrelated unreleased main changes.
 The normal bounded summary worker will expire eligible stranded rows and write
 its existing job fences. No one-off database repair is needed. After release,
 verify PROCESSING/NULL-lease expired rows drain, retry deadlines remain bounded,
 worker errors do not rise and no late summaries are delivered. Existing expired
 summaries cannot be restored by this fix. Reverting the application stops the
 new claim behavior; it does not undo terminalization already committed.
+
+
+## Production verification
+
+User authorized deployment after implementation. Release `8dbcca0` cherry-picks
+`7ef0a6b` onto deployed `7e4132c`; branch `release/summary-lease-fix` is pushed.
+All 68 selected integration tests also passed on this exact release candidate.
+The guarded production reload completed on 2026-09-08 at approximately 19:15 UTC.
+Health and Redis checks passed; topology validation confirmed two HTTP workers,
+one cron and one resolution worker, with the existing aggregate pool budget 32.
+Staging stayed stopped and the server's existing package-lock modification was
+preserved. No migrations, dependency installation or one-off data repair ran.
+
+Saved the 357 stranded IDs before deployment. At 19:16:30 UTC, read-only audit
+confirmed all 357 were EXPIRED_UNDELIVERED, all 357 had completion job fences,
+and none retained a lease. Observed summary drain ticks reported zero retries
+and zero summaries committed. This verifies recovery, not a measured CPU gain.
