@@ -1,6 +1,6 @@
 # Power Outage: 2,000-recipient integration benchmark
 
-Measured locally on 2026-09-08. Implementation is prepared locally, not deployed.
+Measured locally on 2026-09-08. These are local measurements, not production timings.
 
 ## Result
 
@@ -115,8 +115,9 @@ contention or the background race-resolution/notification workers.
 To rerun against a migrated, dedicated local test database:
 
 ```sh
-DATABASE_URL=postgresql://localhost:5432/steps_outage_2000_test \
+DATABASE_URL="postgresql://${USER}@localhost:5432/steps_outage_2000_test" \
 NODE_ENV=test \
+SESSION_TOKEN_SECRET=outage-local-test-only-secret \
 REFERRAL_IP_HMAC_ACTIVE_VERSION=1 \
 REFERRAL_IP_HMAC_SECRET_V1=integration-test-only-referral-hmac-secret-material \
 node --test --test-concurrency=1 --test-force-exit test/integration/power-outage-2000.test.js
