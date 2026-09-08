@@ -26,7 +26,7 @@ async function buildRaceResolutionInputFingerprint({
   const horizon = new Date(now.getTime() + GLOBAL_EVENT_LOOKAHEAD_MS);
   const [raceRows, inputs, effects, eventRows] = await Promise.all([
     client.$queryRawUnsafe(
-      `SELECT race.id AS "r_id",
+      `/* steps:prepared-read:v1 */ SELECT race.id AS "r_id",
        race.name AS "r_name",
        (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS "r_scheduledStartAt",
        race.team_a_name AS "r_teamAName",
@@ -68,7 +68,7 @@ async function buildRaceResolutionInputFingerprint({
       raceId
     ),
     client.$queryRawUnsafe(
-      `WITH members AS (
+      `/* steps:prepared-read:v1 */ WITH members AS (
          SELECT DISTINCT participant.user_id
          FROM race_participants participant
          WHERE participant.race_id=$1 AND participant.status='accepted'
@@ -100,7 +100,7 @@ async function buildRaceResolutionInputFingerprint({
     // Expired local modifiers still affect steps earned during their windows;
     // expired Leech/Hitchhike links additionally remain part of the graph.
     client.$queryRawUnsafe(
-      `SELECT id, target_participant_id AS "targetParticipantId",
+      `/* steps:prepared-read:v1 */ SELECT id, target_participant_id AS "targetParticipantId",
          target_user_id AS "targetUserId", source_user_id AS "sourceUserId",
          powerup_id AS "powerupId", UPPER(type::text) AS type,
          CASE status WHEN 'active_effect' THEN 'ACTIVE'
@@ -118,7 +118,7 @@ async function buildRaceResolutionInputFingerprint({
       [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"]
     ),
     client.$queryRawUnsafe(
-      `WITH race_window AS (
+      `/* steps:prepared-read:v1 */ WITH race_window AS (
          SELECT started_at FROM races WHERE id=$1
        ), schedule AS (
          SELECT COALESCE((
