@@ -230,17 +230,35 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
         return null;
       const task = await model.claimSnapshotNext({ now: now() });
       if (!task) return null;
+      let terminal = false;
       try {
-        await processSnapshot(task);
+        // The claim uses an indexed EXISTS probe, not the legacy intent_count.
+        // A snapshot-only task can persist its completion and receipt now,
+        // without requeueing itself for a second delivery-lane claim.
+        const emptyIntents = task.hasIntents === false;
+        const completion = await processSnapshot(task, { deferCompletion: emptyIntents });
+        if (emptyIntents && completion) {
+          terminal = Boolean(await model.finish({
+            taskId: task.id, leaseToken: task.leaseToken,
+            snapshotCompletion: completion, now: now(),
+          }));
+          // Defensively retain the publication outcome if new delivery work
+          // prevents terminalization. Its ordinary lane must not republish.
+          if (!terminal) await model.completeSnapshot({
+            taskId: task.id, ...completion, now: now(),
+          });
+        }
       } finally {
-        await model.releaseSnapshotLease({
-          taskId: task.id,
-          leaseToken: task.leaseToken,
-          now: now(),
-        });
-        await redisCache.publishDurableQueueWakeup("post-task", {
-          workKind: "ordinary",
-        });
+        if (!terminal) {
+          await model.releaseSnapshotLease({
+            taskId: task.id,
+            leaseToken: task.leaseToken,
+            now: now(),
+          });
+          await redisCache.publishDurableQueueWakeup("post-task", {
+            workKind: "ordinary",
+          });
+        }
       }
       return task.id;
     },

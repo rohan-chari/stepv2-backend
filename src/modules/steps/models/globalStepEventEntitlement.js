@@ -30,7 +30,7 @@ async function findEligibleByRace({
   const hasCompleteSuppliedMemberships = suppliedMemberships !== null &&
     suppliedMembershipIds.size === ids.length &&
     ids.every((id) => suppliedMembershipIds.has(id));
-  const [legacyEvents, entitlements, memberships] = await Promise.all([
+  const [legacyEvents, entitlements] = await Promise.all([
     client.globalStepEvent.findMany({
       where: {
         scheduleMode: LEGACY_GLOBAL,
@@ -50,22 +50,29 @@ async function findEligibleByRace({
       include: { event: true },
       orderBy: { startsAt: "asc" },
     }),
-    hasCompleteSuppliedMemberships
-      ? Promise.resolve(suppliedMemberships)
-      : typeof client.raceParticipant?.findMany === "function"
-      ? client.raceParticipant.findMany({
-          where: { raceId, userId: { in: ids }, status: "ACCEPTED" },
-          select: { userId: true, joinedAt: true },
-        })
-        : Promise.resolve([]),
   ]);
   for (const id of ids) map.get(id).push(...legacyEvents);
 
   const eventIds = [...new Set(entitlements.map((row) => row.eventId))];
-  const impacts = eventIds.length === 0 ? [] : await client.globalEventRaceImpact.findMany({
-    where: { raceId, userId: { in: ids }, eventId: { in: eventIds } },
-    select: { id: true, eventId: true, userId: true, status: true },
-  });
+  const [impacts, memberships] = await Promise.all([
+    eventIds.length === 0 ? [] : client.globalEventRaceImpact.findMany({
+      where: { raceId, userId: { in: ids }, eventId: { in: eventIds } },
+      select: { id: true, eventId: true, userId: true, status: true },
+    }),
+    // Membership clipping is consumed only by local entitlements below.
+    // An empty entitlement result needs no roster query at all; legacy global
+    // events are independent of each participant's join timestamp.
+    entitlements.length === 0 ? [] : (
+      hasCompleteSuppliedMemberships
+        ? Promise.resolve(suppliedMemberships)
+        : typeof client.raceParticipant?.findMany === "function"
+          ? client.raceParticipant.findMany({
+              where: { raceId, userId: { in: ids }, status: "ACCEPTED" },
+              select: { userId: true, joinedAt: true },
+            })
+          : Promise.resolve([])
+    ),
+  ]);
   const impactByEventUser = new Map(
     impacts.map((impact) => [`${impact.eventId}:${impact.userId}`, impact])
   );
