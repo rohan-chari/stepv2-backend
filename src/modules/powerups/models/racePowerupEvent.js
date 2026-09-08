@@ -42,6 +42,26 @@ function applyCursor(where, cursor) {
 }
 
 const RacePowerupEvent = {
+  // One invalidation per race after commit, carrying the newest durable marker
+  // from the batch. Preserve every feed row, including individual shield blocks.
+  async createMany(inputs) {
+    if (inputs.length === 0) return;
+    const newestByRace = new Map();
+    for (let offset = 0; offset < inputs.length; offset += 500) {
+      const rows = await prisma.racePowerupEvent.createManyAndReturn({
+        data: inputs.slice(offset, offset + 500),
+      });
+      for (const row of rows) {
+        const previous = newestByRace.get(row.raceId);
+        if (!previous || row.createdAt > previous.createdAt ||
+            (row.createdAt.getTime() === previous.createdAt.getTime() && row.id > previous.id)) {
+          newestByRace.set(row.raceId, row);
+        }
+      }
+    }
+    for (const row of newestByRace.values()) await invalidateCreatedEvent(row);
+  },
+
   async create({
     raceId,
     actorUserId,

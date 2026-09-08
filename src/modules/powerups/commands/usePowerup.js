@@ -6,7 +6,10 @@ const { Race } = require("../../races/models/race");
 const { User } = require("../../users");
 const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
 const { eventBus } = require("../../../shared/events/eventBus");
-const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
+const {
+  appendDomainEvent: defaultAppendDomainEvent,
+  bulkAppendDomainEvents: defaultBulkAppendDomainEvents,
+} = require("../../domainEvents");
 const {
   prisma: defaultPrisma,
   runInPrismaTransaction,
@@ -578,6 +581,7 @@ async function resolveAoEDecoySlots({
   now,
   consumeDecoy,
   attackPowerupType,
+  effectsByParticipant,
 }) {
   const resolvedAt = now();
   const slots = [];
@@ -585,7 +589,11 @@ async function resolveAoEDecoySlots({
   const redirectedToUserIds = new Set();
 
   for (const victim of victims) {
-    const decoy = await effectModel.findActiveByTypeForParticipant(
+    const decoy = effectsByParticipant
+      ? (effectsByParticipant.get(victim.id) || []).find(
+        (effect) => effect.type === "DECOY" && effect.expiresAt && new Date(effect.expiresAt) > resolvedAt,
+      )
+      : await effectModel.findActiveByTypeForParticipant(
       victim.id,
       "DECOY",
       { expiresAfter: resolvedAt },
@@ -1075,6 +1083,17 @@ function buildUsePowerup(dependencies = {}) {
   const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
   const immediateEvents = dependencies.eventBus || eventBus;
   const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
+  const bulkAppendDomainEvents = dependencies.bulkAppendDomainEvents || defaultBulkAppendDomainEvents;
+  function decoyConsumptionEvent({ decoy, ownerParticipant, attackPowerupType, outcome, attackerUserId, raceId }) {
+    return {
+      eventKey: `DECOY_CONSUMED_V1:${decoy.id}`,
+      eventType: "DECOY_CONSUMED_V1", schemaVersion: 1,
+      aggregateType: "POWERUP", aggregateId: decoy.id, occurredAt: new Date(),
+      payload: { decoyEffectId: decoy.id, raceId, ownerUserId: ownerParticipant.userId,
+        attackerUserId, attackPowerupType, outcome },
+      audience: [{ recipientId: ownerParticipant.userId, facts: {} }],
+    };
+  }
   async function consumeDecoy({
     decoy,
     ownerParticipant,
@@ -1084,54 +1103,48 @@ function buildUsePowerup(dependencies = {}) {
     raceId,
   }) {
     await effectModel.update(decoy.id, { status: "EXPIRED" });
+    await appendDomainEvent(db, decoyConsumptionEvent({
+      decoy, ownerParticipant, attackPowerupType, outcome, attackerUserId, raceId,
+    }));
+  }
+  function powerupUsedDomainEvent(data) {
     const occurredAt = new Date();
-    await appendDomainEvent(db, {
-      eventKey: `DECOY_CONSUMED_V1:${decoy.id}`,
-      eventType: "DECOY_CONSUMED_V1",
-      schemaVersion: 1,
-      aggregateType: "POWERUP",
-      aggregateId: decoy.id,
-      occurredAt,
+    const targetId = data.targetUserId || "self";
+    return {
+      eventKey: `POWERUP_USED_V1:${data.powerupId}:${targetId}`,
+      eventType: "POWERUP_USED_V1", schemaVersion: 1,
+      aggregateType: "POWERUP", aggregateId: data.powerupId, occurredAt,
       payload: {
-        decoyEffectId: decoy.id,
-        raceId,
-        ownerUserId: ownerParticipant.userId,
-        attackerUserId,
-        attackPowerupType,
-        outcome,
+        powerupId: data.powerupId, raceId: data.raceId,
+        actorUserId: data.userId, powerupType: data.powerupType,
+        targetUserId: data.targetUserId ?? null, upgradeLevel: data.upgradeLevel || 0,
+        stealthed: data.stealthed === true, occurredAt, notificationIntentId: data.notificationIntentId,
       },
-      audience: [{ recipientId: ownerParticipant.userId, facts: {} }],
-    });
+      audience: data.targetUserId && data.targetUserId !== data.userId
+        ? [{ recipientId: data.targetUserId, facts: {} }] : [],
+    };
   }
   const events = hasInjectedDeps
     ? immediateEvents
     : {
         async emit(eventName, data) {
           if (eventName === "POWERUP_USED") {
-            const occurredAt = new Date();
-            const targetId = data.targetUserId || "self";
-            await appendDomainEvent(defaultPrisma, {
-              eventKey: `POWERUP_USED_V1:${data.powerupId}:${targetId}`,
-              eventType: "POWERUP_USED_V1", schemaVersion: 1,
-              aggregateType: "POWERUP", aggregateId: data.powerupId,
-              occurredAt,
-              payload: {
-                powerupId: data.powerupId, raceId: data.raceId,
-                actorUserId: data.userId, powerupType: data.powerupType,
-                targetUserId: data.targetUserId ?? null,
-                upgradeLevel: data.upgradeLevel || 0,
-                stealthed: data.stealthed === true, occurredAt,
-                notificationIntentId: data.notificationIntentId,
-              },
-              audience: data.targetUserId && data.targetUserId !== data.userId
-                ? [{ recipientId: data.targetUserId, facts: {} }]
-                : [],
-            });
+            await appendDomainEvent(defaultPrisma, powerupUsedDomainEvent(data));
           }
           // Mixed-version compatibility only. The durable event above is the
           // correctness source; this post-commit hint preserves old in-process
           // handlers without allowing them to affect the powerup transaction.
           return deferUntilAfterCommit(() => immediateEvents.emit(eventName, data));
+        },
+        async emitMany(eventName, entries) {
+          if (eventName === "POWERUP_USED") {
+            await bulkAppendDomainEvents(db, entries.map(powerupUsedDomainEvent));
+          }
+          // Keep legacy hints after commit; durable delivery is still sourced
+          // from one immutable event/audience/receipt per affected player.
+          for (const data of entries) {
+            await deferUntilAfterCommit(() => immediateEvents.emit(eventName, data));
+          }
         },
       };
   // C0 (spec §5a item 4): after a powerup's own small writes, ENQUEUE the race
@@ -2156,6 +2169,19 @@ function buildUsePowerup(dependencies = {}) {
         .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
         .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
       const outageEnd = new Date(currentTime.getTime() + POWER_OUTAGE_DURATION_MS);
+      // Read defenses only after the outer transaction acquired the race fence
+      // and participant locks. Include teammates: a Decoy can redirect there.
+      let effectsByParticipant;
+      if (typeof effectModel.findActiveForParticipants === "function") {
+        effectsByParticipant = new Map();
+        for (const effect of await effectModel.findActiveForParticipants(acceptedParticipants.map((p) => p.id))) {
+          const list = effectsByParticipant.get(effect.targetParticipantId) || [];
+          list.push(effect);
+          effectsByParticipant.set(effect.targetParticipantId, list);
+        }
+      }
+      const consumedDecoyIds = [];
+      const decoyEvents = [];
       const decoyResolution = await resolveAoEDecoySlots({
         victims,
         acceptedParticipants,
@@ -2163,22 +2189,30 @@ function buildUsePowerup(dependencies = {}) {
         isAliveTarget,
         isTeamRace,
         effectModel,
+        effectsByParticipant,
         random,
         now: () => currentTime,
-        consumeDecoy: (input) => consumeDecoy({
-          ...input,
-          attackerUserId: userId,
-          raceId,
-        }),
+        consumeDecoy: (input) => {
+          const consumption = { ...input, attackerUserId: userId, raceId };
+          if (hasInjectedDeps) return consumeDecoy(consumption);
+          consumedDecoyIds.push(input.decoy.id);
+          decoyEvents.push(decoyConsumptionEvent(consumption));
+        },
         attackPowerupType: type,
       });
       const affected = new Set();
       const processedLandingIds = new Set();
+      const effectTargets = [];
+      const blockedSocksIds = [];
+      const blockedFeedEvents = [];
+      const blockedHints = [];
       let blockedCount = 0;
       for (const { landing } of decoyResolution.slots) {
         if (!landing || processedLandingIds.has(landing.id)) continue;
         processedLandingIds.add(landing.id);
-        const victimEffects = await effectModel.findActiveForParticipant(landing.id);
+        const victimEffects = effectsByParticipant
+          ? effectsByParticipant.get(landing.id) || []
+          : await effectModel.findActiveForParticipant(landing.id);
         const umbrella = victimEffects.find(
           (e) => e.type === "UMBRELLA" && e.expiresAt && new Date(e.expiresAt) > currentTime
         );
@@ -2191,9 +2225,9 @@ function buildUsePowerup(dependencies = {}) {
           (e) => e.type === "COMPRESSION_SOCKS" && e.expiresAt && new Date(e.expiresAt) > currentTime,
         );
         if (socks) {
-          await effectModel.update(socks.id, { status: "BLOCKED" });
+          blockedSocksIds.push(socks.id);
           blockedCount += 1;
-          await eventModel.create({
+          blockedFeedEvents.push({
             raceId,
             actorUserId: landing.userId,
             eventType: "POWERUP_BLOCKED",
@@ -2201,7 +2235,7 @@ function buildUsePowerup(dependencies = {}) {
             targetUserId: userId,
             description: `${landing.user?.displayName || "A runner"}'s Compression Socks kept the lights on through ${myDisplayName}'s Power Outage!`,
           });
-          events.emit("POWERUP_BLOCKED", {
+          blockedHints.push({
             raceId,
             attackerUserId: userId,
             defenderUserId: landing.userId,
@@ -2210,17 +2244,34 @@ function buildUsePowerup(dependencies = {}) {
           });
           continue;
         }
-        await effectModel.create({
-          raceId,
-          targetParticipantId: landing.id,
-          targetUserId: landing.userId,
-          sourceUserId: userId,
-          powerupId,
-          type: "POWER_OUTAGE",
-          startsAt: currentTime,
-          expiresAt: outageEnd,
-        });
+        effectTargets.push(landing);
         affected.add(landing.userId);
+      }
+      // All destinations/defenses are now decided in memory. Writes retain the
+      // same atomic commit as item consumption, with no per-recipient SQL.
+      if (!hasInjectedDeps) {
+        await effectModel.updateManyStatus(consumedDecoyIds, "EXPIRED");
+        await bulkAppendDomainEvents(db, decoyEvents);
+      }
+      if (typeof effectModel.updateManyStatus === "function") {
+        await effectModel.updateManyStatus(blockedSocksIds, "BLOCKED");
+      } else {
+        for (const id of blockedSocksIds) await effectModel.update(id, { status: "BLOCKED" });
+      }
+      if (typeof eventModel.createMany === "function") {
+        await eventModel.createMany(blockedFeedEvents);
+      } else {
+        for (const event of blockedFeedEvents) await eventModel.create(event);
+      }
+      for (const hint of blockedHints) await events.emit("POWERUP_BLOCKED", hint);
+      const effectInput = { raceId, sourceUserId: userId, powerupId, type,
+        startsAt: currentTime, expiresAt: outageEnd };
+      if (typeof effectModel.createManyForTargets === "function") {
+        await effectModel.createManyForTargets({ ...effectInput, targets: effectTargets });
+      } else {
+        for (const target of effectTargets) {
+          await effectModel.create({ ...effectInput, targetParticipantId: target.id, targetUserId: target.userId });
+        }
       }
       await eventModel.create({
         raceId,
@@ -2230,8 +2281,14 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} triggered a Power Outage! ${affected.size} rival${affected.size === 1 ? "" : "s"} can't use powerups for 30 minutes.`,
         metadata: { affected: affected.size, blockedCount },
       });
-      for (const uid of affected) {
-        await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}:${uid}`, raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
+      const stealthed = affected.size > 0 ? await casterStealthed() : false;
+      const usedEvents = [...affected].map((uid) => ({ powerupId,
+        notificationIntentId: `powerup:${powerupId}:${uid}`, raceId, userId,
+        powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed }));
+      if (typeof events.emitMany === "function") {
+        await events.emitMany("POWERUP_USED", usedEvents);
+      } else {
+        for (const event of usedEvents) await events.emit("POWERUP_USED", event);
       }
       await finalizeSelfContainedUse(null);
       const redirectedToUserIds = decoyResolution.redirectedToUserIds;

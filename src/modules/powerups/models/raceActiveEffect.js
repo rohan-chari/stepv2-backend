@@ -115,6 +115,30 @@ function buildActiveImpactDueReader(client = prisma) {
 
 const RaceActiveEffect = {
   ...buildActiveImpactDueReader(),
+  // Homogeneous offensive fanout: attribution is a fact of the cast, so read
+  // the caster once instead of twice per recipient. The command owns the race
+  // fence/participant locks and transaction; never use this for self effects.
+  async createManyForTargets({ raceId, sourceUserId, powerupId, type, startsAt, expiresAt, targets }) {
+    if (targets.length === 0) return;
+    if (targets.some((target) => target.userId === sourceUserId)) {
+      throw new Error("createManyForTargets requires non-caster recipients");
+    }
+    const metadata = await impactBoundaryMetadata({ raceId, sourceUserId, expiresAt });
+    for (let offset = 0; offset < targets.length; offset += 500) {
+      await prisma.raceActiveEffect.createMany({
+        data: targets.slice(offset, offset + 500).map((target) => ({
+          raceId, targetParticipantId: target.id, targetUserId: target.userId,
+          sourceUserId, powerupId, type, status: "ACTIVE", startsAt, expiresAt, metadata,
+        })),
+      });
+    }
+  },
+
+  async updateManyStatus(ids, status) {
+    if (ids.length === 0) return;
+    return prisma.raceActiveEffect.updateMany({ where: { id: { in: ids } }, data: { status } });
+  },
+
   async create({ raceId, targetParticipantId, targetUserId, sourceUserId, powerupId, type, startsAt, expiresAt, metadata }) {
     const durableMetadata = await impactBoundaryMetadata({
       raceId,
