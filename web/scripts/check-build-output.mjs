@@ -39,12 +39,13 @@ if (existsSync(join(distDir, "assets"))) {
 // is skipped or silently fails, /privacy (the App Store listing's URL) becomes
 // a blank page that still returns 200, which is invisible in any status check.
 const REQUIRED_PROSE = {
+  "billing-terms.html": "Bara Purchase Terms",
   "index.html": "more fun when you can steal",
   "privacy.html": "not write to or modify your health data",
   "support.html": "Common trail troubles",
 };
 
-for (const page of ["index.html", "privacy.html", "support.html"]) {
+for (const page of ["index.html", "privacy.html", "support.html", "billing-terms.html"]) {
   const file = join(distDir, page);
   if (!existsSync(file)) {
     problems.push(`dist/${page} is missing — the Express route for it would 500.`);
@@ -152,5 +153,5 @@ const bundles = existsSync(join(distDir, "web-assets"))
   ? readdirSync(join(distDir, "web-assets")).length
   : 0;
 console.log(
-  `[check-build-output] ok — 3 pages, ${bundles} bundled asset(s) under /web-assets.`
+  `[check-build-output] ok — 4 pages, ${bundles} bundled asset(s) under /web-assets.`
 );

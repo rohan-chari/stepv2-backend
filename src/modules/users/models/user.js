@@ -86,6 +86,7 @@ const User = {
     name,
     displayName,
     isReviewAccount,
+    billingRealm,
     nameSetupOnboardingRequired,
     metricsV2SignupEligible,
     metricsV2SignupEpochId,
@@ -104,6 +105,9 @@ const User = {
     }
     if (isReviewAccount !== undefined) {
       data.isReviewAccount = isReviewAccount;
+    }
+    if (billingRealm !== undefined) {
+      data.billingRealm = billingRealm;
     }
     if (nameSetupOnboardingRequired !== undefined) {
       data.nameSetupOnboardingRequired = nameSetupOnboardingRequired === true;

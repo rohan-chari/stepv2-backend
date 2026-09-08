@@ -518,6 +518,7 @@ function createAuthRouter(dependencies = {}) {
           // Hidden from real users (leaderboards, search, public races); the
           // reviewer still sees their own data via self-aware queries.
           isReviewAccount: true,
+          billingRealm: 'sandbox',
         });
       }
 

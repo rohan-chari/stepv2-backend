@@ -1,3 +1,4 @@
+const { scheduleBillingReconciliation } = require("./modules/billing/services/reconciliationWorker");
 require("dotenv").config();
 const { apnsService } = require("./shared/push/apns");
 const {
@@ -234,6 +235,7 @@ function startServer({
       return notificationAdmissionBarrierPromise;
     };
     const startCrons = () => {
+      retainStopHandle(scheduleBillingReconciliation());
       const scheduleTrackedResolutionWorker = () => {
         const handle = scheduleRaceResolution();
         if (reportCapacityResolutionWorker) {

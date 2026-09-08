@@ -1,3 +1,4 @@
+const { pricedItem } = require("../billing/services/memberPrice");
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../db");
 const { serializeShopItem, CHARACTER_SLOT } = require("./shopCosmetics");
@@ -59,6 +60,7 @@ async function purchaseShopItem({
   userId,
   itemId,
   idempotencyKey,
+  expectedPriceCoins,
   channel = "prod",
   supportsCharacters = false,
 }) {
@@ -80,7 +82,7 @@ async function purchaseShopItem({
 
   try {
     const outcome = await prisma.$transaction(async (tx) => {
-      const item = await tx.shopItem.findFirst({
+      let item = await tx.shopItem.findFirst({
         where: {
           id: itemId,
           active: true,
@@ -94,6 +96,7 @@ async function purchaseShopItem({
       if (!item) {
         throw new ShopPurchaseError("Shop item not found", 404);
       }
+      item = await pricedItem(tx, userId, item, expectedPriceCoins);
 
       await tx.shopPurchaseRequest.create({
         data: {

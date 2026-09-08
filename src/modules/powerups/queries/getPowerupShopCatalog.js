@@ -1,3 +1,5 @@
+const { prisma } = require("../../../db");
+const { memberDiscount, priceFields } = require("../../billing/services/memberPrice");
 const { User } = require("../../users");
 const { PowerupShopItem } = require("../models/powerupShopItem");
 const { UserPowerupItem } = require("../models/userPowerupItem");
@@ -53,6 +55,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
         : Promise.resolve([]),
     ]);
 
+    const discountPercent = deps.User ? 0 : await memberDiscount(prisma, userId);
     const copyByType = new Map();
     for (const row of copyRows || []) {
       copyByType.set(row.powerupType, row);
@@ -101,7 +104,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
         name: copyByType.get(item.powerupType)?.name || item.name,
         description:
           copyByType.get(item.powerupType)?.description ?? item.description,
-        priceCoins: item.priceCoins,
+        ...priceFields(item.priceCoins, discountPercent),
         powerupType: item.powerupType,
         ownedQuantity: ownedByType[item.powerupType] ?? 0,
         // Item 9 — additive. Old clients ignore both; the frontend defaults a

@@ -1,3 +1,4 @@
+const { pricedItem } = require("../../billing/services/memberPrice");
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../../db");
 const { testOnlyFilter } = require("../../../shared/middleware/releaseChannel");
@@ -112,7 +113,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
             "POWERUP_NOT_FOR_SALE",
           );
         }
-        const item = await tx.powerupShopItem.findFirst({
+        let item = await tx.powerupShopItem.findFirst({
           where: {
             sku,
             ...(decoyRequest ? {} : { active: true }),
@@ -122,6 +123,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
         if (!item) {
           throw new UnlockWithAdsError("Powerup not found", 404);
         }
+        item = await pricedItem(tx, userId, item);
 
         const user = await tx.user.findUnique({ where: { id: userId } });
         const coins = user?.coins ?? 0;
@@ -247,6 +249,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
             sku: item.sku,
             name: item.name,
             priceCoins: item.priceCoins,
+            ...(item.discountPercent ? { basePriceCoins: item.basePriceCoins, discountPercent: item.discountPercent } : {}),
             powerupType: item.powerupType,
           },
           idempotent: false,

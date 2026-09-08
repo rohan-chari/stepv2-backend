@@ -151,6 +151,7 @@ function createTournamentsRouter(dependencies = {}) {
   );
 
   router.use(requireAuth);
+  router.use(require('../../middleware/billingRealm').buildBillingRealmGuard('tournament', dependencies.prisma));
 
   // POST /tournaments — create
   router.post(

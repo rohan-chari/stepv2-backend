@@ -25,6 +25,7 @@ const webRoot = join(here, "..");
 const distDir = join(webRoot, "dist");
 
 const PAGES = [
+  { html: "billing-terms.html", component: "/src/pages/BillingTermsPage.vue" },
   { html: "index.html", component: "/src/pages/HomePage.vue" },
   { html: "privacy.html", component: "/src/pages/PrivacyPage.vue" },
   { html: "support.html", component: "/src/pages/SupportPage.vue" },

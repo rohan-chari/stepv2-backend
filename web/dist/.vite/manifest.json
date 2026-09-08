@@ -1,6 +1,6 @@
 {
-  "_SiteFooter-B7Jx3J6e.js": {
-    "file": "web-assets/SiteFooter-B7Jx3J6e.js",
+  "_SiteFooter-DbcMaznW.js": {
+    "file": "web-assets/SiteFooter-DbcMaznW.js",
     "name": "SiteFooter",
     "css": [
       "web-assets/SiteFooter-XuyO-QMJ.css"
@@ -10,13 +10,22 @@
     "file": "web-assets/SiteFooter-XuyO-QMJ.css",
     "src": "_SiteFooter-XuyO-QMJ.css"
   },
+  "billing-terms.html": {
+    "file": "web-assets/billingTerms-BqrgZhoK.js",
+    "name": "billingTerms",
+    "src": "billing-terms.html",
+    "isEntry": true,
+    "imports": [
+      "_SiteFooter-DbcMaznW.js"
+    ]
+  },
   "index.html": {
-    "file": "web-assets/index-unIquMu4.js",
+    "file": "web-assets/index-_kV-VHW5.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-B7Jx3J6e.js"
+      "_SiteFooter-DbcMaznW.js"
     ],
     "assets": [
       "web-assets/runners_high-CKr9XeFl.png",
@@ -31,12 +40,12 @@
     ]
   },
   "privacy.html": {
-    "file": "web-assets/privacy-D0EW0OPf.js",
+    "file": "web-assets/privacy-wEQLD6RV.js",
     "name": "privacy",
     "src": "privacy.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-B7Jx3J6e.js"
+      "_SiteFooter-DbcMaznW.js"
     ]
   },
   "src/assets/app-store-badge.svg": {
@@ -76,12 +85,12 @@
     "src": "src/assets/wrong_turn.png"
   },
   "support.html": {
-    "file": "web-assets/support-k_Qx4-O1.js",
+    "file": "web-assets/support-B-yp3hXS.js",
     "name": "support",
     "src": "support.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-B7Jx3J6e.js"
+      "_SiteFooter-DbcMaznW.js"
     ]
   }
 }

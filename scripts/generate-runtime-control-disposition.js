@@ -128,6 +128,13 @@ const productDb = new Set([
 ]);
 
 const envMetadata = {
+  REVENUECAT_SECRET_API_KEY: ["deployment_config", null, "server-only scoped RevenueCat v2 secret; missing configuration leaves checkout unavailable", "billing_config", null],
+  REVENUECAT_PROJECT_ID: ["deployment_config", null, "RevenueCat project identifier; missing configuration leaves checkout unavailable", "billing_config", null],
+  REVENUECAT_IOS_APP_ID: ["deployment_config", null, "RevenueCat App Store app identifier; missing configuration leaves checkout unavailable", "billing_config", null],
+  REVENUECAT_ANDROID_APP_ID: ["deployment_config", null, "RevenueCat Play Store app identifier; missing configuration leaves checkout unavailable", "billing_config", null],
+  REVENUECAT_WEBHOOK_AUTHORIZATION: ["deployment_config", null, "exact server-only webhook Bearer authorization; missing configuration leaves checkout unavailable", "billing_config", null],
+  BILLING_TERMS_URL: ["deployment_config", null, "published absolute HTTPS billing terms URL; missing configuration leaves checkout unavailable", "billing_config", null],
+  BILLING_PRIVACY_URL: ["deployment_config", null, "published absolute HTTPS privacy URL; missing configuration leaves checkout unavailable", "billing_config", null],
   GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE: ["deployment_config", null, "absolute path to the root-readable Gmail send-only OAuth secret", "feedback_delivery", null],
   PRISMA_QUERY_EVENTS_ENABLED: ["retained_diagnostic", false, "literal true enables outside production; production true fails startup", "diagnostics", false],
   PLACEMENT_BASELINE_WRITE_CONCURRENCY: ["retained_numeric", 4, "integer clamped to 1..8", "performance", 4],

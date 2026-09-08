@@ -419,6 +419,9 @@ function buildDeleteUserAccount(dependencies = {}) {
 
       // 6) DailyRewardClaim, UserShopItem, UserEquippedAccessory, and
       //    ShopPurchaseRequest all cascade on user delete.
+      // Financial ownership survives deletion; stop all future fulfillment to
+      // this identity in the same transaction that removes the login account.
+      await tx.billingIdentity.updateMany({ where: { userId, deletedAt: null }, data: { deletedAt: new Date() } });
       await tx.user.delete({ where: { id: userId } });
       await eligibilityEpoch.advance(tx);
         }, { timeout: 15_000, maxWait: 10_000 });

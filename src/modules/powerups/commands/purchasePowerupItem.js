@@ -1,3 +1,4 @@
+const { pricedItem } = require("../../billing/services/memberPrice");
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../../db");
 const { testOnlyFilter } = require("../../../shared/middleware/releaseChannel");
@@ -64,7 +65,7 @@ function buildPurchasePowerupItem(dependencies = {}) {
         where: { userId_idempotencyKey: { userId, idempotencyKey } },
       }));
 
-  return async function purchasePowerupItem({ userId, sku, powerupType, idempotencyKey, channel = "prod" }) {
+  return async function purchasePowerupItem({ userId, sku, powerupType, idempotencyKey, expectedPriceCoins, channel = "prod" }) {
     if (isRetiredPowerupRequest({ sku, powerupType })) {
       throw markRetiredPowerupError(
         new PowerupPurchaseError("This powerup has been retired.", 410),
@@ -104,10 +105,11 @@ function buildPurchasePowerupItem(dependencies = {}) {
         const where = sku
           ? { sku, active: true, ...testOnlyFilter(channel) }
           : { powerupType, active: true, ...testOnlyFilter(channel) };
-        const item = await tx.powerupShopItem.findFirst({ where });
+        let item = await tx.powerupShopItem.findFirst({ where });
         if (!item) {
           throw new PowerupPurchaseError("Powerup not found", 404);
         }
+        item = await pricedItem(tx, userId, item, expectedPriceCoins);
 
         const request = await tx.powerupPurchaseRequest.create({
           data: {
@@ -151,6 +153,7 @@ function buildPurchasePowerupItem(dependencies = {}) {
             sku: item.sku,
             name: item.name,
             priceCoins: item.priceCoins,
+            ...(item.discountPercent ? { basePriceCoins: item.basePriceCoins, discountPercent: item.discountPercent } : {}),
             powerupType: item.powerupType,
           },
           purchase: {

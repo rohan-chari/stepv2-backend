@@ -1,3 +1,4 @@
+const { memberDiscount, priceFields } = require("../billing/services/memberPrice");
 const { prisma } = require("../../db");
 const {
   buildEquipmentMap,
@@ -80,6 +81,7 @@ async function getShopCatalog(
     }),
   ]);
 
+  const discountPercent = await memberDiscount(prisma, userId);
   const ownedItemIds = owned.map((entry) => entry.shopItemId);
   const ownedItemIdSet = new Set(ownedItemIds);
   // On the prod channel, never surface a still-hidden item the user equipped
@@ -106,7 +108,7 @@ async function getShopCatalog(
     ownedItemIds,
     equipped,
     items: items.map((item) =>
-      serializeShopItem(item, {
+      serializeShopItem({ ...item, ...priceFields(item.priceCoins, discountPercent) }, {
         owned: ownedItemIdSet.has(item.id),
         equipped: equippedItemIdSet.has(item.id),
       })

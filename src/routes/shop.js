@@ -1,3 +1,4 @@
+const { AppError } = require("../shared/errors/AppError");
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { extractReleaseChannel } = require("../shared/middleware/releaseChannel");
@@ -88,6 +89,7 @@ function createShopRouter(dependencies = {}) {
       });
       res.json(await attachAdUnlock(result, req));
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       console.error("Get powerup shop catalog error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
@@ -117,6 +119,7 @@ function createShopRouter(dependencies = {}) {
       }
       const result = await purchasePowerupItem({
         userId: req.user.id,
+        expectedPriceCoins: req.body?.expectedPriceCoins,
         sku: req.body.sku,
         powerupType: req.body.powerupType,
         idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey,
@@ -124,6 +127,7 @@ function createShopRouter(dependencies = {}) {
       });
       res.json(result);
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       if (error.name === "PowerupPurchaseError") {
         return res
           .status(error.statusCode || 400)
@@ -154,6 +158,7 @@ function createShopRouter(dependencies = {}) {
       });
       res.json(result);
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       if (error.name === "UnlockWithAdsError") {
         return res
           .status(error.statusCode || 400)
@@ -173,6 +178,7 @@ function createShopRouter(dependencies = {}) {
       });
       res.json(await attachAdUnlock(result, req));
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       console.error("Get shop catalog error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
@@ -183,12 +189,14 @@ function createShopRouter(dependencies = {}) {
       const result = await purchaseShopItem({
         userId: req.user.id,
         itemId: req.params.itemId,
+        expectedPriceCoins: req.body?.expectedPriceCoins,
         idempotencyKey: req.get("Idempotency-Key"),
         channel: req.releaseChannel,
         supportsCharacters: req.clientFeatures.has("characters"),
       });
       res.json(result);
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       if (error.name === "ShopPurchaseError") {
         return res
           .status(error.statusCode || 400)
@@ -220,6 +228,7 @@ function createShopRouter(dependencies = {}) {
       });
       res.json(result);
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       if (error.name === "ShopUnlockWithAdsError") {
         return res
           .status(error.statusCode || 400)
@@ -245,6 +254,7 @@ function createShopRouter(dependencies = {}) {
       });
       res.json(result);
     } catch (error) {
+      if (error instanceof AppError) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(error.meta || {}) });
       if (error.name === "AccessoryEquipError") {
         return res
           .status(error.statusCode || 400)

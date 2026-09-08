@@ -28,6 +28,10 @@ function buildSendFriendRequest(dependencies = {}) {
     if (!addressee) {
       throw new FriendRequestError("User not found");
     }
+    const requester = await userModel.findById(userId);
+    if ((requester?.billingRealm || 'production') !== (addressee.billingRealm || 'production')) {
+      throw new FriendRequestError("Sandbox accounts can only connect with other sandbox accounts");
+    }
 
     const result = await withFriendshipPairLock(
       userId,

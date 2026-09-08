@@ -55,6 +55,7 @@ async function provisionReviewerUser() {
       name: REVIEWER_DISPLAY_NAME,
       displayName: REVIEWER_DISPLAY_NAME,
       isReviewAccount: true,
+      billingRealm: 'sandbox',
     },
   });
   console.log(`Provisioned reviewer user (id=${created.id}).`);

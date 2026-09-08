@@ -40,6 +40,7 @@ function serializeShopItem(item, extras = {}) {
     description: item.description,
     slot: item.slot,
     priceCoins: item.priceCoins,
+    ...(item.discountPercent ? { basePriceCoins: item.basePriceCoins, discountPercent: item.discountPercent } : {}),
     assetKey: item.assetKey,
     renderMetadata: item.renderMetadata,
     ...bobbleField(item),

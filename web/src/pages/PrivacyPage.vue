@@ -2,10 +2,9 @@
 import SiteHeader from "@/components/SiteHeader.vue";
 import SiteFooter from "@/components/SiteFooter.vue";
 
-// Copy is carried over verbatim from the previous public/privacy.html. This is
-// a legal document: the rebuild changes how it reads, never what it says.
-// Effective date must be bumped here (and only here) when the policy changes.
-const EFFECTIVE_DATE = "August 27, 2026";
+// Billing disclosure is updated alongside the real purchase integration.
+// Effective date changes when the policy changes.
+const EFFECTIVE_DATE = "September 7, 2026";
 
 const collected = [
   {
@@ -150,9 +149,29 @@ const collected = [
           you're in a head-to-head challenge, your opponent can see your step
           progress for that week. We do not sell or rent your personal data, and
           outside of the advertising partner described in the "Advertising"
-          section below and Google Workspace processing feedback email for Bara
-          Support, we do not share your personal data with any third parties for
+          section below, RevenueCat processing billing as described below, and Google
+          Workspace processing feedback email for Bara Support, we do not share your personal data with any third parties for
           their own use. We do not use third-party analytics SDKs.
+        </p>
+
+        <h2>Purchases and Subscriptions</h2>
+        <p>
+          Apple or Google processes payments for coin packs, Bara+ subscriptions and permanent Bara+ purchases.
+          We use RevenueCat to verify purchases and subscription status. We share an
+          opaque billing account identifier, purchase and receipt identifiers,
+          purchased products, subscription and permanent access status, and technical app and device
+          information needed to process and restore purchases. Bara does not receive
+          your full payment-card details. We do not send your health data or step counts to RevenueCat.
+        </p>
+        <p>
+          We retain limited billing records, including transaction identifiers,
+          benefit grants and refund adjustments, after account deletion to prevent
+          duplicate grants, reconcile purchases and refunds, and handle billing
+          support. For designated sandbox/test accounts, we also retain hashed
+          sign-in identifiers after deletion to keep test purchases isolated from
+          ordinary players. These records do not include health data. See
+          <a href="/billing-terms">Bara Purchase Terms</a> and
+          <a href="https://www.revenuecat.com/privacy">RevenueCat's privacy policy</a>.
         </p>
 
         <h2>Advertising</h2>

@@ -5,6 +5,11 @@ const { signSessionToken } = require("../../src/modules/users/services/sessionTo
 
 // Tables in deletion order (respects foreign key constraints)
 const TABLES_IN_ORDER = [
+  "billing_sandbox_auth_identities",
+  "billing_permanent_grants", "billing_permanent_revocations", "billing_permanent_sources", "billing_permanent_schedules",
+  "billing_credit_entries", "billing_credit_lots", "billing_cosmetic_grants",
+  "billing_cosmetic_releases", "billing_reroll_operations", "billing_inbox",
+  "billing_reconciliation", "billing_subscriptions", "billing_purchases", "billing_identities",
   "durable_capture_compaction_schedule",
   "global_event_recovery_candidates",
   "global_event_recovery_seed",

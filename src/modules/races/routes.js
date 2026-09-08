@@ -685,6 +685,7 @@ function createRacesRouter(dependencies = {}) {
   });
 
   router.use(requireAuth);
+  router.use(require('../../middleware/billingRealm').buildBillingRealmGuard('race', dependencies.prisma));
 
   function sendJoinRequestError(res, error) {
     if (!(error instanceof RaceJoinRequestError) &&

@@ -9,6 +9,7 @@ const capacityEventLoopDelay = (process.env.CAPACITY_MODE === "true" || process.
   : null;
 capacityEventLoopDelay?.enable();
 
+const { createBillingRouter, createBillingRerollRouter } = require("./modules/billing");
 const { createAuthRouter } = require("./modules/users");
 const { createStepsRouter } = require("./modules/steps");
 const { createFriendsRouter } = require("./modules/social");
@@ -144,6 +145,7 @@ function createApp(dependencies = {}) {
   // documents. Parse them with the contract's tighter bound before the
   // application-wide parser; body-parser skips an already-consumed request.
   app.use(["/giveaways", "/admin/giveaways"], express.json({ limit: "32kb" }));
+  app.use("/billing/webhook/revenuecat", express.json({ limit: "32kb" }));
   app.use(express.json());
   app.use(extractTimezone);
   // Capability gating (X-Client-Features) is read app-wide: social surfaces
@@ -179,6 +181,8 @@ function createApp(dependencies = {}) {
         dependencies.getDbPoolPressure || getDbPoolPressure,
     })
   );
+  app.use("/billing", createBillingRouter(dependencies));
+  app.use("/races", createBillingRerollRouter(dependencies));
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter({
     ...dependencies,
@@ -535,6 +539,8 @@ function createApp(dependencies = {}) {
   app.get("/", (req, res) => res.sendFile(path.join(webDistDir, "index.html")));
   app.get("/support", (req, res) => res.sendFile(path.join(webDistDir, "support.html")));
   app.get("/support.html", (req, res) => res.sendFile(path.join(webDistDir, "support.html")));
+  app.get("/billing-terms", (req, res) => res.sendFile(path.join(webDistDir, "billing-terms.html")));
+  app.get("/billing-terms.html", (req, res) => res.sendFile(path.join(webDistDir, "billing-terms.html")));
   app.get("/privacy", (req, res) => res.sendFile(path.join(webDistDir, "privacy.html")));
   app.get("/privacy.html", (req, res) => res.sendFile(path.join(webDistDir, "privacy.html")));
   // Bundled share-card image for link previews (point OG_IMAGE_URL at this).
@@ -577,7 +583,7 @@ function createApp(dependencies = {}) {
   // for HTML. This classifier runs only after every real API route, so it is a
   // final not-found envelope rather than a competing router.
   const apiPrefixes = new Set([
-    "auth", "steps", "friends", "admin", "notifications", "leaderboard",
+    "billing", "auth", "steps", "friends", "admin", "notifications", "leaderboard",
     "ranked", "races", "race-join-requests", "tournaments", "referrals",
     "shop", "powerups", "daily-reward", "coins", "users", "tutorial",
     "onboarding", "analytics", "feedback", "home", "inbox", "app-version",

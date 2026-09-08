@@ -40,6 +40,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
+        billingTerms: fileURLToPath(new URL("./billing-terms.html", import.meta.url)),
         privacy: fileURLToPath(new URL("./privacy.html", import.meta.url)),
         support: fileURLToPath(new URL("./support.html", import.meta.url)),
       },

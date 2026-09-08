@@ -1,3 +1,4 @@
+const { pricedItem } = require("../billing/services/memberPrice");
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../db");
 const { serializeShopItem, CHARACTER_SLOT } = require("./shopCosmetics");
@@ -104,7 +105,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
 
         // Accept the catalog `sku` (what the contract names) or the row id —
         // the cosmetic catalog serializes both and older client code keys on id.
-        const item = await tx.shopItem.findFirst({
+        let item = await tx.shopItem.findFirst({
           where: {
             OR: [{ sku }, { id: sku }],
             active: true,
@@ -116,6 +117,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
         if (!item) {
           throw new ShopUnlockWithAdsError("Shop item not found", 404);
         }
+        item = await pricedItem(tx, userId, item);
 
         const alreadyOwned = await tx.userShopItem.findUnique({
           where: { userId_shopItemId: { userId, shopItemId: item.id } },

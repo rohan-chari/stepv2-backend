@@ -1,15 +1,15 @@
 -- App Review demo seed.
 -- Idempotent: re-running refreshes the same demo rows instead of duplicating them.
 -- Target account: apple_id = 'review-account-v1' (provisioned by the wrapper script
--- using APP_REVIEW_EMAIL). The reviewer is an UNFLAGGED real user; only the
--- seeded supporting cast (Alex/Maya/Jordan) carries is_review_account = true,
--- so they stay invisible to real users in search, leaderboards, public races.
+-- using APP_REVIEW_EMAIL). New reviewer accounts use the sandbox economic realm;
+-- supporting cast inherits the reviewer's realm and remains hidden from players.
 
 BEGIN;
 
 DO $$
 DECLARE
   demo_user_id text;
+  demo_realm text;
   alex_id text;
   maya_id text;
   jordan_id text;
@@ -18,12 +18,15 @@ DECLARE
   )::date;
   today date := current_date;
 BEGIN
-  SELECT id INTO demo_user_id
+  SELECT id,billing_realm INTO demo_user_id,demo_realm
   FROM users
   WHERE apple_id = 'review-account-v1';
 
   IF demo_user_id IS NULL THEN
     RAISE EXCEPTION 'No reviewer user with apple_id review-account-v1 found. Run the wrapper script to provision it first.';
+  END IF;
+  IF EXISTS (SELECT 1 FROM users WHERE apple_id IN ('demo-review-alex','demo-review-maya','demo-review-jordan') AND billing_realm<>demo_realm) THEN
+    RAISE EXCEPTION 'Existing supporting cast belongs to a different economic realm; use an explicitly approved clean review setup.';
   END IF;
 
   UPDATE users
@@ -44,6 +47,7 @@ BEGIN
     step_goal,
     last_step_sync_at,
     is_review_account,
+    billing_realm,
     created_at
   )
   VALUES
@@ -57,6 +61,7 @@ BEGIN
       9000,
       now(),
       true,
+      demo_realm,
       now() - interval '12 days'
     ),
     (
@@ -69,6 +74,7 @@ BEGIN
       10000,
       now(),
       true,
+      demo_realm,
       now() - interval '10 days'
     ),
     (
@@ -81,6 +87,7 @@ BEGIN
       7500,
       now(),
       true,
+      demo_realm,
       now() - interval '8 days'
     )
   ON CONFLICT (apple_id) DO UPDATE

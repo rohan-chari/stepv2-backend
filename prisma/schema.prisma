@@ -7,6 +7,7 @@ datasource db {
 }
 
 model User {
+  billingRealm String @default("production") @map("billing_realm")
   raceProgressRefreshIntents RaceProgressRefreshIntent[]
   id                                String                          @id @default(uuid())
   // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
@@ -1610,6 +1611,7 @@ model FundedExposureGuard {
 }
 
 model Race {
+  economicRealm String @default("production") @map("economic_realm")
   effectDeadlines RaceEffectDeadline[]
   snapshotRepairIntents RaceSnapshotRepairIntent[]
   progressRefreshIntents RaceProgressRefreshIntent[]
@@ -1993,6 +1995,7 @@ enum TournamentStatus {
 }
 
 model Tournament {
+  economicRealm String @default("production") @map("economic_realm")
   id                         String           @id @default(uuid())
   // null = seeded/featured (system-minted), mirrors Race.creatorId.
   creatorId                  String?          @map("creator_id")
@@ -3943,4 +3946,199 @@ model RaceProgressRefreshIntent {
  @@id([raceId,userId])
  @@index([availableAt,raceId],map:"race_progress_refresh_due_idx")
  @@map("race_progress_refresh_intents")
+}
+
+// Financial ownership intentionally survives account deletion. No cascading User
+// relation: userId is a retained opaque key and deletedAt is a permanent tombstone.
+model BillingIdentity {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  environment String    @default("production")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("billing_identities")
+}
+
+model BillingPurchase {
+  refundCount Int @default(0) @map("refund_count")
+  fulfillmentStatus String @default("pending") @map("fulfillment_status")
+  benefitKind String @default("paid") @map("benefit_kind")
+  effectiveExpiresAt DateTime? @map("effective_expires_at")
+  id               String    @id @default(uuid())
+  identityId       String    @map("identity_id")
+  canonicalKey     String    @unique @map("canonical_key")
+  projectId        String    @map("project_id")
+  appId            String    @map("app_id")
+  store            String
+  environment      String
+  transactionId    String    @map("transaction_id")
+  providerId       String    @map("provider_id")
+  productId        String    @map("product_id")
+  subscriptionId   String?   @map("subscription_id")
+  grantVersion     Int       @default(1) @map("grant_version")
+  purchasedAt      DateTime  @map("purchased_at")
+  expiresAt        DateTime? @map("expires_at")
+  quantity         Int       @default(1)
+  grantedCoins     Int       @default(0) @map("granted_coins")
+  grantedCredits   Int       @default(0) @map("granted_credits")
+  recoveredCoins   Int       @default(0) @map("recovered_coins")
+  absorbedCoins    Int       @default(0) @map("absorbed_coins")
+  revokedCredits   Int       @default(0) @map("revoked_credits")
+  refundedAt       DateTime? @map("refunded_at")
+  refundObservedAt DateTime? @map("refund_observed_at")
+  refundSource     String?   @map("refund_source")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([identityId, purchasedAt])
+  @@index([store, environment, transactionId])
+  @@map("billing_purchases")
+}
+
+model BillingSubscription {
+  providerStatus String @default("active") @map("provider_status")
+  id             String   @id
+  identityId     String   @map("identity_id")
+  productId      String   @map("product_id")
+  startsAt       DateTime @map("starts_at")
+  periodStartsAt DateTime? @map("period_starts_at")
+  accessUntil    DateTime? @map("access_until")
+  givesAccess    Boolean  @default(false) @map("gives_access")
+  trial          Boolean  @default(false)
+  renews         Boolean  @default(false)
+  observedAt     DateTime @map("observed_at")
+  managementUrl  String?  @map("management_url")
+
+  @@index([identityId, accessUntil])
+  @@map("billing_subscriptions")
+}
+
+model BillingCreditLot {
+  id         String    @id @default(uuid())
+  identityId String    @map("identity_id")
+  sourceKey  String    @unique @map("source_key")
+  kind       String
+  granted    Int
+  remaining  Int
+  expiresAt  DateTime? @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([identityId, kind, createdAt])
+  @@map("billing_credit_lots")
+}
+
+model BillingCreditEntry {
+  id           String   @id @default(uuid())
+  lotId        String   @map("lot_id")
+  operationKey String   @map("operation_key")
+  amount       Int
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([lotId, operationKey])
+  @@map("billing_credit_entries")
+}
+
+model BillingInbox {
+  id          String    @id
+  identityId  String?   @map("identity_id")
+  payload     Json
+  processedAt DateTime? @map("processed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([identityId, processedAt])
+  @@map("billing_inbox")
+}
+
+model BillingReconciliation {
+  requestedVersion Int @default(0) @map("requested_version")
+  leaseVersion Int? @map("lease_version")
+  identityId    String    @id @map("identity_id")
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  leaseUntil    DateTime? @map("lease_until")
+  leaseToken    String?   @map("lease_token")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([nextAttemptAt, leaseUntil])
+  @@map("billing_reconciliation")
+}
+
+model BillingCosmeticRelease {
+  month       String   @id
+  shopItemId  String   @map("shop_item_id")
+  publishedAt DateTime @default(now()) @map("published_at")
+
+  @@map("billing_cosmetic_releases")
+}
+
+model BillingCosmeticGrant {
+  id         String   @id @default(uuid())
+  identityId String   @map("identity_id")
+  month      String
+  shopItemId String   @map("shop_item_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([identityId, month])
+  @@map("billing_cosmetic_grants")
+}
+
+model BillingRerollOperation {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  requestKey  String   @map("request_key")
+  fingerprint String
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, requestKey])
+  @@map("billing_reroll_operations")
+}
+
+model BillingPermanentSchedule {
+  identityId String @id @map("identity_id")
+  benefitVersion Int @default(1) @map("benefit_version")
+  anchorAt DateTime @map("anchor_at")
+  nextPeriod Int @default(0) @map("next_period")
+  nextDueAt DateTime @map("next_due_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([nextDueAt])
+  @@map("billing_permanent_schedules")
+}
+model BillingPermanentSource {
+  purchaseId String @id @map("purchase_id")
+  identityId String @map("identity_id")
+  purchasedAt DateTime @map("purchased_at")
+  revokedAt DateTime? @map("revoked_at")
+  refundOperation String? @map("refund_operation")
+  observedAt DateTime @map("observed_at")
+  @@index([identityId, purchasedAt])
+  @@map("billing_permanent_sources")
+}
+model BillingPermanentGrant {
+  id String @id
+  identityId String @map("identity_id")
+  benefitVersion Int @default(1) @map("benefit_version")
+  period Int
+  sourcePurchaseId String @map("source_purchase_id")
+  boundaryAt DateTime @map("boundary_at")
+  coins Int @default(500)
+  credits Int @default(10)
+  recoveredCoins Int @default(0) @map("recovered_coins")
+  absorbedCoins Int @default(0) @map("absorbed_coins")
+  revokedCredits Int @default(0) @map("revoked_credits")
+  refundedAt DateTime? @map("refunded_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([identityId, benefitVersion, period])
+  @@index([sourcePurchaseId])
+  @@map("billing_permanent_grants")
+}
+model BillingPermanentRevocation {
+  id String @id
+  sourcePurchaseId String @map("source_purchase_id")
+  revokedAt DateTime @map("revoked_at")
+  observedAt DateTime @map("observed_at")
+  reversedAt DateTime? @map("reversed_at")
+  @@index([sourcePurchaseId, observedAt])
+  @@map("billing_permanent_revocations")
 }
