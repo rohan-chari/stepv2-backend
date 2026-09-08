@@ -33,7 +33,7 @@ async function bootstrap({db,config,userId,platform,clientFeatures=new Set(),cha
  if(platform!==undefined&&!['ios','android'].includes(platform))throw new AppError('Invalid platform','INVALID_PLATFORM',400);
  const {identity,user}=await ensureIdentity(db,userId);const selected=platform||(user.googleSub?'android':'ios');
  const [state,credits]=await Promise.all([membershipFor(db,identity.id),creditsFor(db,identity.id)]);
- const {managementUrl,...membership}=state;const available=configured(config);
+ const {managementUrl,...membership}=state;const available=configured(config,selected);
  let cosmetic=null;
  const granted=await db.billingCosmeticGrant.findFirst({where:{identityId:identity.id},orderBy:{month:'desc'}});
  if(granted){const item=await db.shopItem.findUnique({where:{id:granted.shopItemId}});

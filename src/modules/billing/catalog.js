@@ -10,7 +10,13 @@ function catalogFor(platform) { return PRODUCTS.filter(p=>p.id!=='plus_annual').
 function readBillingConfig(env=process.env) {
  return {projectId:env.REVENUECAT_PROJECT_ID,secretApiKey:env.REVENUECAT_SECRET_API_KEY,iosAppId:env.REVENUECAT_IOS_APP_ID,androidAppId:env.REVENUECAT_ANDROID_APP_ID,webhookAuthorization:env.REVENUECAT_WEBHOOK_AUTHORIZATION,termsUrl:env.BILLING_TERMS_URL,privacyUrl:env.BILLING_PRIVACY_URL};
 }
-function configured(config) {
- return ['projectId','secretApiKey','iosAppId','androidAppId','webhookAuthorization'].every(k=>typeof config[k]==='string' && config[k].trim()) && ['termsUrl','privacyUrl'].every(k=>{try{return new URL(config[k]).protocol==='https:';}catch{return false;}});
+function configured(config, platform) {
+ const present = key => typeof config[key] === 'string' && config[key].trim().length > 0;
+ const storeConfigured = platform === undefined
+  ? present('iosAppId') || present('androidAppId')
+  : ['ios','android'].includes(platform) && present(`${platform}AppId`);
+ // Checkout needs this device's store; account sync and background recovery
+ // can operate as soon as either real store has been configured.
+ return storeConfigured && ['projectId','secretApiKey','webhookAuthorization'].every(present) && ['termsUrl','privacyUrl'].every(k=>{try{return new URL(config[k]).protocol==='https:';}catch{return false;}});
 }
 module.exports={PRODUCTS,catalogFor,readBillingConfig,configured};

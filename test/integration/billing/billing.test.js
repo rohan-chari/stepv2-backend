@@ -9,6 +9,33 @@ before(async () => { server = await startServer({ billingConfig:config, billingP
 after(async () => { await server?.close(); });
 beforeEach(async () => { await cleanDatabase(); history={ purchases:[], subscriptions:[], observedAt:new Date().toISOString() }; });
 async function bootstrap(token) { const res=await request(server.baseUrl,'GET','/billing/bootstrap?platform=ios',{token}); assert.equal(res.status,200); return res.json(); }
+for (const platform of ['ios', 'android']) {
+ it(`supports ${platform} checkout and account sync with only that store configured`, async () => {
+  const other = platform === 'ios' ? 'android' : 'ios';
+  const singleConfig = {...config, [`${other}AppId`]: undefined};
+  const app = await startServer({billingConfig:singleConfig, billingProvider:{async getCustomerHistory(){return history;}}});
+  try {
+   const {token} = await createTestUser({coins:350});
+   const get = async selected => {
+    const response = await request(app.baseUrl, 'GET', `/billing/bootstrap?platform=${selected}`, {token});
+    assert.equal(response.status,200); return response.json();
+   };
+   const enabled = await get(platform);
+   assert.equal(enabled.available,true); assert.equal(enabled.products.length,5);
+   const disabled = await get(other);
+   assert.equal(disabled.available,false); assert.deepEqual(disabled.products,[]);
+   assert.equal(disabled.coins,350); assert.equal(disabled.reroll.supported,true);
+   // Account reconciliation remains usable from either platform, even when
+   // checkout on the current device has not yet been configured.
+   for (const selected of [platform, other]) {
+    const response = await request(app.baseUrl,'POST',`/billing/sync?platform=${selected}`,{token,body:{}});
+    assert.equal(response.status,200);
+    const state = await response.json(); assert.equal(state.coins,350);
+    assert.equal(state.available,selected===platform);
+   }
+  } finally { await app.close(); }
+ });
+}
 it('authenticates billing and creates a stable opaque account identity without minting', async () => {
   assert.equal((await request(server.baseUrl,'GET','/billing/bootstrap')).status,401);
   const {user,token}=await createTestUser({coins:350});
@@ -226,7 +253,8 @@ it('keeps a pending initial zero-price payment unresolved even when its proposed
  history.purchases=[purchase({transactionId:'unpaid-pending',productId:'plus_monthly',paid:false,subscriptionId:'sub1',purchasedAt:start,expiresAt:end})];
  const result=await sync(token,'unpaid-pending');assert.equal(result.status,202);assert.equal(result.body.coins,0);assert.equal(result.body.credits.trial,0);
 });
-it('recovers checkout without a client sync or webhook through the real reconciliation CLI',async()=>{
+for (const androidAppId of [config.androidAppId, '']) {
+it(`recovers checkout without a client sync or webhook through the real reconciliation CLI${androidAppId ? '' : ' with iOS-only configuration'}`,async()=>{
  const {mkdtemp,writeFile,rm}=require('node:fs/promises'),path=require('node:path');const dir=await mkdtemp(path.join(require('node:os').tmpdir(),'bara-worker-'));
  try{
   const {token}=await createTestUser();const state=await bootstrap(token),identity=state.identity.appUserId;
@@ -235,11 +263,12 @@ it('recovers checkout without a client sync or webhook through the real reconcil
   // CLI, provider adapter, database lease and financial handler all execute.
   await writeFile(preload,`globalThis.fetch=async(url,options)=>{const path=new URL(url).pathname;let body;if(path.endsWith('/products/coin'))body={id:'coin',app_id:'app_ios',store_identifier:'bara_coins_500_v1'};else if(path.endsWith('/subscriptions'))body={items:[],next_page:null};else if(path.endsWith('/purchases'))body={items:[{id:'p',customer_id:${JSON.stringify(identity)},original_customer_id:${JSON.stringify(identity)},ownership:'purchased',product_id:'coin',store:'app_store',environment:'production',purchased_at:${Date.now()},quantity:1,status:'owned',store_purchase_identifier:'recovered-without-client',revenue_in_usd:{gross:0.99}}],next_page:null};else throw new Error('Unexpected provider URL');return new Response(JSON.stringify(body));};`);
   const {execFile}=require('node:child_process'),{promisify}=require('node:util');
-  const run=()=>promisify(execFile)(process.execPath,['--require',preload,'scripts/billing-reconcile.js',`--identity-id=${identity}`],{cwd:path.resolve(__dirname,'../../..'),env:{...process.env,REVENUECAT_PROJECT_ID:config.projectId,REVENUECAT_IOS_APP_ID:config.iosAppId,REVENUECAT_ANDROID_APP_ID:config.androidAppId,REVENUECAT_SECRET_API_KEY:config.secretApiKey,REVENUECAT_WEBHOOK_AUTHORIZATION:config.webhookAuthorization,BILLING_TERMS_URL:config.termsUrl,BILLING_PRIVACY_URL:config.privacyUrl},timeout:20000});
+  const run=()=>promisify(execFile)(process.execPath,['--require',preload,'scripts/billing-reconcile.js',`--identity-id=${identity}`],{cwd:path.resolve(__dirname,'../../..'),env:{...process.env,REVENUECAT_PROJECT_ID:config.projectId,REVENUECAT_IOS_APP_ID:config.iosAppId,REVENUECAT_ANDROID_APP_ID:androidAppId,REVENUECAT_SECRET_API_KEY:config.secretApiKey,REVENUECAT_WEBHOOK_AUTHORIZATION:config.webhookAuthorization,BILLING_TERMS_URL:config.termsUrl,BILLING_PRIVACY_URL:config.privacyUrl},timeout:20000});
   const output=await run();assert.match(output.stdout,/"processed":1/);assert.equal((await bootstrap(token)).coins,500);
   await run();assert.equal((await bootstrap(token)).coins,500);assert.equal(await prisma.coinTransaction.count({where:{reason:'billing_purchase'}}),1);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+}
 it('acknowledges a past zero-price initial period after conversion while granting only the paid renewal',async()=>{
  const {token}=await createTestUser();await bootstrap(token);
  const start=new Date(Date.now()-8*86400000).toISOString(),conversion=new Date(Date.now()-86400000).toISOString(),end=new Date(Date.now()+29*86400000).toISOString();
