@@ -45,9 +45,14 @@ planning-only probes on production gave:
 | Query shape | Planning time range (ms) |
 |---|---:|
 | Event fingerprint | 11.22–37.32 |
-| Queue insertion | 0.84–4.74 |
-| Race claim | 0.34–3.69 |
+| Full-trigger promotion insertion | 0.84–4.74 |
+| Race-admin command claim | 0.34–3.69 |
 | Sample ranges | 0.51–6.87 |
+
+The earlier artifact labels `queue enqueue` and `race claim` were too broad:
+inspection of the captured SQL identifies full-trigger promotion and race-admin
+command claiming, respectively. They are not measurements of the hot batched
+enqueue or race-resolution claim statements.
 
 An initial event-fingerprint probe took 78.65 ms. These timings include contention
 and use fixture parameters; they cannot establish application-wide planning CPU

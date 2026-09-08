@@ -1,0 +1,505 @@
+[
+  {
+    "type": "measurement",
+    "mode": "unnamed",
+    "round": 0,
+    "concurrency": 1,
+    "units": 3000,
+    "wallMs": 19054.528917000003,
+    "cpuMs": 9329.999999999998,
+    "unitsPerSecond": 157.44288473715403,
+    "p50Ms": 5.367709000012837,
+    "p95Ms": 11.642290999996476,
+    "calls": 15000,
+    "plans": 15000,
+    "planningMs": 2447.7492220000004,
+    "executionMs": 4825.273377000005,
+    "shapes": 0,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 153.74615499999985,
+        "total_exec_time": 370.2874289999992
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 179.64631399999968,
+        "total_exec_time": 2197.2691179999993
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 143.62829800000014,
+        "total_exec_time": 17.772267999999983
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 255.78690300000062,
+        "total_exec_time": 518.8236349999995
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 1300.9765509999993,
+        "total_exec_time": 232.76087899999976
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 413.9650010000009,
+        "total_exec_time": 1488.3600480000073
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "named",
+    "round": 0,
+    "concurrency": 1,
+    "units": 3000,
+    "wallMs": 16867.654917000007,
+    "cpuMs": 5609.999999999985,
+    "unitsPerSecond": 177.85519177158767,
+    "p50Ms": 4.607875000016065,
+    "p95Ms": 11.148208999977214,
+    "calls": 15000,
+    "plans": 83,
+    "planningMs": 11.950584999999961,
+    "executionMs": 4850.216846999986,
+    "shapes": 6,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 374.04314399999896
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 32,
+        "total_plan_time": 2.2651660000000504,
+        "total_exec_time": 2172.4333229999866
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 17.25638899999966
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 51,
+        "total_plan_time": 9.68541899999991,
+        "total_exec_time": 559.9769060000033
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 250.72081199999957
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 1475.7862729999977
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "named",
+    "round": 1,
+    "concurrency": 1,
+    "units": 3000,
+    "wallMs": 16703.62512500002,
+    "cpuMs": 5960.000000000008,
+    "unitsPerSecond": 179.60173181269215,
+    "p50Ms": 4.576290999975754,
+    "p95Ms": 11.136041000019759,
+    "calls": 15000,
+    "plans": 0,
+    "planningMs": 0,
+    "executionMs": 4813.187470000023,
+    "shapes": 6,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 365.16163500000175
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 2177.868507
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 16.860971999999812
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 547.5696940000025
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 244.88391500000375
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 1460.8427470000138
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "unnamed",
+    "round": 1,
+    "concurrency": 1,
+    "units": 3000,
+    "wallMs": 19142.863332999987,
+    "cpuMs": 9949.999999999989,
+    "unitsPerSecond": 156.7163672337545,
+    "p50Ms": 5.349749999993946,
+    "p95Ms": 11.842417000007117,
+    "calls": 15000,
+    "plans": 15000,
+    "planningMs": 2479.270756999997,
+    "executionMs": 4918.187161999953,
+    "shapes": 0,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 160.70919099999895,
+        "total_exec_time": 383.7365669999981
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 183.9772300000005,
+        "total_exec_time": 2234.846493999965
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 145.227460999999,
+        "total_exec_time": 18.48998799999969
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 262.0017309999999,
+        "total_exec_time": 525.1553670000055
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 1297.546184,
+        "total_exec_time": 230.66385099999832
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 429.80895999999876,
+        "total_exec_time": 1525.2948949999864
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "unnamed",
+    "round": 0,
+    "concurrency": 3,
+    "units": 3000,
+    "wallMs": 14676.813332999998,
+    "cpuMs": 9830.000000000013,
+    "unitsPerSecond": 204.40404411594355,
+    "p50Ms": 14.799583000014536,
+    "p95Ms": 19.85975000000326,
+    "calls": 15000,
+    "plans": 15000,
+    "planningMs": 2614.7681600000005,
+    "executionMs": 5034.555152000043,
+    "shapes": 0,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 157.3824890000006,
+        "total_exec_time": 406.04611099999966
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 182.41948200000036,
+        "total_exec_time": 2225.49564300006
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 149.13403400000038,
+        "total_exec_time": 15.37127499999967
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 259.8261639999989,
+        "total_exec_time": 561.3011819999988
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 1404.2295250000038,
+        "total_exec_time": 240.92777599999977
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 461.77646599999673,
+        "total_exec_time": 1585.4131649999845
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "named",
+    "round": 0,
+    "concurrency": 3,
+    "units": 3000,
+    "wallMs": 14182.084459000005,
+    "cpuMs": 5720.000000000027,
+    "unitsPerSecond": 211.53448977637336,
+    "p50Ms": 13.595624999987194,
+    "p95Ms": 19.183583000005456,
+    "calls": 15000,
+    "plans": 0,
+    "planningMs": 0,
+    "executionMs": 4930.200126999992,
+    "shapes": 6,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 391.05329200000006
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 2163.013661000012
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 18.36150400000008
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 570.0911179999976
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 272.1069109999971
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 1515.5736409999854
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "named",
+    "round": 1,
+    "concurrency": 3,
+    "units": 3000,
+    "wallMs": 14324.620708000002,
+    "cpuMs": 5819.999999999993,
+    "unitsPerSecond": 209.429628969133,
+    "p50Ms": 13.673750000016298,
+    "p95Ms": 19.37575000000652,
+    "calls": 15000,
+    "plans": 0,
+    "planningMs": 0,
+    "executionMs": 5080.159087999999,
+    "shapes": 6,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 397.5485649999937
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 2225.095158999986
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 18.946726999999782
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 597.0976020000026
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 278.91749800000343
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 0,
+        "total_plan_time": 0,
+        "total_exec_time": 1562.5535370000143
+      }
+    ]
+  },
+  {
+    "type": "measurement",
+    "mode": "unnamed",
+    "round": 1,
+    "concurrency": 3,
+    "units": 3000,
+    "wallMs": 14374.420666999999,
+    "cpuMs": 9609.999999999985,
+    "unitsPerSecond": 208.704063245292,
+    "p50Ms": 14.48104099999182,
+    "p95Ms": 19.272540999983903,
+    "calls": 15000,
+    "plans": 15000,
+    "planningMs": 2571.2045790000066,
+    "executionMs": 4940.509449000081,
+    "shapes": 0,
+    "queries": [
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 149.86300499999896,
+        "total_exec_time": 390.85355399999617
+      },
+      {
+        "query": "WITH requested AS MATERIALIZED (\n       SELECT input.user_id,\n              input.range_start,\n     ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 186.1357299999995,
+        "total_exec_time": 2182.4394350000875
+      },
+      {
+        "query": "SELECT id, target_participant_id AS \"targetParticipantId\",\n         target_user_id AS \"targetUserId\"",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 143.3899530000005,
+        "total_exec_time": 14.675960000000117
+      },
+      {
+        "query": "SELECT race.id AS \"r_id\",\n       race.name AS \"r_name\",\n       (EXTRACT($2 FROM race.scheduled_start",
+        "calls": 1500,
+        "plans": 1500,
+        "total_plan_time": 254.54362499999968,
+        "total_exec_time": 545.9320530000055
+      },
+      {
+        "query": "WITH race_window AS (\n         SELECT started_at FROM races WHERE id=$1\n       ), schedule AS (\n    ",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 1388.8709180000033,
+        "total_exec_time": 235.6899919999987
+      },
+      {
+        "query": "WITH members AS (\n         SELECT DISTINCT participant.user_id\n         FROM race_participants parti",
+        "calls": 3000,
+        "plans": 3000,
+        "total_plan_time": 448.4013480000051,
+        "total_exec_time": 1570.9184549999936
+      }
+    ]
+  },
+  {
+    "type": "compatibility",
+    "passed": true,
+    "case": "pool backend reconnect"
+  },
+  {
+    "type": "compatibility",
+    "passed": true,
+    "case": "add/drop unused column on races"
+  },
+  {
+    "type": "parity",
+    "passed": true,
+    "case": "changed parameters, race sizes, committed rename"
+  }
+]
