@@ -55,3 +55,25 @@ one resolution and one cron process, staging stopped, and the existing 32-pool
 budget. Deployment uses the isolated powerup branch. Dependencies, schema,
 ecosystem configuration and catalog copy are unchanged. Existing npm peer-only
 metadata edits to the server's package lock are preserved.
+
+## Production deployment outcome
+
+Deployed `030aebdfa9d5843794ad0a09549a855c238ed67a` to
+`release/powerup-shared-guards`, tagged `prod-powerup-shared-guards-20260908`.
+The deployment used `scripts/pm2-safe-prod-reload.sh`; no dependency install,
+schema migration, catalog rewrite, runtime flag or capacity change was needed.
+The pre-existing package-lock peer metadata was preserved byte-for-byte.
+
+Verification at 2026-09-08T16:53:02Z confirmed two HTTP processes, one resolution
+process and one cron process online with stable post-reload PIDs/restart counts;
+staging remained stopped. The wrapper validated and saved the 32-connection
+aggregate role budget. Public API health reported HTTP/Redis healthy, and the
+marketing homepage, privacy and support routes all returned 200.
+
+The required referral-contest audit/apply/audit completed successfully with zero
+missing activities and zero missing review ownership before and after (zero
+rows changed). Fresh bounded log reads found no deadlock or transaction-timeout
+errors. The resolution service briefly alarmed during restart catch-up, then
+reported `alarm:false`, no expired running jobs, and ongoing terminal progress.
+Other observed referral, scheduled-race, payout-monitor and pg-deprecation
+warning categories were also present before deployment.
