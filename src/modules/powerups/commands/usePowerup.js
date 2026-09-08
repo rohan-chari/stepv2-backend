@@ -108,14 +108,33 @@ async function applyImmediatePenalty(
   return actualPenalty;
 }
 
-async function lockPowerupUseParticipants(tx, { raceId, powerupId }) {
+// Audited direct self mutations/effect creation only. Types that compute ranks,
+// end scoring boundaries, transfer inventory or touch other users stay broad.
+const SELF_PARTICIPANT_LOCK_TYPES = new Set([
+  "PROTEIN_SHAKE", "TRAIL_MIX", "RUNNERS_HIGH", "STEALTH_MODE",
+  "COMPRESSION_SOCKS", "MIRROR", "UMBRELLA", "DECOY", "CAMPFIRE_REST",
+]);
+const PLANNED_TARGET_LOCK_TYPES = new Set(["SHORTCUT", "DETOUR_SIGN", "SIGNAL_JAMMER"]);
+// Only these handlers have been audited for shared race guards. Other types
+// retain the exclusive lifecycle/scoring fence, including all broad effects.
+const SHARED_RACE_GUARD_TYPES = new Set([
+  "PROTEIN_SHAKE", "TRAIL_MIX", "RUNNERS_HIGH", "STEALTH_MODE",
+  "COMPRESSION_SOCKS", "MIRROR", "DECOY", "SHORTCUT", "DETOUR_SIGN",
+]);
+class PowerupLockPlanChanged extends Error {}
+
+async function lockPowerupUseParticipants(tx, { raceId, powerupId, planTargeted = false }) {
   const [powerupLock] = await tx.$queryRaw`
     SELECT participant_id, type
     FROM race_powerups
     WHERE id = ${powerupId}
     FOR UPDATE
   `;
-  if (powerupLock?.type === "PINECONE_TOSS") {
+  // Raw SQL returns the mapped PostgreSQL enum (lowercase); Prisma model
+  // reads return its uppercase API name. Preserve the legacy Pinecone branch
+  // separately: enabling its late, unordered target lock is outside this audit.
+  const type = powerupLock?.type?.toUpperCase();
+  if (powerupLock?.type === "PINECONE_TOSS" || SELF_PARTICIPANT_LOCK_TYPES.has(type)) {
     await tx.$queryRaw`
       SELECT id
       FROM race_participants
@@ -124,6 +143,7 @@ async function lockPowerupUseParticipants(tx, { raceId, powerupId }) {
     `;
     return;
   }
+  if (planTargeted && PLANNED_TARGET_LOCK_TYPES.has(type)) return true;
   await tx.$queryRaw`
     SELECT id
     FROM race_participants
@@ -1258,8 +1278,8 @@ function buildUsePowerup(dependencies = {}) {
     clientFeatures = null,
     // Internal observability seam. Never serialized or accepted from HTTP.
     onPerformanceContext = null,
-  }) {
-    const powerup = await powerupModel.findById(powerupId);
+  }, execution = null) {
+    const powerup = execution?.lockedPowerup || await powerupModel.findById(powerupId);
     if (!powerup) {
       throw new PowerupUseError("Powerup not found", 404);
     }
@@ -1295,7 +1315,7 @@ function buildUsePowerup(dependencies = {}) {
     // moments later, through the one owner that is allowed to.
     // (No-op for other powerup types.)
     let computedTotals = null;
-    let race = null;
+    let race = execution?.lockedRace || null;
     if (powerup.type === "TRAIL_MINE") {
       const computed = await computeRaceState({ raceId, timeZone });
       computedTotals = computed.totalsByParticipantId;
@@ -1321,6 +1341,90 @@ function buildUsePowerup(dependencies = {}) {
         : typeof raceModel.findPowerupUseContext === "function"
           ? await raceModel.findPowerupUseContext(raceId)
           : await raceModel.findById(raceId);
+    }
+    // Plan before validation: a concurrent defense activation must not make
+    // an early rejection or successful preflight depend on an unlocked snapshot.
+    // Re-enter the core only after the complete ordered dependency set is held.
+    if (execution?.planTargeted && !execution?.participantsReady) {
+      const type = powerup.type;
+      const acceptedParticipants = race?.participants?.filter(p => p.status === "ACCEPTED") || [];
+      const myParticipant = acceptedParticipants.find(p => p.userId === userId);
+      const targetParticipant = acceptedParticipants.find(p => p.userId === targetUserId);
+      // Invalid/uncertain contexts use the established exclusive validation path.
+      if (!myParticipant || !targetParticipant) throw new PowerupLockPlanChanged();
+      const isTeamRace = race.isTeamRace === true;
+      const isAliveTarget = p => !p.finishedAt && !p.forfeitedAt;
+      const mirror = !SHOP_POWERUP_TYPES.includes(type)
+        ? await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "MIRROR")
+        : null;
+      const decoy = !mirror
+        ? await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "DECOY", { expiresAfter: now() })
+        : null;
+      const redirect = decoy ? pickDecoyRedirectVictim({
+        acceptedParticipants, isAliveTarget, attackerUserId: userId,
+        holderParticipant: targetParticipant, isTeamRace, random: execution.decoyRandom,
+      }) : null;
+      const redirectedMirror = redirect && !SHOP_POWERUP_TYPES.includes(type)
+        ? await effectModel.findActiveByTypeForParticipant(redirect.id, "MIRROR") : null;
+      const landing = decoy && !redirect ? null
+        : mirror || redirectedMirror ? myParticipant : redirect || targetParticipant;
+      const socks = landing
+        ? await effectModel.findActiveByTypeForParticipant(landing.id, "COMPRESSION_SOCKS") : null;
+      const involved = [...new Map([myParticipant, targetParticipant, redirect]
+        .filter(Boolean).map((p) => [p.id, p])).values()];
+      const participantIds = involved.map((p) => p.id);
+      // Lock only rows this chain can consume. Duplicate-effect validations
+      // remain read-only; their expiry must not become a new lock dependency.
+      // Unrelated buffs also have independent expiry/wallet writers.
+      const effectIds = [...new Set([mirror, decoy, redirectedMirror, socks]
+        .filter(Boolean).map((effect) => effect.id))];
+      const effectWhere = { id: { in: effectIds }, status: "ACTIVE" };
+      const effectSnapshot = await execution.tx.raceActiveEffect.findMany({
+        where: effectWhere, orderBy: { id: "asc" },
+      });
+      await execution.tx.$queryRawUnsafe(`
+        SELECT id FROM race_participants
+        WHERE race_id = $1 AND id = ANY($2::text[])
+        ORDER BY user_id ASC FOR UPDATE`, raceId, participantIds);
+      if (effectSnapshot.length) {
+        await execution.tx.$queryRawUnsafe(`
+          SELECT id FROM race_active_effects
+          WHERE id = ANY($1::text[]) ORDER BY id ASC FOR UPDATE`, effectSnapshot.map((e) => e.id));
+      }
+      const freshParticipants = await execution.tx.raceParticipant.findMany({ where: { id: { in: participantIds } } });
+      const sameParticipant = (before, after) => after && [
+        "userId", "status", "team", "finishedAt", "forfeitedAt", "totalSteps",
+      ].every((key) => String(before[key] ?? "") === String(after[key] ?? ""));
+      const freshEffects = await execution.tx.raceActiveEffect.findMany({ where: effectWhere, orderBy: { id: "asc" } });
+      const freshMirror = !SHOP_POWERUP_TYPES.includes(type)
+        ? await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "MIRROR") : null;
+      const freshDecoy = !freshMirror
+        ? await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "DECOY", { expiresAfter: now() }) : null;
+      const freshRedirectedMirror = redirect && !SHOP_POWERUP_TYPES.includes(type)
+        ? await effectModel.findActiveByTypeForParticipant(redirect.id, "MIRROR") : null;
+      const freshSocks = landing
+        ? await effectModel.findActiveByTypeForParticipant(landing.id, "COMPRESSION_SOCKS") : null;
+      if (involved.some((p) => !sameParticipant(p, freshParticipants.find((row) => row.id === p.id))) ||
+          JSON.stringify(effectSnapshot) !== JSON.stringify(freshEffects) ||
+          (mirror?.id || null) !== (freshMirror?.id || null) ||
+          (decoy?.id || null) !== (freshDecoy?.id || null) ||
+          (redirectedMirror?.id || null) !== (freshRedirectedMirror?.id || null) ||
+          (socks?.id || null) !== (freshSocks?.id || null)) {
+        // Never append newly discovered participant locks out of userId order.
+        // Roll back and plan again; the request retains its one random draw.
+        throw new PowerupLockPlanChanged();
+      }
+      return usePowerupCore({ userId, raceId, powerupId, targetUserId,
+        targetUserIds, targetDirection, swapOfferedPowerupId, swapRequestedPowerupId,
+        timeZone, upgradeLevel, targetEffectId, clientFeatures, onPerformanceContext },
+        { ...execution, participantsReady: true, lockedPowerup: powerup,
+          // Membership/lifecycle is fenced; only locked participants can affect
+          // these local handlers. Refresh those rows, preserving joined user
+          // display fields, without hydrating the entire roster a second time.
+          lockedRace: { ...race, participants: race.participants.map(p => ({
+            ...p, ...(freshParticipants.find(fresh => fresh.id === p.id) || {}),
+          })) },
+          plannedDecoyResolution: { decoy, holder: targetParticipant, redirect } });
     }
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);
@@ -2931,6 +3035,8 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    const plannedDecoyResolution = execution?.plannedDecoyResolution || null;
+
     // Resolve Hitchhike's one-hop Decoy landing without mutating anything.
     // This intentionally happens before the first write (upgrade coin charge)
     // so a full redirected target preserves the Decoy, Socks, held/redeemed
@@ -3090,6 +3196,8 @@ function buildUsePowerup(dependencies = {}) {
     if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
       const decoy = type === "HITCHHIKE"
         ? hitchhikeDecoyResolution?.decoy || null
+        : plannedDecoyResolution
+          ? (plannedDecoyResolution.decoy?.expiresAt > now() ? plannedDecoyResolution.decoy : null)
         : await effectModel.findActiveByTypeForParticipant(
           targetParticipant.id,
           "DECOY",
@@ -3101,13 +3209,14 @@ function buildUsePowerup(dependencies = {}) {
           : targetParticipant;
         const redirect = type === "HITCHHIKE"
           ? hitchhikeDecoyResolution.redirect
+          : plannedDecoyResolution ? plannedDecoyResolution.redirect
           : pickDecoyRedirectVictim({
             acceptedParticipants,
             isAliveTarget,
             attackerUserId: userId,
             holderParticipant: holder,
             isTeamRace,
-            random,
+            random: execution?.decoyRandom || random,
           });
         await consumeDecoy({
           decoy,
@@ -4739,30 +4848,65 @@ function buildUsePowerup(dependencies = {}) {
     try {
       if (hasInjectedDeps) return await usePowerupCore(args);
 
-      return await runInPrismaTransaction(async (tx) => {
-        // One stable lock order for every direct consequence command. The race
-        // row prevents terminal-state changes during validation, the item row
-        // serializes duplicate taps, and participant rows are locked in the
-        // required ascending userId order. Locking all accepted rows is a safe
-        // conservative superset for fan-out/reflection paths whose final
-        // recipients are defense-dependent.
-        await acquireRaceWriteFence(tx, args.raceId);
-        await tx.$queryRaw`
-          SELECT id FROM races WHERE id = ${args.raceId} FOR UPDATE
-        `;
-        // Pinecone resolves its target from the current race snapshot, so the
-        // target participant is not known at the transaction boundary. The
-        // target's conditional UPDATE below acquires that row lock when the
-        // penalty is applied. Locking every participant here made a simple
-        // single-target toss wait behind unrelated step/resolution writes.
-        // Keep the caster locked up front, and retain the conservative cohort
-        // lock for branches whose validation/reflection can touch many rows.
-        await lockPowerupUseParticipants(tx, {
-          raceId: args.raceId,
-          powerupId: args.powerupId,
-        });
-        return usePowerupCore(args);
-      }, { maxWait: 5_000, timeout: 30_000 });
+      // A dependency can change while row acquisition waits (notably expiry).
+      // Replan from a fresh transaction, replaying the same random quantile.
+      // After two changed plans, retain the established conservative cohort
+      // path rather than expose a new retry error or grow locks out of order.
+      const executionStartedAt = Date.now();
+      let decoyDraw;
+      let requireExclusiveGuard = false;
+      const decoyRandom = () => {
+        if (decoyDraw === undefined) decoyDraw = random();
+        return decoyDraw;
+      };
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await runInPrismaTransaction(async (tx) => {
+            // This read only chooses the guard mode. Ownership, status and
+            // type are checked again after the item lock, before any mutation.
+            const candidate = attempt < 2 ? await tx.racePowerup.findUnique({
+              where: { id: args.powerupId }, select: { type: true },
+            }) : null;
+            const shared = !requireExclusiveGuard && SHARED_RACE_GUARD_TYPES.has(candidate?.type);
+            if (shared) {
+              const guards = await tx.$queryRaw`
+                SELECT race_id FROM race_resolution_jobs_v2
+                WHERE race_id = ${args.raceId} FOR SHARE
+              `;
+              // Creating a missing coordination row requires an exclusive path.
+              // Never upgrade a held shared guard inside the same transaction.
+              if (!guards.length) {
+                requireExclusiveGuard = true;
+                throw new PowerupLockPlanChanged();
+              }
+              await tx.$queryRaw`
+                SELECT id FROM races WHERE id = ${args.raceId} FOR SHARE
+              `;
+            } else {
+              await acquireRaceWriteFence(tx, args.raceId);
+              await tx.$queryRaw`
+                SELECT id FROM races WHERE id = ${args.raceId} FOR UPDATE
+              `;
+            }
+            // Stable order: race fence, lifecycle row, item, participants by
+            // userId, then affected effect rows. Complex paths keep the cohort.
+            const planTargeted = await lockPowerupUseParticipants(tx, {
+              raceId: args.raceId,
+              powerupId: args.powerupId,
+              planTargeted: attempt < 2,
+            });
+            if (shared) {
+              const locked = await tx.racePowerup.findUnique({
+                where: { id: args.powerupId }, select: { type: true },
+              });
+              if (locked?.type !== candidate.type) throw new PowerupLockPlanChanged();
+            }
+            return usePowerupCore(args, { tx, planTargeted, decoyRandom });
+          }, { maxWait: 5_000, timeout: Math.max(1, 30_000 - (Date.now() - executionStartedAt)) });
+        } catch (err) {
+          if (!(err instanceof PowerupLockPlanChanged)) throw err;
+        }
+      }
     } catch (err) {
       if (err instanceof PowerupUseError) {
         try {
