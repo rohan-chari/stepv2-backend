@@ -1,0 +1,2591 @@
+{
+  "date": "2026-09-08",
+  "baselineCommit": "3b241ffbb3bfcbaeea5153d18f1efd6e69a293a4",
+  "candidateCommit": "4364048",
+  "runs": {
+    "full": {
+      "baseline": {
+        "counts": {
+          "tests": 2918,
+          "suites": 474,
+          "pass": 2711,
+          "fail": 206,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        "failures": [
+          {
+            "file": "test/integration/accessory-compatibility.test.js",
+            "name": "validates compatibility metadata through the admin create and PATCH API without leaking it into the public catalog",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/accessory-tuner-perfoot.test.js",
+            "name": "keeps perFoot:false when the tuner echoes it back in a save",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/accessory-tuner-perfoot.test.js",
+            "name": "keeps perFoot:false when a save omits it (older tuner client)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/accessory-tuner-perfoot.test.js",
+            "name": "rejects a non-boolean perFoot with 400",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "returns the locked additive section contract and preserves the legacy payload",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "counts each distinct user once, excludes review accounts, and preserves raw event counts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "uses the full bounded history for week comparisons while keeping the public daily series short",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "uses ET-day half-open boundaries and does not gate today's box opener on historical coverage",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "returns gathering_data with explicit null comparison values when rollup history is incomplete",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "each section returns only its allowlisted block(s), coverage, and sources",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "serves dashboard blocks from Postgres with Redis unavailable",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "counts Google Sign-In accounts in the retained iOS population",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "summary counts retained non-review accounts and excludes review-created races",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "growth zero-fills every ET day and provider leaves stay null",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "empty ratios use null percent and revenue never fabricates provider values",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "release adoption includes both iOS sign-in providers and excludes review accounts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "returns mature empty retention cohorts as observed zero counts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "scopes engagement aggregate denominators to the selected ET window",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "computes capable iOS signup activation ratios from durable facts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports trailing capable provider-accepted push opens by type",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "uses the first eligible post-coverage race for power-use activation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "keeps event-backed coverage collecting until the full selected window is covered",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports today's distinct box openers before the historical window matures",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "keeps today's incomplete exact-day retention target null",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports retention coverage for the same latest-30 mature cohorts as summary ratios",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports coverage collection dates in the dashboard ET calendar",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "computes observed, featured, ranked, and leaderboard engagement leaves",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "uses current-epoch non-review facts from both iOS sign-in providers",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "filters iOS onboarding sessions by review status, not sign-in provider",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "uses matching eligible runner and race populations for engagement",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "ranks the actual first accepted race before finish qualification",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "requires active-version HMAC coverage and populates attributed signups per mature WAU",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "keeps every lazy dashboard request within its SQL statement ceiling",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "keeps the no-sections legacy payload and omits metricsDashboard",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "keeps recognized legacy optional sections in legacy mode",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "keeps an unknown-only request on the legacy soft-degradation path",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "rejects mixed recognized legacy and dashboard sections exactly",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "rejects multiple recognized dashboard sections exactly",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "validates window only in dashboard mode",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-summary returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-growth returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-funnels returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-activation returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-retention returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-engagement returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-virality returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-revenue returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-release-adoption returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "accepts 7d and 90d and ignores unknown names beside one dashboard section",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "creates the item end-to-end and reports peer-mirror status",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "defaults a minimal create to testOnly:true, active:true, earnOnly:false",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "honors explicit flag values",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "rejects a duplicate sku with 409 and leaves the existing row intact",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "validates required fields, slot, price, and renderMetadata",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-system-health.test.js",
+            "name": "uses the real auth/admin middleware and returns the additive envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-system-health.test.js",
+            "name": "returns the full ordered available envelope from real Redis and isolates one malformed process",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin.test.js",
+            "name": "isAdmin flag is true on sign-in for admin user",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin.test.js",
+            "name": "GET /auth/me returns isAdmin flag",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/api-contract-payload-cleanup-contracts.test.js",
+            "name": "rejects retired request/API controls at the public admin boundary",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/api-contract-query-plans.test.js",
+            "name": "friend, compact profile, stats, race and 16-player tournament projections use indexed sets",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "PUT with a valid config becomes active and GET returns it",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects positionOdds row not summing to 1",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects positionOdds row with a negative entry",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dailyBox.odds row not summing to 1",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dropPool entry that is not a PowerupType",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dropPool entry that is store-only",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dropPool entry with no rarity",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects rarityByType missing an enum value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgrade ladder with the wrong length",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgrade ladder whose base is not free",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgrade ladder that decreases",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgradeableTypes entry that is not a PowerupType",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects luckyHorseshoe ladder not ending at 1.0",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects luckyHorseshoe ladder that decreases",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects coinRange with min greater than max",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects rareCoinsShare outside [0,1]",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects unknown accessoryWeightMode",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects unrecognised schemaVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a hard failure is never overridable by acknowledgeBoundWarnings",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a stale expectedVersion is 409 with the current version and config",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "two concurrent writers at the same expectedVersion \u2192 exactly one 201, one 409",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a soft-bound violation is 422, and re-submitting with the ack succeeds and records boundOverride",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "GET /versions lists history newest-first with the active flag",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "creates a NEW version holding the old config and never rewrites history",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a stale expectedVersion on rollback is 409",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rolling back to a version that does not exist is 404",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/banner-ads-admin-toggle-contract.test.js",
+            "name": "serves true when the setting row is missing",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/banner-ads-admin-toggle-contract.test.js",
+            "name": "accepts false through PATCH and returns the persisted settings envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/banner-ads-admin-toggle-contract.test.js",
+            "name": "keeps non-boolean banner values on the existing 400 validation path",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "buckets users by lastAppVersion + platform, with an explicit unknown bucket and a since date",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "reports a user with no X-App-Version header in the unknown bucket, end to end",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "counts private vs public races, total and active",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "returns zeroed sections rather than omitting them when there is no data",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "FROZEN CLIENT: every pre-existing admin-stats section is still present and unchanged",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "is served with the shipped defaults when no config row exists",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "publishes a soft bound for the key so the admin UI can warn before saving",
+            "error": "\"Cannot read properties of undefined (reading 'discardPrices.*')\""
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "round-trips an edited price through the admin save path",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "a STORED CONFIG LACKING the key still saves, reads, and inherits the code defaults",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "a later save on top of a key-less stored row is NOT blocked (partial-row-blocks-apply regression)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "SCHEMA_VERSION is unchanged, so a row stored at the old version still validates",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "rejects a negative price (a coin DRAIN on a button labelled discard)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "rejects a fractional price and an unknown rarity key",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "rejects a non-object discardPrices",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "a price past the soft bound is 422 and succeeds with the explicit ack",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "an admin price edit changes what a real discard pays on the wire",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "balance:apply runs against a stored config that LACKS the key",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27. the demo stages appear in the admin funnel, in demo sequence order",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27b. a demo drop-off renders as a real curve (opened > box > powerup > won)",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27c. tutorial_skipped is NOT an ordered stage (it is an exit, not a step)",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27d. the pre-existing funnel stages are unchanged (additive-only)",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27e. KNOWN LIMITATION: a settings-tutorial replay counts into the onboarding funnel",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28. an orphan session (no onboarding_started) contributes to NO stage",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28b. a legitimate onboarding session still counts every stage it reached",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28c. WINDOW SEMANTICS: a start outside 7d still anchors a stage inside 7d",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28d. the anchor reaches back further than the reported windows",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28e. a NULL session id is still excluded, as before",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28f. anchoring is per-session, not global: one orphan cannot ride another session's start",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/discard-cap-visibility.test.js",
+            "name": "the day boundary comes from the user's STORED zone, not X-Timezone",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "dry-run is mutation-free and reports the deterministic keep/expire set",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "apply expires only later duplicate live Leeches, finalizes boundaries, invalidates/enqueues, and is idempotent",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "refuses apply without both the explicit confirmation and reviewed digest",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "serializes repair against a real-HTTP Leech use and leaves one live effect",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "invalidates the touched race's Redis progress snapshot after commit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "defers a race that is concurrently settlement-eligible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "reports a race that becomes settlement-risky after audit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/extra-spin-funnel.test.js",
+            "name": "is opt-in and reports ET-windowed client stages beside authoritative SSV grants by platform and version",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "rejects admin mutation and keeps /auth/me permanently mandatory",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "rejects a historical OFF request and retains the compatibility value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "no sections param returns the legacy payload with no new keys",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "sections=economy adds coinEconomy in the locked shape",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "sections=ads adds adRevenue in the locked shape",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "adRevenue.boxReroll counts real reroll ad grants and their conversion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "both sections at once, and an unknown name is ignored not fatal",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "coinEconomy.days reports a real ledger row as minted",
+            "error": "\"Cannot read properties of undefined (reading 'coinEconomy')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "every aggregate returns JSON numbers when it has real rows",
+            "error": "\"Cannot read properties of undefined (reading 'coinEconomy')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "usersAtCap counts only users at the cap on the LATEST day",
+            "error": "\"Cannot read properties of undefined (reading 'adRevenue')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "coinEconomy.days reports a negative ledger row as sunk (positive magnitude)",
+            "error": "\"Cannot read properties of undefined (reading 'coinEconomy')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "serves recipient-private inbox alerts and staff-only feedback replies",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "includes the feedback thread user's displayName in the admin list",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "returns null for an admin feedback thread whose user has no displayName",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "returns the user's current displayName without leaking email or profile fields",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "adds podium records and an operator-controlled Home service banner without changing legacy shapes",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-25.test.js",
+            "name": "prioritizes unread staff replies with stable timestamps and marks ordinary alerts separately",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-28.test.js",
+            "name": "locks the dedicated admin active-competition-limit contract and validation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-28.test.js",
+            "name": "enforces one configured limit over free race and tournament memberships",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-backend-contract.test.js",
+            "name": "serves dualBoxBannersEnabled permanently on and rejects admin mutation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-backend-contract.test.js",
+            "name": "GET /admin/stats counts distinct stepped-today verified watchers by placement",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "lists suggestions newest first for an admin",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "honors the limit query parameter",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "pages backwards with the before cursor",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "400s an unparseable before cursor",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "returns an empty list rather than 404 when there is no feedback",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/global-event-reliability.test.js",
+            "name": "merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/home-suggested-races.test.js",
+            "name": "leaves every legacy endpoint byte-compatible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/invite-code-onboarding.test.js",
+            "name": "rejects an admin override and remains permanently FALSE",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP step-sync dependency closure fails closed while that participant's local event is active",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "a support projection failure cannot roll back the committed staff message and later retries",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects the real placement job's ending, team, slacker, and placement producers",
+            "error": "'TEAM_LEAD_CHANGED_V1 is appended by the real placement job'"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects eligible and deleted-recipient outcomes from the real daily-mover job",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "retention waits for downstream delivery, survives account deletion, and cascades only terminal coordination rows",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "2. PATCH /admin/settings cannot change permanently enabled onboarding V3",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "3. PATCH /admin/settings with an unknown key 400s",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+            "error": "'auto-enroll should have joined the non-Daily race'"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "8. starter reward and the legacy tutorial reward share one ledger key (100 coins, not 200)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "14. GET /admin/stats reports onboardingFunnel with distinct-session counts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "14b. events with no onboardingSessionId are not counted in the funnel",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/position-aware-drops.test.js",
+            "name": "positionRules survives a save round trip through the admin endpoint",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+            "name": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "GET lists items with the \u00a75.1 shape",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH changes the price and GET reflects it",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH toggles active / testOnly / sortOrder",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH rejects an empty body and bad types with 400",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH on an unknown itemId is 404",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "an admin-set price survives a re-run of prisma/seed.js",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "catalog exposes wave 5 only to capable clients and omits retired Imposter",
+            "error": "'DECOY visible with powerups5'"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "penalizes the target at expiry when the goal is missed",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "keeps exact finish/placement/steps/join/user ordering and global ranks across pages",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 50 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 500 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 5000 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-experience-invites-autofriend.test.js",
+            "name": "adds tournament createdAt + creator to invite summaries and keeps respond unchanged",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-leave-capability.test.js",
+            "name": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-powerup-placement-performance.test.js",
+            "name": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+            "name": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation before publication",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation during Redis writes",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "a Redis write failure without newer input retains the generic publication error",
+            "error": "'inject failure at the real projection write boundary'"
+          },
+          {
+            "file": "test/integration/referral-contest-joined-dashboard.test.js",
+            "name": "records exact event-time activity for create, direct join, and invite acceptance",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/referral-giveaway-workflow.test.js",
+            "name": "runs draft through archive, preserving intent, review, alternate, and exactly-once fulfillment invariants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "POST /admin/shop/items persists assetVersion and echoes it back",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "defaults remoteOnly to false and validates it on create and PATCH",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "POST /admin/shop/items rejects a malformed assetVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "PATCH /admin/shop/items/:id sets and detaches assetVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "PATCH preserves renderMetadata.baselineOffset when tuning other keys",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "PATCH /admin/powerup-shop/items/:id sets, detaches and validates assetVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/resolved-impact-events-v2.test.js",
+            "name": "rolls back Drill Sergeant judgement with its v2 event, then retries once",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/step-sample-bucket-flag.test.js",
+            "name": "rejects the retired admin setting and keeps the permanent value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/step-sample-bucket-flag.test.js",
+            "name": "rejects a former out-of-set value and keeps the permanent value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/step-sample-bucket-flag.test.js",
+            "name": "rejects every formerly allowed runtime value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold paged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold frozen unpaged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "uses the worker's stale lean team snapshot and hydrates names after masking",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/tournaments.test.js",
+            "name": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward",
+            "error": "|-"
+          }
+        ]
+      },
+      "candidate": {
+        "counts": {
+          "tests": 2978,
+          "suites": 479,
+          "pass": 2770,
+          "fail": 207,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        "failures": [
+          {
+            "file": "test/integration/accessory-compatibility.test.js",
+            "name": "validates compatibility metadata through the admin create and PATCH API without leaking it into the public catalog",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/accessory-tuner-perfoot.test.js",
+            "name": "keeps perFoot:false when the tuner echoes it back in a save",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/accessory-tuner-perfoot.test.js",
+            "name": "keeps perFoot:false when a save omits it (older tuner client)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/accessory-tuner-perfoot.test.js",
+            "name": "rejects a non-boolean perFoot with 400",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "returns the locked additive section contract and preserves the legacy payload",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "counts each distinct user once, excludes review accounts, and preserves raw event counts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "uses the full bounded history for week comparisons while keeping the public daily series short",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "uses ET-day half-open boundaries and does not gate today's box opener on historical coverage",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-dau-engagement.test.js",
+            "name": "returns gathering_data with explicit null comparison values when rollup history is incomplete",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "each section returns only its allowlisted block(s), coverage, and sources",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "serves dashboard blocks from Postgres with Redis unavailable",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "counts Google Sign-In accounts in the retained iOS population",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "summary counts retained non-review accounts and excludes review-created races",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "growth zero-fills every ET day and provider leaves stay null",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "empty ratios use null percent and revenue never fabricates provider values",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "release adoption includes both iOS sign-in providers and excludes review accounts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "returns mature empty retention cohorts as observed zero counts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "scopes engagement aggregate denominators to the selected ET window",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "computes capable iOS signup activation ratios from durable facts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports trailing capable provider-accepted push opens by type",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "uses the first eligible post-coverage race for power-use activation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "keeps event-backed coverage collecting until the full selected window is covered",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports today's distinct box openers before the historical window matures",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "keeps today's incomplete exact-day retention target null",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports retention coverage for the same latest-30 mature cohorts as summary ratios",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "reports coverage collection dates in the dashboard ET calendar",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "computes observed, featured, ranked, and leaderboard engagement leaves",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "uses current-epoch non-review facts from both iOS sign-in providers",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "filters iOS onboarding sessions by review status, not sign-in provider",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "uses matching eligible runner and race populations for engagement",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "ranks the actual first accepted race before finish qualification",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "requires active-version HMAC coverage and populates attributed signups per mature WAU",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-blocks.test.js",
+            "name": "keeps every lazy dashboard request within its SQL statement ceiling",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "keeps the no-sections legacy payload and omits metricsDashboard",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "keeps recognized legacy optional sections in legacy mode",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "keeps an unknown-only request on the legacy soft-degradation path",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "rejects mixed recognized legacy and dashboard sections exactly",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "rejects multiple recognized dashboard sections exactly",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "validates window only in dashboard mode",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-summary returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-growth returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-funnels returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-activation returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-retention returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-engagement returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-virality returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-revenue returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "dashboard-release-adoption returns the exact legacy-disabled dashboard envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-metrics-dashboard-contract.test.js",
+            "name": "accepts 7d and 90d and ignores unknown names beside one dashboard section",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "creates the item end-to-end and reports peer-mirror status",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "defaults a minimal create to testOnly:true, active:true, earnOnly:false",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "honors explicit flag values",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "rejects a duplicate sku with 409 and leaves the existing row intact",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-shop-item-create.test.js",
+            "name": "validates required fields, slot, price, and renderMetadata",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-system-health.test.js",
+            "name": "uses the real auth/admin middleware and returns the additive envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin-system-health.test.js",
+            "name": "returns the full ordered available envelope from real Redis and isolates one malformed process",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin.test.js",
+            "name": "isAdmin flag is true on sign-in for admin user",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/admin.test.js",
+            "name": "GET /auth/me returns isAdmin flag",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/api-contract-payload-cleanup-contracts.test.js",
+            "name": "rejects retired request/API controls at the public admin boundary",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/api-contract-query-plans.test.js",
+            "name": "friend, compact profile, stats, race and 16-player tournament projections use indexed sets",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "PUT with a valid config becomes active and GET returns it",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects positionOdds row not summing to 1",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects positionOdds row with a negative entry",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dailyBox.odds row not summing to 1",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dropPool entry that is not a PowerupType",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dropPool entry that is store-only",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects dropPool entry with no rarity",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects rarityByType missing an enum value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgrade ladder with the wrong length",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgrade ladder whose base is not free",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgrade ladder that decreases",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects upgradeableTypes entry that is not a PowerupType",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects luckyHorseshoe ladder not ending at 1.0",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects luckyHorseshoe ladder that decreases",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects coinRange with min greater than max",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects rareCoinsShare outside [0,1]",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects unknown accessoryWeightMode",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rejects unrecognised schemaVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a hard failure is never overridable by acknowledgeBoundWarnings",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a stale expectedVersion is 409 with the current version and config",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "two concurrent writers at the same expectedVersion \u2192 exactly one 201, one 409",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a soft-bound violation is 422, and re-submitting with the ack succeeds and records boundOverride",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "GET /versions lists history newest-first with the active flag",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "creates a NEW version holding the old config and never rewrites history",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "a stale expectedVersion on rollback is 409",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/balance-config-admin.test.js",
+            "name": "rolling back to a version that does not exist is 404",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/banner-ads-admin-toggle-contract.test.js",
+            "name": "serves true when the setting row is missing",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/banner-ads-admin-toggle-contract.test.js",
+            "name": "accepts false through PATCH and returns the persisted settings envelope",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/banner-ads-admin-toggle-contract.test.js",
+            "name": "keeps non-boolean banner values on the existing 400 validation path",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "buckets users by lastAppVersion + platform, with an explicit unknown bucket and a since date",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "reports a user with no X-App-Version header in the unknown bucket, end to end",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "counts private vs public races, total and active",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "returns zeroed sections rather than omitting them when there is no data",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-admin-version-stats.test.js",
+            "name": "FROZEN CLIENT: every pre-existing admin-stats section is still present and unchanged",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "is served with the shipped defaults when no config row exists",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "publishes a soft bound for the key so the admin UI can warn before saving",
+            "error": "\"Cannot read properties of undefined (reading 'discardPrices.*')\""
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "round-trips an edited price through the admin save path",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "a STORED CONFIG LACKING the key still saves, reads, and inherits the code defaults",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "a later save on top of a key-less stored row is NOT blocked (partial-row-blocks-apply regression)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "SCHEMA_VERSION is unchanged, so a row stored at the old version still validates",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "rejects a negative price (a coin DRAIN on a button labelled discard)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "rejects a fractional price and an unknown rarity key",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "rejects a non-object discardPrices",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "a price past the soft bound is 422 and succeeds with the explicit ack",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "an admin price edit changes what a real discard pays on the wire",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/batch-0808-discard-balance-config.test.js",
+            "name": "balance:apply runs against a stored config that LACKS the key",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27. the demo stages appear in the admin funnel, in demo sequence order",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27b. a demo drop-off renders as a real curve (opened > box > powerup > won)",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27c. tutorial_skipped is NOT an ordered stage (it is an exit, not a step)",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27d. the pre-existing funnel stages are unchanged (additive-only)",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "27e. KNOWN LIMITATION: a settings-tutorial replay counts into the onboarding funnel",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28. an orphan session (no onboarding_started) contributes to NO stage",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28b. a legitimate onboarding session still counts every stage it reached",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28c. WINDOW SEMANTICS: a start outside 7d still anchors a stage inside 7d",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28d. the anchor reaches back further than the reported windows",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28e. a NULL session id is still excluded, as before",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/demo-race-tutorial.test.js",
+            "name": "28f. anchoring is per-session, not global: one orphan cannot ride another session's start",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/discard-cap-visibility.test.js",
+            "name": "the day boundary comes from the user's STORED zone, not X-Timezone",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "dry-run is mutation-free and reports the deterministic keep/expire set",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "apply expires only later duplicate live Leeches, finalizes boundaries, invalidates/enqueues, and is idempotent",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "refuses apply without both the explicit confirmation and reviewed digest",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "serializes repair against a real-HTTP Leech use and leaves one live effect",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "invalidates the touched race's Redis progress snapshot after commit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "defers a race that is concurrently settlement-eligible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "reports a race that becomes settlement-risky after audit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/extra-spin-funnel.test.js",
+            "name": "is opt-in and reports ET-windowed client stages beside authoritative SSV grants by platform and version",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "rejects admin mutation and keeps /auth/me permanently mandatory",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "rejects a historical OFF request and retains the compatibility value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "no sections param returns the legacy payload with no new keys",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "sections=economy adds coinEconomy in the locked shape",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "sections=ads adds adRevenue in the locked shape",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "adRevenue.boxReroll counts real reroll ad grants and their conversion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "both sections at once, and an unknown name is ignored not fatal",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "coinEconomy.days reports a real ledger row as minted",
+            "error": "\"Cannot read properties of undefined (reading 'coinEconomy')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "every aggregate returns JSON numbers when it has real rows",
+            "error": "\"Cannot read properties of undefined (reading 'coinEconomy')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "usersAtCap counts only users at the cap on the LATEST day",
+            "error": "\"Cannot read properties of undefined (reading 'adRevenue')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-09.test.js",
+            "name": "coinEconomy.days reports a negative ledger row as sunk (positive magnitude)",
+            "error": "\"Cannot read properties of undefined (reading 'coinEconomy')\""
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "serves recipient-private inbox alerts and staff-only feedback replies",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "includes the feedback thread user's displayName in the admin list",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "returns null for an admin feedback thread whose user has no displayName",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "returns the user's current displayName without leaking email or profile fields",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-17-contracts.test.js",
+            "name": "adds podium records and an operator-controlled Home service banner without changing legacy shapes",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-25.test.js",
+            "name": "prioritizes unread staff replies with stable timestamps and marks ordinary alerts separately",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-28.test.js",
+            "name": "locks the dedicated admin active-competition-limit contract and validation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-2026-08-28.test.js",
+            "name": "enforces one configured limit over free race and tournament memberships",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-backend-contract.test.js",
+            "name": "serves dualBoxBannersEnabled permanently on and rejects admin mutation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feature-batch-backend-contract.test.js",
+            "name": "GET /admin/stats counts distinct stepped-today verified watchers by placement",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "lists suggestions newest first for an admin",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "honors the limit query parameter",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "pages backwards with the before cursor",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "400s an unparseable before cursor",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/feedback_suggestions.test.js",
+            "name": "returns an empty list rather than 404 when there is no feedback",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/global-event-reliability.test.js",
+            "name": "merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/home-suggested-races.test.js",
+            "name": "leaves every legacy endpoint byte-compatible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/invite-code-onboarding.test.js",
+            "name": "rejects an admin override and remains permanently FALSE",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP step-sync dependency closure fails closed while that participant's local event is active",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "a support projection failure cannot roll back the committed staff message and later retries",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects the real placement job's ending, team, slacker, and placement producers",
+            "error": "'TEAM_LEAD_CHANGED_V1 is appended by the real placement job'"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects eligible and deleted-recipient outcomes from the real daily-mover job",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "retention waits for downstream delivery, survives account deletion, and cascades only terminal coordination rows",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "2. PATCH /admin/settings cannot change permanently enabled onboarding V3",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "3. PATCH /admin/settings with an unknown key 400s",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+            "error": "'auto-enroll should have joined the non-Daily race'"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "8. starter reward and the legacy tutorial reward share one ledger key (100 coins, not 200)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "14. GET /admin/stats reports onboardingFunnel with distinct-session counts",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "14b. events with no onboardingSessionId are not counted in the funnel",
+            "error": "\"Cannot read properties of undefined (reading 'onboardingFunnel')\""
+          },
+          {
+            "file": "test/integration/position-aware-drops.test.js",
+            "name": "positionRules survives a save round trip through the admin endpoint",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+            "name": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "GET lists items with the \u00a75.1 shape",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH changes the price and GET reflects it",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH toggles active / testOnly / sortOrder",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH rejects an empty body and bad types with 400",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "PATCH on an unknown itemId is 404",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerup-shop-admin.test.js",
+            "name": "an admin-set price survives a re-run of prisma/seed.js",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "catalog exposes wave 5 only to capable clients and omits retired Imposter",
+            "error": "'DECOY visible with powerups5'"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "penalizes the target at expiry when the goal is missed",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/query-efficiency-resolution.test.js",
+            "name": "real resolution worker query trace and fence projection: team=false",
+            "error": "'fence candidate removes user-join work'"
+          },
+          {
+            "file": "test/integration/query-efficiency-resolution.test.js",
+            "name": "real resolution worker query trace and fence projection: team=true",
+            "error": "'fence candidate removes user-join work'"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 50 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 500 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 5000 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-experience-invites-autofriend.test.js",
+            "name": "adds tournament createdAt + creator to invite summaries and keeps respond unchanged",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-leave-capability.test.js",
+            "name": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-powerup-placement-performance.test.js",
+            "name": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+            "name": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation before publication",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation during Redis writes",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "a Redis write failure without newer input retains the generic publication error",
+            "error": "'inject failure at the real projection write boundary'"
+          },
+          {
+            "file": "test/integration/referral-contest-joined-dashboard.test.js",
+            "name": "records exact event-time activity for create, direct join, and invite acceptance",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/referral-giveaway-workflow.test.js",
+            "name": "runs draft through archive, preserving intent, review, alternate, and exactly-once fulfillment invariants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "POST /admin/shop/items persists assetVersion and echoes it back",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "defaults remoteOnly to false and validates it on create and PATCH",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "POST /admin/shop/items rejects a malformed assetVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "PATCH /admin/shop/items/:id sets and detaches assetVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "PATCH preserves renderMetadata.baselineOffset when tuning other keys",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/remote-assets.test.js",
+            "name": "PATCH /admin/powerup-shop/items/:id sets, detaches and validates assetVersion",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/resolved-impact-events-v2.test.js",
+            "name": "rolls back Drill Sergeant judgement with its v2 event, then retries once",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/step-sample-bucket-flag.test.js",
+            "name": "rejects the retired admin setting and keeps the permanent value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/step-sample-bucket-flag.test.js",
+            "name": "rejects a former out-of-set value and keeps the permanent value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/step-sample-bucket-flag.test.js",
+            "name": "rejects every formerly allowed runtime value",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold paged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold frozen unpaged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "uses the worker's stale lean team snapshot and hydrates names after masking",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/tournaments.test.js",
+            "name": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward",
+            "error": "|-"
+          }
+        ]
+      }
+    },
+    "configuredAdmin": {
+      "baseline": {
+        "counts": {
+          "tests": 629,
+          "suites": 77,
+          "pass": 588,
+          "fail": 41,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "failures": [
+          {
+            "file": "test/integration/api-contract-query-plans.test.js",
+            "name": "friend, compact profile, stats, race and 16-player tournament projections use indexed sets",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/discard-cap-visibility.test.js",
+            "name": "the day boundary comes from the user's STORED zone, not X-Timezone",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "dry-run is mutation-free and reports the deterministic keep/expire set",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "apply expires only later duplicate live Leeches, finalizes boundaries, invalidates/enqueues, and is idempotent",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "refuses apply without both the explicit confirmation and reviewed digest",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "serializes repair against a real-HTTP Leech use and leaves one live effect",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "invalidates the touched race's Redis progress snapshot after commit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "defers a race that is concurrently settlement-eligible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "reports a race that becomes settlement-risky after audit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/global-event-reliability.test.js",
+            "name": "merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/home-suggested-races.test.js",
+            "name": "leaves every legacy endpoint byte-compatible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP step-sync dependency closure fails closed while that participant's local event is active",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "does not spend the failure budget on successful fan-out pages",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects the real placement job's ending, team, slacker, and placement producers",
+            "error": "'TEAM_LEAD_CHANGED_V1 is appended by the real placement job'"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects eligible and deleted-recipient outcomes from the real daily-mover job",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "retention waits for downstream delivery, survives account deletion, and cascades only terminal coordination rows",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+            "error": "'auto-enroll should have joined the non-Daily race'"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "8. starter reward and the legacy tutorial reward share one ledger key (100 coins, not 200)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+            "name": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "catalog exposes wave 5 only to capable clients and omits retired Imposter",
+            "error": "'DECOY visible with powerups5'"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "penalizes the target at expiry when the goal is missed",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 50 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 500 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 5000 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-experience-invites-autofriend.test.js",
+            "name": "adds tournament createdAt + creator to invite summaries and keeps respond unchanged",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-leave-capability.test.js",
+            "name": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-powerup-placement-performance.test.js",
+            "name": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+            "name": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation before publication",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation during Redis writes",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "a Redis write failure without newer input retains the generic publication error",
+            "error": "'inject failure at the real projection write boundary'"
+          },
+          {
+            "file": "test/integration/referral-contest-joined-dashboard.test.js",
+            "name": "records exact event-time activity for create, direct join, and invite acceptance",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/referral-giveaway-workflow.test.js",
+            "name": "runs draft through archive, preserving intent, review, alternate, and exactly-once fulfillment invariants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/resolved-impact-events-v2.test.js",
+            "name": "rolls back Drill Sergeant judgement with its v2 event, then retries once",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold paged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold frozen unpaged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "uses the worker's stale lean team snapshot and hydrates names after masking",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/tournaments.test.js",
+            "name": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward",
+            "error": "|-"
+          }
+        ]
+      },
+      "candidate": {
+        "counts": {
+          "tests": 629,
+          "suites": 77,
+          "pass": 588,
+          "fail": 41,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "failures": [
+          {
+            "file": "test/integration/api-contract-query-plans.test.js",
+            "name": "friend, compact profile, stats, race and 16-player tournament projections use indexed sets",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/discard-cap-visibility.test.js",
+            "name": "the day boundary comes from the user's STORED zone, not X-Timezone",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "dry-run is mutation-free and reports the deterministic keep/expire set",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "apply expires only later duplicate live Leeches, finalizes boundaries, invalidates/enqueues, and is idempotent",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "refuses apply without both the explicit confirmation and reviewed digest",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "serializes repair against a real-HTTP Leech use and leaves one live effect",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "invalidates the touched race's Redis progress snapshot after commit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "defers a race that is concurrently settlement-eligible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/duplicate-leech-repair.test.js",
+            "name": "reports a race that becomes settlement-risky after audit",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/global-event-reliability.test.js",
+            "name": "merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/home-suggested-races.test.js",
+            "name": "leaves every legacy endpoint byte-compatible",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP step-sync dependency closure fails closed while that participant's local event is active",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/local-global-step-event-entitlements.test.js",
+            "name": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects the real placement job's ending, team, slacker, and placement producers",
+            "error": "'TEAM_LEAD_CHANGED_V1 is appended by the real placement job'"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "projects eligible and deleted-recipient outcomes from the real daily-mover job",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/notification-domain-isolation.test.js",
+            "name": "retention waits for downstream delivery, survives account deletion, and cascades only terminal coordination rows",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+            "error": "'auto-enroll should have joined the non-Daily race'"
+          },
+          {
+            "file": "test/integration/onboarding-revamp.test.js",
+            "name": "8. starter reward and the legacy tutorial reward share one ledger key (100 coins, not 200)",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+            "name": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "catalog exposes wave 5 only to capable clients and omits retired Imposter",
+            "error": "'DECOY visible with powerups5'"
+          },
+          {
+            "file": "test/integration/powerups5-wave.test.js",
+            "name": "penalizes the target at expiry when the goal is missed",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "keeps exact finish/placement/steps/join/user ordering and global ranks across pages",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 50 accepted participants",
+            "error": "`{\"Node Type\":\"Sort\",\"Parallel Aware\":false,\"Async Capable\":false,\"Startup Cost\":11.76,\"Total Cost\":11.8,\"Plan Rows\":15,\"Plan Width\":116,\"Actual Startup Time\":0.038,\"Actual Total Time\":0.039,\"Actual Rows\":15,\"Actual Loops\":1,\"Sort Key\":[\"(((row_number() OVER (?) + '0'::bigint))::integer)\"],\"Sort Method\":\"quicksort\",\"Sort Space Used\":26,\"Sort Space Type\":\"Memory\",\"Shared Hit Blocks\":8,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"Limit\",\"Parent Relationship\":\"InitPlan\",\"Subplan Name\":\"CTE page\",\"Parallel Aware\":false,\"Async Capable\":false,\"Startup Cost\":8.98,\"Total Cost\":9.01,\"Plan Rows\":15,\"Plan Width\":138,\"Actual Startup Time\":0.021,\"Actual Total Time\":0.022,\"Actual Rows\":15,\"Actual Loops\":1,\"Shared Hit Blocks\":7,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"Sort\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"Startup Cost\":8.98,\"Total Cost\":9.1,\"Plan Rows\":50,\"Plan Width\":138,\"Actual Startup Time\":0.021,\"Actual Total Time\":0.022,\"Actual Rows\":15,\"Actual Loops\":1,\"Sort Key\":[\"(CASE WHEN (rp.finished_at IS NOT NULL) THEN 0 ELSE 1 END)\",\"(CASE WHEN (rp.finished_at IS NOT NULL) THEN rp.placement ELSE NULL::integer END)\",\"(CASE WHEN (rp.finished_at IS NOT NULL) THEN rp.finished_at ELSE NULL::timestamp without time zone END)\",\"(CASE WHEN (rp.finished_at IS NULL) THEN rp.total_steps ELSE NULL::integer END) DESC NULLS LAST\",\"rp.joined_at\",\"rp.id\"],\"Sort Method\":\"top-N heapsort\",\"Sort Space Used\":26,\"Sort Space Type\":\"Memory\",\"Shared Hit Blocks\":7,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"Seq Scan\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"Relation Name\":\"race_participants\",\"Alias\":\"rp\",\"Startup Cost\":0,\"Total Cost\":7.75,\"Plan Rows\":50,\"Plan Width\":138,\"Actual Startup Time\":0.003,\"Actual Total Time\":0.01,\"Actual Rows\":50,\"Actual Loops\":1,\"Filter\":\"((race_id = 'ad386bbc-f8c2-4fb4-a5f5-51d8320a3d70'::text) AND (status = 'accepted'::\\\\\"RaceParticipantStatus\\\\\"))\",\"Rows Removed by Filter\":0,\"Shared Hit Blocks\":7,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0}]}]},{\"Node Type\":\"Nested Loop\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"Join Type\":\"Left\",\"Startup Cost\":0.59,\"Total Cost\":2.45,\"Plan Rows\":15,\"Plan Width\":116,\"Actual Startup Time\":0.032,\"Actual Total Time\":0.035,\"Actual Rows\":15,\"Actual Loops\":1,\"Inner Unique\":false,\"Shared Hit Blocks\":8,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"Nested Loop\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"Join Type\":\"Left\",\"Startup Cost\":0,\"Total Cost\":1.03,\"Plan Rows\":1,\"Plan Width\":4,\"Actual Startup Time\":0.002,\"Actual Total Time\":0.002,\"Actual Rows\":1,\"Actual Loops\":1,\"Inner Unique\":false,\"Shared Hit Blocks\":1,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"Result\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"Startup Cost\":0,\"Total Cost\":0.01,\"Plan Rows\":1,\"Plan Width\":0,\"Actual Startup Time\":0,\"Actual Total Time\":0,\"Actual Rows\":1,\"Actual Loops\":1,\"Shared Hit Blocks\":0,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0},{\"Node Type\":\"Seq Scan\",\"Parent Relationship\":\"Inner\",\"Parallel Aware\":false,\"Async Capable\":false,\"Relation Name\":\"race_accepted_participant_counts\",\"Alias\":\"counts\",\"Startup Cost\":0,\"Total Cost\":1.01,\"Plan Rows\":1,\"Plan Width\":4,\"Actual Startup Time\":0.002,\"Actual Total Time\":0.002,\"Actual Rows\":1,\"Actual Loops\":1,\"Filter\":\"('ad386bbc-f8c2-4fb4-a5f5-51d8320a3d70'::text = race_id)\",\"Rows Removed by Filter\":0,\"Shared Hit Blocks\":1,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0}]},{\"Node Type\":\"WindowAgg\",\"Parent Relationship\":\"Inner\",\"Parallel Aware\":false,\"Async Capable\":false,\"Startup Cost\":0.59,\"Total Cost\":1.12,\"Plan Rows\":15,\"Plan Width\":132,\"Actual Startup Time\":0.029,\"Actual Total Time\":0.031,\"Actual Rows\":15,\"Actual Loops\":1,\"Shared Hit Blocks\":7,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"Sort\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"Startup Cost\":0.59,\"Total Cost\":0.63,\"Plan Rows\":15,\"Plan Width\":128,\"Actual Startup Time\":0.028,\"Actual Total Time\":0.028,\"Actual Rows\":15,\"Actual Loops\":1,\"Sort Key\":[\"(CASE WHEN (page.\\\\\"finishedAt\\\\\" IS NOT NULL) THEN 0 ELSE 1 END)\",\"(CASE WHEN (page.\\\\\"finishedAt\\\\\" IS NOT NULL) THEN page.placement ELSE NULL::integer END)\",\"(CASE WHEN (page.\\\\\"finishedAt\\\\\" IS NOT NULL) THEN page.\\\\\"finishedAt\\\\\" ELSE NULL::timestamp without time zone END)\",\"(CASE WHEN (page.\\\\\"finishedAt\\\\\" IS NULL) THEN page.\\\\\"totalSteps\\\\\" ELSE NULL::integer END) DESC NULLS LAST\",\"page.\\\\\"joinedAt\\\\\"\",\"page.\\\\\"participantId\\\\\"\"],\"Sort Method\":\"quicksort\",\"Sort Space Used\":26,\"Sort Space Type\":\"Memory\",\"Shared Hit Blocks\":7,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0,\"Plans\":[{\"Node Type\":\"CTE Scan\",\"Parent Relationship\":\"Outer\",\"Parallel Aware\":false,\"Async Capable\":false,\"CTE Name\":\"page\",\"Alias\":\"page\",\"Startup Cost\":0,\"Total Cost\":0.3,\"Plan Rows\":15,\"Plan Width\":128,\"Actual Startup Time\":0.023,\"Actual Total Time\":0.025,\"Actual Rows\":15,\"Actual Loops\":1,\"Shared Hit Blocks\":7,\"Shared Read Blocks\":0,\"Shared Dirtied Blocks\":0,\"Shared Written Blocks\":0,\"Local Hit Blocks\":0,\"Local Read Blocks\":0,\"Local Dirtied Blocks\":0,\"Local Written Blocks\":0,\"Temp Read Blocks\":0,\"Temp Written Blocks\":0}]}]}]}]}`"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 500 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+            "name": "uses a bounded indexed first page for 5000 accepted participants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-experience-invites-autofriend.test.js",
+            "name": "adds tournament createdAt + creator to invite summaries and keeps respond unchanged",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-leave-capability.test.js",
+            "name": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-powerup-placement-performance.test.js",
+            "name": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+            "name": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation before publication",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "publication preserves its failed attempt when HTTP advances generation during Redis writes",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/race-resolution-pending-scope.test.js",
+            "name": "a Redis write failure without newer input retains the generic publication error",
+            "error": "'inject failure at the real projection write boundary'"
+          },
+          {
+            "file": "test/integration/referral-contest-joined-dashboard.test.js",
+            "name": "records exact event-time activity for create, direct join, and invite acceptance",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/referral-giveaway-workflow.test.js",
+            "name": "runs draft through archive, preserving intent, review, alternate, and exactly-once fulfillment invariants",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/resolved-impact-events-v2.test.js",
+            "name": "rolls back Drill Sergeant judgement with its v2 event, then retries once",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold paged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "serves a cold frozen unpaged team bootstrap without polling for worker output",
+            "error": "'authoritative refresh remains queued'"
+          },
+          {
+            "file": "test/integration/team-race-read-performance.test.js",
+            "name": "uses the worker's stale lean team snapshot and hydrates names after masking",
+            "error": "|-"
+          },
+          {
+            "file": "test/integration/tournaments.test.js",
+            "name": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward",
+            "error": "|-"
+          }
+        ]
+      }
+    },
+    "matchedPhysicalStateQueryPlan": {
+      "baseline": {
+        "counts": {
+          "tests": 2,
+          "suites": 0,
+          "pass": 2,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "failures": []
+      },
+      "candidate": {
+        "counts": {
+          "tests": 2,
+          "suites": 0,
+          "pass": 2,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "failures": []
+      }
+    },
+    "exactDatabaseNameLeech": {
+      "baseline": {
+        "counts": {
+          "tests": 7,
+          "suites": 1,
+          "pass": 7,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "failures": []
+      },
+      "candidate": {
+        "counts": {
+          "tests": 7,
+          "suites": 1,
+          "pass": 7,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "failures": []
+      }
+    }
+  },
+  "assessment": "No new regression identified. Two full-run query-plan ratio failures pass on both revisions from matching physical DB copies; every remaining candidate failure appears in a baseline run. No assertions changed or skipped."
+}
