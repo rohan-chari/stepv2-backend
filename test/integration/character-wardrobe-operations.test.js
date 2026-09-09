@@ -116,3 +116,33 @@ it("fit apply aborts missing/changed identity with no partial fit rows", async (
   assert.match(r.error, /identity\/slot mismatch/);
   assert.equal(await prisma.shopItemCharacterFit.count(), 0);
 });
+
+it("audit preserves pending ad grants bound by legacy SKU instead of item ID", async () => {
+  const i = await prisma.shopItem.create({
+    data: {
+      sku: "pending-ad-hat",
+      name: "Hat",
+      slot: "HEAD",
+      assetKey: "hat",
+      priceCoins: 1,
+      testOnly: true,
+    },
+  });
+  const u = await prisma.user.create({
+    data: { appleId: "audit-pending-ad-user" },
+  });
+  await prisma.adRewardGrant.create({
+    data: {
+      userId: u.id,
+      transactionId: "pending-ad-reference",
+      grantedDate: "2026-09-09",
+      rewardKind: "shop_unlock",
+      shopItemId: i.sku,
+    },
+  });
+  const r = run("scripts/audit-character-wardrobes.js");
+  assert.equal(r.status, 0, r.error);
+  const row = r.body.items.find((x) => x.id === i.id);
+  assert.equal(row.refs.ads, 1);
+  assert.equal(row.classification, "Preserve owned-or-referenced");
+});

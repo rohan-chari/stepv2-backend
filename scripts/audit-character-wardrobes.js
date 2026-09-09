@@ -38,6 +38,9 @@ async function audit(
     ).rows;
     const ids = rows.map((i) => i.id),
       counts = new Map(ids.map((id) => [id, {}]));
+    // SSV shop-unlock grants deliberately bind by SKU; old grants may bind by
+    // ID. Preserve either identity, including ambiguous cross-namespace values.
+    const referenceKeys = [...new Set(rows.flatMap((i) => [i.id, i.sku]))];
     const missingTables = [];
     for (const [table, column, label] of REFERENCES) {
       const exists = (
@@ -50,10 +53,16 @@ async function audit(
       const refs = (
         await db.query(
           `SELECT ${column} AS id,count(*)::int AS count FROM ${table} WHERE ${column}=ANY($1::text[]) GROUP BY ${column}`,
-          [ids],
+          [referenceKeys],
         )
       ).rows;
-      for (const r of refs) counts.get(r.id)[label] = r.count;
+      for (const r of refs)
+        for (const item of rows.filter(
+          (i) => i.id === r.id || i.sku === r.id,
+        )) {
+          const counter = counts.get(item.id);
+          counter[label] = (counter[label] || 0) + r.count;
+        }
     }
     // Purchase replay JSON may contain equipment other than the purchased item.
     // Page the source rows, visiting each request once for this bounded item page.
@@ -69,9 +78,12 @@ async function audit(
       if (!requests.length) break;
       for (const r of requests) {
         const json = JSON.stringify(r.result_json);
-        for (const id of ids)
-          if (json.includes(JSON.stringify(id)))
-            counts.get(id).replay = (counts.get(id).replay || 0) + 1;
+        for (const item of rows)
+          if (
+            json.includes(JSON.stringify(item.id)) ||
+            json.includes(JSON.stringify(item.sku))
+          )
+            counts.get(item.id).replay = (counts.get(item.id).replay || 0) + 1;
       }
       requestsChecked += requests.length;
       requestCursor = requests.at(-1).id;

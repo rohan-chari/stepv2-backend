@@ -46,11 +46,12 @@ async function main() {
       "billing_cosmetic_releases",
       "billing_cosmetic_grants",
     ];
+    const referenceKeys = [...new Set(items.flatMap((i) => [i.id, i.sku]))];
     for (const table of tables) {
       const refs = (
         await db.query(
           `SELECT 1 FROM ${table} WHERE shop_item_id=ANY($1::text[]) LIMIT 1`,
-          [ids],
+          [referenceKeys],
         )
       ).rows;
       if (refs.length)
@@ -69,7 +70,7 @@ async function main() {
       if (!rows.length) break;
       for (const row of rows)
         if (
-          ids.some((id) =>
+          referenceKeys.some((id) =>
             JSON.stringify(row.result_json).includes(JSON.stringify(id)),
           )
         )
