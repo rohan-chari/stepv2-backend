@@ -1157,7 +1157,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               requested_at ASC,
               race_id ASC`;
       const rows = await prisma.$queryRawUnsafe(
-        `
+        `/* steps:prepared-query:v1 */
         WITH candidate AS (
           SELECT id
           FROM race_resolution_jobs_v2

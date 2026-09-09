@@ -8,7 +8,7 @@ const {
 // predicate correlated so PostgreSQL can stop at the first qualifying event
 // instead of flattening it into a broad join and sorting all matches.
 // The user-only membership gate skips event probes when no race can qualify.
-const READ_SQL = `
+const READ_SQL = `/* steps:prepared-read:v1 */
 WITH requested AS (
   SELECT * FROM jsonb_to_recordset($1::jsonb) AS request(
     "userId" text, "at" timestamptz

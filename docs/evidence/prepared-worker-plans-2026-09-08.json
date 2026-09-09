@@ -1,0 +1,224 @@
+{
+  "rounds": 30,
+  "results": [
+    {
+      "family": "placement-claim",
+      "density": "empty",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.25966700000003584,
+      "preparedMedianMs": 0.14774999999997362
+    },
+    {
+      "family": "placement-claim",
+      "density": "sparse",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.29349999999999454,
+      "preparedMedianMs": 0.18783399999995254
+    },
+    {
+      "family": "placement-claim",
+      "density": "dense",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 1.2581250000000637,
+      "preparedMedianMs": 1.135791999999924
+    },
+    {
+      "family": "placement-due",
+      "density": "empty",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 30,
+      "customExecutions": 0,
+      "baselineMedianMs": 0.23291700000004312,
+      "preparedMedianMs": 0.13199999999983447
+    },
+    {
+      "family": "placement-due",
+      "density": "sparse",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 30,
+      "customExecutions": 0,
+      "baselineMedianMs": 0.22454199999992852,
+      "preparedMedianMs": 0.12108299999999872
+    },
+    {
+      "family": "placement-due",
+      "density": "dense",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 30,
+      "customExecutions": 0,
+      "baselineMedianMs": 1.2610839999999826,
+      "preparedMedianMs": 1.156041999999843
+    },
+    {
+      "family": "resolution-claim",
+      "density": "empty",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.4020419999999376,
+      "preparedMedianMs": 0.16266700000005585
+    },
+    {
+      "family": "resolution-claim",
+      "density": "sparse",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.4517920000000686,
+      "preparedMedianMs": 0.21741599999995742
+    },
+    {
+      "family": "resolution-claim",
+      "density": "dense",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 1.0310839999999644,
+      "preparedMedianMs": 0.7752920000000358
+    },
+    {
+      "family": "post-task-claim",
+      "density": "empty",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.558084000000008,
+      "preparedMedianMs": 0.4162499999999909
+    },
+    {
+      "family": "post-task-claim",
+      "density": "sparse",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.6031669999999849,
+      "preparedMedianMs": 0.47299999999995634
+    },
+    {
+      "family": "post-task-claim",
+      "density": "dense",
+      "scope": "queue",
+      "rounds": 30,
+      "genericExecutions": 25,
+      "customExecutions": 5,
+      "baselineMedianMs": 0.3397090000000844,
+      "preparedMedianMs": 0.2091659999998683
+    },
+    {
+      "family": "active-event-read",
+      "density": "empty",
+      "scope": "all",
+      "rounds": 30,
+      "genericExecutions": 0,
+      "customExecutions": 30,
+      "baselineMedianMs": 0.8291249999999764,
+      "preparedMedianMs": 0.7634579999999005
+    },
+    {
+      "family": "active-event-read",
+      "density": "empty",
+      "scope": "race",
+      "rounds": 30,
+      "genericExecutions": 0,
+      "customExecutions": 30,
+      "baselineMedianMs": 0.3502080000002934,
+      "preparedMedianMs": 0.2947919999996884
+    },
+    {
+      "family": "active-event-read",
+      "density": "sparse",
+      "scope": "all",
+      "rounds": 30,
+      "genericExecutions": 0,
+      "customExecutions": 30,
+      "baselineMedianMs": 0.390041999999994,
+      "preparedMedianMs": 0.32975000000033106
+    },
+    {
+      "family": "active-event-read",
+      "density": "sparse",
+      "scope": "race",
+      "rounds": 30,
+      "genericExecutions": 0,
+      "customExecutions": 30,
+      "baselineMedianMs": 0.3354589999999007,
+      "preparedMedianMs": 0.2733330000000933
+    },
+    {
+      "family": "active-event-read",
+      "density": "dense",
+      "scope": "all",
+      "rounds": 30,
+      "genericExecutions": 0,
+      "customExecutions": 30,
+      "baselineMedianMs": 108.56354200000078,
+      "preparedMedianMs": 108.44375000000036
+    },
+    {
+      "family": "active-event-read",
+      "density": "dense",
+      "scope": "race",
+      "rounds": 30,
+      "genericExecutions": 0,
+      "customExecutions": 30,
+      "baselineMedianMs": 0.5959999999995489,
+      "preparedMedianMs": 0.5418750000008004
+    }
+  ],
+  "environment": {
+    "postgresql": "18.4",
+    "pgbouncer": "1.25.2",
+    "poolMode": "transaction",
+    "maxPreparedStatements": 128,
+    "planCacheMode": "auto"
+  },
+  "fixture": {
+    "races": 1000,
+    "queueEligible": {
+      "empty": 0,
+      "sparse": 1,
+      "dense": 1000
+    },
+    "activeEventDenseBatch": "one eligible user plus 255 missing users; not 256 active users"
+  },
+  "method": "30 alternating baseline/prepared pairs per case; first 6 excluded from elapsed medians; savepoint rollback between executions; dedicated PgBouncer backends recycled before each topology",
+  "productionCpuSaving": "not measured",
+  "testsFirst": {
+    "before": {
+      "pass": 2,
+      "fail": 1,
+      "failure": "resolution-claim must reuse a bounded named statement instead of reparsing each call"
+    },
+    "after": {
+      "tests": 45,
+      "pass": 45,
+      "fail": 0,
+      "skipped": 0
+    },
+    "flutterAnalyze": "clean",
+    "review": "SHIP, no blockers"
+  },
+  "sourceSha256": {
+    "src/modules/races/models/raceResolutionJobV2.js": "05cd1b157a8b64634826f8c70d8959682a7fcf35bc47bb0e343bfe09b794caa0",
+    "src/modules/races/models/racePlacementTransitionJob.js": "3838058035d3246e37d77134150f126ed9c4591e0f2c1a92515539b1b30a82a9",
+    "src/modules/races/models/raceResolutionPostTask.js": "da97859940966da852ca798a03165c8629432572911698cb8c426dc5d66b83b8",
+    "src/modules/steps/services/viewerActiveEventReadBatch.js": "b2b1ac8483a6b428583daa8a2653b85ff3a363144ced99f13842a972e2c6218c"
+  }
+}

@@ -102,7 +102,7 @@ function buildRacePlacementTransitionJobModel(prisma = defaultPrisma) {
     async claimOne({ now = new Date() } = {}) {
       const leaseToken = crypto.randomUUID();
       const rows = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
-        `WITH candidate AS (
+        `/* steps:prepared-query:v1 */ WITH candidate AS (
            SELECT p.id
              FROM race_placement_transition_jobs p
              JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id
@@ -142,7 +142,7 @@ function buildRacePlacementTransitionJobModel(prisma = defaultPrisma) {
 
     async nextDueAt() {
       const [row = {}] = await prisma.$queryRawUnsafe(
-        `SELECT LEAST(
+        `/* steps:prepared-query:v1 */ SELECT LEAST(
            (SELECT MIN(GREATEST(p.not_before_at,COALESCE(p.retry_at,'-infinity'::timestamp)))
               FROM race_placement_transition_jobs p
               JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id

@@ -378,7 +378,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       const leaseToken = crypto.randomUUID();
       return prisma.$transaction(async (tx) => {
         const rows = await tx.$queryRawUnsafe(
-          `WITH candidate_ids AS MATERIALIZED (
+          `/* steps:prepared-query:v1 */ WITH candidate_ids AS MATERIALIZED (
              SELECT id, requested_at FROM (
                (SELECT id, requested_at FROM race_resolution_post_tasks
                 WHERE state='queued' AND not_before_at <= $1
