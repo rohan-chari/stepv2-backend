@@ -1,12 +1,13 @@
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { describe, it, before, beforeEach, after } = require('node:test');
+const { describe, it, before, beforeEach, after, afterEach } = require('node:test');
 const { cleanDatabase, createTestUser, startServer, prisma, request } = require('./setup');
 const { scheduleSeededChallengePreparation } = require('../../src/modules/races/jobs/seededChallengePreparation');
 const { buildRaceResolutionWorkerV2 } = require('../../src/modules/races/jobs/raceResolutionQueueV2');
 const HEADERS = { 'X-Client-Features': 'seeded_race_buckets' };
 describe('durable signup recovery through production scheduler and worker', () => {
   let server, clock, scheduler;
+  let priorSeeds = [];
   before(async () => {
     server = await startServer({ now: () => new Date(clock),
       verifyAppleIdentityToken: async token => ({ sub: token, email: `${token}@example.com` }),
@@ -18,9 +19,18 @@ describe('durable signup recovery through production scheduler and worker', () =
   after(async () => { scheduler?.stop(); await server.close(); });
   beforeEach(async () => {
     scheduler?.stop(); await cleanDatabase(); await prisma.onboardingBoxGrant.deleteMany(); clock = '2026-09-09T16:00:00Z';
+    // cleanDatabase intentionally retains the catalog. Prior suites may leave
+    // active custom seeds; this scenario owns the two canonical challenges.
+    priorSeeds = await prisma.raceSeed.findMany({ select: { id: true, active: true, powerupsEnabled: true, updatedAt: true } });
+    await prisma.raceSeed.updateMany({ where: { id: { notIn: ['seed-daily-10k', 'seed-weekly-50k'] } }, data: { active: false } });
+    await prisma.raceSeed.updateMany({ where: { id: { in: ['seed-daily-10k', 'seed-weekly-50k'] } }, data: { active: true } });
     scheduler = scheduleSeededChallengePreparation({ prisma, now: () => new Date(clock),
       setInterval: () => ({ unref() {} }), clearInterval() {}, startImmediately: false,
       logger: { log() {}, error() {} }, processRole: 'cron', instance: '0' });
+  });
+  afterEach(async () => {
+    scheduler?.stop();
+    await prisma.$transaction(priorSeeds.map(({ id, ...data }) => prisma.raceSeed.update({ where: { id }, data })));
   });
   for (const mode of ['LEGACY', 'BUCKET']) it(`${mode}: late signup recovery preserves requested scoring time and enrolls the event active at that time`, async () => {
     if (mode === 'BUCKET') await prisma.seededRaceWindowModeRecord.createMany({data:[{seedId:'seed-daily-10k',windowStart:new Date('2026-09-09T04:00:00Z'),windowEnd:new Date('2026-09-10T04:00:00Z'),mode},{seedId:'seed-weekly-50k',windowStart:new Date('2026-09-07T04:00:00Z'),windowEnd:new Date('2026-09-14T04:00:00Z'),mode}]});

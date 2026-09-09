@@ -9,8 +9,16 @@
 // unset (test 4b), and every case must still pass.
 
 const assert = require("node:assert/strict");
-const { describe, it, before, beforeEach, afterEach } = require("node:test");
+const { describe, it, before, beforeEach, after, afterEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+
+// setup has loaded dotenv; explicitly exercise the documented no-Redis mode.
+const previousRedisUrl = process.env.REDIS_URL;
+delete process.env.REDIS_URL;
+after(() => {
+  if (previousRedisUrl === undefined) delete process.env.REDIS_URL;
+  else process.env.REDIS_URL = previousRedisUrl;
+});
 
 let server;
 let nextAppleId = 0;

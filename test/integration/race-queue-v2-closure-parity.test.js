@@ -849,9 +849,12 @@ describe("dependency closure — Trail Mine escalation", () => {
     const versionsBefore = await participantVersions(raceId);
     assert.equal((await postSamples(alice, [sampleAt(3, 9000)])).status, 200);
     const { worker, lines } = makeCapturingWorker({
+      fixtureRaceId: raceId,
       dependencyClosureEnabled: closureWrites,
     });
-    assert.ok(await worker.processOne());
+    const claimed = await worker.processOne();
+    assert.ok(claimed);
+    assert.equal(claimed.raceId, raceId, "the worker must claim the scenario race");
 
     return {
       raceId,

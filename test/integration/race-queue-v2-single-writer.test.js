@@ -711,6 +711,7 @@ describe("5a — one bulk writer per race", () => {
     assert.equal((await postSamples(alice, [sampleAt(2, 3100)])).status, 200);
 
     const claimed = await makeWorker({
+      fixtureRaceId: raceId,
       RacePlacementTransitionJob: {
         async enqueueCurrentGeneration() {
           throw Object.assign(new Error("injected handoff failure"), {
@@ -721,6 +722,7 @@ describe("5a — one bulk writer per race", () => {
       logger: { log() {}, warn() {}, error() {} },
     }).processOne();
     assert.ok(claimed);
+    assert.equal(claimed.raceId, raceId, "the worker must claim the scenario race");
     assert.equal((await totalsByUser(raceId))[alice.userId], 0);
     assert.equal(await prisma.racePlacementTransitionJob.count({ where: { raceId } }), 0);
     assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "QUEUED");
@@ -728,7 +730,7 @@ describe("5a — one bulk writer per race", () => {
     await prisma.raceResolutionJobV2.update({
       where: { raceId }, data: { retryAt: new Date(0) },
     });
-    assert.ok(await makeWorker().processOne());
+    assert.ok(await makeWorker({ fixtureRaceId: raceId }).processOne());
     const handoff = await prisma.racePlacementTransitionJob.findUnique({
       where: { raceId },
     });
@@ -942,6 +944,7 @@ describe("5a — one bulk writer per race", () => {
       },
     });
     const claimed = await makeWorker({
+      fixtureRaceId: raceId,
       processRole: "resolution",
       // This test isolates the authoritative-commit/watchdog boundary. Keep
       // dependency-closure planning out of it even when a preceding focused
@@ -997,6 +1000,7 @@ describe("5a — one bulk writer per race", () => {
     }).processOne();
 
     assert.ok(claimed);
+    assert.equal(claimed.raceId, raceId, "the worker must claim the scenario race");
     assert.equal(boundaryObserved, true);
     assert.deepEqual(failStops, [70]);
     assert.equal(markers.length, 1);
