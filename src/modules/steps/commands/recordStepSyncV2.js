@@ -197,6 +197,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     canonical,
     cleaned,
     options,
+    beforeSourceWrites,
   }) {
     const requestedAt = now();
     const summaryCaptureDependencies = await measureStepTelemetryPhase(
@@ -215,6 +216,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
       timeZone,
       requestTimestamp: requestedAt,
       endpoint: "sync-v2",
+      beforeSourceWrites,
       ...options,
     }, tx);
     const completedAt = intake.completedAt || requestedAt;
@@ -390,29 +392,30 @@ function buildRecordStepSyncV2(dependencies = {}) {
           now: now(),
         }, tx);
 
-        if (homePull) {
-          const stamped = await tx.$queryRaw`
-            UPDATE "users"
-               SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
-             WHERE "id" = ${userId}
-               AND ("last_home_pull_step_sync_at" IS NULL OR
-                    "last_home_pull_step_sync_at" <=
-                      CURRENT_TIMESTAMP - INTERVAL '30 seconds')
-            RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
-          `;
-          if (stamped.length !== 1) {
-            const cooldown = await tx.$queryRaw`
-              SELECT CEIL(EXTRACT(EPOCH FROM (
-                "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
-              )))::int AS "retryAfterSeconds"
-                FROM "users" WHERE "id" = ${userId}
-            `;
-            throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
-          }
-        }
-
         return runIntakeInTransaction({
           tx, reservation, userId, timeZone, canonical, cleaned, options,
+          // Intake acquires the scoring row before this user-row update, just
+          // as ordinary sync does. Keep cooldown rejection ahead of source writes.
+          beforeSourceWrites: homePull ? async () => {
+            const stamped = await tx.$queryRaw`
+              UPDATE "users"
+                 SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
+               WHERE "id" = ${userId}
+                 AND ("last_home_pull_step_sync_at" IS NULL OR
+                      "last_home_pull_step_sync_at" <=
+                        CURRENT_TIMESTAMP - INTERVAL '30 seconds')
+              RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
+            `;
+            if (stamped.length !== 1) {
+              const cooldown = await tx.$queryRaw`
+                SELECT CEIL(EXTRACT(EPOCH FROM (
+                  "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
+                )))::int AS "retryAfterSeconds"
+                  FROM "users" WHERE "id" = ${userId}
+              `;
+              throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
+            }
+          } : undefined,
         });
       });
     } catch (error) {

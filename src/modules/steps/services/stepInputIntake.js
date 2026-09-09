@@ -124,6 +124,7 @@ function buildStepInputIntake(dependencies = {}) {
     requestTimestamp = now(),
     burstCoalescing = true,
     queuedGenerationMerge = true,
+    beforeSourceWrites = null,
   }) {
     if (!userId) throw new TypeError("step input intake requires userId");
     if (!daily && !Array.isArray(samples)) {
@@ -134,6 +135,9 @@ function buildStepInputIntake(dependencies = {}) {
       "scoring_state",
       () => lockScoringInputState(tx, userId),
     );
+    // Per-user source serialization must precede any optional user-row write
+    // (including Home cooldown admission) to keep one lock order across syncs.
+    if (beforeSourceWrites) await beforeSourceWrites(tx);
     let dailyExisted = false;
     let record = null;
     let dailyStorageChanged = false;
