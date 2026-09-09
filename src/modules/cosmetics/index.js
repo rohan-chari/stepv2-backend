@@ -16,6 +16,8 @@ const {
 } = require("./unlockShopItemWithAds");
 
 module.exports = {
+  ...require("./contentRetirements"),
+  ...require("./characterWardrobes"),
   ...shopCosmetics,
   getShopCatalog,
   getUnownedAccessoryPool,

@@ -642,6 +642,7 @@ function createAdminRouter(dependencies = {}) {
         }
       }
 
+      if (require("../cosmetics").isRetiredCosmetic(sku) && optionalBoolean("active", true)) return res.status(409).json({error:"This cosmetic is permanently retired",code:"COSMETIC_RETIRED"});
       const created = await prisma.shopItem.create({
         data: {
           sku,
@@ -769,6 +770,10 @@ function createAdminRouter(dependencies = {}) {
       }
       if (Object.keys(data).length === 0) {
         return res.status(400).json({ error: "No updatable fields supplied" });
+      }
+      if (data.active === true) {
+        const retirementItem = await prisma.shopItem.findUnique({where:{id:req.params.itemId},select:{sku:true}});
+        if (retirementItem && require("../cosmetics").isRetiredCosmetic(retirementItem.sku)) return res.status(409).json({error:"This cosmetic is permanently retired",code:"COSMETIC_RETIRED"});
       }
       const updated = await prisma.shopItem.update({
         where: { id: req.params.itemId },

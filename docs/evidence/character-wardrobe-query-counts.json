@@ -1,0 +1,55 @@
+{
+  "source": "real HTTP, local dedicated test database; includes authentication, membership/ad policy and cache DB reads; no production timing/CPU claim",
+  "samples": [
+    {
+      "name": "collection",
+      "total": 8,
+      "selects": 5,
+      "inserts": 0,
+      "updates": 0,
+      "deletes": 0,
+      "locks": 0,
+      "transactionControl": 3
+    },
+    {
+      "name": "wardrobe",
+      "total": 7,
+      "selects": 5,
+      "inserts": 0,
+      "updates": 0,
+      "deletes": 0,
+      "locks": 0,
+      "transactionControl": 2
+    },
+    {
+      "name": "inactiveSave",
+      "total": 11,
+      "selects": 3,
+      "inserts": 3,
+      "updates": 0,
+      "deletes": 1,
+      "locks": 3,
+      "transactionControl": 1
+    },
+    {
+      "name": "activate",
+      "total": 10,
+      "selects": 3,
+      "inserts": 1,
+      "updates": 2,
+      "deletes": 0,
+      "locks": 3,
+      "transactionControl": 1
+    },
+    {
+      "name": "noOp",
+      "total": 8,
+      "selects": 4,
+      "inserts": 0,
+      "updates": 0,
+      "deletes": 0,
+      "locks": 3,
+      "transactionControl": 1
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "readAt": "2026-09-09T21:37:05.833Z",
+  "source": "SELECT-only REPEATABLE READ",
+  "items": 69,
+  "requestsChecked": 227,
+  "missingTables": [
+    "character_wardrobe_items"
+  ],
+  "classifications": {
+    "Preserve released": 22,
+    "Needs investigation": 34,
+    "Preserve owned-or-referenced": 13
+  },
+  "candidateIds": [],
+  "birthdayHat": {
+    "id": "e8bfc9d4-0db5-425a-af9f-0216563c7716",
+    "sku": "birthday_hat",
+    "slot": "HEAD",
+    "active": true,
+    "testOnly": false,
+    "earnOnly": false,
+    "remoteOnly": false,
+    "assetKey": "birthday_hat",
+    "assetVersion": null,
+    "renderMetadata": {
+      "scale": 1.995762711864405,
+      "offsetX": -0.019689265536722303,
+      "offsetY": 0.12516949152542345,
+      "rotation": -0.17186440677965953,
+      "perAnimal": {
+        "turtle": {
+          "scale": 1.895762711864405,
+          "offsetX": 0.21838983050847416,
+          "offsetY": 0.29541446208112854,
+          "rotation": -0.17186440677965953
+        },
+        "corgi_puppy": {
+          "scale": 2.5,
+          "offsetX": 0.02432203389830561,
+          "offsetY": 0.20016949152542352,
+          "rotation": -0.22245762711864625
+        }
+      }
+    },
+    "refs": {
+      "owners": 12,
+      "equipped": 3,
+      "purchases": 3,
+      "dailyRewards": 8,
+      "replay": 3
+    },
+    "rewardPoolEligible": true,
+    "rankedReference": false,
+    "bundledAsset": true,
+    "remoteAssetReferenced": false,
+    "fitClassification": "approved",
+    "approvedCharacterKeys": [
+      "default",
+      "564d2abf-b735-4235-b51e-6b462292e639",
+      "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+    ],
+    "classification": "Preserve released",
+    "expectedFingerprint": "0db6ac3aad7a6d161bede8a7aa4318646aba3f8c382a89bf5a3c7f9fe884d869"
+  }
+}

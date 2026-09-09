@@ -32,7 +32,7 @@ test("presentation-mutating seams name presentation invalidation", () => {
     "src/modules/users/commands/setDisplayName.js",
     "src/modules/users/commands/profilePhoto.js",
     "src/modules/users/models/user.js",
-    "src/modules/cosmetics/equipAccessory.js",
+    "src/modules/cosmetics/characterWardrobeState.js",
     "src/modules/users/commands/setLeaderboardVisibility.js",
     "src/modules/users/commands/deleteUserAccount.js",
   ]) {
@@ -41,6 +41,13 @@ test("presentation-mutating seams name presentation invalidation", () => {
       /userPresentationCache|presentation\.invalidate/,
       `${file} must invalidate presentation`
     );
+  }
+});
+
+test("all cosmetics writers use the transaction helper that invalidates presentation", () => {
+  for (const file of ["equipAccessory.js", "characterWardrobes.js", "cleanupAccessoryCompatibility.js", "repairCharacterWardrobes.js"]) {
+    assert.match(read(`src/modules/cosmetics/${file}`), /withWriter\(/);
+    assert.match(read(`src/modules/cosmetics/${file}`), /characterWardrobeState/);
   }
 });
 

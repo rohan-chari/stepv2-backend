@@ -1,0 +1,630 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-09-09T21:16:47.168Z",
+  "source": "Production SELECT-only catalog and real RacerAvatar bundled-art contact sheets, September 9 2026. Default/corgi approved for 19 released accessories; turtle excludes shoes. Legend crown renders fallback and remains preservation-only. Test-only designs not approved. Existing saved/current combinations remain grandfathered.",
+  "items": [
+    {
+      "id": "a4ab6910-2d56-490b-a7bb-fc67f580c3f0",
+      "sku": "bandana",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "bandana"
+    },
+    {
+      "id": "shop-baseball-cap",
+      "sku": "baseball_cap",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "baseball_cap"
+    },
+    {
+      "id": "4b8c6b4e-4b4d-4012-9686-8ba869ea4a76",
+      "sku": "basketball",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "basketball"
+    },
+    {
+      "id": "df3dcbe7-8363-41f1-b11c-654bb32ebcb3",
+      "sku": "beanie",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "beanie"
+    },
+    {
+      "id": "e8bfc9d4-0db5-425a-af9f-0216563c7716",
+      "sku": "birthday_hat",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "birthday_hat"
+    },
+    {
+      "id": "51ba15d4-1d73-4779-8a53-1c769cd8d37e",
+      "sku": "bunny_ears",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "bunny_ears"
+    },
+    {
+      "id": "2882e2b5-906e-46b7-b8e2-196ffcb30f05",
+      "sku": "chef_hat",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "chef_hat"
+    },
+    {
+      "id": "shop-cowboy-hat",
+      "sku": "cowboy_hat",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "cowboy_hat"
+    },
+    {
+      "id": "be86856a-c1c4-426a-980b-3d5290e25994",
+      "sku": "cycling_helmet",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "cycling_helmet"
+    },
+    {
+      "id": "29cf75a7-61a6-4e8b-bd4a-ee5370286b66",
+      "sku": "devil_horns",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "devil_horns"
+    },
+    {
+      "id": "22564fc5-a946-494b-bd7c-d92a79dbed45",
+      "sku": "flower_crown",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "flower_crown"
+    },
+    {
+      "id": "3ad58f64-4081-47b2-93f1-7bf00b1c1bbc",
+      "sku": "football_helmet",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "football_helmet"
+    },
+    {
+      "id": "41d30f37-86f0-4a08-847e-f25a02689ef9",
+      "sku": "graduation_cap",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "graduation_cap"
+    },
+    {
+      "id": "442bf6fe-c21f-487f-8f60-61d2c9ed412f",
+      "sku": "halo",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "halo"
+    },
+    {
+      "id": "2c8041ec-ac3b-4bee-9643-f3b81c7a7793",
+      "sku": "headphones",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "headphones"
+    },
+    {
+      "id": "ab4c935a-d5e8-4f34-b7db-e815644a711c",
+      "sku": "knight_helmet",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "knight_helmet"
+    },
+    {
+      "id": "0d672fb1-922f-4f56-bad5-66f4ecad9a1d",
+      "sku": "pirate_hat",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "pirate_hat"
+    },
+    {
+      "id": "fc8160e0-5b13-4a3c-914d-130d7433f3a5",
+      "sku": "propeller_cap",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "propeller_cap"
+    },
+    {
+      "id": "df2438fb-ef8b-4e75-a43a-e9442409dbe9",
+      "sku": "pumpkin_hat",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "pumpkin_hat"
+    },
+    {
+      "id": "791e1976-2953-4001-824b-c4404d1d0541",
+      "sku": "ranked_legend_crown",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "legend_crown"
+    },
+    {
+      "id": "d07c252c-84ac-48dd-a1f3-83f4cc854d9c",
+      "sku": "reindeer_antlers",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "reindeer_antlers"
+    },
+    {
+      "id": "7f9f5370-178d-47a3-8f6c-d8eef4b194a5",
+      "sku": "santa_hat",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "santa_hat"
+    },
+    {
+      "id": "175faed8-8210-48f6-95d8-14ba8962c560",
+      "sku": "sweatband",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "sweatband"
+    },
+    {
+      "id": "e3564307-25a5-4768-be01-22a788886719",
+      "sku": "tennis_visor",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "tennis_visor"
+    },
+    {
+      "id": "69d4bfcc-09ef-4f76-b648-740033361c21",
+      "sku": "top_hat",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "HEAD",
+      "assetKey": "top_hat"
+    },
+    {
+      "id": "bf4326a8-35c1-48e1-bf28-b3bc1c16afc8",
+      "sku": "viking_helmet",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "viking_helmet"
+    },
+    {
+      "id": "9df2691b-b118-4d01-a33c-0be7f25328af",
+      "sku": "wizard_hat",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "HEAD",
+      "assetKey": "wizard_hat"
+    },
+    {
+      "id": "539b98f4-440d-426a-b2f5-e470d6b92d73",
+      "sku": "beard",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "FACE",
+      "assetKey": "beard"
+    },
+    {
+      "id": "c812c13c-2c72-483b-a42a-a30dd91759b1",
+      "sku": "catchers_mask",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "catchers_mask"
+    },
+    {
+      "id": "6f63145a-b038-49de-9799-6066c84a0ce7",
+      "sku": "clown_nose",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "clown_nose"
+    },
+    {
+      "id": "db5c5664-fd2a-412a-ac18-c66c30307e46",
+      "sku": "domino_mask",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "domino_mask"
+    },
+    {
+      "id": "cc3aee57-1247-4f17-9f93-d6ef5595e737",
+      "sku": "eyepatch",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "eyepatch"
+    },
+    {
+      "id": "2d8198d6-968f-4e4b-a926-270004920a9f",
+      "sku": "glasses_3d",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "FACE",
+      "assetKey": "glasses_3d"
+    },
+    {
+      "id": "312e1103-9bde-4b75-903f-09a455a226f5",
+      "sku": "heart_glasses",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "heart_glasses"
+    },
+    {
+      "id": "b7efae05-79a6-43c1-b247-550514961882",
+      "sku": "monocle",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "monocle"
+    },
+    {
+      "id": "a2c2cca6-b8a3-490f-a879-9f5a9d6f4b05",
+      "sku": "mustache",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "mustache"
+    },
+    {
+      "id": "b09e14ca-bbda-4d5b-819e-fba20851a0f8",
+      "sku": "nerd_glasses",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "nerd_glasses"
+    },
+    {
+      "id": "0fadf61f-938d-40ad-b268-c968a546a3c2",
+      "sku": "party_blower",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "party_blower"
+    },
+    {
+      "id": "eaa3fa49-6135-4d27-b3a2-0b3703c05f16",
+      "sku": "ski_goggles",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "FACE",
+      "assetKey": "ski_goggles"
+    },
+    {
+      "id": "4254a885-2b6a-4e8c-a059-ddbc1078bba1",
+      "sku": "snorkel_mask",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FACE",
+      "assetKey": "snorkel_mask"
+    },
+    {
+      "id": "5112cb43-7fd8-4c68-8548-89171fd7ca3f",
+      "sku": "sunglasses",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "FACE",
+      "assetKey": "sunglasses"
+    },
+    {
+      "id": "f53649c0-1d81-4b5c-9554-aefefb699c64",
+      "sku": "sunglasses_style_1",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "FACE",
+      "assetKey": "sunglasses_style_1"
+    },
+    {
+      "id": "6957dc6b-a373-4d17-903d-8945e14f5c3a",
+      "sku": "bell_collar",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "bell_collar"
+    },
+    {
+      "id": "ceb1c8d8-9d02-4fa0-b2a9-4e9d8bdcb635",
+      "sku": "bowtie",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "bowtie"
+    },
+    {
+      "id": "74060140-eb85-449a-b5ed-1e4b46c2f91b",
+      "sku": "coach_whistle",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "coach_whistle"
+    },
+    {
+      "id": "94663bb1-1691-4091-8dba-af43cb5bf68d",
+      "sku": "flower_lei",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "flower_lei"
+    },
+    {
+      "id": "c725d512-0508-4f32-927c-ad229ece96e8",
+      "sku": "gold_chain",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639",
+        "fa5ea940-ac91-4db3-bade-8248d31f6d2b"
+      ],
+      "slot": "NECK",
+      "assetKey": "gold_chain"
+    },
+    {
+      "id": "8ca732ba-b506-4024-8dcc-3f1b25dfccac",
+      "sku": "gold_medal",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "gold_medal"
+    },
+    {
+      "id": "6d0fd2d1-b1eb-4f0b-b7be-5afc8560ba19",
+      "sku": "necktie",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "necktie"
+    },
+    {
+      "id": "982a18cc-7f2b-45c1-ac3f-dcb3695ba017",
+      "sku": "pearl_necklace",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "pearl_necklace"
+    },
+    {
+      "id": "46cdd5e1-2f34-47e4-82a5-3843edd99313",
+      "sku": "scarf",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "NECK",
+      "assetKey": "scarf"
+    },
+    {
+      "id": "48a4a200-5ef4-400e-a649-be86d1f12c0f",
+      "sku": "angel_wings",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "angel_wings"
+    },
+    {
+      "id": "b9e3a35c-c20a-4beb-a04c-93fec8b221a0",
+      "sku": "backpack",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "backpack"
+    },
+    {
+      "id": "f54bbbb4-2a79-445a-8413-a602873ff903",
+      "sku": "balloon_bundle",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "balloon_bundle"
+    },
+    {
+      "id": "fac093ee-58e5-4ef9-9c93-73c45a1ff8b6",
+      "sku": "beaver_tail",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "beaver_tail"
+    },
+    {
+      "id": "2c6e9480-5d0b-4255-94c8-dd79c750c450",
+      "sku": "bunny_tail",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "bunny_tail"
+    },
+    {
+      "id": "de53e4b8-cd1a-4ea9-93c6-7c51783e112f",
+      "sku": "butterfly_wings",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "butterfly_wings"
+    },
+    {
+      "id": "b4172519-e8a9-418f-9024-b109dcbaf8ea",
+      "sku": "cape",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "cape"
+    },
+    {
+      "id": "b12e0f58-f776-4d1f-ab52-33ae691a1b1a",
+      "sku": "dragon_tail",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "dragon_tail"
+    },
+    {
+      "id": "857a8e2f-5f88-4902-b33c-a32f48c03706",
+      "sku": "fox_tail",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "fox_tail"
+    },
+    {
+      "id": "b702ad44-2c7f-4755-a492-1cde899cf9fe",
+      "sku": "hydration_pack",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "hydration_pack"
+    },
+    {
+      "id": "272b5a01-a6ce-4c52-81cd-f8d52f7b2804",
+      "sku": "jetpack",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "jetpack"
+    },
+    {
+      "id": "19798b2c-b95a-4c80-800b-736339538725",
+      "sku": "peacock_tail",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "peacock_tail"
+    },
+    {
+      "id": "8805116a-2154-4ba1-a04e-7b48d5bf8bb2",
+      "sku": "rocket",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "rocket"
+    },
+    {
+      "id": "3ba1247d-b9e3-49d6-b6ac-d4e5c6162cf3",
+      "sku": "turtle_shell",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "BACK",
+      "assetKey": "turtle_shell"
+    },
+    {
+      "id": "8ceb320b-8d6a-453d-b826-f3fcc5b248b6",
+      "sku": "shoes",
+      "classification": "approved",
+      "approvedCharacterKeys": [
+        "default",
+        "564d2abf-b735-4235-b51e-6b462292e639"
+      ],
+      "slot": "FEET",
+      "assetKey": "shoes"
+    },
+    {
+      "id": "fe867983-3b7d-4374-ae86-3a39ddac42c5",
+      "sku": "skateboard",
+      "classification": "preservation-only",
+      "approvedCharacterKeys": [],
+      "slot": "FEET",
+      "assetKey": "skateboard"
+    }
+  ],
+  "characters": [
+    {
+      "id": "564d2abf-b735-4235-b51e-6b462292e639",
+      "sku": "corgi_puppy",
+      "assetKey": "corgi_puppy"
+    },
+    {
+      "id": "fa5ea940-ac91-4db3-bade-8248d31f6d2b",
+      "sku": "turtle",
+      "assetKey": "turtle"
+    }
+  ]
+}

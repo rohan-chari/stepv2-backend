@@ -83,7 +83,7 @@ async function cloneCosmetics({ dryRun = false } = {}) {
             ? r[key] ?? false
           : r[key];
     }
-    await prisma.shopItem.create({ data });
+    await prisma.shopItem.create({ data: require("../src/modules/cosmetics/contentRetirements").preserveRetirement(data) });
     console.log(`  created ${r.sku}`);
     created++;
   }

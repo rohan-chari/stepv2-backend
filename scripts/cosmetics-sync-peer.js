@@ -129,14 +129,14 @@ async function syncPeerCosmetics({ repair = false } = {}) {
   let created = 0;
   let updated = 0;
   for (const row of missingInPeer) {
-    await peer.shopItem.create({ data: { sku: row.sku, ...mirrorFields(row) } });
+    await peer.shopItem.create({ data: require("../src/modules/cosmetics/contentRetirements").preserveRetirement({ sku: row.sku, ...mirrorFields(row) }) });
     console.log(`  created ${row.sku} in peer`);
     created++;
   }
   for (const { row } of differing) {
     await peer.shopItem.update({
       where: { sku: row.sku },
-      data: mirrorFields(row),
+      data: require("../src/modules/cosmetics/contentRetirements").preserveRetirement({sku:row.sku,...mirrorFields(row)}),
     });
     console.log(`  updated ${row.sku} in peer`);
     updated++;

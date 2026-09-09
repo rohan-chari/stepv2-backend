@@ -50,6 +50,7 @@ async function mirrorShopItemToPeer(item) {
     }
   }
 
+  if (require("./contentRetirements").isRetiredCosmetic(item.sku)) fields.active = false;
   try {
     await peer.shopItem.upsert({
       where: { sku: item.sku },

@@ -1,0 +1,270 @@
+{
+  "collection": {
+    "contract": "character-wardrobes-v1",
+    "appearanceRevision": 0,
+    "activeCharacterKey": "default",
+    "activeCharacterVisible": true,
+    "coins": 0,
+    "adUnlock": {
+      "maxShortfall": 20,
+      "coinsPerAd": 50,
+      "maxAds": 3,
+      "dailyCap": 1,
+      "remainingToday": 1
+    },
+    "characters": [
+      {
+        "characterKey": "default",
+        "name": "Capybara",
+        "item": null,
+        "owned": true,
+        "active": true,
+        "canPurchase": false,
+        "canActivate": true,
+        "canEdit": true,
+        "availability": "available",
+        "outfit": {
+          "revision": 0,
+          "editable": true,
+          "hasHiddenItems": false,
+          "slots": {
+            "HEAD": null,
+            "FACE": null,
+            "NECK": null,
+            "BACK": null,
+            "FEET": null
+          },
+          "items": [],
+          "unavailableItemIds": []
+        }
+      },
+      {
+        "characterKey": "wardrobe-evidence-character",
+        "name": "Character",
+        "item": {
+          "id": "wardrobe-evidence-character",
+          "sku": "evidence_character",
+          "name": "Character",
+          "description": null,
+          "slot": "CHARACTER",
+          "priceCoins": 10,
+          "assetKey": "corgi_puppy",
+          "renderMetadata": null,
+          "bobble": false
+        },
+        "owned": true,
+        "active": false,
+        "canPurchase": false,
+        "canActivate": true,
+        "canEdit": true,
+        "availability": "available",
+        "outfit": {
+          "revision": 0,
+          "editable": true,
+          "hasHiddenItems": false,
+          "slots": {
+            "HEAD": null,
+            "FACE": null,
+            "NECK": null,
+            "BACK": null,
+            "FEET": null
+          },
+          "items": [],
+          "unavailableItemIds": []
+        }
+      }
+    ],
+    "nextCursor": null
+  },
+  "wardrobe": {
+    "contract": "character-wardrobes-v1",
+    "appearanceRevision": 0,
+    "activeCharacterKey": "default",
+    "activeCharacterVisible": true,
+    "characterKey": "default",
+    "name": "Capybara",
+    "active": true,
+    "canActivate": true,
+    "outfit": {
+      "revision": 0,
+      "editable": true,
+      "hasHiddenItems": false,
+      "slots": {
+        "HEAD": null,
+        "FACE": null,
+        "NECK": null,
+        "BACK": null,
+        "FEET": null
+      },
+      "items": [],
+      "unavailableItemIds": []
+    },
+    "coins": 0,
+    "adUnlock": {
+      "maxShortfall": 20,
+      "coinsPerAd": 50,
+      "maxAds": 3,
+      "dailyCap": 1,
+      "remainingToday": 1
+    },
+    "accessories": [
+      {
+        "item": {
+          "id": "wardrobe-evidence-hat",
+          "sku": "evidence_hat",
+          "name": "Hat",
+          "description": null,
+          "slot": "HEAD",
+          "priceCoins": 10,
+          "assetKey": "birthday_hat",
+          "renderMetadata": null,
+          "bobble": false
+        },
+        "owned": true,
+        "canPurchase": false,
+        "canPreview": true,
+        "canSelect": true,
+        "fit": "approved",
+        "unavailableReason": null
+      }
+    ],
+    "nextCursor": null
+  },
+  "inactiveSave": {
+    "contract": "character-wardrobes-v1",
+    "characterKey": "wardrobe-evidence-character",
+    "appearanceRevision": 0,
+    "activeCharacterKey": "default",
+    "activeCharacterVisible": true,
+    "outfit": {
+      "revision": 1,
+      "editable": true,
+      "hasHiddenItems": false,
+      "slots": {
+        "HEAD": "wardrobe-evidence-hat",
+        "FACE": null,
+        "NECK": null,
+        "BACK": null,
+        "FEET": null
+      },
+      "items": [
+        {
+          "id": "wardrobe-evidence-hat",
+          "sku": "evidence_hat",
+          "name": "Hat",
+          "slot": "HEAD",
+          "assetKey": "birthday_hat",
+          "renderMetadata": null,
+          "bobble": false
+        }
+      ],
+      "unavailableItemIds": []
+    },
+    "appearanceChanged": false,
+    "equipped": {}
+  },
+  "activate": {
+    "contract": "character-wardrobes-v1",
+    "characterKey": "wardrobe-evidence-character",
+    "appearanceRevision": 1,
+    "activeCharacterKey": "wardrobe-evidence-character",
+    "activeCharacterVisible": true,
+    "outfit": {
+      "revision": 1,
+      "editable": true,
+      "hasHiddenItems": false,
+      "slots": {
+        "HEAD": "wardrobe-evidence-hat",
+        "FACE": null,
+        "NECK": null,
+        "BACK": null,
+        "FEET": null
+      },
+      "items": [
+        {
+          "id": "wardrobe-evidence-hat",
+          "sku": "evidence_hat",
+          "name": "Hat",
+          "slot": "HEAD",
+          "assetKey": "birthday_hat",
+          "renderMetadata": null,
+          "bobble": false
+        }
+      ],
+      "unavailableItemIds": []
+    },
+    "appearanceChanged": true,
+    "equipped": {
+      "HEAD": {
+        "id": "wardrobe-evidence-hat",
+        "sku": "evidence_hat",
+        "name": "Hat",
+        "slot": "HEAD",
+        "assetKey": "birthday_hat",
+        "renderMetadata": null,
+        "bobble": false
+      },
+      "CHARACTER": {
+        "id": "wardrobe-evidence-character",
+        "sku": "evidence_character",
+        "name": "Character",
+        "slot": "CHARACTER",
+        "assetKey": "corgi_puppy",
+        "renderMetadata": null,
+        "bobble": false
+      }
+    }
+  },
+  "noOp": {
+    "contract": "character-wardrobes-v1",
+    "characterKey": "wardrobe-evidence-character",
+    "appearanceRevision": 1,
+    "activeCharacterKey": "wardrobe-evidence-character",
+    "activeCharacterVisible": true,
+    "outfit": {
+      "revision": 1,
+      "editable": true,
+      "hasHiddenItems": false,
+      "slots": {
+        "HEAD": "wardrobe-evidence-hat",
+        "FACE": null,
+        "NECK": null,
+        "BACK": null,
+        "FEET": null
+      },
+      "items": [
+        {
+          "id": "wardrobe-evidence-hat",
+          "sku": "evidence_hat",
+          "name": "Hat",
+          "slot": "HEAD",
+          "assetKey": "birthday_hat",
+          "renderMetadata": null,
+          "bobble": false
+        }
+      ],
+      "unavailableItemIds": []
+    },
+    "appearanceChanged": false,
+    "equipped": {
+      "HEAD": {
+        "id": "wardrobe-evidence-hat",
+        "sku": "evidence_hat",
+        "name": "Hat",
+        "slot": "HEAD",
+        "assetKey": "birthday_hat",
+        "renderMetadata": null,
+        "bobble": false
+      },
+      "CHARACTER": {
+        "id": "wardrobe-evidence-character",
+        "sku": "evidence_character",
+        "name": "Character",
+        "slot": "CHARACTER",
+        "assetKey": "corgi_puppy",
+        "renderMetadata": null,
+        "bobble": false
+      }
+    }
+  }
+}
