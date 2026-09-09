@@ -1,3 +1,4 @@
+const { assertLargeTeamSupport } = require("../teamRaces");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { Steps } = require("../../steps/models/steps");
@@ -1862,6 +1863,7 @@ function buildGetRaceProgress(deps = {}) {
     // rather than throwing. Adding to that tail is how that class of bug grows;
     // new options go here, by name, where order cannot matter.
     {
+      supportsLargeTeamRaces = false,
       participantsView = null,
       participantsOffset = 0,
       participantsLimit = 10,
@@ -1922,6 +1924,7 @@ function buildGetRaceProgress(deps = {}) {
       error.statusCode = 404;
       throw error;
     }
+    if (!supportsLargeTeamRaces) assertLargeTeamSupport(race, null);
     // Lobby/result serializers still require their legacy full graph. ACTIVE
     // solo and team serializers use only scoring rows plus bounded visible
     // presentation, so both can take the lean context.
@@ -1955,6 +1958,7 @@ function buildGetRaceProgress(deps = {}) {
         : boundedLegacyContext && canUseLeanContext
           ? await loadFullScoringContext()
           : await raceModel.findById(raceId);
+      if (!supportsLargeTeamRaces) assertLargeTeamSupport(race, null);
       fullScoringContextLoaded = true;
       if (race && useLeanContext) {
         Object.defineProperty(race, "_leanProgressProjection", {
@@ -1976,6 +1980,7 @@ function buildGetRaceProgress(deps = {}) {
       race.status === "ACTIVE";
     if (leanProjectionEnabled && !usingLeanProjection) {
       race = await raceModel.findById(raceId);
+      if (!supportsLargeTeamRaces) assertLargeTeamSupport(race, null);
       fullScoringContextLoaded = true;
     }
     if (usingLeanProjection) {
@@ -1988,6 +1993,7 @@ function buildGetRaceProgress(deps = {}) {
       resolvedContext.race = race;
     }
 
+    if (!supportsLargeTeamRaces) assertLargeTeamSupport(race, null);
     const myParticipant = race.participants.find((p) => p.userId === userId);
     // Mirrors getRaceDetails: declining revokes access to the race.
     //

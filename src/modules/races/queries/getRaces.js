@@ -303,6 +303,13 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     (race) =>
       !race.tournamentId &&
       !(race.isTeamRace && !supportsTeamRaces) &&
+      // A downgraded device retains its accepted memberships and earned
+      // results. Only incompatible invitations are suppressed; a sticky
+      // account capability cannot authorize this particular device's UI.
+      !(race.isTeamRace && race.teamSize > 5 &&
+        !clientFeatures?.has("team_races_10v10_v1") &&
+        !(race.participants || []).some((participant) =>
+          participant.userId === userId && participant.status === "ACCEPTED")) &&
       // An older/tokenless binary cannot render a private bucket card. The
       // membership remains durable, but this compatible list simply omits it.
       !(race.seededBucketId && !supportsBuckets)

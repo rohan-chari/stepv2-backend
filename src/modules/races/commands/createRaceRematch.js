@@ -1,3 +1,4 @@
+const { requiresLargeTeamSupport, clientSupportsLargeTeamRaces } = require("../teamRaces");
 const crypto = require("node:crypto");
 const { prisma, runInPrismaTransaction, deferUntilAfterCommit } = require("../../../db");
 const { createRace: defaultCreateRace } = require("./createRace");
@@ -193,7 +194,8 @@ function buildCreateRaceRematch(dependencies = {}) {
             skipped.push({ userId: former.userId, reason: "ACCOUNT_UNAVAILABLE" });
           } else if (
             source.isTeamRace &&
-            !(account.clientFeatures || []).includes("team_races")
+            (!(account.clientFeatures || []).includes("team_races") ||
+             (requiresLargeTeamSupport(source) && !clientSupportsLargeTeamRaces(account.clientFeatures)))
           ) {
             skipped.push({
               userId: former.userId,

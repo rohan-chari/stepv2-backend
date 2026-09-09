@@ -83,6 +83,7 @@ function buildGetSharedRacePreview(dependencies = {}) {
         : null,
       isJoinable: isOpen && !isFull,
     };
+    Object.defineProperty(preview, "_teamCompatibility", { value: { isTeamRace: race.isTeamRace, teamSize: race.teamSize }, enumerable: false });
     if (capableLink) {
       Object.defineProperties(preview, {
         _approvalRequired: { value: true, enumerable: false },

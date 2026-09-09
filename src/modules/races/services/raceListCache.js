@@ -71,6 +71,7 @@ function canonicalRaceListVariant({
   const channel = CHANNELS.has(releaseChannel) ? releaseChannel : "prod";
   return [
     `tm${bit(features, "team_races")}`,
+    `tl${bit(features, "team_races_10v10_v1")}`,
     `to${bit(features, "tournaments")}`,
     `sb${bit(features, "seeded_race_buckets")}`,
     `pu${bit(features, "powerups3")}${bit(features, "powerups4")}${bit(features, "powerups5")}`,

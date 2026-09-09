@@ -295,7 +295,8 @@ describe("race invite summaries + quick-share automatic friendship — locked HT
     );
     assert.ok(acceptedSummary);
     assert.equal(acceptedSummary.myStatus, "ACCEPTED");
-    assert.equal("createdAt" in acceptedSummary, false);
+    assert.equal("createdAt" in acceptedSummary, true);
+    assert.equal(acceptedSummary.createdAt, created.tournament.createdAt);
     assert.equal("creator" in acceptedSummary, false);
 
     const list = await request(server.baseUrl, "GET", "/races", {

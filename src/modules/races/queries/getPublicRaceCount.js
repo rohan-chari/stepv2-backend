@@ -15,6 +15,7 @@ function buildGetPublicRaceCount(dependencies = {}) {
   return async function getPublicRaceCount({
     userId,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     excludeSeeded = false,
     hiddenSeededWindows = [],
   }) {
@@ -31,6 +32,7 @@ function buildGetPublicRaceCount(dependencies = {}) {
       return raceModel.countVisiblePublicRaces({
         userId,
         supportsTeamRaces,
+        supportsLargeTeamRaces,
         excludeSeeded,
         hiddenSeededWindows,
       });
@@ -42,7 +44,7 @@ function buildGetPublicRaceCount(dependencies = {}) {
     let count = 0;
     for (const race of races) {
       if (race.seedId && hiddenWindows.has(`${race.seedId}:${new Date(race.scheduledStartAt || race.startedAt).toISOString()}`)) continue;
-      if (isVisiblePublicRace(race, userId, supportsTeamRaces)) count += 1;
+      if (isVisiblePublicRace(race, userId, supportsTeamRaces, supportsLargeTeamRaces)) count += 1;
     }
     return count;
   };

@@ -13,10 +13,11 @@ const {
 // the full list can never diverge in membership/capacity/seed/team rules. Reads
 // only tournamentId, isTeamRace, status, participants[].userId/status, and
 // maxParticipants, so it works on both the full and lean participant shapes.
-function isVisiblePublicRace(race, userId, supportsTeamRaces) {
+function isVisiblePublicRace(race, userId, supportsTeamRaces, supportsLargeTeamRaces = false) {
   // Matchup races are never browsable — managed only via the tournament UI.
   if (race.tournamentId) return false;
   if (race.isTeamRace && !supportsTeamRaces) return false;
+  if (race.isTeamRace && race.teamSize > 5 && !supportsLargeTeamRaces) return false;
   if (race.isTeamRace && race.status !== "PENDING") return false;
   const participants = race.participants || [];
   if (participants.some((p) => p.userId === userId)) return false;
@@ -36,6 +37,7 @@ function buildGetPublicRaces(dependencies = {}) {
   return async function getPublicRaces({
     userId,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     // Additive, internal-only Home inputs. Both default false so every existing
     // caller — especially GET /races/public — stays on the byte-identical
     // legacy path below.
@@ -47,6 +49,7 @@ function buildGetPublicRaces(dependencies = {}) {
       const rows = await raceModel.findPublicSuggestions({
         userId,
         supportsTeamRaces,
+        supportsLargeTeamRaces,
         excludeSeeded,
         limit: 4,
       });
@@ -105,7 +108,7 @@ function buildGetPublicRaces(dependencies = {}) {
     for (const race of races) {
       if (excludeSeeded && race.seedId) continue;
       if (race.seedId && hiddenWindows.has(`${race.seedId}:${new Date(race.scheduledStartAt || race.startedAt).toISOString()}`)) continue;
-      if (!isVisiblePublicRace(race, userId, supportsTeamRaces)) continue;
+      if (!isVisiblePublicRace(race, userId, supportsTeamRaces, supportsLargeTeamRaces)) continue;
       const participants = race.participants || [];
       const acceptedCount = participants.filter(
         (p) => p.status === "ACCEPTED"

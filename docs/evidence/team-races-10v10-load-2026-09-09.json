@@ -1,0 +1,475 @@
+{
+  "date": "2026-09-09",
+  "environment": "dedicated localhost test Postgres and local Redis db15",
+  "scope": "real HTTP full handler-chain measurements; settlement is in separate evidence",
+  "limits": [
+    "Local timings include concurrent workstation work; not a production capacity forecast.",
+    "Intake, actual resolution worker and publication phases measured separately with bounded concurrency.",
+    "WITH statements are reported separately because one statement may contain multiple operations.",
+    "Production permanent settings loaded before application construction; bootstrap reads assert zero participant score updates."
+  ],
+  "measurements": [
+    {
+      "cold": {
+        "label": "5v5-bootstrap-cold",
+        "statements": 39,
+        "byLeadingVerb": {
+          "SELECT": 33,
+          "WITH": 2,
+          "INSERT": 1,
+          "UPDATE": 1,
+          "COMMIT": 1,
+          "OTHER": 1
+        },
+        "participantUpdates": 0,
+        "summedQueryMs": 32.311373000000344,
+        "wallMs": 86.89
+      },
+      "warm": [
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 27,
+          "byLeadingVerb": {
+            "SELECT": 26,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 11.086958999998842,
+          "wallMs": 13.99
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 23.575331999999435,
+          "wallMs": 15.37
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 6.358004000000619,
+          "wallMs": 8.53
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 6.842418999999381,
+          "wallMs": 9.11
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.445540000000165,
+          "wallMs": 7.48
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 6.1551270000002205,
+          "wallMs": 8.87
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.4204570000001695,
+          "wallMs": 7.55
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 6.323747999999341,
+          "wallMs": 9
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 6.209415000000035,
+          "wallMs": 9.08
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 4.986247000000276,
+          "wallMs": 7.21
+        },
+        {
+          "label": "5v5-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.820834999999988,
+          "wallMs": 8.48
+        }
+      ],
+      "warmP95Ms": 15.37
+    },
+    {
+      "label": "5v5-RALLY_FLAG",
+      "statements": 66,
+      "byLeadingVerb": {
+        "SELECT": 49,
+        "WITH": 3,
+        "INSERT": 10,
+        "UPDATE": 2,
+        "COMMIT": 2
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 17.862789999998768,
+      "wallMs": 44.37,
+      "effectRows": 5,
+      "queuedRaceJobs": 1
+    },
+    {
+      "label": "5v5-UPRISING",
+      "statements": 74,
+      "byLeadingVerb": {
+        "SELECT": 56,
+        "WITH": 3,
+        "INSERT": 10,
+        "UPDATE": 2,
+        "COMMIT": 2,
+        "OTHER": 1
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 18.149921000000404,
+      "wallMs": 36.66,
+      "effectRows": 5,
+      "queuedRaceJobs": 1
+    },
+    {
+      "label": "5v5-RAINSTORM",
+      "statements": 82,
+      "byLeadingVerb": {
+        "SELECT": 65,
+        "WITH": 3,
+        "INSERT": 10,
+        "UPDATE": 2,
+        "COMMIT": 2
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 14.065960999999106,
+      "wallMs": 26.84,
+      "effectRows": 5,
+      "queuedRaceJobs": 1
+    },
+    {
+      "cold": {
+        "label": "10v10-bootstrap-cold",
+        "statements": 38,
+        "byLeadingVerb": {
+          "SELECT": 32,
+          "WITH": 2,
+          "INSERT": 1,
+          "UPDATE": 1,
+          "COMMIT": 1,
+          "OTHER": 1
+        },
+        "participantUpdates": 0,
+        "summedQueryMs": 9.447376000000531,
+        "wallMs": 16.29
+      },
+      "warm": [
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 27,
+          "byLeadingVerb": {
+            "SELECT": 26,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.641793999999436,
+          "wallMs": 8.08
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.164290999999594,
+          "wallMs": 7.68
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.577917999999499,
+          "wallMs": 7.72
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.9146280000006755,
+          "wallMs": 8.16
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.59608100000105,
+          "wallMs": 9.48
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 4.955002000000604,
+          "wallMs": 6.9
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 4.954962000000705,
+          "wallMs": 7.28
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 5.301209999998946,
+          "wallMs": 7.55
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 4.6505399999998644,
+          "wallMs": 6.78
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 4.578626999999869,
+          "wallMs": 6.68
+        },
+        {
+          "label": "10v10-bootstrap-warm",
+          "statements": 26,
+          "byLeadingVerb": {
+            "SELECT": 25,
+            "OTHER": 1
+          },
+          "participantUpdates": 0,
+          "summedQueryMs": 4.6537920000005215,
+          "wallMs": 6.67
+        }
+      ],
+      "warmP95Ms": 9.48
+    },
+    {
+      "label": "10v10-RALLY_FLAG",
+      "statements": 91,
+      "byLeadingVerb": {
+        "SELECT": 69,
+        "WITH": 3,
+        "INSERT": 15,
+        "UPDATE": 2,
+        "COMMIT": 2
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 13.71937300000127,
+      "wallMs": 22.64,
+      "effectRows": 10,
+      "queuedRaceJobs": 1
+    },
+    {
+      "label": "10v10-UPRISING",
+      "statements": 99,
+      "byLeadingVerb": {
+        "SELECT": 76,
+        "WITH": 3,
+        "INSERT": 15,
+        "UPDATE": 2,
+        "COMMIT": 2,
+        "OTHER": 1
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 17.771709000000328,
+      "wallMs": 30.41,
+      "effectRows": 10,
+      "queuedRaceJobs": 1
+    },
+    {
+      "label": "10v10-RAINSTORM",
+      "statements": 117,
+      "byLeadingVerb": {
+        "SELECT": 95,
+        "WITH": 3,
+        "INSERT": 15,
+        "UPDATE": 2,
+        "COMMIT": 2
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 16.94454099999939,
+      "wallMs": 27.82,
+      "effectRows": 10,
+      "queuedRaceJobs": 1
+    },
+    {
+      "label": "20-players-5+5-per-side-sync-concurrency8",
+      "statements": 461,
+      "byLeadingVerb": {
+        "SELECT": 120,
+        "WITH": 103,
+        "INSERT": 60,
+        "UPDATE": 99,
+        "COMMIT": 59,
+        "OTHER": 20
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 516.4125000000024,
+      "wallMs": 104.13,
+      "requests": 20,
+      "queuedRaceJobs": 2
+    },
+    {
+      "label": "20-players-10-per-side-sync-concurrency8",
+      "statements": 449,
+      "byLeadingVerb": {
+        "SELECT": 111,
+        "WITH": 100,
+        "INSERT": 60,
+        "UPDATE": 99,
+        "COMMIT": 59,
+        "OTHER": 20
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 390.25537600000075,
+      "wallMs": 86.58,
+      "requests": 20,
+      "queuedRaceJobs": 1
+    },
+    {
+      "label": "2000-players-100-races-sync-concurrency8",
+      "statements": 52037,
+      "byLeadingVerb": {
+        "SELECT": 15974,
+        "WITH": 12065,
+        "INSERT": 6000,
+        "UPDATE": 9999,
+        "COMMIT": 5999,
+        "OTHER": 2000
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 38684.77340100018,
+      "wallMs": 7322.19,
+      "requests": 2000,
+      "requestP95Ms": 38.19262499999968,
+      "queuedRaceJobs": 100,
+      "note": "Local producer phase. Downstream worker and publication phases measured separately below."
+    },
+    {
+      "label": "100-full10v10-resolution-concurrency2",
+      "statements": 2930,
+      "byLeadingVerb": {
+        "SELECT": 819,
+        "OTHER": 1400,
+        "UPDATE": 304,
+        "WITH": 103,
+        "INSERT": 200,
+        "COMMIT": 104
+      },
+      "participantUpdates": 200,
+      "summedQueryMs": 1184.073734000016,
+      "wallMs": 637.62
+    },
+    {
+      "label": "100-full10v10-post-tasks",
+      "statements": 1620,
+      "byLeadingVerb": {
+        "SELECT": 1128,
+        "UPDATE": 147,
+        "COMMIT": 197,
+        "WITH": 98,
+        "OTHER": 50
+      },
+      "participantUpdates": 0,
+      "summedQueryMs": 268.866791999968,
+      "wallMs": 391.1
+    }
+  ]
+}

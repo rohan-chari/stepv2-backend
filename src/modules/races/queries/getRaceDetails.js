@@ -1,7 +1,7 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { characterPresentation } = require("../../cosmetics");
-const { acceptedTeamCounts } = require("../teamRaces");
+const { acceptedTeamCounts, assertLargeTeamSupport } = require("../teamRaces");
 const {
   clampOffsetLimit,
 } = require("../../../shared/pagination/clampOffsetLimit");
@@ -68,6 +68,7 @@ async function getRaceDetails(
   //                         public/non-tournament shape still have to agree.
   {
     pagination = null,
+    supportsLargeTeamRaces = false,
     previewViewer = false,
     // Additive bootstrap-only projection. It preserves the historical detail
     // shape while replacing the all-participant cosmetic join with scalar
@@ -78,7 +79,7 @@ async function getRaceDetails(
   } = {}
 ) {
   const pagingCapable = pagination?.capable === true;
-  const pagingRequested =
+  let pagingRequested =
     pagingCapable && pagination?.view === "participants-v1";
 
   const notFound = () => {
@@ -97,6 +98,17 @@ async function getRaceDetails(
   let participantsPagination = null;
   let participantSummary = null;
   const context = readContext?.matches?.(raceId, userId) ? readContext : null;
+  let supportedTeamCore = null;
+  if (supportsLargeTeamRaces && !pagingRequested && !preloadedRace) {
+    supportedTeamCore = context ? context.core() : await Race.findDetailsCore(raceId);
+    if (supportedTeamCore?.isTeamRace === true) {
+      // The accepted roster has its own fixed bound. Invitation history never
+      // becomes an unbounded query just because a new client omitted paging.
+      pagingRequested = true;
+      pagination = { capable: true, view: "participants-v1", offset: 0, limit: 50 };
+    }
+  }
+
 
   // A preload is ONLY passed by the bootstrap handler's ACTIVE branch, where it
   // is getRaceProgress's `Race.findById` result — byte for byte the same fat
@@ -141,7 +153,7 @@ async function getRaceDetails(
     }));
     myParticipant = summaryRows.find((p) => p.userId === userId);
   } else if (pagingRequested && !sliceFromPreload) {
-    race = context ? context.core() : await Race.findDetailsCore(raceId);
+    race = supportedTeamCore || (context ? context.core() : await Race.findDetailsCore(raceId));
     if (!race) throw notFound();
     if (race.seededBucketId && !supportsBuckets) {
       const error = notFound();
@@ -175,6 +187,7 @@ async function getRaceDetails(
     }
     myParticipant = summaryRows.find((p) => p.userId === userId);
   }
+  if (!supportsLargeTeamRaces) assertLargeTeamSupport(race, null);
   // An ACTIVE race is no longer readable as an actionable detail route after
   // this viewer forfeits. Completed races remain readable for settlement and
   // history; the live route must not expose powerup controls or a stale board.
@@ -282,6 +295,37 @@ async function getRaceDetails(
   });
   const { payouts: legacyPayouts, payoutTiers } = serializePayouts(money.payouts);
 
+  const serializeParticipant = (p) => ({
+      id: p.id,
+      userId: p.userId,
+      displayName: p.user.displayName,
+      profilePhotoUrl: p.user.profilePhotoUrl,
+      // {animal, accessories} — naked capy for viewers without `characters`.
+      ...characterPresentation(
+        p.user,
+        supportsCharacters,
+        releaseChannel,
+        supportsRemoteAssets
+      ),
+      status: p.status,
+      totalSteps: Math.max(0, Number(p.totalSteps) || 0),
+      finishedAt: p.finishedAt,
+      joinedAt: p.joinedAt,
+      // Financial redaction for a public-preview viewer. These three are the
+      // only fields in this payload the public race listing does not already
+      // expose, so lifting the 403 without nulling them would be a NEW leak of
+      // every participant's stake and winnings to any stranger browsing the
+      // public list. There is no "my own row" to exempt: a preview viewer has
+      // no participant row at all. Null (never omitted) so a defensive client
+      // read cannot tell a missing key from a null value.
+      buyInAmount: isPublicPreview ? null : p.buyInAmount,
+      buyInStatus: isPublicPreview ? null : p.buyInStatus,
+      payoutCoins: isPublicPreview ? null : p.payoutCoins,
+      // Team races (additive; null on individual races). The lobby renders the
+      // two-column face-off from `team`; forfeitedAt marks frozen members.
+      team: p.team ?? null,
+      forfeitedAt: p.forfeitedAt ?? null,
+    });
   const result = {
     id: race.id,
     name: race.name,
@@ -346,37 +390,7 @@ async function getRaceDetails(
     // don't read this key are unaffected; the new build renders the mute toggle.
     myPlacementAlertsMuted: myParticipant?.placementAlertsMuted || false,
     myLastReadRaceChatAt: myParticipant?.lastReadRaceChatAt ?? null,
-    participants: serializedRows.map((p) => ({
-      id: p.id,
-      userId: p.userId,
-      displayName: p.user.displayName,
-      profilePhotoUrl: p.user.profilePhotoUrl,
-      // {animal, accessories} — naked capy for viewers without `characters`.
-      ...characterPresentation(
-        p.user,
-        supportsCharacters,
-        releaseChannel,
-        supportsRemoteAssets
-      ),
-      status: p.status,
-      totalSteps: Math.max(0, Number(p.totalSteps) || 0),
-      finishedAt: p.finishedAt,
-      joinedAt: p.joinedAt,
-      // Financial redaction for a public-preview viewer. These three are the
-      // only fields in this payload the public race listing does not already
-      // expose, so lifting the 403 without nulling them would be a NEW leak of
-      // every participant's stake and winnings to any stranger browsing the
-      // public list. There is no "my own row" to exempt: a preview viewer has
-      // no participant row at all. Null (never omitted) so a defensive client
-      // read cannot tell a missing key from a null value.
-      buyInAmount: isPublicPreview ? null : p.buyInAmount,
-      buyInStatus: isPublicPreview ? null : p.buyInStatus,
-      payoutCoins: isPublicPreview ? null : p.payoutCoins,
-      // Team races (additive; null on individual races). The lobby renders the
-      // two-column face-off from `team`; forfeitedAt marks frozen members.
-      team: p.team ?? null,
-      forfeitedAt: p.forfeitedAt ?? null,
-    })),
+    participants: serializedRows.map(serializeParticipant),
     createdAt: race.createdAt,
     // ── Team races (TR-101/402; additive — old clients ignore these and never
     // receive a team race in their lists anyway).
@@ -412,6 +426,13 @@ async function getRaceDetails(
     // distinguish a missing key from a null value.
     myTotalSteps: myParticipant?.totalSteps ?? null,
   };
+  if (race.isTeamRace === true && supportsLargeTeamRaces) {
+    const acceptedRows = preloadedRace?.participants
+      ? preloadedRace.participants.filter((p) => p.status === "ACCEPTED").slice(0, 20)
+      : await Race.findDetailsAcceptedTeamParticipants(raceId);
+    result.teamAcceptedParticipants = acceptedRows.map(serializeParticipant);
+    result.teamRosterComplete = acceptedRows.length === acceptedCount;
+  }
   if (participantsPagination) {
     result.participantsPagination = participantsPagination;
   }

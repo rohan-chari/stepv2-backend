@@ -1727,7 +1727,7 @@ model Race {
   shareToken                    String?          @unique @map("share_token")
   // ── Team races (TR-100/§12) ────────────────────────────────────────────────
   // isTeamRace flips a race into two-team mode: exactly two sides, team size
-  // 1–5, combined team totals, winnerTeam decides. teamSize is the per-side cap
+  // 1–10, combined team totals, winnerTeam decides. teamSize is the per-side cap
   // (maxParticipants = 2 × teamSize). teamAName/teamBName are the two playful
   // side names (auto-generated at creation, creator-overridable). winnerTeam is
   // the settled result (TEAM_A|TEAM_B|null); winnerUserId stays null for team

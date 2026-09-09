@@ -110,6 +110,7 @@ function createHomeRouter(dependencies = {}) {
       const result = await getSuggestedRaces({
         userId: req.user.id,
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        supportsLargeTeamRaces: req.clientFeatures?.has("team_races_10v10_v1") ?? false,
         supportsTournaments:
           req.clientFeatures?.has("tournaments") ?? false,
         supportsBuckets:
@@ -160,6 +161,7 @@ function createHomeRouter(dependencies = {}) {
           supportsRemoteAssets:
             req.clientFeatures?.has("remote_assets") ?? false,
           supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        supportsLargeTeamRaces: req.clientFeatures?.has("team_races_10v10_v1") ?? false,
           privacySafeDisplayRanks:
             req.clientFeatures?.has("privacy_safe_display_ranks") === true,
           supportsNextRace: supportsNextRace(req.clientFeatures),
@@ -212,6 +214,7 @@ function createHomeRouter(dependencies = {}) {
         releaseChannel: req.releaseChannel,
         // TR-702/809: old clients never get a team race on the Home card.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        supportsLargeTeamRaces: req.clientFeatures?.has("team_races_10v10_v1") ?? false,
         privacySafeDisplayRanks:
           req.clientFeatures?.has("privacy_safe_display_ranks") === true,
         leanLiveEnabled,

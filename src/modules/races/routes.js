@@ -1,3 +1,4 @@
+const { clientSupportsLargeTeamRaces, requiresLargeTeamSupport, assertLargeTeamSupport } = require("./teamRaces");
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { createRace: defaultCreateRace } = require("./commands/createRace");
@@ -521,6 +522,7 @@ function createRacesRouter(dependencies = {}) {
     const { isParticipantsView, participantsOffset, participantsLimit } =
       readParticipantsPagingQuery(req);
     return {
+      supportsLargeTeamRaces: clientSupportsLargeTeamRaces(req.clientFeatures),
       pagination: {
         capable: req.clientFeatures?.has("race_participants_paging") ?? false,
         view: isParticipantsView ? "participants-v1" : null,
@@ -562,6 +564,7 @@ function createRacesRouter(dependencies = {}) {
       req.clientFeatures?.has("remote_assets") ?? false,
       resolvedContext,
       {
+        supportsLargeTeamRaces: clientSupportsLargeTeamRaces(req.clientFeatures),
         participantsView: isParticipantsView ? "participants-v1" : null,
         participantsOffset,
         participantsLimit,
@@ -660,6 +663,7 @@ function createRacesRouter(dependencies = {}) {
   router.get("/share/:token", async (req, res) => {
     try {
       const preview = await getSharedRacePreview({ token: req.params.token });
+      assertLargeTeamSupport(preview?._teamCompatibility, req.clientFeatures);
       if (!preview) {
         return res.status(404).json({ error: "Race not found" });
       }
@@ -673,6 +677,7 @@ function createRacesRouter(dependencies = {}) {
           : {}),
       });
     } catch (error) {
+      if (error.code === "UPDATE_REQUIRED") return res.status(400).json({ error: error.message, code: error.code });
       if (error.statusCode === 410) {
         return res.status(410).json({
           error: error.message,
@@ -686,6 +691,29 @@ function createRacesRouter(dependencies = {}) {
 
   router.use(requireAuth);
   router.use(require('../../middleware/billingRealm').buildBillingRealmGuard('race', dependencies.prisma));
+
+  // Frozen five-slot renderers must never enter a larger board. Retained
+  // membership escape, payout and acknowledgement controls remain available.
+  router.param("raceId", async (req, res, next, raceId) => {
+    if (clientSupportsLargeTeamRaces(req.clientFeatures)) return next();
+    const suffix = req.path.slice(req.path.indexOf(raceId) + raceId.length);
+    const escape = suffix === "/leave" || suffix === "/forfeit" ||
+      (suffix === "/respond" && req.body?.accept === false) ||
+      suffix === "/favorite" || suffix === "/chat/mute" ||
+      suffix === "/placement/mute" || suffix === "/chat/read" ||
+      suffix.endsWith("/acknowledge") || (req.method === "DELETE" && suffix === "");
+    if (escape) return next();
+    try {
+      const marker = dependencies.Race
+        ? await raceModel.findById(raceId)
+        : await routePrisma.race.findUnique({ where: { id: raceId }, select: { isTeamRace: true, teamSize: true } });
+      assertLargeTeamSupport(marker, req.clientFeatures);
+      return next();
+    } catch (error) {
+      if (error.code === "UPDATE_REQUIRED") return res.status(400).json({error: error.message, code: error.code});
+      return next(error);
+    }
+  });
 
   function sendJoinRequestError(res, error) {
     if (!(error instanceof RaceJoinRequestError) &&
@@ -703,6 +731,7 @@ function createRacesRouter(dependencies = {}) {
       const result = await createRaceJoinRequest({
         rawToken: req.params.token,
         requesterUserId: req.user.id,
+        clientFeatures: req.clientFeatures,
         team: req.body?.team ?? null,
       });
       res.status(202).json({ joinRequest: result.joinRequest });
@@ -842,6 +871,7 @@ function createRacesRouter(dependencies = {}) {
           userId: req.user.id,
           supportsTournaments,
           supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+          supportsLargeTeamRaces: clientSupportsLargeTeamRaces(req.clientFeatures),
           homeInviteModal,
         })
       );
@@ -889,6 +919,7 @@ function createRacesRouter(dependencies = {}) {
       }
       const [result, tournaments] = await Promise.all([
         getRaces(req.user.id, supportsTeamRaces, {
+          supportsLargeTeamRaces: clientSupportsLargeTeamRaces(req.clientFeatures),
           clientFeatures: req.clientFeatures,
           // Batch 2026-08-08 item 4: the completed-race podium rows gate
           // test-only characters on the release channel, same as race detail.
@@ -1115,6 +1146,7 @@ function createRacesRouter(dependencies = {}) {
       const summary = await getRaceDiscoverySummary({
         userId: req.user.id,
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+          supportsLargeTeamRaces: clientSupportsLargeTeamRaces(req.clientFeatures),
         supportsTournaments: req.clientFeatures?.has("tournaments") ?? false,
         supportsBuckets: capable,
         hiddenSeedKinds,
@@ -1141,6 +1173,7 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         // TR-702: old clients never see team races in the public browser.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+          supportsLargeTeamRaces: clientSupportsLargeTeamRaces(req.clientFeatures),
         // Capable clients never see the legacy global seeded field during the
         // mixed-version bridge; their private card is /featured-only.
         excludeSeeded: false,
@@ -1791,6 +1824,7 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         raceId: req.params.raceId,
         team: req.body && req.body.team,
+        clientFeatures: req.clientFeatures,
       });
       res.json({ participant });
     } catch (error) {
@@ -1853,6 +1887,7 @@ function createRacesRouter(dependencies = {}) {
   router.post("/:raceId/start", async (req, res) => {
     try {
       const race = await startRace({
+        clientFeatures: req.clientFeatures,
         userId: req.user.id,
         raceId: req.params.raceId,
       });
@@ -1861,6 +1896,9 @@ function createRacesRouter(dependencies = {}) {
       if (error.name === "RaceStartError") {
         if (error.code === "RACE_ALREADY_STARTED") {
           const current = await raceModel.findById(req.params.raceId);
+          if (requiresLargeTeamSupport(current) && !clientSupportsLargeTeamRaces(req.clientFeatures)) {
+            return res.status(400).json({error:"Update the app to use this team race",code:"UPDATE_REQUIRED"});
+          }
           if (
             current?.status === "ACTIVE" &&
             current.isTeamRace === true &&
@@ -1932,7 +1970,7 @@ function createRacesRouter(dependencies = {}) {
       });
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Race progress error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -2427,7 +2465,7 @@ function createRacesRouter(dependencies = {}) {
       res.json(result);
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Get race inventory error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -2446,7 +2484,7 @@ function createRacesRouter(dependencies = {}) {
       res.json(result);
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Get race feed error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -2745,6 +2783,7 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         raceId: req.params.raceId,
         updates,
+        clientFeatures: req.clientFeatures,
       });
       res.json({ race: serializeMutationRace(race) });
     } catch (error) {

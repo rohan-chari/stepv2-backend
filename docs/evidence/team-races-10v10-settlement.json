@@ -1,0 +1,71 @@
+{
+  "date": "2026-09-09",
+  "environment": "dedicated localhost steps-tracker-integration_test; no Redis worker consumers or external notifications",
+  "method": "real resolveExpiredRaces scheduled entrypoint, entire awaited settlement captured via Prisma query events; HTTP details/progress/auth/me/race list assertions afterward; second expiry call proves no duplicate credit",
+  "sampleCountPerCase": 1,
+  "scopeLimitations": [
+    "local smoke timings, not p95 or production CPU evidence",
+    "all participants have frozen authoritative finish totals; no global events or active effects in these settlement fixtures",
+    "includes synchronous settlement, ledger, outbox and queue insertion queries; downstream consumer execution is excluded",
+    "OTHER contains transaction control and CTE statements, not a count of jobs",
+    "separate repeated run observed one extra transaction-control query for 10v10 tie"
+  ],
+  "results": [
+    {
+      "size": 5,
+      "tie": false,
+      "elapsedMs": 87.57,
+      "queries": 128,
+      "sql": {
+        "SELECT": 55,
+        "INSERT": 12,
+        "UPDATE": 38,
+        "DELETE": 0,
+        "OTHER": 23
+      },
+      "coinWrites": 5
+    },
+    {
+      "size": 5,
+      "tie": true,
+      "elapsedMs": 52.43,
+      "queries": 153,
+      "sql": {
+        "SELECT": 60,
+        "INSERT": 17,
+        "UPDATE": 48,
+        "DELETE": 0,
+        "OTHER": 28
+      },
+      "coinWrites": 10
+    },
+    {
+      "size": 10,
+      "tie": false,
+      "elapsedMs": 53.45,
+      "queries": 183,
+      "sql": {
+        "SELECT": 60,
+        "INSERT": 17,
+        "UPDATE": 68,
+        "DELETE": 0,
+        "OTHER": 38
+      },
+      "coinWrites": 10
+    },
+    {
+      "size": 10,
+      "tie": true,
+      "elapsedMs": 65.7,
+      "queries": 233,
+      "sql": {
+        "SELECT": 70,
+        "INSERT": 27,
+        "UPDATE": 88,
+        "DELETE": 0,
+        "OTHER": 48
+      },
+      "coinWrites": 20
+    }
+  ]
+}

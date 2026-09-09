@@ -1,3 +1,6 @@
+const { assertLargeTeamSupport, clientSupportsLargeTeamRaces } = require("../teamRaces");
+const { withRaceJoinLock } = require("../services/raceJoinLock");
+const { prisma, deferUntilAfterCommit } = require("../../../db");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { eventBus } = require("../../../shared/events/eventBus");
@@ -48,11 +51,12 @@ function buildEditRace(dependencies = {}) {
   const settings = dependencies.appSettings || appSettings;
   const events = dependencies.eventBus || eventBus;
 
-  return async function editRace({ userId, raceId, updates = {} }) {
+  const editCore = async function editRace({ userId, raceId, updates = {}, clientFeatures = null }) {
     const race = await raceModel.findById(raceId);
     if (!race) {
       throw new RaceEditError("Race not found", 404);
     }
+    assertLargeTeamSupport(race, clientFeatures, RaceEditError);
     if (race.tournamentId) {
       throw new RaceEditError(
         "This race is managed by its tournament",
@@ -119,9 +123,23 @@ function buildEditRace(dependencies = {}) {
 
       if (hasField(updates, "teamSize")) {
         const newSize = validateTeamSize(updates.teamSize, RaceEditError);
+        assertLargeTeamSupport({ ...race, teamSize: newSize }, clientFeatures, RaceEditError);
         const accepted = (race.participants || []).filter(
           (p) => p.status === "ACCEPTED"
         );
+        if (newSize > 5 && newSize > race.teamSize) {
+          const memberIds = accepted.map((p) => p.userId);
+          // At most20 accepted rows; invitations never expand this read.
+          const members = await (dependencies.prisma || prisma).user.findMany({
+            where: { id: { in: memberIds } },
+            select: { id: true, clientFeatures: true },
+            take: 20,
+          });
+          if (members.length !== memberIds.length ||
+              members.some((member) => !clientSupportsLargeTeamRaces(member.clientFeatures))) {
+            throw new RaceEditError("Every accepted member must open the updated app before enlarging this race", 400, "UPDATE_REQUIRED");
+          }
+        }
         const sideCounts = {
           TEAM_A: accepted.filter((p) => p.team === "TEAM_A").length,
           TEAM_B: accepted.filter((p) => p.team === "TEAM_B").length,
@@ -403,17 +421,24 @@ function buildEditRace(dependencies = {}) {
     await raceModel.update(raceId, fields);
     const updated = await raceModel.findById(raceId);
 
-    events.emit("RACE_EDITED", {
-      raceId,
-      creatorUserId: userId,
-      updatedFields: Object.keys(fields),
+    await deferUntilAfterCommit(async () => {
+      events.emit("RACE_EDITED", {
+        raceId,
+        creatorUserId: userId,
+        updatedFields: Object.keys(fields),
+      });
+      await invalidateRaceProgress(raceId);
     });
-
-    await invalidateRaceProgress(raceId);
 
     // Edits are PENDING-only, so there are no live standings to resolve.
 
     return updated;
+  };
+  // All real edits re-read their roster under the same lock as joins/start.
+  // Injectable model tests retain their original in-memory contract.
+  return async function editRace(args) {
+    if (dependencies.Race) return editCore(args);
+    return (dependencies.withRaceJoinLock || withRaceJoinLock)(args.raceId, () => editCore(args));
   };
 }
 

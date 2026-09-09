@@ -5,7 +5,7 @@ const { Steps } = require("../../steps/models/steps");
 const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const { isRacePayoutPresetCompatible } = require("../racePayoutPresets");
 
-const { acceptedTeamCounts } = require("../teamRaces");
+const { acceptedTeamCounts, assertLargeTeamSupport } = require("../teamRaces");
 const { snapshotBaselineFields } = require("../services/raceBaseline");
 const { commitRaceStart } = require("../services/commitRaceStart");
 const { resolveRaceEndsAt } = require("../services/resolveRaceEndsAt");
@@ -59,12 +59,18 @@ function buildStartRace(dependencies = {}) {
   // 1.1.7: `bypassSchedule` lets the autoStartScheduledRaces cron job start a
   // scheduled race at the scheduled moment (it pins `now` to scheduledStartAt so
   // endsAt anchors there). `now` is also injectable for that anchoring + tests.
-  return async function startRace({ userId, raceId, bypassSchedule = false, now: nowOverride }) {
+  return async function startRace({ userId, raceId, bypassSchedule = false, now: nowOverride, clientFeatures = null }) {
+    const readSafeCurrentRace = async () => {
+      const current = await raceModel.findById(raceId);
+      if (clientFeatures !== null) assertLargeTeamSupport(current, clientFeatures, RaceStartError);
+      return current;
+    };
     const startNow = typeof nowOverride === "function" ? nowOverride : now;
     const race = await raceModel.findById(raceId);
     if (!race) {
       throw new RaceStartError("Race not found", 404);
     }
+    if (clientFeatures !== null) assertLargeTeamSupport(race, clientFeatures, RaceStartError);
     if (race.creatorId !== userId) {
       throw new RaceStartError("Only the race creator can start the race", 403);
     }
@@ -229,6 +235,7 @@ function buildStartRace(dependencies = {}) {
       const committed = await commitRaceStartFn({
         raceId,
         actorUserId: userId,
+        clientFeatures,
         startedAt,
         endsAt,
         // §5.3a: re-priced duration AND the team multiplier derived from it,
@@ -263,9 +270,9 @@ function buildStartRace(dependencies = {}) {
       if (committed.participantChanged) {
         // A join committed while baselines were being read. Retry from a fresh
         // race/participant snapshot; the first transaction wrote nothing.
-        return startRace({ userId, raceId, bypassSchedule, now: nowOverride });
+        return startRace({ userId, raceId, bypassSchedule, now: nowOverride, clientFeatures });
       }
-      if (!committed.started) return raceModel.findById(raceId);
+      if (!committed.started) return readSafeCurrentRace();
 
       const participantUserIds = participantUpdates.map((p) => p.userId);
       try {
@@ -274,7 +281,7 @@ function buildStartRace(dependencies = {}) {
           "SYSTEM"
         );
       } catch {}
-      return raceModel.findById(raceId);
+      return readSafeCurrentRace();
     }
 
     // Conditional flip: claim the PENDING -> ACTIVE transition. The status check
@@ -291,7 +298,7 @@ function buildStartRace(dependencies = {}) {
       potCoins: (race.potCoins || 0) + heldPot,
     });
     if (flip.count === 0) {
-      return raceModel.findById(raceId);
+      return readSafeCurrentRace();
     }
 
     // Snapshot each participant's current steps so only post-race steps count.
@@ -336,7 +343,7 @@ function buildStartRace(dependencies = {}) {
       priority: "IMMEDIATE",
     });
 
-    return raceModel.findById(raceId);
+    return readSafeCurrentRace();
   };
 }
 

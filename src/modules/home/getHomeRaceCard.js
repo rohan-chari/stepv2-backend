@@ -323,7 +323,8 @@ async function checkPendingInvite(
   supportsCharacters = false,
   releaseChannel = "prod",
   supportsRemoteAssets = false,
-  launchReadBatch = null
+  launchReadBatch = null,
+  supportsLargeTeamRaces = false,
 ) {
   const where = {
     userId,
@@ -344,12 +345,14 @@ async function checkPendingInvite(
           startedAt: true,
           endsAt: true,
           maxDurationDays: true,
+          isTeamRace: true,
+          teamSize: true,
           creator: { select: USER_SELECT },
           _count: { select: { participants: true } },
         },
       },
     };
-  const invites = launchReadBatch
+  const invitationRows = launchReadBatch
     ? await launchReadBatch.loadPendingInvites({ prisma, userId, now, select })
     : await prisma.raceParticipant.findMany({
         where,
@@ -358,6 +361,11 @@ async function checkPendingInvite(
         orderBy: [{ inviteExpiresAt: "asc" }, { joinedAt: "asc" }],
       });
 
+  // Filter after the shared batch so two devices with different capabilities
+  // cannot leak incompatible invitations through a common read.
+  const invites = invitationRows.filter((row) =>
+    supportsLargeTeamRaces || row.race?.isTeamRace !== true ||
+    !(row.race.teamSize > 5));
   if (invites.length === 0) return null;
 
   const primary = invites[0];
@@ -1770,6 +1778,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // TR-702/809: whether the caller declared the `team_races` token. Old
     // clients never see a team race on the Home card.
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     privacySafeDisplayRanks = false,
     // Batch 2026-07-26, item 8. Defaults to "prod" — a shipped binary never
     // receives a test-only assetKey it does not bundle.
@@ -1786,7 +1795,8 @@ function buildGetHomeRaceCard(dependencies = {}) {
       supportsCharacters,
       releaseChannel,
       supportsRemoteAssets,
-      launchReadBatch
+      launchReadBatch,
+      supportsLargeTeamRaces,
     );
     if (pending) return pending;
 

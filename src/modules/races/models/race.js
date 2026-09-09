@@ -489,6 +489,15 @@ const Race = {
 
   // ONE page of participants, cosmetics included, LIMIT/OFFSET pushed into the
   // database rather than sliced in JS after the fact.
+  async findDetailsAcceptedTeamParticipants(raceId) {
+    return prisma.raceParticipant.findMany({
+      where: { raceId, status: "ACCEPTED" },
+      include: { user: participantCosmeticUserSelect },
+      orderBy: detailsParticipantOrder,
+      take: 20,
+    });
+  },
+
   async findDetailsParticipantPage(raceId, { skip = 0, take = 10 } = {}) {
     return prisma.raceParticipant.findMany({
       where: { raceId },
@@ -1432,11 +1441,14 @@ const Race = {
   async findPublicSuggestions({
     userId,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     excludeSeeded = false,
     limit = 4,
   }) {
     const teamPredicate = supportsTeamRaces
-      ? Prisma.sql`AND (r.is_team_race = FALSE OR r.status = 'pending'::"RaceStatus")`
+      ? Prisma.sql`AND (r.is_team_race = FALSE OR
+          (r.status = 'pending'::"RaceStatus" AND
+            (${supportsLargeTeamRaces}::boolean OR COALESCE(r.team_size, 0) <= 5)))`
       : Prisma.sql`AND r.is_team_race = FALSE`;
     const seedPredicate = excludeSeeded
       ? Prisma.sql`AND r.seed_id IS NULL`
@@ -1556,6 +1568,7 @@ WITH eligible AS MATERIALIZED (
         scheduledEndAt: true,
         tournamentId: true,
         isTeamRace: true,
+        teamSize: true,
         status: true,
         maxParticipants: true,
         participants: { select: { userId: true, status: true } },
@@ -1567,11 +1580,14 @@ WITH eligible AS MATERIALIZED (
   async countVisiblePublicRaces({
     userId,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     excludeSeeded = false,
     hiddenSeededWindows = [],
   }) {
     const teamPredicate = supportsTeamRaces
-      ? Prisma.sql`AND (r.is_team_race = FALSE OR r.status = 'pending'::"RaceStatus")`
+      ? Prisma.sql`AND (r.is_team_race = FALSE OR
+          (r.status = 'pending'::"RaceStatus" AND
+            (${supportsLargeTeamRaces}::boolean OR COALESCE(r.team_size, 0) <= 5)))`
       : Prisma.sql`AND r.is_team_race = FALSE`;
     const seedPredicate = excludeSeeded
       ? Prisma.sql`AND r.seed_id IS NULL`

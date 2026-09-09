@@ -154,7 +154,7 @@ test("race list variants canonicalize supported dimensions and ignore unknown to
       compact: true,
       releaseChannel: "unknown",
     }),
-    "tm1:to1:sb1:pu111:lv1:ch1:ra1:pd1:rv1:co1:rcprod",
+    "tm1:tl0:to1:sb1:pu111:lv1:ch1:ra1:pd1:rv1:co1:rcprod",
   );
 });
 

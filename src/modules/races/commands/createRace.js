@@ -1,3 +1,4 @@
+const { assertLargeTeamSupport } = require("../teamRaces");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { User } = require("../../users");
@@ -240,6 +241,7 @@ function buildCreateRace(dependencies = {}) {
       }
 
       const normalizedTeamSize = validateTeamSize(teamSize, RaceCreationError);
+      assertLargeTeamSupport({ isTeamRace: true, teamSize: normalizedTeamSize }, clientFeatures, RaceCreationError);
       const aOverridden = teamAName !== null && teamAName !== undefined;
       const bOverridden = teamBName !== null && teamBName !== undefined;
       const [generatedA, generatedB] = generateTeamNamePair();

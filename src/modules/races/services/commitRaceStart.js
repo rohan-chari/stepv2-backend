@@ -1,3 +1,4 @@
+const { assertLargeTeamSupport } = require("../teamRaces");
 const { prisma } = require("../../../db");
 const {
   acquireRaceWriteFence,
@@ -30,6 +31,7 @@ class RaceStartTransactionAbort extends Error {
 async function commitRaceStart({
   raceId,
   actorUserId,
+  clientFeatures = null,
   startedAt,
   endsAt,
   potCoins,
@@ -73,12 +75,15 @@ async function commitRaceStart({
     await lockCompetitionRows(tx, { raceIds: [raceId] });
     const race = await tx.race.findUnique({
       where: { id: raceId },
-      select: { status: true, creationSource: true, startPolicy: true, createdAt: true },
+      select: { status: true, creationSource: true, startPolicy: true, createdAt: true, isTeamRace: true, teamSize: true },
     });
+    if (clientFeatures !== null) {
+      try { assertLargeTeamSupport(race, clientFeatures); }
+      catch (error) { error.name = "RaceStartError"; throw error; }
+    }
     if (!race || race.status !== "PENDING") {
       throw new RaceStartTransactionAbort({ started: false });
     }
-
     const accepted = await tx.raceParticipant.findMany({
       where: { raceId, status: "ACCEPTED" },
       select: { id: true, userId: true },

@@ -15,6 +15,7 @@ const {
   isTeamSideFull,
   pickAutoAssignTeam,
   clientSupportsTeamRaces,
+  assertLargeTeamSupport,
 } = require("../teamRaces");
 
 // How many bonus mystery boxes the "join your first race" onboarding grants.
@@ -240,6 +241,7 @@ function buildJoinRaceCore(dependencies = {}) {
 
     let joinTeam = null;
     if (race.isTeamRace) {
+      assertLargeTeamSupport(race, clientFeatures, RaceJoinError);
       // TR-703: defense-in-depth — an old client can never enter a team race.
       if (!clientSupportsTeamRaces(clientFeatures)) {
         throw new RaceJoinError(

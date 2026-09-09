@@ -1,7 +1,7 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { eventBus } = require("../../../shared/events/eventBus");
-const { isTeamSideFull } = require("../teamRaces");
+const { isTeamSideFull, assertLargeTeamSupport } = require("../teamRaces");
 const {
   prisma: defaultPrisma,
   runInPrismaTransaction,
@@ -28,7 +28,7 @@ function buildSwitchRaceTeam(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const usesDefaultPersistence = !dependencies.Race && !dependencies.RaceParticipant;
 
-  return async function switchRaceTeam({ userId, raceId, team }) {
+  return async function switchRaceTeam({ userId, raceId, team, clientFeatures = null }) {
     const mutate = async (tx = db) => {
     if (usesDefaultPersistence) await acquireRaceWriteFence(tx, raceId);
     const race = usesDefaultPersistence
@@ -37,6 +37,7 @@ function buildSwitchRaceTeam(dependencies = {}) {
     if (!race) {
       throw new RaceTeamSwitchError("Race not found", 404);
     }
+    assertLargeTeamSupport(race, clientFeatures, RaceTeamSwitchError);
     if (!race.isTeamRace) {
       throw new RaceTeamSwitchError("This is not a team race", 400);
     }

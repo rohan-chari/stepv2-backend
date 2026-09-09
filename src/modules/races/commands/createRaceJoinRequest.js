@@ -1,3 +1,4 @@
+const { assertLargeTeamSupport } = require("../teamRaces");
 const { prisma: defaultPrisma } = require("../../../db");
 const { hashShareToken } = require("../models/raceShareLink");
 const { createInboxAlert } = require("../../inbox/services/inbox");
@@ -20,6 +21,7 @@ function buildCreateRaceJoinRequest(dependencies = {}) {
     rawToken,
     requesterUserId,
     team = null,
+    clientFeatures = null,
     now = new Date(),
   }) {
     const outcome = await prisma.$transaction(async (tx) => {
@@ -73,6 +75,7 @@ function buildCreateRaceJoinRequest(dependencies = {}) {
       if (race.maxParticipants != null && acceptedCount >= race.maxParticipants) {
         throw new RaceJoinRequestError("This race is full", 409, "RACE_FULL");
       }
+      assertLargeTeamSupport(race, clientFeatures, RaceJoinRequestError);
       let requestedTeam = null;
       if (race.isTeamRace) {
         if (team !== "TEAM_A" && team !== "TEAM_B") {

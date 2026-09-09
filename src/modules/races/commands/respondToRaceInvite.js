@@ -17,6 +17,7 @@ const {
   isTeamSideFull,
   pickAutoAssignTeam,
   clientSupportsTeamRaces,
+  assertLargeTeamSupport,
 } = require("../teamRaces");
 const {
   buildMaybeAutoStartPrivateRace,
@@ -177,6 +178,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
 
     let acceptTeam = null;
     if (accept && race.isTeamRace) {
+      assertLargeTeamSupport(race, clientFeatures, RaceInviteResponseError);
       // TR-703: defense-in-depth against old clients.
       if (!clientSupportsTeamRaces(clientFeatures)) {
         throw new RaceInviteResponseError(
@@ -332,6 +334,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
               throw new RaceInviteResponseError("Race is full", 409, "RACE_FULL");
             }
             if (lockedRace.isTeamRace) {
+              assertLargeTeamSupport(lockedRace, clientFeatures, RaceInviteResponseError);
               if (lockedRace.status !== "PENDING") {
                 throw new RaceInviteResponseError(
                   "This race has already started",

@@ -178,10 +178,10 @@ function validateTeamName(name, ErrorClass, label = "Team name") {
   return trimmed;
 }
 
-// TR-106: team size must be an integer 1..5.
+// TR-106: team size must be an integer 1..10.
 function validateTeamSize(teamSize, ErrorClass) {
-  if (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > 5) {
-    throw new ErrorClass("Team size must be between 1 and 5", 400);
+  if (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > 10) {
+    throw new ErrorClass("Team size must be between 1 and 10", 400);
   }
   return teamSize;
 }

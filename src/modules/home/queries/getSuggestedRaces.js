@@ -99,6 +99,7 @@ function buildGetSuggestedRaces(dependencies = {}) {
   return async function getSuggestedRaces({
     userId,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     supportsTournaments = false,
     supportsBuckets = false,
   }) {
@@ -113,6 +114,7 @@ function buildGetSuggestedRaces(dependencies = {}) {
         getPublicRaces({
           userId,
           supportsTeamRaces,
+          supportsLargeTeamRaces,
           excludeSeeded: true,
           suggestionMode: true,
         }),

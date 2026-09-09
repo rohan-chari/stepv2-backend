@@ -1108,6 +1108,7 @@ describe("GET /home/suggested-races", () => {
     await createTournament({
       id: "legacy-public-tournament",
       creatorId: owner.id,
+      createdAt: new Date("2026-08-11T12:00:00.000Z"),
     });
 
     const legacyPaths = [
@@ -1136,7 +1137,8 @@ describe("GET /home/suggested-races", () => {
       assert.equal(await response.text(), before.get(path), path);
     }
 
-    // Frozen pre-feature fixture. Comparing the legacy handler to itself before
+    // Frozen fixture including the already-shipped creation/favorite fields.
+    // Comparing the legacy handler to itself before
     // and after the new call cannot detect an accidental global serializer
     // addition, so pin the actual wire bytes and key order here.
     const publicTournaments = await request(
@@ -1171,11 +1173,14 @@ describe("GET /home/suggested-races", () => {
             seedKind: null,
             championPrizeCoins: null,
             championUserId: null,
+            createdAt: "2026-08-11T12:00:00.000Z",
             startedAt: null,
             completedAt: null,
             myStatus: null,
             myEliminatedInRound: null,
             acceptedCount: 0,
+            isFavorite: false,
+            favoritedAt: null,
             myCurrentMatchRaceId: null,
             joinable: true,
           },

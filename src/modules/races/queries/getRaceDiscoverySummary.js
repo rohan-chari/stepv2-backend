@@ -32,6 +32,7 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
   return async function getRaceDiscoverySummary({
     userId,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     supportsTournaments = false,
     supportsBuckets = false,
     hiddenSeedKinds = new Set(),
@@ -47,6 +48,7 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
       getPublicRaceCount({
         userId,
         supportsTeamRaces,
+        supportsLargeTeamRaces,
         excludeSeeded: false,
         hiddenSeededWindows,
       }),

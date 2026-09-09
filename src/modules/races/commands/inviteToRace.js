@@ -1,3 +1,4 @@
+const { requiresLargeTeamSupport, clientSupportsLargeTeamRaces } = require("../teamRaces");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { Friendship } = require("../../social");
@@ -102,7 +103,7 @@ function buildInviteToRace(dependencies = {}) {
       if (race.isTeamRace) {
         const invitee = await userModel.findById(inviteeId);
         const features = (invitee && invitee.clientFeatures) || [];
-        if (!features.includes(TEAM_RACES_FEATURE)) {
+        if (!features.includes(TEAM_RACES_FEATURE) || (requiresLargeTeamSupport(race) && !clientSupportsLargeTeamRaces(features))) {
           const friendName =
             (invitee && invitee.displayName) || "That friend";
           throw new RaceInviteError(

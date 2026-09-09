@@ -20,7 +20,7 @@ function normalizeJoinFailure(error) {
       error.meta || null,
     );
   }
-  if (error?.code === "TEAM_FULL" || error?.code === "UPDATE_REQUIRED") {
+  if (error?.code === "TEAM_FULL") {
     return new RaceJoinRequestError(error.message, 400, "INVALID_TEAM");
   }
   if (error?.code === "ALREADY_RESPONDED") {
@@ -143,8 +143,14 @@ function buildRespondRaceJoinRequest(dependencies = {}) {
           request.creatorUserId,
           request.requesterUserId,
         );
-        const requesterFeatures = new Set(clientFeatures || []);
-        if (request.team != null) requesterFeatures.add("team_races");
+        const requester = await tx.user.findUnique({
+          where: { id: request.requesterUserId },
+          select: { clientFeatures: true },
+        });
+        const requesterFeatures = new Set(requester?.clientFeatures || []);
+        // Legacy <=5 requests stored the explicit team; keep their old support
+        // inference. Larger races require the actual requester's durable union.
+        if (request.team != null && !(race.isTeamRace && race.teamSize > 5)) requesterFeatures.add("team_races");
         joined = await joinRaceCore({
           race,
           userId: request.requesterUserId,

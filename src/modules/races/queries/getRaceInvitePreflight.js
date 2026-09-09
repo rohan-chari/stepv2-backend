@@ -10,6 +10,7 @@ function buildGetRaceInvitePreflight(dependencies = {}) {
     userId,
     supportsTournaments,
     supportsTeamRaces = false,
+    supportsLargeTeamRaces = false,
     homeInviteModal = false,
   }) {
     const now = new Date();
@@ -24,6 +25,7 @@ function buildGetRaceInvitePreflight(dependencies = {}) {
           // Tournament matchup races are answered solely through their bracket;
           // never duplicate one into a race decision surface.
           tournamentId: null,
+          ...(supportsLargeTeamRaces ? {} : { NOT: { isTeamRace: true, teamSize: { gt: 5 } } }),
           status: { in: ["PENDING", "ACTIVE"] },
           participants: { some: liveInvite },
         },

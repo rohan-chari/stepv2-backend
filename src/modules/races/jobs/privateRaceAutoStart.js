@@ -34,6 +34,7 @@ const { acceptedTeamCounts } = require("../teamRaces");
 // box. Over this many participant rows we skip the inline path entirely and let
 // the 5-minute backstop start it.
 const MAX_INLINE_PARTICIPANTS = 10;
+const MAX_INLINE_LARGE_TEAM_PARTICIPANTS = 20;
 
 // Safety bound on the backstop's scan. PENDING private races that never start
 // accumulate; oldest eligible first so no race can starve behind newer rows.
@@ -152,10 +153,16 @@ function buildMaybeAutoStartPrivateRace(dependencies = {}) {
       // Fresh read: the caller's copy predates the participant write.
       const race = await raceModel.findById(raceId);
       if (!race) return false;
-      if ((race.participants || []).length > MAX_INLINE_PARTICIPANTS) {
-        // Too big to start on the request path — the backstop tick will get it.
-        return false;
-      }
+      const largeTeam = race.isTeamRace === true && race.teamSize > 5;
+      const inlineCount = largeTeam
+        ? (race.participants || []).filter((p) => p.status === "ACCEPTED").length
+        : (race.participants || []).length;
+      const inlineLimit = largeTeam ? MAX_INLINE_LARGE_TEAM_PARTICIPANTS : MAX_INLINE_PARTICIPANTS;
+      if (inlineCount > inlineLimit) return false;
+      // A configured large team has at most20 accepted members. Resolved
+      // invitation history does not increase start work or suppress the public
+      // final-invite trigger (public teams are outside the private backstop).
+
       if (race.isTeamRace === true && race.isPublic !== false && !fromInvite) return false;
       if (!shouldAutoStartPrivateRace({ race, now: now() })) return false;
 

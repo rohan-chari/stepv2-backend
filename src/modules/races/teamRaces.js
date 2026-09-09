@@ -52,6 +52,20 @@ function toFeatureSet(clientFeatures) {
 }
 
 const TEAM_RACES_FEATURE = "team_races";
+const TEAM_RACES_10V10_FEATURE = "team_races_10v10_v1";
+function clientSupportsLargeTeamRaces(clientFeatures) {
+  return toFeatureSet(clientFeatures).has(TEAM_RACES_10V10_FEATURE);
+}
+function requiresLargeTeamSupport(race) {
+  return race?.isTeamRace === true && Number(race.teamSize) > 5;
+}
+function assertLargeTeamSupport(race, clientFeatures, ErrorClass = Error) {
+  if (!requiresLargeTeamSupport(race) || clientSupportsLargeTeamRaces(clientFeatures)) return;
+  const error = new ErrorClass("Update the app to use this team race", 400, "UPDATE_REQUIRED");
+  error.statusCode = 400;
+  error.code = "UPDATE_REQUIRED";
+  throw error;
+}
 
 function clientSupportsTeamRaces(clientFeatures) {
   return toFeatureSet(clientFeatures).has(TEAM_RACES_FEATURE);
@@ -114,6 +128,10 @@ function buildTeamsBlockFromParticipants(race, participants = []) {
 }
 
 module.exports = {
+  TEAM_RACES_10V10_FEATURE,
+  clientSupportsLargeTeamRaces,
+  requiresLargeTeamSupport,
+  assertLargeTeamSupport,
   acceptedTeamCounts,
   isTeamSideFull,
   pickAutoAssignTeam,
