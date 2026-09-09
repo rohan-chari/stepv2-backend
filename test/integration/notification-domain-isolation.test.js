@@ -1385,7 +1385,12 @@ describe("notification domain isolation", () => {
       now: () => retentionNow,
       logger: quietLogger,
     });
-    assert.deepEqual(await retain(), { deleted: 0 }, "pending push outbox protects its source event");
+    const unchangedRetention = {
+      deleted: 0, eventReceiptsBackfilled: 0, scheduleReceiptsBackfilled: 0,
+      eventReceiptsDeleted: 0, schedulePayloadsDeleted: 0, scheduleReceiptsDeleted: 0,
+      cleanupPagesUsed: 3,
+    };
+    assert.deepEqual(await retain(), unchangedRetention, "pending push outbox protects its source event");
 
     await prisma.friendship.delete({ where: { id: friendship.id } });
     await prisma.user.delete({ where: { id: addressee.user.id } });
@@ -1393,10 +1398,10 @@ describe("notification domain isolation", () => {
       await prisma.domainEventOutbox.findUnique({ where: { id: event.id } }),
       "recipient deletion cannot cascade into coordination history",
     );
-    assert.deepEqual(await retain(), { deleted: 1 });
+    assert.deepEqual(await retain(), { ...unchangedRetention, deleted: 1, eventReceiptsDeleted: 1 });
     assert.equal(await prisma.domainEventOutbox.count({ where: { id: event.id } }), 0);
     assert.equal(await prisma.domainEventAudience.count({ where: { domainEventId: event.id } }), 0);
     assert.equal(await prisma.domainEventNotificationProjection.count({ where: { domainEventId: event.id } }), 0);
-    assert.deepEqual(await retain(), { deleted: 0 }, "cleanup replay is idempotent");
+    assert.deepEqual(await retain(), unchangedRetention, "cleanup replay is idempotent");
   });
 });

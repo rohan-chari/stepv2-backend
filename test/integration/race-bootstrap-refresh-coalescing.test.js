@@ -23,8 +23,9 @@ const headers = {
 };
 
 async function fixture() {
-  const viewer = await createTestUser();
-  const other = await createTestUser();
+  // Model an already registered UTC device; timezone migration has its own race fences.
+  const viewer = await createTestUser({ timezone: "UTC", globalEventTimezone: "UTC" });
+  const other = await createTestUser({ timezone: "UTC", globalEventTimezone: "UTC" });
   const race = await prisma.race.create({ data: {
     creatorId: viewer.user.id, name: "Refresh coalescing", status: "ACTIVE", targetSteps: 50000,
     maxDurationDays: 7, maxParticipants: 50, startedAt: new Date(Date.now() - 3600000),
@@ -105,7 +106,7 @@ describe("bootstrap read-only queue contract", () => {
 
   it("never enqueues work for a public preview reader", async () => {
     const f = await fixture();
-    await read(f, await createTestUser());
+    await read(f, await createTestUser({ timezone: "UTC", globalEventTimezone: "UTC" }));
     assert.equal(await row(f), null);
   });
 

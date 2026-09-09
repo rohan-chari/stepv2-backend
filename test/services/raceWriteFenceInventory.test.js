@@ -170,6 +170,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/jobs/placementRecompute.js": ["participantModel.update", "participantModel.update", "participantModel.update", "participantModel.update"],
   "src/modules/races/jobs/raceAdminCommandRunner.js": ["raceParticipant.create", "raceParticipant.update"],
   "src/modules/races/jobs/raceExpiry.js": ["raceParticipant.update", "raceParticipant.update"],
+  // Includes the fenced set-based box_progress_steps projection.
   "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update", "raw.race_participants.update", "raw.race_participants.update", "raw.race_participants.update"],
   "src/modules/races/jobs/raceSeriesRenewal.js": ["raceParticipant.create"],
   "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany"],

@@ -49,7 +49,8 @@ beforeEach(async()=>{
 });
 after(async()=>{Client.prototype.query=original;await redis?.close();await liveRedis?.close();});
 async function fixture(size){
- const viewer=await createTestUser();
+  // Model an already registered UTC device; timezone migration has its own race fences.
+ const viewer=await createTestUser({ timezone: "UTC", globalEventTimezone: "UTC" });
  const others=Array.from({length:size-1},()=>({id:randomUUID(),appleId:randomUUID()}));
  await prisma.user.createMany({data:others});
  const ids=[viewer.user.id,...others.map(u=>u.id)],now=Date.now();
@@ -121,7 +122,7 @@ it('fresh, expired, and Redis-off progress/bootstrap reads never score or enqueu
 });
 it('cold first screen and an uninitialized box gate do not create a scoring obligation',async()=>{
  await appSettings.setFlag('apiRaceBootstrapV1Enabled',true);
- const viewer=await createTestUser(),at=Date.now();
+ const viewer=await createTestUser({ timezone: "UTC", globalEventTimezone: "UTC" }),at=Date.now();
  const race=await prisma.race.create({data:{creatorId:viewer.user.id,name:'Cold read',status:'ACTIVE',targetSteps:50000,startedAt:new Date(at-3600000),endsAt:new Date(at+86400000),timezone:'UTC',powerupsEnabled:true,powerupStepInterval:5000}});
  await prisma.raceParticipant.create({data:{raceId:race.id,userId:viewer.user.id,status:'ACCEPTED'}});
  const f={viewer,race,size:1};

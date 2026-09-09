@@ -168,6 +168,8 @@ describe("referral giveaway — complete HTTP workflow", () => {
           refereeId: referee.user.id,
           refereeSubHash: crypto.createHash("sha256").update(`referee-${suffix}`).digest("hex"),
           status,
+          // Fixture creation must precede its injected qualification time.
+          createdAt: new Date(Math.min(+clock, qualifiedAt ? +qualifiedAt : +clock)),
           qualifiedAt,
           qualifyingRaceId: null,
         },
@@ -183,6 +185,7 @@ describe("referral giveaway — complete HTTP workflow", () => {
       referrerId: alice.user.id,
       refereeId: durableReferee.user.id,
       refereeSubHash: crypto.createHash("sha256").update("durable-referee").digest("hex"),
+      createdAt: new Date(clock),
       status: "PENDING",
     } });
     const durableRace = await prisma.race.create({ data: {

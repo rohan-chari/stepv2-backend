@@ -16,8 +16,9 @@ const HEADERS = { 'X-Client-Features': 'powerups2,powerups3,powerups4,powerups5'
 let server;
 let earned = 0;
 async function fixture() {
+  // Model an already registered UTC device; timezone migration has its own race fences.
   const players = [];
-  for (const displayName of ['Caster', 'Target', 'Redirect', 'Unrelated']) players.push(await createTestUser({ displayName }));
+  for (const displayName of ['Caster', 'Target', 'Redirect', 'Unrelated']) players.push(await createTestUser({ displayName, timezone: "UTC", globalEventTimezone: "UTC" }));
   const race = await prisma.race.create({ data: { creatorId: players[0].user.id, name: 'Participant lock regression', status: 'ACTIVE',
     timeBased: true, maxDurationDays: 7, targetSteps: 1000000, powerupsEnabled: true,
     startedAt: new Date(Date.now() - 3600000), endsAt: new Date(Date.now() + 7 * 86400000), timezone: 'UTC' } });

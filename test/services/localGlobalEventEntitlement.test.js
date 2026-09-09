@@ -470,9 +470,22 @@ test("materialization cursor advances past a full page of ended timezone candida
   }));
   const created = [];
   const client = {
-    async $queryRawUnsafe(_sql, _eventId, take, afterUserId) {
-      const after = afterUserId || "";
-      return users.filter((user) => user.id > after).slice(0, take);
+    async $executeRawUnsafe(sql, key) {
+      assert.match(sql, /pg_advisory_xact_lock/);
+      assert.equal(key, "global-event-enrollment");
+      return 1;
+    },
+    async $queryRawUnsafe(sql, eventId, take, after) {
+      assert.match(sql, /enrollment_candidates/);
+      assert.equal(eventId, "event-cursor");
+      return users.filter((user) => user.id > (after || "")).slice(0, take);
+    },
+    raceParticipant: {
+      async findMany({ where, take }) {
+        const after = where.userId?.gt || "";
+        return users.filter((user) => user.id > after).slice(0, take)
+          .map((user) => ({ user }));
+      },
     },
     globalStepEventEntitlement: {
       async findUnique() { return null; },
@@ -531,7 +544,15 @@ function setBasedMaterializationFake(users) {
   let materializeStatements = 0;
   let receiptStatements = 0;
   const tx = {
-    async $executeRawUnsafe() { return 1; },
+    async $executeRawUnsafe(sql, key) {
+      assert.match(sql, /pg_advisory_xact_lock/);
+      assert.equal(key, "global-event-enrollment");
+      return 1;
+    },
+    user: { async findMany({ where }) {
+      assert.deepEqual(where.id.in, users.map((user) => user.id));
+      return users;
+    } },
     async $queryRawUnsafe(_sql, inputJson) {
       const input = JSON.parse(inputJson);
       if (Object.hasOwn(input[0] || {}, "eventKey")) {
@@ -577,7 +598,14 @@ test("production materialization writes one bounded entitlement/event page inste
   const fake = setBasedMaterializationFake(users);
   let transactions = 0;
   const client = {
-    async $queryRawUnsafe() { return users; },
+    async $queryRawUnsafe(sql, eventId, take, after) {
+      assert.match(sql, /enrollment_candidates/);
+      assert.equal(eventId, EVENT.id);
+      assert.equal(take, users.length);
+      assert.equal(after, null);
+      return users;
+    },
+    raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
     globalStepEventEntitlement: fake.tx.globalStepEventEntitlement,
     async $transaction(work) {
       transactions += 1;
@@ -608,7 +636,14 @@ test("production materialization persists a 500-user page with one set-based sta
   }));
   const fake = setBasedMaterializationFake(users);
   const client = {
-    async $queryRawUnsafe() { return users; },
+    async $queryRawUnsafe(sql, eventId, take, after) {
+      assert.match(sql, /enrollment_candidates/);
+      assert.equal(eventId, EVENT.id);
+      assert.equal(take, users.length);
+      assert.equal(after, null);
+      return users;
+    },
+    raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
     globalStepEventEntitlement: fake.tx.globalStepEventEntitlement,
     async $transaction(work) { return work(fake.tx); },
   };
