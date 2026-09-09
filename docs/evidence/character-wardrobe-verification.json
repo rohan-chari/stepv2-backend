@@ -1,0 +1,104 @@
+{
+  "sourceBeforeWardrobes": "3292872",
+  "releaseA": "b30db8e",
+  "releaseB": "30ee4d4",
+  "auditHardening": "4db8df0",
+  "testDatabases": [
+    "steps-tracker-integration_test on localhost",
+    "wardrobe-compat-review_test on localhost"
+  ],
+  "targeted": {
+    "tests": 49,
+    "pass": 49,
+    "fail": 0,
+    "skip": 0
+  },
+  "fullUnit": {
+    "tests": 3370,
+    "pass": 3364,
+    "fail": 6,
+    "newStructuralFailureFixed": true,
+    "unchangedPreAFailures": 5
+  },
+  "fullIntegration": {
+    "tests": 3155,
+    "pass": 3103,
+    "fail": 51,
+    "skip": 1,
+    "durationMs": 949301.453041
+  },
+  "preABaselineSelectedIntegration": {
+    "tests": 337,
+    "pass": 288,
+    "fail": 49,
+    "durationMs": 142576.3895
+  },
+  "reproducedNamedFailures": [
+    "test/integration/centralized-notification-delivery.test.js::local provisioning stays notification-free and boundary activation projects durably",
+    "test/integration/discard-cap-visibility.test.js::the day boundary comes from the user's STORED zone, not X-Timezone",
+    "test/integration/global-event-enrollment-query.test.js::test/integration/global-event-enrollment-query.test.js",
+    "test/integration/global-event-reliability.test.js::merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+    "test/integration/local-global-step-event-entitlements.test.js::HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+    "test/integration/local-global-step-event-entitlements.test.js::HTTP step-sync dependency closure fails closed while that participant's local event is active",
+    "test/integration/local-global-step-event-entitlements.test.js::enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+    "test/integration/notification-domain-isolation.test.js::projects eligible and deleted-recipient outcomes from the real daily-mover job",
+    "test/integration/notification-domain-isolation.test.js::projects the real placement job's ending, team, slacker, and placement producers",
+    "test/integration/notification-domain-isolation.test.js::retention waits for downstream delivery, survives account deletion, and cascades only terminal coordination rows",
+    "test/integration/onboarding-revamp.test.js::5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+    "test/integration/onboarding-revamp.test.js::7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+    "test/integration/onboarding-revamp.test.js::8. starter reward and the legacy tutorial reward share one ledger key",
+    "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js::drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+    "test/integration/powerup-character-batch-2026-07-25.test.js::stamps the new 1h base window for ladder + fixed-window powerups",
+    "test/integration/powerup-shared-race-guards.test.js::COMPRESSION_SOCKS / MIRROR on disjoint players overlaps gameplay commits",
+    "test/integration/powerup-shared-race-guards.test.js::DETOUR_SIGN / DETOUR_SIGN on disjoint players overlaps gameplay commits",
+    "test/integration/powerup-shared-race-guards.test.js::PROTEIN_SHAKE / TRAIL_MIX on disjoint players overlaps gameplay commits",
+    "test/integration/powerup-shared-race-guards.test.js::RUNNERS_HIGH / RUNNERS_HIGH on disjoint players overlaps gameplay commits",
+    "test/integration/powerup-shared-race-guards.test.js::SHORTCUT / SHORTCUT on disjoint players overlaps gameplay commits",
+    "test/integration/powerups5-wave.test.js::catalog exposes wave 5 only to capable clients and omits retired Imposter",
+    "test/integration/powerups5-wave.test.js::penalizes the target at expiry when the goal is missed",
+    "test/integration/query-efficiency-enrollment.test.js::real cron enrollment pages unique users in PostgreSQL",
+    "test/integration/query-efficiency-resolution.test.js::real resolution worker query trace and fence projection: team=true",
+    "test/integration/race-bootstrap-persisted-standings.test.js::keeps exact finish/placement/steps/join/user ordering and global ranks across pages",
+    "test/integration/race-bootstrap-persisted-standings.test.js::uses a bounded indexed first page for 50 accepted participants",
+    "test/integration/race-bootstrap-persisted-standings.test.js::uses a bounded indexed first page for 500 accepted participants",
+    "test/integration/race-bootstrap-persisted-standings.test.js::uses a bounded indexed first page for 5000 accepted participants",
+    "test/integration/race-bootstrap-refresh-coalescing.test.js::a real step upload creates source work and subsequent reads leave it intact",
+    "test/integration/race-bootstrap-refresh-coalescing.test.js::live Redis reads create no work for either viewer",
+    "test/integration/race-bootstrap-refresh-coalescing.test.js::reads remain display-only with legacy reason-aware rollout off",
+    "test/integration/race-bootstrap-refresh-coalescing.test.js::reads succeed even when the job table rejects inserts",
+    "test/integration/race-bootstrap-refresh-coalescing.test.js::repeated and concurrent first reads create no scoring obligation",
+    "test/integration/race-leave-capability.test.js::keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+    "test/integration/race-powerup-placement-performance.test.js::preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+    "test/integration/race-queue-v2-closure-scaling.test.js::keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+    "test/integration/race-resolution-pending-scope.test.js::a Redis write failure without newer input retains the generic publication error",
+    "test/integration/race-resolution-pending-scope.test.js::publication preserves its failed attempt when HTTP advances generation before publication",
+    "test/integration/race-resolution-pending-scope.test.js::publication preserves its failed attempt when HTTP advances generation during Redis writes",
+    "test/integration/read-only-race-progress.test.js::cold first screen and an uninitialized box gate do not create a scoring obligation",
+    "test/integration/referral-contest-joined-dashboard.test.js::records exact event-time activity for create, direct join, and invite acceptance",
+    "test/integration/referral-giveaway-workflow.test.js::runs draft through archive, preserving intent, review, alternate, and exactly-once fulfillment invariants",
+    "test/integration/resolved-impact-events-v2.test.js::rolls back Drill Sergeant judgement with its v2 event, then retries once",
+    "test/integration/team-race-read-performance.test.js::serves a cold frozen unpaged team bootstrap without polling for worker output",
+    "test/integration/team-race-read-performance.test.js::serves a cold paged team bootstrap without polling for worker output",
+    "test/integration/team-race-read-performance.test.js::uses the worker's fresh lean team snapshot and hydrates names after masking",
+    "test/integration/team-race-read-performance.test.js::uses the worker's stale lean team snapshot and hydrates names after masking",
+    "test/integration/tournaments.test.js::inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward"
+  ],
+  "reproducedFileLoadFailure": "test/integration/global-event-enrollment-query.test.js",
+  "fullRunOnlyFailures": [
+    {
+      "test": "test/integration/ad-coin-reward.test.js::claims up to the daily cap, then 409s; coins and ledger add up",
+      "failure": "P2034 serialization/write conflict during ad coin claim; passed baseline isolated suite"
+    },
+    {
+      "test": "test/integration/powerups-rally-flag-not-cleansable.test.js::Cleanse clears a real debuff alongside a surviving Rally Flag",
+      "failure": "40P01 deadlock in cleanDatabase before test behavior; passed baseline isolated suite"
+    }
+  ],
+  "note": "Broad suites remain red. Baseline reproduction does not fix these failures or prove them harmless; no blanket deployment readiness claim.",
+  "currentIsolatedTransientRecheck": {
+    "tests": 13,
+    "pass": 13,
+    "fail": 0,
+    "skip": 0
+  }
+}
