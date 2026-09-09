@@ -89,14 +89,23 @@ function buildSeededChallengeAdmission(dependencies = {}) {
       const published = reservation && !ledger.raceId && ['PUBLISHED','MATERIALIZING','COMPLETE'].includes(preparation?.state);
       const [{ matchSteps }] = owned && owned.status === 'ACCEPTED' ? [{ matchSteps: 0 }] : await matchStepsForCandidates({ prisma: db, candidates: [{ userId }], seed, windowStart: window.windowStart });
       const pruneCandidate = owned?.status === 'DECLINED';
-      const shortlist = (!owned || pruneCandidate) && !published ? await candidates(db, seed, window, matchSteps) : [];
-      const originalHasRoom = pruneCandidate && await db.raceParticipant.count({where:{raceId:owned.raceId,status:'ACCEPTED'}}) < owned.race.maxParticipants;
-      const chosen = owned && (!pruneCandidate || originalHasRoom) ? { raceId: owned.raceId, bucketId: owned.race.seededBucketId } : published ? { raceId: reservation.reservedRaceId, bucketId: reservation.reservedBucketId } : shortlist[0];
-      const raceId = chosen?.raceId || randomUUID(), bucketId = chosen?.bucketId || randomUUID();
-      const shell = await raceData(seed, window, raceId, now() >= window.windowStart);
+      const proposedRaceId = randomUUID();
+      const shellTemplate = await raceData(seed, window, proposedRaceId, now() >= window.windowStart);
       try {
         const result = await db.$transaction(async tx => {
           await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '1500ms'");
+          // Admission-only placement guard precedes C0. Selecting after this
+          // guard prevents HTTP callers from repeatedly racing stale capacity
+          // snapshots or creating competing overflow shells. Background writers
+          // never take it; their existing C0/user/window guards still arbitrate
+          // materialization, pruning and lifecycle changes below.
+          await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+            `seeded-current-admission:${seed.id}:${window.windowStart.toISOString()}`);
+          const shortlist = (!owned || pruneCandidate) && !published ? await candidates(tx, seed, window, matchSteps) : [];
+          const originalHasRoom = pruneCandidate && await tx.raceParticipant.count({where:{raceId:owned.raceId,status:'ACCEPTED'}}) < owned.race.maxParticipants;
+          const chosen = owned && (!pruneCandidate || originalHasRoom) ? { raceId: owned.raceId, bucketId: owned.race.seededBucketId } : published ? { raceId: reservation.reservedRaceId, bucketId: reservation.reservedBucketId } : shortlist[0];
+          const raceId = chosen?.raceId || proposedRaceId, bucketId = chosen?.bucketId || randomUUID();
+          const shell = { ...shellTemplate, id: raceId };
           const shellExists = await tx.race.findUnique({ where: { id: raceId }, select: { id: true } });
           if (!shellExists) await tx.race.createMany({ data: [shell], skipDuplicates: true });
           await acquireRaceWriteFences(tx, [raceId, ...(ledger?.raceId ? [ledger.raceId] : [])]);
@@ -184,7 +193,7 @@ function buildSeededChallengeAdmission(dependencies = {}) {
         if (!result.alreadyJoined) {
           await Promise.allSettled([
             require('./raceListCache').invalidateUser(userId),
-            require('./raceProgressSnapshot').invalidateRaceProgress(raceId),
+            require('./raceProgressSnapshot').invalidateRaceProgress(result.raceId),
             require('../../steps/services/globalStepEventEntitlement').invalidateHomeActiveGlobalEvent([userId]),
           ]);
         }

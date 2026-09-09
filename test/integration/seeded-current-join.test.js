@@ -53,6 +53,51 @@ describe('immediate current seeded Join HTTP contract', () => {
     const groups = new Map(); for (const result of results) groups.set(result.raceId, (groups.get(result.raceId) || 0) + 1);
     assert.deepEqual([...groups.values()].sort((a,b) => a-b), [3,35]);
   });
+  it('reselects available capacity when competing HTTP joins invalidate consecutive placement snapshots', async () => {
+    const accounts = await Promise.all(Array.from({ length: 72 }, () => createTestUser({ autoJoinFeaturedRaces: false })));
+    for (const account of accounts.slice(0, 34)) assert.equal((await join(account.token)).status, 200);
+    let conflicts = 0, competitor = 35;
+    const instrumentedDb = new Proxy(prisma, { get(target, property) {
+      if (property !== '$transaction') return Reflect.get(target, property, target);
+      return async (...args) => {
+      if (conflicts < 3) {
+        const count = ++conflicts === 3 ? 34 : 1;
+        for (let index = 0; index < count; index++) {
+          const response = await join(accounts[competitor++].token);
+          assert.equal(response.status, 200, await response.clone().text());
+        }
+      }
+      return target.$transaction(...args);
+      };
+    }});
+    const interleavedServer = await startServer({ prisma: instrumentedDb, now: () => new Date(at) });
+    try {
+      const response = await request(interleavedServer.baseUrl, 'POST', '/races/seeded/DAILY_10K/join-current', { token: accounts[34].token, headers: HEADERS, body: { requestId: randomUUID() } });
+      assert.equal(response.status, 200, await response.clone().text());
+      assert.ok(conflicts >= 1, 'a competing public Join must commit before the admission transaction');
+      const result = await response.json();
+      assert.equal((await request(server.baseUrl, 'GET', `/races/${result.raceId}`, { token: accounts[34].token, headers: HEADERS })).status, 200);
+      const counts = await prisma.raceParticipant.groupBy({ by: ['raceId'], where: { status: 'ACCEPTED' }, _count: true });
+      assert.ok(counts.every(group => group._count <= 35));
+      assert.equal(await prisma.raceParticipant.count({ where: { userId: accounts[34].user.id } }), 1);
+    } finally { await interleavedServer.close(); }
+  });
+  it('sustained eight-request concurrency fills and creates overflow without spurious busy responses', async () => {
+    const accounts = await Promise.all(Array.from({ length: 160 }, () => createTestUser({ autoJoinFeaturedRaces: false })));
+    const responses = [];
+    let cursor = 0;
+    await Promise.all(Array.from({ length: 8 }, async () => {
+      while (cursor < accounts.length) {
+        const account = accounts[cursor++];
+        const response = await join(account.token);
+        responses.push({ status: response.status, body: await response.json() });
+      }
+    }));
+    assert.deepEqual(responses.filter(response => response.status !== 200), []);
+    assert.equal(await prisma.raceParticipant.count({ where: { status: 'ACCEPTED' } }), accounts.length);
+    const counts = await prisma.raceParticipant.groupBy({ by: ['raceId'], where: { status: 'ACCEPTED' }, _count: true });
+    assert.deepEqual(counts.map(group => group._count).sort((a,b) => a-b), [20,35,35,35,35]);
+  });
   it('rejects placement/backdating inputs and incapable clients before writing membership', async () => {
     const { token } = await createTestUser();
     for (const body of [{}, { requestId: 'bad' }, { requestId: randomUUID(), joinedAt: at }, { requestId: randomUUID(), raceId: randomUUID() }]) {

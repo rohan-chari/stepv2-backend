@@ -156,3 +156,9 @@ A database trigger timestamps newly eligible inserts and transitions into both
 opt-in and bucket capability, including older writers; repeated eligible writes
 preserve the original timestamp. Exact request intentions remain independently
 durable, so a delayed capability/preference write does not select another window.
+
+Current admission takes an admission-only seed/window transaction guard before
+selecting capacity and before the shared C0 → global → user → race → window
+lock sequence. Background writers never acquire this outer guard. It prevents
+competing HTTP joins from exhausting retries on stale placement snapshots while
+preserving the existing bounded transaction, lock-timeout and retry limits.
