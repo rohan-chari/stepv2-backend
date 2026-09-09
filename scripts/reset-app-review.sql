@@ -40,6 +40,7 @@ DELETE FROM coin_transactions WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM challenge_instances
 WHERE user_a_id IN (SELECT id FROM review_user_ids)
    OR user_b_id IN (SELECT id FROM review_user_ids);
+DELETE FROM character_wardrobes WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM user_shop_items WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM user_equipped_accessories WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM device_tokens WHERE user_id IN (SELECT id FROM review_user_ids);

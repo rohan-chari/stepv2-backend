@@ -7,6 +7,7 @@ const { signSessionToken } = require("../../src/modules/users/services/sessionTo
 const TABLES_IN_ORDER = [
   "seeded_challenge_join_receipts", "seeded_challenge_transfers", "seeded_challenge_membership_repairs",
   "seeded_challenge_enrollment_requests", "seeded_challenge_preparation_groups", "seeded_challenge_preparations",
+  "character_wardrobe_items", "character_wardrobes", "shop_item_character_fits",
   "billing_sandbox_auth_identities",
   "billing_permanent_grants", "billing_permanent_revocations", "billing_permanent_sources", "billing_permanent_schedules",
   "billing_credit_entries", "billing_credit_lots", "billing_cosmetic_grants",

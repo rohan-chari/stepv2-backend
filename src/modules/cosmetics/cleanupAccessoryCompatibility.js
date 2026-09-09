@@ -22,33 +22,31 @@ function partitionCompatibleEquipment(equippedAccessories) {
   return { kept, removed };
 }
 
-// This is deliberately a separately-invoked, idempotent rollout command — it
-// must run while enforcement is still OFF, after the migration/backfill and
-// before enabling the flag. It never modifies an already-compatible loadout.
+// Bounded operational repair, sharing the same user lock and dual-write
+// protocol as all runtime equipment mutations. Dry-run never writes.
 async function cleanupAccessoryCompatibility({ prisma = defaultPrisma, apply = false } = {}) {
-  const users = await prisma.user.findMany({ select: { id: true } });
-  const summary = { usersChecked: users.length, conflictingRows: 0, removed: 0 };
-
-  for (const { id: userId } of users) {
-    await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`
-        SELECT 1 FROM "users" WHERE "id" = ${userId} FOR UPDATE
-      `;
-      const equipped = await tx.userEquippedAccessory.findMany({
-        where: { userId },
-        include: { shopItem: true },
-      });
-      const { removed } = partitionCompatibleEquipment(equipped);
-      summary.conflictingRows += removed.length;
-      if (apply && removed.length > 0) {
-        const result = await tx.userEquippedAccessory.deleteMany({
-          where: { id: { in: removed.map((entry) => entry.id) } },
-        });
-        summary.removed += result.count;
-      }
-    });
+  const {withWriter,checkpoint,writeWardrobe,outfitState,activeKey,project}=require('./characterWardrobeState');
+  const summary={usersChecked:0,conflictingRows:0,removed:0};
+  let cursor;
+  for (;;) {
+    const users=await prisma.user.findMany({where:cursor?{id:{gt:cursor}}:{},select:{id:true},orderBy:{id:'asc'},take:200});
+    if(!users.length)break;
+    for(const {id:userId} of users) {
+      const outcome=await withWriter(userId,[],async(tx,state)=>{
+        const {kept,removed}=partitionCompatibleEquipment(state.equipment);
+        if(apply&&removed.length){
+          await checkpoint(tx,userId,state);
+          const key=activeKey(kept);
+          await writeWardrobe(tx,userId,key,outfitState(state,key),kept,{force:true});
+          await project(tx,userId,state.equipment,kept);
+        }
+        return {appearanceChanged:apply&&removed.length>0,count:removed.length};
+      },{prisma});
+      summary.usersChecked++;summary.conflictingRows+=outcome.count;
+      if(apply)summary.removed+=outcome.count;
+    }
+    cursor=users.at(-1).id;
   }
   return summary;
 }
-
 module.exports = { partitionCompatibleEquipment, cleanupAccessoryCompatibility };

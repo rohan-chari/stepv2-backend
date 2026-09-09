@@ -1,4 +1,3 @@
-const { prisma } = require("../../db");
 const {
   ACCESSORY_SLOTS,
   CHARACTER_SLOT,
@@ -13,20 +12,6 @@ class AccessoryEquipError extends Error {
     this.statusCode = statusCode;
     Object.assign(this, extras);
   }
-}
-
-async function getEquipment(userId, tx = prisma, { supportsCharacters = false } = {}) {
-  const equippedAccessories = await tx.userEquippedAccessory.findMany({
-    where: { userId },
-    include: { shopItem: true },
-  });
-  // Old binaries (no `characters` capability) render every entry of this map
-  // as an accessory on the capybara, so an equipped CHARACTER row must be
-  // withheld from them.
-  const visible = supportsCharacters
-    ? equippedAccessories
-    : equippedAccessories.filter((entry) => entry.shopItem?.slot !== CHARACTER_SLOT);
-  return buildEquipmentMap(visible);
 }
 
 async function equipAccessory({
@@ -46,30 +31,14 @@ async function equipAccessory({
     throw new AccessoryEquipError("Accessory slot is invalid", 400);
   }
 
-  if (itemId === null) {
-    await prisma.userEquippedAccessory.deleteMany({
-      where: { userId, slot },
-    });
-    // C2 invalidation (spec §3 `v1:user:{id}:cosmetics`): the UNEQUIP branch
-    // returns early and runs outside the $transaction below, so it needs its
-    // own hook — a single hook after the transaction would silently miss it.
-    await invalidatePresentation(userId);
-    return { equipped: await getEquipment(userId, prisma, { supportsCharacters }) };
-  }
-
-  if (typeof itemId !== "string" || itemId.trim().length === 0) {
+  if (itemId !== null && (typeof itemId !== "string" || itemId.trim().length === 0)) {
     throw new AccessoryEquipError("itemId must be a shop item id or null", 400);
   }
-
-  const outcome = await prisma.$transaction(async (tx) => {
-    // One per-user row lock serializes all cross-slot equip attempts. The slot
-    // unique index alone cannot protect a HEAD/FACE conflict because each
-    // request writes a different row. Lock before the equipment read, then
-    // re-read inside the same transaction so exactly one racing request wins.
-    await tx.$queryRaw`
-      SELECT 1 FROM "users" WHERE "id" = ${userId} FOR UPDATE
-    `;
-    const ownership = await tx.userShopItem.findUnique({
+  const { withWriter, activeKey, outfitState, checkpoint, writeWardrobe, project } = require('./characterWardrobeState');
+  const outcome = await withWriter(userId, slot === CHARACTER_SLOT && itemId ? [itemId] : ['default'], async (tx, state) => {
+    let ownership = null;
+    if (itemId !== null) {
+    ownership = await tx.userShopItem.findUnique({
       where: { userId_shopItemId: { userId, shopItemId: itemId } },
       include: { shopItem: true },
     });
@@ -93,10 +62,7 @@ async function equipAccessory({
     }
 
     {
-      const equippedAccessories = await tx.userEquippedAccessory.findMany({
-        where: { userId },
-        include: { shopItem: true },
-      });
+      const equippedAccessories = state.equipment;
       // The same-slot item is being replaced by the candidate and is therefore
       // not part of the resulting loadout.
       const conflicts = findConflictingEquipment(
@@ -117,41 +83,22 @@ async function equipAccessory({
       }
     }
 
-    await tx.userEquippedAccessory.upsert({
-      where: { userId_slot: { userId, slot } },
-      update: { shopItemId: ownership.shopItemId },
-      create: { userId, slot, shopItemId: ownership.shopItemId },
-    });
-
-    return {
-      equipped: await getEquipment(userId, tx, { supportsCharacters }),
-      assetKey: ownership.shopItem.assetKey ?? null,
-    };
+    }
+    const before = state.equipment;
+    const after = before.filter(entry => entry.slot !== slot);
+    if (ownership) after.push({slot,shopItemId:itemId,shopItem:ownership.shopItem});
+    const changed = before.find(entry=>entry.slot===slot)?.shopItemId !== (itemId || undefined);
+    if (changed) {
+      await checkpoint(tx,userId,state);
+      const source = activeKey(before), target = activeKey(after);
+      // A frozen client switches bodies with accessory carry-over. Never
+      // reinterpret that old request as restoration of a different outfit.
+      await writeWardrobe(tx,userId,target,outfitState(state,target),after,{force:source!==target});
+      await project(tx,userId,before,after);
+    }
+    return {equipped:buildEquipmentMap(supportsCharacters?after:after.filter(e=>e.slot!==CHARACTER_SLOT)),appearanceChanged:changed};
   });
-
-  // C2 invalidation: equip changes the user's presentation everywhere it is
-  // hydrated at read time (chat senders today; leaderboard/social later). One
-  // user-scoped DEL propagates to every surface — no message list is touched.
-  await invalidatePresentation(userId);
-
-  return { equipped: outcome.equipped };
-}
-
-// Kept defensive: cosmetics must never fail to equip because a cache DEL threw.
-async function invalidatePresentation(userId) {
-  try {
-    const {
-      invalidate,
-    } = require("../social/services/userPresentationCache");
-    await invalidate(userId);
-  } catch {}
-  // C5 (spec §5 Phase E2): equip/unequip is on the spec's named invalidation
-  // list for `v1:user:{id}:authme`, and the client refreshes profile surfaces
-  // right after a cosmetics change. Same defensive posture as above — equipping
-  // must never fail because a cache DEL threw.
-  try {
-    await require("../users/services/authMeCache").invalidateSafe(userId);
-  } catch {}
+  return {equipped:outcome.equipped};
 }
 
 module.exports = { equipAccessory, AccessoryEquipError };
