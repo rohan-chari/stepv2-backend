@@ -253,10 +253,22 @@ describe("wardrobe snapshot, migration and public appearance safety", () => {
     assert.equal(r.body.outfit.editable, false);
   });
   it("deleting an account cascades wardrobes without deleting fits/catalog/other owners", async () => {
+    const peerResponse = await request(server.baseUrl, "POST", "/auth/apple", {
+      body: { identityToken: "apple-wardrobe-deletion-peer" },
+    });
+    const peer = (await peerResponse.json()).user;
+    const peerAssignments = await prisma.seededRaceBucketAssignment.findMany({ where: { userId: peer.id } });
+    assert.ok(peerAssignments.length > 0);
+    assert.ok(await prisma.seededRaceBucketAssignment.count({ where: { userId } }) > 0);
     const h = await item("HEAD");
     await fit(h);
     await equip("HEAD", h.id);
-    await prisma.user.delete({ where: { id: userId } });
+    const deleted = await request(server.baseUrl, "DELETE", "/auth/account", { token });
+    assert.equal(deleted.status, 204);
+    assert.equal(await prisma.user.count({ where: { id: userId } }), 0);
+    assert.equal(await prisma.seededRaceBucketAssignment.count({ where: { userId } }), 0);
+    assert.equal(await prisma.seededRaceWindowMembership.count({ where: { userId } }), 0);
+    assert.deepEqual(await prisma.seededRaceBucketAssignment.findMany({ where: { userId: peer.id } }), peerAssignments);
     assert.equal(await prisma.characterWardrobe.count(), 0);
     assert.equal(await prisma.characterWardrobeItem.count(), 0);
     assert.equal(await prisma.shopItemCharacterFit.count(), 1);
