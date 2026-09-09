@@ -49,7 +49,7 @@ async function cleanupAccessoryCompatibility({
     for (const { id: userId } of users) {
       const outcome = await withWriter(
         userId,
-        [],
+        ["default"],
         async (tx, state) => {
           const { kept, removed } = partitionCompatibleEquipment(
             state.equipment,

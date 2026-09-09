@@ -153,7 +153,14 @@ async function withWriter(
       if (result.appearanceChanged) await invalidateAppearance(userId);
       return result;
     } catch (e) {
-      if (!["P2034", "40P01", "40001"].includes(e.code)) throw e;
+      const code =
+        e.code === "P2010"
+          ? e.meta?.code ||
+            e.meta?.driverAdapterError?.cause?.originalCode ||
+            e.meta?.driverAdapterError?.cause?.code ||
+            e.code
+          : e.code || e.meta?.code || e.cause?.code;
+      if (!["P2034", "40P01", "40001"].includes(code)) throw e;
       if (attempt >= 2)
         throw new AppError(
           "Your wardrobe is busy. Please retry.",
