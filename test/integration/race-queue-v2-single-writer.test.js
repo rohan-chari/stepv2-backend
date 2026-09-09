@@ -147,10 +147,19 @@ async function postSamples(user, samples) {
   });
 }
 
-function makeWorker(overrides = {}) {
+function makeWorker({ fixtureRaceId, ...overrides } = {}) {
   // bootAt: 0 => the quiet period has provably elapsed. The handoff-gate case
   // below constructs its own worker with a live bootAt to assert the opposite.
-  return buildRaceResolutionWorkerV2({ bootAt: 0, ...overrides });
+  return buildRaceResolutionWorkerV2({
+    bootAt: 0,
+    // Real signup also queues seeded races. Keep scenario claims on the real
+    // queue/lease/fence path without consuming another race's pending job.
+    ...(fixtureRaceId ? { RaceResolutionJobV2: {
+      ...RaceResolutionJobV2,
+      claimNext: (args) => RaceResolutionJobV2.claimNext({ ...args, raceId: fixtureRaceId }),
+    } } : {}),
+    ...overrides,
+  });
 }
 
 async function drain(worker, maxJobs = 50) {
@@ -405,7 +414,9 @@ describe("5a — one bulk writer per race", () => {
       },
     });
 
-    assert.ok(await makeWorker().processOne());
+    const claimed = await makeWorker({ fixtureRaceId: raceId }).processOne();
+    assert.ok(claimed);
+    assert.equal(claimed.raceId, raceId, "the worker must claim the scenario race");
     assert.equal(await prisma.racePowerup.count({
       where: { participantId: participant.id, earnedAtSteps: 2000 },
     }), 1);
@@ -419,7 +430,7 @@ describe("5a — one bulk writer per race", () => {
       dirtyEnvelope: { reason: "FULL", dirtyUserIds: [], dirtyParticipantIds: [] },
       now: new Date(),
     });
-    assert.ok(await makeWorker().processOne());
+    assert.ok(await makeWorker({ fixtureRaceId: raceId }).processOne());
     assert.equal(await prisma.racePowerup.count({
       where: { participantId: participant.id, earnedAtSteps: 2000 },
     }), 1);
@@ -746,6 +757,7 @@ describe("5a — one bulk writer per race", () => {
     assert.equal((await postSamples(alice, [sampleAt(2, 3100)])).status, 200);
 
     const claimed = await makeWorker({
+      fixtureRaceId: raceId,
       onCommitted: async () => {
         throw Object.assign(new Error("injected preparation failure"), {
           code: "INJECTED_PREPARE_FAILURE",
@@ -1668,6 +1680,7 @@ describe("5a — one bulk writer per race", () => {
 
     let fenceAttempt = 0;
     const worker = makeWorker({
+      fixtureRaceId: raceId,
       async beforeWriteTransaction() {
         fenceAttempt += 1;
         if (fenceAttempt === 1) {
@@ -1677,7 +1690,9 @@ describe("5a — one bulk writer per race", () => {
         }
       },
     });
-    assert.ok(await worker.processOne());
+    const claimed = await worker.processOne();
+    assert.ok(claimed);
+    assert.equal(claimed.raceId, raceId, "the worker must claim the scenario race");
     assert.ok(fenceAttempt >= 3, "both newer generations must reject stale work");
     const corrected = await prisma.raceParticipant.findUniqueOrThrow({
       where: { id: target.id },

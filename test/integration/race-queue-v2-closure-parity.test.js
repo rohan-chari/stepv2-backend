@@ -207,9 +207,18 @@ async function plantEffect({
 
 // ── worker driving ─────────────────────────────────────────────────────────
 
-function makeWorker(overrides = {}) {
+function makeWorker({ fixtureRaceId, ...overrides } = {}) {
   // bootAt 0 => the startup quiet period has provably elapsed.
-  return buildRaceResolutionWorkerV2({ bootAt: 0, ...overrides });
+  return buildRaceResolutionWorkerV2({
+    bootAt: 0,
+    // Real signup also queues seeded races. Keep scenario claims on the real
+    // queue/lease/fence path without consuming another race's pending job.
+    ...(fixtureRaceId ? { RaceResolutionJobV2: {
+      ...RaceResolutionJobV2,
+      claimNext: (args) => RaceResolutionJobV2.claimNext({ ...args, raceId: fixtureRaceId }),
+    } } : {}),
+    ...overrides,
+  });
 }
 
 function makeCapturingWorker(overrides = {}) {
@@ -382,10 +391,13 @@ async function runScenarioOnce({
 
   const versionsBefore = await participantVersions(raceId);
   const capture = makeCapturingWorker({
+    fixtureRaceId: raceId,
     dependencyClosureEnabled: closureWrites,
     ...(overrides || {}),
   });
-  assert.ok(await capture.worker.processOne(), "the worker must claim the job");
+  const claimed = await capture.worker.processOne();
+  assert.ok(claimed, "the worker must claim the job");
+  assert.equal(claimed.raceId, raceId, "the worker must claim the scenario race");
 
   return {
     raceId,

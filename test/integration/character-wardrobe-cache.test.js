@@ -18,6 +18,10 @@ for (const failedInvalidation of [false, true])
     const proxy = await startRedisFailProxy(live.url);
     const probe = new IORedis(live.url);
     const server = await getSharedServer();
+    const settingKeys = [
+      "redisPresentationGenerationGuardEnabled", "redisCacheFriendsEnabled", "redisCacheAuthMeEnabled",
+    ];
+    const previousSettings = await prisma.appSetting.findMany({ where: { key: { in: settingKeys } } });
     try {
       process.env.REDIS_URL = proxy.url;
       await cache.close();
@@ -139,5 +143,10 @@ for (const failedInvalidation of [false, true])
       await probe.quit();
       await proxy.close();
       await live.close();
+      await prisma.$transaction(async (tx) => {
+        await tx.appSetting.deleteMany({ where: { key: { in: settingKeys } } });
+        if (previousSettings.length) await tx.appSetting.createMany({ data: previousSettings });
+      });
+      appSettings.bustCache();
     }
   });
