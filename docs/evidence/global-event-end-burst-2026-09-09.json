@@ -1,0 +1,105 @@
+{
+  "baselineCommit": "3f427fc",
+  "productionCommitInvestigated": "7915ad8",
+  "scenario": "Real local scheduler, PostgreSQL, resolution worker, and HTTP intake/progress. Two shared active races. Scheduler runs before the two resolution attempts; this does not measure the benefit of avoided concurrent superseded attempts.",
+  "runs": {
+    "baseline": [
+      {
+        "experiment": "end-cohort",
+        "size": 10,
+        "queries": 185,
+        "queueWrites": 10,
+        "bumps": [
+          10,
+          10
+        ],
+        "elapsedMs": 123.231334
+      },
+      {
+        "experiment": "end-cohort-downstream",
+        "size": 10,
+        "queries": 277,
+        "elapsedMs": 146.13454100000007
+      },
+      {
+        "experiment": "end-cohort",
+        "size": 40,
+        "queries": 695,
+        "queueWrites": 40,
+        "bumps": [
+          40,
+          40
+        ],
+        "elapsedMs": 170.025125
+      },
+      {
+        "experiment": "end-cohort-downstream",
+        "size": 40,
+        "queries": 581,
+        "elapsedMs": 201.74570800000004
+      }
+    ],
+    "updated": [
+      {
+        "experiment": "end-cohort",
+        "size": 10,
+        "queries": 26,
+        "queueWrites": 1,
+        "bumps": [
+          1,
+          1
+        ],
+        "elapsedMs": 76.09799999999996
+      },
+      {
+        "experiment": "end-cohort-downstream",
+        "size": 10,
+        "queries": 276,
+        "elapsedMs": 133.287959
+      },
+      {
+        "experiment": "end-cohort",
+        "size": 40,
+        "queries": 26,
+        "queueWrites": 1,
+        "bumps": [
+          1,
+          1
+        ],
+        "elapsedMs": 25.25162499999999
+      },
+      {
+        "experiment": "end-cohort-downstream",
+        "size": 40,
+        "queries": 580,
+        "elapsedMs": 185.74524999999994
+      }
+    ]
+  },
+  "verification": {
+    "newIntegrationTests": 8,
+    "newIntegrationPassing": 8,
+    "broaderSelectedTestsIncludingNew": 186,
+    "passing": 178,
+    "failuresReproducedOnUnchangedBaseline": 8,
+    "flutterAnalyze": "No issues found",
+    "codeReview": "SHIP; no blockers",
+    "productionChanged": false
+  },
+  "productionCohort": {
+    "endsAtUtc": "2026-09-09 02:53:00",
+    "users": 87,
+    "firstProcessedUtc": "2026-09-09 02:53:24.304",
+    "lastProcessedUtc": "2026-09-09 02:59:24.308",
+    "timezones": [
+      "America/Boise",
+      "America/Chihuahua",
+      "America/Ciudad_Juarez",
+      "America/Denver",
+      "America/Edmonton",
+      "America/Guatemala",
+      "America/Mexico_City",
+      "America/Regina"
+    ]
+  }
+}
