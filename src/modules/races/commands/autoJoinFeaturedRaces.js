@@ -4,7 +4,7 @@ const {
   filterInactiveUserIds,
   disableAutoEnrollForInactive,
 } = require("../services/seededInactivity");
-const { claimLegacyStream, readWindowMode, BUCKET_FEATURE } = require("../services/seededRaceBuckets");
+const { claimLegacyStream, readWindowMode, BUCKET_FEATURE, upcomingWindowFor } = require("../services/seededRaceBuckets");
 const {
   computeRaceExposureStamp,
   lockFundedExposureUsers,
@@ -71,10 +71,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
     const capacity = await remainingCapacity(race);
     if (capacity <= 0) return 0;
     const candidates = capacity === Infinity ? userIds : userIds.slice(0, capacity);
-    const toAdd = [];
-    for (const userId of candidates) {
-      if (await claimLegacyStream({ prisma, race, userId })) toAdd.push(userId);
-    }
+    const toAdd = candidates;
     if (toAdd.length === 0) return 0;
     const seededChallenge = ["DAILY_10K", "WEEKLY_50K"].includes(race.seedKind);
     const exposureStamp = race.fundedPrize === true
@@ -136,6 +133,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
               enforceLimits: !seededChallenge,
             });
           }
+          if (!(await claimLegacyStream({prisma,race,userId,transactionClient:tx}))) return 0;
           const created = await tx.raceParticipant.createMany({
             data: [participantData(userId)],
             skipDuplicates: true,
@@ -242,9 +240,9 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
   // Toggle path: opt one user into every existing PENDING seeded race they are
   // not already in. Deliberately skips ACTIVE races — auto-join starts with
   // the NEXT challenge, not the one already running.
-  async function optUserIntoPendingSeededRaces(userId) {
+  async function optUserIntoPendingSeededRaces(userId, { targetAt = null } = {}) {
     const pending = await prisma.race.findMany({
-      where: { status: "PENDING", seedId: { not: null } },
+      where: { status: "PENDING", seedId: { not: null }, seededBucketId: null },
       select: {
         id: true,
         seedId: true,
@@ -257,11 +255,12 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
         prizeCoinUnit: true,
         prizePoolMaxCoins: true,
         prizeCalculationVersion: true,
-        seed: { select: { kind: true } },
+        seed: { select: { kind: true, cadence: true } },
       },
     });
     let joined = 0;
     for (const race of pending) {
+      if (targetAt && new Date(race.scheduledStartAt).getTime() !== upcomingWindowFor(race.seed, targetAt).windowStart.getTime()) continue;
       const existing = await prisma.raceParticipant.findFirst({
         where: { raceId: race.id, userId },
         select: { id: true },

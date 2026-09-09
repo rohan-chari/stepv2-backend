@@ -131,6 +131,8 @@ test("tournament advancement guards every surviving user before the tournament r
 // a scalar-only projection update). This is intentionally separate from the
 // production helpers so the guard cannot satisfy itself.
 const EXPECTED_PARTICIPANT_MUTATIONS = {
+  "src/modules/races/services/seededChallengeAdmission.js": ["raceParticipant.create", "raceParticipant.update"],
+  "src/modules/races/services/seededChallengeMaterialization.js": ["raceParticipant.createMany"],
   "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
   "src/modules/loadTesting/globalEventSyncFixture.js": ["raceParticipant.deleteMany"],
   "src/modules/loadTesting/racesTabOpenFixtures.js": [
@@ -168,9 +170,9 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/jobs/placementRecompute.js": ["participantModel.update", "participantModel.update", "participantModel.update", "participantModel.update"],
   "src/modules/races/jobs/raceAdminCommandRunner.js": ["raceParticipant.create", "raceParticipant.update"],
   "src/modules/races/jobs/raceExpiry.js": ["raceParticipant.update", "raceParticipant.update"],
-  "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update", "raw.race_participants.update", "raw.race_participants.update"],
+  "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update", "raw.race_participants.update", "raw.race_participants.update", "raw.race_participants.update"],
   "src/modules/races/jobs/raceSeriesRenewal.js": ["raceParticipant.create"],
-  "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany"],
+  "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raw.race_participants.update", "raw.race_participants.update"],
   "src/modules/races/models/racePlacementBaseline.js": ["raw.race_participants.update"],
   "src/modules/races/services/commitRaceStart.js": ["raceParticipant.update"],
@@ -383,6 +385,8 @@ test("AST inventory pins indirect participant-writer call sites and callers", ()
 });
 
 const SERIALIZED_MEMBERSHIP_LOCK_OWNERS = {
+  "src/modules/races/services/seededChallengeAdmission.js": ["src/modules/races/services/seededChallengeAdmission.js", ["acquireRaceWriteFences", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers", "lockCompetitionRows", "acquireSeededWindowLock"]],
+  "src/modules/races/services/seededChallengeMaterialization.js": ["src/modules/races/jobs/raceResolutionQueueV2.js", ["expectedLeaseToken: job.leaseToken", "operation.processRace", "seededChallengeMaterialization"]],
   "src/modules/races/commands/autoEnrollNewUser.js": ["src/modules/races/commands/autoEnrollNewUser.js", ["acquireWriteFence", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers"]],
   "src/modules/races/commands/autoJoinFeaturedRaces.js": ["src/modules/races/commands/autoJoinFeaturedRaces.js", ["acquireWriteFence", "acquireGlobalEnrollmentLock", "lockFundedExposureUsers"]],
   "src/modules/races/commands/completeRace.js": ["src/modules/races/commands/completeRace.js", ["acquireRaceWriteFence", "lockFundedExposureUsers", "FOR UPDATE"]],

@@ -651,7 +651,9 @@ describe("private seeded race buckets (integration)", () => {
     const persisted = await prisma.seededRaceBucket.findMany({
       where: { id: { in: buckets.map(({ id }) => id) } },
       include: { race: true, assignments: true },
-      orderBy: { race: { createdAt: "asc" } },
+      // Bulk-created races share createdAt; order the asserted size distribution
+      // explicitly so tied timestamps cannot shuffle the 76-person cohort.
+      orderBy: [{ assignments: { _count: "desc" } }, { id: "asc" }],
     });
     assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), Array(12).fill(100));
     assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [76, ...Array(11).fill(75)]);

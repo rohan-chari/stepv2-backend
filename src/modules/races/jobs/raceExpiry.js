@@ -318,10 +318,9 @@ async function settleWave5Economy({ race, standings, settlementTime }) {
   }
 }
 
-async function resolveExpiredRaces() {
+async function resolveExpiredRaces({ now = new Date() } = {}) {
   console.log("[CRON] Checking for expired races...");
 
-  const now = new Date();
   const expiredRaces = await Race.findActiveExpired(now);
 
   if (expiredRaces.length === 0) {
@@ -933,7 +932,7 @@ async function resolveExpiredRaces() {
   }
 }
 
-function buildRaceExpiryRunner({ resolve = resolveExpiredRaces, logger = console } = {}) {
+function buildRaceExpiryRunner({ resolve = resolveExpiredRaces, logger = console, now = () => new Date() } = {}) {
   let inFlight = false;
   return async function runRaceExpiry() {
     if (inFlight) {
@@ -942,7 +941,7 @@ function buildRaceExpiryRunner({ resolve = resolveExpiredRaces, logger = console
     }
     inFlight = true;
     try {
-      await resolve();
+      await resolve({ now: now() });
       return { skipped: false };
     } finally {
       inFlight = false;

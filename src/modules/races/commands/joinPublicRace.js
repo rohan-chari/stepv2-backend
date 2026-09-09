@@ -71,7 +71,7 @@ function buildJoinPublicRace(dependencies = {}) {
         }
         throw new RaceJoinError("This race is not public", 403);
       }
-      if (!(await claimLegacyStream({ prisma, race, userId }))) {
+      if (!(await claimLegacyStream({ prisma, race, userId, transactionClient: lockTx }))) {
         throw new RaceJoinError(
           "This featured race uses the private stream",
           409,

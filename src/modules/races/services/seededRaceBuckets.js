@@ -273,18 +273,20 @@ async function stampWindowMode({ prisma, seedId, windowStart, windowEnd, mode })
 // RaceParticipant; otherwise the same person can enter both fields by changing
 // client capability between requests. The legacy race's scheduled/start instant
 // is its canonical ET window identity.
-async function claimLegacyStream({ prisma, race, userId }) {
+async function claimLegacyStream({ prisma, race, userId, transactionClient = null }) {
   if (!race?.seedId || !prisma?.seededRaceWindowMembership) return true;
   const windowStart = race.scheduledStartAt || race.startedAt;
   if (!windowStart) return true;
-  return withSeededWindowLock({ prisma, seedId: race.seedId, windowStart, fn: async (tx) => {
+  const claim = async (tx) => {
+    await acquireSeededWindowLock(tx, race.seedId, windowStart);
     const membership = await tx.seededRaceWindowMembership.upsert({
       where: { seedId_windowStart_userId: { seedId: race.seedId, windowStart: new Date(windowStart), userId } },
       create: { seedId: race.seedId, windowStart: new Date(windowStart), userId, stream: "LEGACY", raceId: race.id },
       update: {},
     });
     return membership.stream === "LEGACY";
-  }});
+  };
+  return transactionClient ? claim(transactionClient) : prisma.$transaction(claim);
 }
 
 function skillBand(a, b) {
@@ -571,30 +573,26 @@ function buildSeededRaceBuckets(dependencies = {}) {
     }, { timeout: 15_000, maxWait: 10_000 });
   }
 
-  async function elect({ userId, seedKind, window = "UPCOMING" }) {
+  async function elect({ userId, seedKind, window = "UPCOMING", acceptedAt = null }) {
     if (window !== "UPCOMING") throw new SeededBucketError("Window must be UPCOMING", 400, "INVALID_WINDOW");
     const seed = await prisma.raceSeed.findFirst({ where: { kind: seedKind, active: true } });
     if (!seed || !["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
       throw new SeededBucketError("Seed not found or disabled", 404, "SEED_NOT_FOUND_OR_DISABLED");
     }
-    const { windowStart, windowEnd } = upcomingWindowFor(seed, now());
-    if (now() >= windowStart) throw new SeededBucketError("Window is finalized", 409, "WINDOW_FINALIZED");
+    const electionAt = acceptedAt || now();
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, electionAt);
+    if ((acceptedAt || now()) >= windowStart) throw new SeededBucketError("Window is finalized", 409, "WINDOW_FINALIZED");
     // Election and finalization share the identical transaction-scoped lock.
     // Without it, an election that commits after finalise snapshots candidates
     // but before the boundary would receive 202 yet never get an assignment.
     await withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
-      if (now() >= windowStart) {
+      if ((acceptedAt || now()) >= windowStart) {
         throw new SeededBucketError("Window is finalized", 409, "WINDOW_FINALIZED");
       }
       if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") {
         throw new SeededBucketError("Seeded bucket matching is unavailable", 503, "MATCHING_UNAVAILABLE");
       }
-      const finalized = await tx.seededRaceBucket.count({
-        where: { seedId: seed.id, windowStart },
-      });
-      if (finalized > 0) {
-        throw new SeededBucketError("Window is finalized", 409, "WINDOW_FINALIZED");
-      }
+
       // Deploy/migration safety: a legacy PENDING participant created before
       // this release cannot have a ledger row yet. Detect it under the same
       // window lock and stamp LEGACY before permitting any bucket election.
@@ -631,7 +629,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
       // can inspect which stream won.
       const membership = await tx.seededRaceWindowMembership.upsert({
         where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
-        create: { seedId: seed.id, windowStart, userId, stream: "BUCKET" },
+        create: { seedId: seed.id, windowStart, userId, stream: "BUCKET", createdAt: electionAt },
         update: {},
       });
       if (membership.stream === "LEGACY") {
@@ -933,7 +931,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
     return [];
   }
 
-  async function featuredCards(userId) {
+  async function featuredCards(userId, { includeEmptyLegacyWindows = false } = {}) {
     const seeds = await prisma.raceSeed.findMany({
       where: { active: true, kind: { in: ["DAILY_10K", "WEEKLY_50K"] } },
       orderBy: { kind: "asc" },
@@ -952,7 +950,14 @@ function buildSeededRaceBuckets(dependencies = {}) {
         seedId: seed.id,
         windowStart: upcoming.windowStart,
       });
-      if (currentMode !== "BUCKET" && upcomingMode !== "BUCKET") continue;
+      const currentMembership = await prisma.seededRaceWindowMembership.findUnique({
+        where: { seedId_windowStart_userId: { seedId: seed.id, windowStart: current.windowStart, userId } },
+      });
+      const admissionOwned = currentMembership?.raceId
+        ? await prisma.seededRaceBucket.findFirst({ where: { raceId: currentMembership.raceId, admissionVersion: 1 }, select: { id: true } })
+        : null;
+      const emptyLegacyFallback = currentMode !== "BUCKET" && upcomingMode !== "BUCKET" && !admissionOwned;
+      if (emptyLegacyFallback && !includeEmptyLegacyWindows) continue;
       // Membership predicate is the privacy boundary: never select another
       // player's bucket merely to discover that this viewer has no row. Read
       // each window independently; combining them and ordering by windowStart
@@ -961,12 +966,12 @@ function buildSeededRaceBuckets(dependencies = {}) {
       const bucketInclude = {
         race: {
           include: {
-            participants: { where: { userId }, select: { status: true } },
+            participants: { where: { userId }, select: { status: true, joinedAt: true, forfeitedAt: true } },
           },
         },
       };
       const [currentBucket, upcomingBucket] = await Promise.all([
-        currentMode === "BUCKET"
+        (currentMode === "BUCKET" || admissionOwned)
           ? prisma.seededRaceBucket.findFirst({
               where: {
                 seedId: seed.id,
@@ -1003,6 +1008,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
       const upcomingRace = upcomingBucket?.race || null;
       const mine = race?.participants?.[0] || null;
       cards.push({
+        ...(includeEmptyLegacyWindows ? { emptyLegacyFallback } : {}),
         raceId: race?.id ?? null,
         seedKind: seed.kind,
         name: seed.name,
@@ -1012,6 +1018,15 @@ function buildSeededRaceBuckets(dependencies = {}) {
         isFull: false,
         myStatus: mine?.status ?? (elected?.stream === "BUCKET" ? "ELECTED" : null),
         bucketPrivate: true,
+        currentJoin: {
+          version: 1,
+          state: mine?.forfeitedAt ? 'FORFEITED' : mine?.status === 'ACCEPTED' ? 'JOINED' : 'JOINABLE',
+          ...current,
+          raceId: mine ? race.id : null,
+          participantCount: mine ? await prisma.raceParticipant.count({ where: { raceId: race.id, status: 'ACCEPTED' } }) : null,
+          scoringStartsAt: mine?.status === 'ACCEPTED' ? new Date(Math.max(new Date(mine.joinedAt).getTime(), current.windowStart.getTime())) : null,
+          reason: null,
+        },
         upcoming: {
           raceId: upcomingRace?.status === "PENDING" ? upcomingRace.id : null,
           scheduledStartAt: upcoming.windowStart,

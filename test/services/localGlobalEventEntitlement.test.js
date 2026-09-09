@@ -470,12 +470,9 @@ test("materialization cursor advances past a full page of ended timezone candida
   }));
   const created = [];
   const client = {
-    raceParticipant: {
-      async findMany({ where, take }) {
-        const after = where.userId?.gt || "";
-        return users.filter((user) => user.id > after).slice(0, take)
-          .map((user) => ({ user }));
-      },
+    async $queryRawUnsafe(_sql, _eventId, take, afterUserId) {
+      const after = afterUserId || "";
+      return users.filter((user) => user.id > after).slice(0, take);
     },
     globalStepEventEntitlement: {
       async findUnique() { return null; },
@@ -534,6 +531,7 @@ function setBasedMaterializationFake(users) {
   let materializeStatements = 0;
   let receiptStatements = 0;
   const tx = {
+    async $executeRawUnsafe() { return 1; },
     async $queryRawUnsafe(_sql, inputJson) {
       const input = JSON.parse(inputJson);
       if (Object.hasOwn(input[0] || {}, "eventKey")) {
@@ -579,7 +577,7 @@ test("production materialization writes one bounded entitlement/event page inste
   const fake = setBasedMaterializationFake(users);
   let transactions = 0;
   const client = {
-    raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
+    async $queryRawUnsafe() { return users; },
     globalStepEventEntitlement: fake.tx.globalStepEventEntitlement,
     async $transaction(work) {
       transactions += 1;
@@ -610,7 +608,7 @@ test("production materialization persists a 500-user page with one set-based sta
   }));
   const fake = setBasedMaterializationFake(users);
   const client = {
-    raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
+    async $queryRawUnsafe() { return users; },
     globalStepEventEntitlement: fake.tx.globalStepEventEntitlement,
     async $transaction(work) { return work(fake.tx); },
   };

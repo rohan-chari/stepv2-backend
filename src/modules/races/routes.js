@@ -1,3 +1,5 @@
+const { buildJoinCurrentSeededChallenge } = require('./commands/joinCurrentSeededChallenge');
+const { buildGetFeaturedRaces } = require('./queries/getFeaturedRaces');
 const { clientSupportsLargeTeamRaces, requiresLargeTeamSupport, assertLargeTeamSupport } = require("./teamRaces");
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
@@ -327,7 +329,7 @@ function createRacesRouter(dependencies = {}) {
   const getPublicRaces =
     dependencies.getPublicRaces || defaultGetPublicRaces;
   const getFeaturedRaces =
-    dependencies.getFeaturedRaces || defaultGetFeaturedRaces;
+    dependencies.getFeaturedRaces || buildGetFeaturedRaces(dependencies);
   const startRace =
     dependencies.startRace ||
     (dependencies.beforeCommitRaceStart || dependencies.beforeRaceStartedRecord
@@ -1273,6 +1275,17 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       console.error("Get featured races error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  const joinCurrentSeededChallenge = buildJoinCurrentSeededChallenge(dependencies);
+  router.post('/seeded/:seedKind/join-current', async (req, res, next) => {
+    try { res.json(await joinCurrentSeededChallenge({ user: req.user, seedKind: req.params.seedKind, body: req.body, clientFeatures: req.clientFeatures })); }
+    catch (error) {
+      if (error.code === 'CHALLENGE_JOIN_BUSY') res.set('Retry-After', '1');
+      if (error.statusCode) return next(error);
+      logger.error('Current challenge Join failed:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   });
 
@@ -2283,6 +2296,7 @@ function createRacesRouter(dependencies = {}) {
     try {
       const result = await discardPowerup({
         userId: req.user.id,
+        requestedAt: dependencies.now ? dependencies.now() : new Date(),
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         displayName: req.user.displayName,

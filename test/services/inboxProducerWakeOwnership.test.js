@@ -44,6 +44,7 @@ test("accepted join request publishes the committed Inbox wake before unrelated 
   const tx = {
     $executeRaw: async () => 1,
     friendship: { findMany: async () => [] },
+    user: { findUnique: async () => ({ clientFeatures: [] }) },
     friendshipAutoLinkSuppression: { findUnique: async () => null },
     raceJoinRequest: {
       findUnique: async () => request,

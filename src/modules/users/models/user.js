@@ -90,7 +90,7 @@ const User = {
     nameSetupOnboardingRequired,
     metricsV2SignupEligible,
     metricsV2SignupEpochId,
-  }) {
+  }, { seededRequestedAt = null } = {}) {
     // A user is keyed on exactly one provider id (appleId for iOS, googleSub for
     // Android). Only set the one that was supplied so the other stays null.
     const data = { email, name };
@@ -118,7 +118,14 @@ const User = {
       data.metricsV2EligibleAt = new Date();
       data.metricsV2EligibleEpochId = metricsV2SignupEpochId;
     }
-    return prisma.user.create({ data });
+    if (!seededRequestedAt || data.isReviewAccount) return prisma.user.create({ data });
+    return prisma.$transaction(async tx => {
+      const user = await tx.user.create({data:{...data,autoJoinFeaturedRaces:true}});
+      const {persistEnrollmentIntents}=require('../../races/services/seededChallengeEnrollment');
+      await persistEnrollmentIntents(tx,{user,requestedAt:seededRequestedAt,source:'SIGNUP',current:true});
+      await persistEnrollmentIntents(tx,{user,requestedAt:seededRequestedAt,source:'SIGNUP'});
+      return user;
+    });
   },
 
   async stampMetricsV2Eligibility(id, epochId, eligibleAt = new Date()) {
@@ -137,11 +144,14 @@ const User = {
     });
   },
 
-  async update(id, fields) {
-    const updated = await prisma.user.update({
-      where: { id },
-      data: fields,
-    });
+  async update(id, fields, { requestedAt = new Date() } = {}) {
+    const updated = fields.autoJoinFeaturedRaces === true
+      ? await prisma.$transaction(async tx => {
+          const user = await tx.user.update({ where: { id }, data: fields });
+          await require('../../races/services/seededChallengeEnrollment').persistEnrollmentIntents(tx, { user, requestedAt });
+          return user;
+        })
+      : await prisma.user.update({ where: { id }, data: fields });
     await invalidateAuthMe(id);
     return updated;
   },

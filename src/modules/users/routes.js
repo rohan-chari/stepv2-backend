@@ -103,10 +103,10 @@ function createAuthRouter(dependencies = {}) {
   const router = Router();
   const verifyIdentityToken =
     dependencies.verifyAppleIdentityToken || verifyAppleIdentityToken;
-  const provisionUser = dependencies.ensureAppleUser || ensureAppleUser;
+  const provisionUser = dependencies.ensureAppleUser || (dependencies.now ? require('./services/ensureAppleUser').buildEnsureAppleUser(dependencies) : ensureAppleUser);
   const verifyGoogleToken =
     dependencies.verifyGoogleIdentityToken || verifyGoogleIdentityToken;
-  const provisionGoogleUser = dependencies.ensureGoogleUser || ensureGoogleUser;
+  const provisionGoogleUser = dependencies.ensureGoogleUser || (dependencies.now ? require('./services/ensureGoogleUser').buildEnsureGoogleUser(dependencies) : ensureGoogleUser);
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const signToken = dependencies.signSessionToken || defaultSignSessionToken;
@@ -837,10 +837,11 @@ function createAuthRouter(dependencies = {}) {
       return res.status(400).json({ error: "enabled must be a boolean" });
     }
 
+    const requestedAt = dependencies.now ? dependencies.now() : new Date();
     try {
       const user = await UserModel.update(req.user.id, {
         autoJoinFeaturedRaces: enabled,
-      });
+      }, { requestedAt });
       if (enabled) {
         try {
           // Capability is durable account state, not a one-request header:
@@ -854,6 +855,7 @@ function createAuthRouter(dependencies = {}) {
                   userId: req.user.id,
                   seedKind,
                   window: "UPCOMING",
+                  acceptedAt: requestedAt,
                 });
               } catch (error) {
                 // LEGACY/missing windows retain the legacy enrollment below;
@@ -870,7 +872,7 @@ function createAuthRouter(dependencies = {}) {
           // This command consults the stamped mode and excludes capable users
           // only from BUCKET windows, so it fills every applicable LEGACY row
           // without relying on the current request token or live flag.
-          await optUserIntoPendingSeededRaces(req.user.id);
+          await optUserIntoPendingSeededRaces(req.user.id, supportsSeededRaceBuckets(storedFeatures) ? { targetAt: requestedAt } : {});
         } catch (error) {
           console.error("Featured auto-join opt-in error:", error);
         }

@@ -100,7 +100,7 @@ function buildEnsureGoogleUser(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const recordReferralFn = dependencies.recordReferral || recordReferral;
   const autoEnrollNewUserFn =
-    dependencies.autoEnrollNewUser || autoEnrollNewUser;
+    dependencies.autoEnrollNewUser || (dependencies.now || dependencies.prisma ? require('../../races/commands/autoEnrollNewUser').buildAutoEnrollNewUser(dependencies) : autoEnrollNewUser);
 
   return async function ensureGoogleUser({
     googleSub,
@@ -129,7 +129,7 @@ function buildEnsureGoogleUser(dependencies = {}) {
         ...(metricsV2SignupEligible === true && metricsV2SignupEpochId
           ? { metricsV2SignupEligible: true, metricsV2SignupEpochId }
           : {}),
-      });
+      }, { seededRequestedAt: dependencies.now ? dependencies.now() : new Date() });
 
       if (!user.displayName) {
         const displayName = await pickUniqueDisplayName({

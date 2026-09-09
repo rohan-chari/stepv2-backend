@@ -463,6 +463,37 @@ function buildAutoEnrollNewUser(dependencies = {}) {
       // Review/demo accounts stay out of real races entirely.
       if (user.isReviewAccount === true) return;
 
+      // New provisioners atomically stamp exact-window SIGNUP intents with the
+      // account. Older provisioners/operational callers retain their historical
+      // generic-seed behavior; this durable protocol identity is permanent.
+      const currentProtocol = db.seededChallengeEnrollmentRequest &&
+        await db.seededChallengeEnrollmentRequest.findFirst({where:{userId:user.id,source:'SIGNUP'},select:{id:true}});
+      if (currentProtocol) {
+        const accepted = await db.seededChallengeEnrollmentRequest.findMany({
+          where: { userId: user.id, source: 'SIGNUP' },
+          orderBy: { requestedAt: 'asc' }, take: 4,
+        });
+        const decisionAt = dependencies.now ? dependencies.now() : new Date();
+        const admission=require('../services/seededChallengeAdmission').buildSeededChallengeAdmission(dependencies);
+        let welcomeTarget=null;
+        for(const seedKind of ['DAILY_10K','WEEKLY_50K']) {
+          try {
+            const seed = await db.raceSeed.findUnique({where:{kind:seedKind},select:{id:true}});
+            const intent = accepted.find(row => row.seedId === seed?.id && row.windowStart <= decisionAt && row.windowEnd > decisionAt);
+            if (!intent) continue;
+            const joined=await admission.admit({userId:user.id,seedKind,source:'SIGNUP',
+              targetWindow:{windowStart:intent.windowStart,windowEnd:intent.windowEnd},acceptedAt:intent.requestedAt});
+            if(!welcomeTarget) {
+              const race=await db.race.findUnique({where:{id:joined.raceId}});
+              const participant=await db.raceParticipant.findUnique({where:{id:joined.participantId}});
+              welcomeTarget={race,participant};
+            }
+          } catch(error) { console.warn(`Signup current challenge pending durable recovery: ${seedKind} ${error.code||error.message}`); }
+        }
+        if(welcomeTarget)await grantWelcomeBoxes({user,...welcomeTarget});
+        await require('../../users/services/authMeCache').invalidateSafe(user.id);
+        return;
+      }
       await db.user.update({
         where: { id: user.id },
         data: { autoJoinFeaturedRaces: true },

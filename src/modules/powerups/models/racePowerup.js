@@ -57,9 +57,9 @@ const RacePowerup = {
   // Only the caller whose updateMany matches a still-discardable row
   // (count === 1) may proceed. Mirrors `updateIfPending` on the Race model and
   // the conditional claim in stealRandomHeldPowerup below.
-  async claimForDiscard(id) {
-    return prisma.racePowerup.updateMany({
-      where: { id, status: { in: ["HELD", "MYSTERY_BOX"] } },
+  async claimForDiscard(id, { transactionClient = null, raceId = null, userId = null } = {}) {
+    return (transactionClient || prisma).racePowerup.updateMany({
+      where: { id, ...(raceId ? { raceId } : {}), ...(userId ? { userId } : {}), status: { in: ["HELD", "MYSTERY_BOX"] } },
       data: { status: "DISCARDED" },
     });
   },

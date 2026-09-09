@@ -1,3 +1,5 @@
+const { prisma: defaultPrisma } = require('../../../db');
+const { windowFor } = require('../services/seededRaceBuckets');
 const { Race } = require("../models/race");
 const { buildRaceMoneyView } = require("../racePrizePool");
 const { buildSeededRaceBuckets } = require("../services/seededRaceBuckets");
@@ -20,7 +22,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
   // client can render JOIN vs VIEW without a failed join round-trip.
   return async function getFeaturedRaces({ userId, suggestionMode = false, supportsBuckets = false, hiddenSeedKinds = new Set() }) {
     const bucketCards = supportsBuckets && !suggestionMode
-      ? await seededBuckets.featuredCards(userId)
+      ? await seededBuckets.featuredCards(userId, { includeEmptyLegacyWindows: true })
       : [];
     if (suggestionMode) {
       const rows = await raceModel.findFeaturedSuggestions({
@@ -184,9 +186,21 @@ function buildGetFeaturedRaces(dependencies = {}) {
       return aRank - bRank;
     });
 
-    if (!bucketCards.length) return featured.filter((card) => !hiddenSeedKinds.has(card.seedKind));
-    const bucketKinds = new Set(bucketCards.map((card) => card.seedKind));
-    const normalizedBucketCards = bucketCards.map((card) => ({
+    if (supportsBuckets) {
+      const db = dependencies.prisma || defaultPrisma;
+      for (const card of featured) {
+        if (!['DAILY_10K','WEEKLY_50K'].includes(card.seedKind)) continue;
+        const current = windowFor({cadence:card.seedKind==='WEEKLY_50K'?'WEEKLY':'DAILY'},currentTime);
+        const participant = await db.raceParticipant.findFirst({where:{raceId:card.raceId,userId},select:{status:true,joinedAt:true,forfeitedAt:true}});
+        card.currentJoin = {version:1,...current,state:participant?.forfeitedAt?'FORFEITED':participant?.status==='ACCEPTED'?'JOINED':'JOINABLE',raceId:participant?card.raceId:null,participantCount:participant?card.participantCount:null,scoringStartsAt:participant?.status==='ACCEPTED'?new Date(Math.max(current.windowStart.getTime(),new Date(participant.joinedAt).getTime())):null,reason:null};
+      }
+    }
+    // A virtual empty-window card keeps current Join reachable during cold
+    // recovery. Existing LEGACY cards retain every historical response field.
+    const availableBucketCards = bucketCards.filter(card => !card.emptyLegacyFallback || !featured.some(row => row.seedKind === card.seedKind));
+    if (!availableBucketCards.length) return featured.filter((card) => !hiddenSeedKinds.has(card.seedKind));
+    const bucketKinds = new Set(availableBucketCards.map((card) => card.seedKind));
+    const normalizedBucketCards = availableBucketCards.map(({emptyLegacyFallback, ...card}) => ({
       ...card,
       teamPayoutVersion: null,
       teamWinnerRewardCoins: null,

@@ -7,6 +7,7 @@ datasource db {
 }
 
 model User {
+  seededAutomaticEligibleAt DateTime? @db.Timestamptz(3) @map("seeded_automatic_eligible_at")
   billingRealm String @default("production") @map("billing_realm")
   raceProgressRefreshIntents RaceProgressRefreshIntent[]
   id                                String                          @id @default(uuid())
@@ -2242,6 +2243,7 @@ model RaceParticipant {
 }
 
 model SeededRaceBucket {
+  admissionVersion Int? @map("admission_version")
   id          String                 @id @default(uuid())
   seedId      String                 @map("seed_id")
   windowStart DateTime               @map("window_start") @db.Timestamptz(3)
@@ -2280,6 +2282,10 @@ model SeededRaceBucketAssignment {
 }
 
 model SeededRaceWindowMembership {
+  admissionSource String? @map("admission_source")
+  manualJoinedAt DateTime? @map("manual_joined_at") @db.Timestamptz(3)
+  preparationGroupId String? @map("preparation_group_id")
+  electionSequence BigInt @default(autoincrement()) @map("election_sequence")
   id          String                 @id @default(uuid())
   seedId      String                 @map("seed_id")
   windowStart DateTime               @map("window_start") @db.Timestamptz(3)
@@ -2641,6 +2647,8 @@ model RaceMessage {
 // User row but reuses the same Apple sub). Rows are intentionally NEVER deleted
 // on account deletion — that is what makes the grant abuse-proof.
 model OnboardingBoxGrant {
+  targetBoxCount Int? @map("target_box_count")
+  grantedBoxCount Int? @map("granted_box_count")
   appleSubHash String   @id @map("apple_sub_hash")
   grantedAt    DateTime @default(now()) @map("granted_at")
 
@@ -4147,4 +4155,116 @@ model BillingPermanentRevocation {
   reversedAt DateTime? @map("reversed_at")
   @@index([sourcePurchaseId, observedAt])
   @@map("billing_permanent_revocations")
+}
+
+// Immutable HTTP receipt. Database FK follows account erasure with CASCADE.
+model SeededChallengeJoinReceipt {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  requestId String @map("request_id")
+  seedId String @map("seed_id")
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  windowEnd DateTime @map("window_end") @db.Timestamptz(3)
+  raceId String @map("race_id")
+  participantId String @map("participant_id")
+  joinedAt DateTime @map("joined_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([userId, requestId])
+  @@index([windowEnd, id])
+  @@map("seeded_challenge_join_receipts")
+}
+model SeededChallengePreparation {
+  id String @id @default(uuid())
+  seedId String @map("seed_id")
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  windowEnd DateTime @map("window_end") @db.Timestamptz(3)
+  preparationVersion Int @default(1) @map("preparation_version")
+  generation String
+  automaticCursor String? @map("automatic_cursor")
+  automaticScanCompleteAt DateTime? @map("automatic_scan_complete_at") @db.Timestamptz(3)
+  state String @default("PLANNING")
+  snapshotSequence BigInt @default(0) @map("snapshot_sequence")
+  planningCursor Int @default(0) @map("planning_cursor")
+  validationCursor BigInt @default(0) @map("validation_cursor")
+  expectedSnapshotCount Int @default(0) @map("expected_snapshot_count")
+  startedAt DateTime @default(now()) @map("started_at")
+  publishedAt DateTime? @map("published_at")
+  completedAt DateTime? @map("completed_at")
+  leaseToken String? @map("lease_token")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  notBeforeAt DateTime @map("not_before_at")
+  lastErrorCode String? @map("last_error_code")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([seedId, windowStart])
+  @@index([state, notBeforeAt])
+  @@map("seeded_challenge_preparations")
+}
+model SeededChallengePreparationGroup {
+  id String @id @default(uuid())
+  preparationId String @map("preparation_id")
+  generation String
+  ordinal Int
+  reservedRaceId String @unique @map("reserved_race_id")
+  reservedBucketId String @unique @map("reserved_bucket_id")
+  members Json
+  state String @default("RESERVED")
+  materializedAt DateTime? @map("materialized_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([preparationId, generation, ordinal])
+  @@index([preparationId, state, ordinal])
+  @@map("seeded_challenge_preparation_groups")
+}
+model SeededChallengeEnrollmentRequest {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  seedId String @map("seed_id")
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  windowEnd DateTime @map("window_end") @db.Timestamptz(3)
+  source String
+  requestedAt DateTime @map("requested_at") @db.Timestamptz(3)
+  state String @default("PENDING")
+  availableAt DateTime @default(now()) @map("available_at")
+  leaseToken String? @map("lease_token")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  attempts Int @default(0)
+  lastErrorCode String? @map("last_error_code")
+  @@unique([userId, seedId, windowStart])
+  @@index([state, availableAt, id])
+  @@index([leaseExpiresAt])
+  @@index([windowEnd, id])
+  @@map("seeded_challenge_enrollment_requests")
+}
+model SeededChallengeTransfer {
+  id String @id
+  userId String @map("user_id")
+  seedId String @map("seed_id")
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  oldRaceId String @map("old_race_id")
+  newRaceId String @map("new_race_id")
+  oldParticipantId String @map("old_participant_id")
+  newParticipantId String @map("new_participant_id")
+  priorAssignment String? @map("prior_assignment")
+  newAssignment String @map("new_assignment")
+  sourceState String @map("source_state")
+  reason String
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([userId, seedId, windowStart])
+  @@map("seeded_challenge_transfers")
+}
+model SeededChallengeMembershipRepair {
+  id String @id @default(uuid())
+  userId String @map("user_id")
+  seedId String @map("seed_id")
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  sourceParticipantId String @map("source_participant_id")
+  state String @default("PENDING")
+  reason String
+  availableAt DateTime @default(now()) @map("available_at")
+  leaseToken String? @map("lease_token")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  attempts Int @default(0)
+  result String?
+  @@unique([userId, seedId, windowStart])
+  @@index([state, availableAt, id])
+  @@map("seeded_challenge_membership_repairs")
 }

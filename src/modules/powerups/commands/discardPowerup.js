@@ -1,3 +1,7 @@
+const { acquireRaceWriteFence, lockCompetitionRows } = require('../../races/services/raceWriteFence');
+const { acquireGlobalEnrollmentLock } = require('../../steps/services/globalEventEnrollment');
+const { lockFundedExposureUsers } = require('../../races/services/fundedExposure');
+const { enqueueRaceResolution } = require('../../races/services/enqueueRaceResolution');
 const { prisma } = require("../../../db");
 const { RacePowerup } = require("../models/racePowerup");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
@@ -51,6 +55,7 @@ function buildDiscardPowerup(dependencies = {}) {
     powerupId,
     displayName,
     timezone = null,
+    requestedAt = new Date(),
   }) {
     const powerup = await powerupModel.findById(powerupId);
     if (!powerup) {
@@ -66,7 +71,22 @@ function buildDiscardPowerup(dependencies = {}) {
     // CONDITIONAL claim, not a plain update. The status read above is a TOCTOU:
     // two concurrent taps both pass it. Only the caller that actually flips a
     // still-discardable row proceeds to pay coins and write the feed event.
-    const claimed = await powerupModel.claimForDiscard(powerupId);
+    // Slot release and its resolution wake commit together. In particular,
+    // unfinished signup gifts must not depend on an unrelated future step sync.
+    const claimed = await (dependencies.prisma || prisma).$transaction(async tx => {
+      await acquireRaceWriteFence(tx, raceId);
+      await acquireGlobalEnrollmentLock(tx);
+      await lockFundedExposureUsers(tx, [userId]);
+      await lockCompetitionRows(tx, { raceIds: [raceId] });
+      const result = await powerupModel.claimForDiscard(powerupId, {
+        transactionClient: tx, raceId, userId,
+      });
+      if (result.count === 1) await enqueueRaceResolution({
+        raceId, userId, now: requestedAt, reason: 'POWERUP_MUTATION',
+        ...(powerup.type ? { powerupTypes: [powerup.type] } : {}), priority: 'IMMEDIATE',
+      }, tx);
+      return result;
+    }, { timeout: 15000, maxWait: 2000 });
     if (!claimed || claimed.count !== 1) {
       throw new PowerupDiscardError("This powerup cannot be discarded", 400);
     }

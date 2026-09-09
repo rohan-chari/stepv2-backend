@@ -144,3 +144,15 @@ Signup recovery uses the existing once-per-human onboarding ledger. Its nullable
 rows as fully delivered. Recovery rows pin the original target and atomically
 grant only available inventory capacity; remaining boxes resume on worker retries.
 Manual Join alone never creates welcome-box eligibility.
+
+Unfinished welcome delivery can resume in a later active canonical Daily/Weekly
+membership after the original enrollment intentions expire. Creating a new
+welcome entitlement still requires a captured SIGNUP intention; an ordinary
+manual join cannot create one.
+
+The nullable `users.seeded_automatic_eligible_at` timestamp supports interrupted
+background scans. Existing eligible NULL rows retain their pre-migration identity.
+A database trigger timestamps newly eligible inserts and transitions into both
+opt-in and bucket capability, including older writers; repeated eligible writes
+preserve the original timestamp. Exact request intentions remain independently
+durable, so a delayed capability/preference write does not select another window.
