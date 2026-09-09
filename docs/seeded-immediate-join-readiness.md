@@ -1,6 +1,6 @@
 # Immediate daily/weekly Join: release validation
 
-Implementation and local validation complete. Ready for the authorized deployment process; production deployment has not been authorized or performed.
+Implementation and local validation complete. Backend deployed with user authorization on 2026-09-09; see [deployment audit](seeded-immediate-join-deployment-2026-09-09.md). App release builds remain separate.
 
 ## Behavior
 
