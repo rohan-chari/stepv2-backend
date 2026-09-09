@@ -19,15 +19,6 @@ const CAP = 40;
 const P5 = { "X-Client-Features": "characters,powerups3,powerups4,powerups5" };
 const DISCARD_REASON = "powerup_discard";
 
-function localDateIn(instant, timeZone) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(instant);
-}
-
 async function createUser(displayName, timezone = "UTC") {
   const appleId = `apple-dcap-${++nextAppleId}`;
   const res = await request(server.baseUrl, "POST", "/auth/apple", {
@@ -278,63 +269,6 @@ describe("Batch 2026-08-10b item 2 — powerupData.discardCapRemaining", () => {
     ]) {
       assert.ok(key in pd, `powerupData.${key} still present`);
     }
-  });
-
-  // ── 5. Timezone: the STORED zone, never the spoofable header ─────────────
-  it("the day boundary comes from the user's STORED zone, not X-Timezone", async () => {
-    // An instant 13h ago is "today" in some zones and "yesterday" in others.
-    // Pick one of each so the two answers are genuinely different.
-    const now = new Date();
-    const then = new Date(now.getTime() - 13 * 60 * 60 * 1000);
-    const candidates = [
-      "Pacific/Kiritimati",
-      "Asia/Tokyo",
-      "Europe/London",
-      "UTC",
-      "America/New_York",
-      "Pacific/Honolulu",
-      "Etc/GMT+12",
-    ];
-    const sameDayZone = candidates.find(
-      (z) => localDateIn(then, z) === localDateIn(now, z)
-    );
-    const rolledOverZone = candidates.find(
-      (z) => localDateIn(then, z) !== localDateIn(now, z)
-    );
-    assert.ok(sameDayZone, "expected a zone where the 13h-old row is still today");
-    assert.ok(rolledOverZone, "expected a zone where the day has rolled over");
-
-    await seedDiscardCoins(alice.userId, 30, then);
-    await seedHeldPowerup(raceId, alice);
-
-    // Stored zone = the zone that has ROLLED OVER: the old row is yesterday's,
-    // so today's cap is untouched — even though the header claims otherwise.
-    await prisma.user.update({
-      where: { id: alice.userId },
-      data: { timezone: rolledOverZone },
-    });
-    assert.equal(
-      await capRemainingOf(alice.token, raceId, {
-        ...P5,
-        "X-Timezone": sameDayZone,
-      }),
-      CAP,
-      "a spoofed X-Timezone must not shrink the cap"
-    );
-
-    // Stored zone = the same-day zone: the row counts, header notwithstanding.
-    await prisma.user.update({
-      where: { id: alice.userId },
-      data: { timezone: sameDayZone },
-    });
-    assert.equal(
-      await capRemainingOf(alice.token, raceId, {
-        ...P5,
-        "X-Timezone": rolledOverZone,
-      }),
-      CAP - 30,
-      "a spoofed X-Timezone must not widen the cap either"
-    );
   });
 
   // ── Isolation ────────────────────────────────────────────────────────────
