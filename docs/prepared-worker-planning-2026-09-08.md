@@ -66,3 +66,88 @@ Do not run another test concurrently against this database: the benchmark uses l
 ## Production follow-up
 
 No deployment performed. After explicit deployment authorization, compare direct managed DB CPU, planning counts/time, SQL throughput, traffic, and queue age under comparable load. Named plans can adapt differently with production distributions/history. This change does not establish the 70% idle target, remove event fan-out, or optimize notification repair scans. Those remain separate follow-up work.
+
+
+## Authorized production deployment — September 9 UTC
+
+User authorized deployment explicitly. Source commit `7915ad8` was pushed on
+`release/prepared-workers-20260909`, tagged
+`deploy/prepared-workers-20260909-7915ad8`, and deployed on the production
+checkout. The guarded wrapper completed at approximately 02:02 UTC with two
+HTTP workers, one cron process and one resolution process; staging remained
+stopped. Startup pool limits were 10/10/4/8, aggregate 32. Existing server
+package-lock changes were backed up and preserved byte-for-byte.
+
+Preflight verified all repository migrations applied and none unfinished,
+managed transaction pool size 40, direct max_connections 50, and PgBouncer
+max_prepared_statements=128. No installation, migration, configuration or
+powerup-copy change was needed. API/Redis health and marketing home/privacy/
+support checks passed. Required referral audit/apply/final audit all reported
+zero missing rows; the apply changed zero rows.
+
+Production pg_prepared_statements exposed all five selected query families.
+Generic executions were observed for placement claim/due, post-task claim and
+resolution claim across sampled pooled backends; active-event reads remained
+custom-planned. These are per-backend observations, not cluster-wide counts.
+
+Five direct managed CPU samples before reload averaged 65.45% non-idle; five
+after averaged 67.80%. One-minute statement deltas were 144.5 versus 150.8 calls/s.
+These short windows include changed traffic, startup/cold-plan effects and
+monitoring work: they do not demonstrate lower CPU or an event-start improvement.
+No statistics reset or statement deallocation occurred during either delta.
+
+No prepared-statement/cached-plan errors were found. HTTP minute telemetry for
+01:59–02:04 UTC reported zero server 5xx. One notification completeness P2028
+occurred during verification; 134 occurrences of that same error already existed
+in the pre-deploy cron error log. Existing billing/configuration and scheduled-race
+eligibility messages also continued. Notification repair is a separate remaining
+issue, not declared fixed here. A post-deploy pg_stat_monitor diagnostic hit its
+five-second read-only timeout; no post-deploy planning-time reduction is claimed.
+A redundant standalone final topology command required a baseline file; the
+actual guarded wrapper's final topology/budget validation had already passed.
+Follow-up topology, startup limits and static budget checks confirmed the intended
+running configuration.
+
+The user requested continued monitoring after clarifying that ordinary traffic
+checks do not substitute for measuring the next daily-event boundary. A bounded
+ten-minute read-only observation began around 02:07 UTC; results follow below.
+
+
+### Ten-minute follow-up completed
+
+The temporary samplers exited normally after approximately 02:07–02:17 UTC.
+21 direct CPU samples averaged **60.79% busy** (range 35.71–89.09%, latest
+69.55%); mean CPU steal was 4.64%. This is lower than the short pre-deploy
+65.45% sample, but statement traffic was also lower: 118.85 calls/s versus
+144.52/s. Consequently this does not establish a causal CPU saving or the
+70% idle target, and no daily-event boundary was observed.
+
+The 602.303-second unfiltered statement delta recorded 71,586 calls and
+285.45 seconds of aggregate execution elapsed. Statistics reset and deallocation
+markers stayed unchanged. This includes diagnostic work and execution waits;
+it is not a per-query CPU measure.
+
+All four production PIDs remained stable; staging stayed stopped. The last
+sampled queue had two jobs, oldest 3.25 seconds, and no expired leases. Retained
+resolution logs through the final summary contained 437 commits, one superseded
+discard, and maximum queue lag 25.23 seconds. Log/CPU/SQL windows are close but
+not identical. All four worker families showed generic-plan executions on a
+sampled production backend; the active-event read still used custom plans.
+No prepared-statement/cached-plan errors were observed.
+
+**Two database deadlocks occurred** (pg_stat_database 222 → 224), with two
+P2010/40P01 step-intake errors and two HTTP 5xx in the 02:13 minute. HTTP minutes
+02:07–02:16 totaled 3596 requests,
+including 286 step-intake requests. No further 5xx appeared in
+subsequent retained completed minutes. Earlier logs also contain deadlocks;
+that proves prior occurrence, not unchanged frequency or that this release
+cannot affect timing. This deserves a separate lock-order/concurrency
+investigation because it affected requests.
+
+One further notification completeness P2028 occurred during this watch. Billing
+reconciliation errors also continued (8 BILLING_UNAVAILABLE, 17
+BILLING_REALM_MISMATCH log entries). No additional fix or operational change was
+made while monitoring. Prioritize the step-intake deadlocks and notification
+repair timeouts for follow-up; do not describe this observation as error-free.
+
+[Sanitized production observation](evidence/prepared-worker-production-watch-2026-09-09.json).

@@ -1,0 +1,139 @@
+{
+  "window": "2026-09-09 approximately 02:07\u201302:17 UTC",
+  "sourceCommit": "7915ad8",
+  "cpu": {
+    "samples": 21,
+    "busyMean": 60.79,
+    "busyLatest": 69.55,
+    "busyMin": 35.71,
+    "busyMax": 89.09,
+    "stealMean": 4.64
+  },
+  "httpMinutes": {
+    "2026-09-09T02:07:00.000Z": {
+      "interactive": 93,
+      "5xx": 0,
+      "stepIntake": 20,
+      "other": 242
+    },
+    "2026-09-09T02:08:00.000Z": {
+      "interactive": 43,
+      "5xx": 0,
+      "stepIntake": 16,
+      "other": 110
+    },
+    "2026-09-09T02:09:00.000Z": {
+      "interactive": 104,
+      "5xx": 0,
+      "stepIntake": 41,
+      "other": 248
+    },
+    "2026-09-09T02:11:00.000Z": {
+      "interactive": 80,
+      "5xx": 0,
+      "stepIntake": 32,
+      "other": 197
+    },
+    "2026-09-09T02:12:00.000Z": {
+      "interactive": 173,
+      "5xx": 0,
+      "stepIntake": 52,
+      "other": 414
+    },
+    "2026-09-09T02:13:00.000Z": {
+      "interactive": 176,
+      "5xx": 2,
+      "stepIntake": 40,
+      "other": 445
+    },
+    "2026-09-09T02:14:00.000Z": {
+      "interactive": 59,
+      "5xx": 0,
+      "stepIntake": 13,
+      "other": 154
+    },
+    "2026-09-09T02:15:00.000Z": {
+      "interactive": 104,
+      "5xx": 0,
+      "stepIntake": 26,
+      "other": 245
+    },
+    "2026-09-09T02:16:00.000Z": {
+      "interactive": 91,
+      "5xx": 0,
+      "stepIntake": 32,
+      "other": 242
+    },
+    "2026-09-09T02:10:00.000Z": {
+      "interactive": 23,
+      "5xx": 0,
+      "stepIntake": 14,
+      "other": 67
+    }
+  },
+  "httpTotals": {
+    "interactive": 946,
+    "5xx": 2,
+    "stepIntake": 286,
+    "other": 2364
+  },
+  "statementDelta": {
+    "seconds": 602.303,
+    "calls": 71586,
+    "executionMs": 285448.140157003,
+    "callsPerSecond": 118.85379949958742,
+    "statsResetUnchanged": true,
+    "deallocationCounterUnchanged": true
+  },
+  "databaseDeadlocks": {
+    "before": 222,
+    "after": 224
+  },
+  "newErrorCounts": {
+    "BILLING_UNAVAILABLE": 8,
+    "BILLING_REALM_MISMATCH": 17,
+    "P2028": 1,
+    "P2010": 2
+  },
+  "resolutionLogWindow": {
+    "commit": 437,
+    "maxQueueLagMs": 25232,
+    "superseded_discard": 1
+  },
+  "latestSampledQueue": {
+    "at": "2026-09-09T02:16:40.506Z",
+    "type": "queue",
+    "rows": [
+      {
+        "state": "queued",
+        "count": 2,
+        "oldest_requested_seconds": 3.248298,
+        "expired": 0
+      }
+    ]
+  },
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "status": "stopped"
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "status": "online"
+    },
+    {
+      "name": "steps-tracker-cron",
+      "status": "online"
+    },
+    {
+      "name": "steps-tracker",
+      "status": "online"
+    },
+    {
+      "name": "steps-tracker",
+      "status": "online"
+    }
+  ],
+  "temporarySamplersStopped": true,
+  "causalCpuImprovementEstablished": false
+}
