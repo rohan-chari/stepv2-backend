@@ -831,10 +831,10 @@ async function processDueEntitlementBoundaries({
     }
   };
 
-  const drain = async (boundary, processor) => {
+  const drain = async (boundary, processor, budgetStarted = started) => {
     const excludedIds = new Set();
     let attempts = 0;
-    while (attempts < limit && Date.now() - started < tickBudgetMs) {
+    while (attempts < limit && Date.now() - budgetStarted < tickBudgetMs) {
       let outcome;
       try {
         outcome = await processor(excludedIds);
@@ -872,7 +872,28 @@ async function processDueEntitlementBoundaries({
   };
 
   if (processStarts) await drain("start", processOneStart);
-  if (Date.now() - started < tickBudgetMs) await drain("end", processOneEnd);
+  if (Date.now() - started < tickBudgetMs) {
+    if (!enqueueRaceResolution && typeof prisma.$queryRawUnsafe === 'function') {
+      try {
+        const ended = await processDueEndMicroBatch({ prisma, now: current, batchSize: limit });
+        result.ends += ended.length;
+        for (const row of ended) transitionedUserIds.add(row.userId);
+      } catch (error) {
+        // The batch rolls back before isolation/retry. Preserve the established
+        // per-row recovery path so one malformed historical row cannot strand
+        // a cohort. It also retries a race-set change with fresh discovery.
+        logger.error('[GLOBAL_EVENT_BOUNDARY] end batch rolled back; retrying individually', {
+          errorCode: error?.code || 'END_BATCH_FAILED',
+        });
+        // A failed batch may have consumed the normal tick budget. Give row
+        // isolation its own bounded pass rather than retrying that same batch
+        // forever without ever reaching healthy siblings.
+        await drain('end', processOneEnd, Date.now());
+      }
+    } else {
+      await drain('end', processOneEnd);
+    }
+  }
   await invalidateHomeActiveGlobalEvent([...transitionedUserIds]);
   try {
     const { recordOperationalCounters } = require("./globalStepEventObservability");
@@ -885,6 +906,80 @@ async function processDueEntitlementBoundaries({
     });
   } catch {}
   return result;
+}
+
+async function processDueEndMicroBatch({ prisma, now, batchSize }) {
+  const discovered = await prisma.globalStepEventEntitlement.findMany({
+    where: { endProcessedAt: null, endsAt: { lte: now } },
+    orderBy: [{ endsAt: 'asc' }, { id: 'asc' }], take: batchSize,
+    select: { id: true },
+  });
+  if (!discovered.length) return [];
+  const ids = discovered.map(row => row.id);
+  const readImpacts = (client, entitlementIds) => client.$queryRawUnsafe(
+    `SELECT entitlement.id AS "entitlementId", impact.race_id AS "raceId",
+       impact.user_id AS "userId", impact.attribution_version AS "attributionVersion",
+       impact.status, participant.id AS "participantId"
+     FROM global_step_event_entitlements entitlement
+     JOIN global_event_race_impacts impact
+       ON impact.event_id=entitlement.event_id AND impact.user_id=entitlement.user_id
+     LEFT JOIN race_participants participant
+       ON participant.race_id=impact.race_id AND participant.user_id=impact.user_id
+     WHERE entitlement.id=ANY($1::text[])
+     ORDER BY impact.race_id,entitlement.id`, entitlementIds);
+  const discoveredImpacts = await readImpacts(prisma, ids);
+  const raceIds = [...new Set(discoveredImpacts.map(row => row.raceId))].sort();
+  return prisma.$transaction(async tx => {
+    // Match start-boundary/membership writers: sorted C0, global enrollment,
+    // entitlement rows, then summary work. Discovery alone is not a fence.
+    await acquireRaceWriteFencesSetBased(tx, raceIds, now);
+    const { acquireGlobalEnrollmentLock } = require('./globalEventEnrollment');
+    await acquireGlobalEnrollmentLock(tx);
+    const claims = await tx.$queryRawUnsafe(
+      `SELECT id FROM global_step_event_entitlements
+       WHERE id=ANY($1::text[]) AND end_processed_at IS NULL AND ends_at <= $2
+       ORDER BY ends_at,id FOR UPDATE SKIP LOCKED`, ids, now);
+    if (!claims.length) return [];
+    const claimedIds = claims.map(row => row.id);
+    const entitlements = await tx.globalStepEventEntitlement.findMany({
+      where: { id: { in: claimedIds } }, include: { event: true },
+    });
+    const impacts = await readImpacts(tx, claimedIds);
+    const fenced = new Set(raceIds);
+    if (impacts.some(row => !fenced.has(row.raceId))) {
+      throw Object.assign(new Error('end boundary race lock set changed'), { code: 'GLOBAL_EVENT_LOCK_SET_CHANGED' });
+    }
+    const impactsByEntitlement = new Map();
+    const scopes = new Map();
+    for (const impact of impacts) {
+      if (!impactsByEntitlement.has(impact.entitlementId)) impactsByEntitlement.set(impact.entitlementId, []);
+      impactsByEntitlement.get(impact.entitlementId).push(impact);
+      if (!scopes.has(impact.raceId)) scopes.set(impact.raceId, { users: new Set(), participants: new Set() });
+      const scope = scopes.get(impact.raceId);
+      scope.users.add(impact.userId);
+      if (impact.participantId) scope.participants.add(impact.participantId);
+    }
+    if (scopes.size) {
+      await RaceResolutionJobV2.enqueueMany({
+        raceIds: [...scopes.keys()], now,
+        triggeredUserIdsByRaceId: new Map([...scopes].map(([id, scope]) => [id, [...scope.users]])),
+        dirtyEnvelopeByRaceId: new Map([...scopes].map(([id, scope]) => [id, {
+          reason: 'GLOBAL_EVENT_BOUNDARY', dirtyUserIds: [...scope.users],
+          dirtyParticipantIds: [...scope.participants], powerupTypes: [], priority: 'IMMEDIATE',
+        }])),
+        burstCoalescing: true, queuePriority: 'LIVE',
+      }, tx);
+      await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup('resolution', { workKind: 'ordinary' }));
+    }
+    const { createSummaryWorkForEntitlements } = require('./globalEventSummaryLifecycle');
+    await createSummaryWorkForEntitlements(tx, entitlements.map(entitlement => ({
+      entitlement, impacts: impactsByEntitlement.get(entitlement.id) || [],
+    })), now);
+    await tx.globalStepEventEntitlement.updateMany({
+      where: { id: { in: claimedIds }, endProcessedAt: null }, data: { endProcessedAt: now },
+    });
+    return entitlements;
+  }, { timeout: 15_000, maxWait: 10_000 });
 }
 
 async function discoverDueStartIds({ prisma = defaultPrisma, now = new Date(), batchSize = 100 } = {}) {

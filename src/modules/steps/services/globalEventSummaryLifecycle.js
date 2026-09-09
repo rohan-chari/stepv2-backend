@@ -63,6 +63,17 @@ function legacyGlobalSummaryEntitlement({ event, userId }) {
   };
 }
 
+function classifySummaryWork(impacts, expiresAt, now) {
+  const incompatible = impacts.some(impact => impact.attributionVersion !== 2 &&
+    !(impact.attributionVersion === 1 && impact.status === 'PENDING'));
+  const expired = expiresAt.getTime() <= new Date(now).getTime();
+  return {
+    incompatible, expired,
+    initialStatus: incompatible ? 'UNSCORABLE' : expired ? 'EXPIRED_UNDELIVERED' : 'WAITING_SYNC',
+    lastErrorCode: incompatible ? 'DEPENDENCY_INPUT_UNREPLAYABLE' : expired ? 'DEADLINE_PASSED' : null,
+  };
+}
+
 async function createSummaryWorkForEntitlement(tx, entitlement, now = new Date()) {
   if (!entitlement?.event || entitlement.event.summaryAttributionVersion !== 2) {
     return null;
@@ -81,15 +92,7 @@ async function createSummaryWorkForEntitlement(tx, entitlement, now = new Date()
     orderBy: { raceId: "asc" },
   });
   const impactCount = impacts.length;
-  const incompatible = impacts.some((impact) =>
-    impact.attributionVersion !== 2 &&
-    !(impact.attributionVersion === 1 && impact.status === "PENDING"));
-  const expired = expiresAt.getTime() <= new Date(now).getTime();
-  const initialStatus = incompatible
-    ? "UNSCORABLE"
-    : expired
-      ? "EXPIRED_UNDELIVERED"
-      : "WAITING_SYNC";
+  const { incompatible, expired, initialStatus, lastErrorCode } = classifySummaryWork(impacts, expiresAt, now);
   // Empty-update Prisma upserts may be implemented as SELECT then INSERT.
   // Independent summary workers can bootstrap the same entitlement together;
   // use the unique key atomically without rewriting an existing work's state.
@@ -98,7 +101,7 @@ async function createSummaryWorkForEntitlement(tx, entitlement, now = new Date()
     VALUES ($1,$2,$3,$4::timestamp,$5,$6,$7::timestamp,$8,clock_timestamp())
     ON CONFLICT (event_id,user_id) DO NOTHING`, randomUUID(), entitlement.eventId,
   entitlement.userId, expiresAt, initialStatus, impactCount, new Date(now),
-  incompatible ? "DEPENDENCY_INPUT_UNREPLAYABLE" : expired ? "DEADLINE_PASSED" : null);
+  lastErrorCode);
   // This subsequent READ COMMITTED statement observes a competing inserter
   // after ON CONFLICT has waited for it, unlike a same-statement fallback CTE.
   const work = await tx.globalEventSummaryWork.findUniqueOrThrow({
@@ -126,9 +129,47 @@ async function createSummaryWorkForEntitlement(tx, entitlement, now = new Date()
   return work;
 }
 
+// End-boundary callers already hold the race/enrollment fences and have read
+// the complete impact vectors. Persist the cohort in one statement; do not
+// reload each user's impacts or read back work rows nobody consumes.
+async function createSummaryWorkForEntitlements(tx, entries, now = new Date()) {
+  const rows = [];
+  for (const { entitlement, impacts } of entries) {
+    if (entitlement.event?.summaryAttributionVersion !== 2) continue;
+    const expiresAt = computeSummaryExpiresAt(entitlement);
+    if (!expiresAt) continue;
+    const { initialStatus, lastErrorCode } = classifySummaryWork(impacts, expiresAt, now);
+    rows.push({ id: randomUUID(), eventId: entitlement.eventId, userId: entitlement.userId,
+      expiresAt: expiresAt.toISOString(), requiredRaceCount: impacts.length,
+      status: initialStatus, error: lastErrorCode,
+    });
+  }
+  if (!rows.length) return;
+  rows.sort((a, b) => a.eventId.localeCompare(b.eventId) || a.userId.localeCompare(b.userId));
+  await tx.$executeRawUnsafe(`INSERT INTO global_event_summary_work
+    (id,event_id,user_id,expires_at,status,required_race_count,available_at,last_error_code,updated_at)
+    SELECT id,"eventId","userId","expiresAt",status,"requiredRaceCount",$2,error,clock_timestamp()
+    FROM jsonb_to_recordset($1::jsonb) AS input(id text,"eventId" text,"userId" text,
+      "expiresAt" timestamp,status text,"requiredRaceCount" integer,error text)
+    ORDER BY "eventId","userId"
+    ON CONFLICT (event_id,user_id) DO NOTHING`, JSON.stringify(rows), new Date(now));
+  const terminal = rows.filter(row => row.error);
+  if (terminal.length && tx.jobRun) {
+    await tx.$executeRawUnsafe(`INSERT INTO job_runs (job_name,last_ran_for,updated_at)
+      SELECT 'global_event_summary:' || "eventId" || ':' || "userId" || ':v2',status,clock_timestamp()
+      FROM jsonb_to_recordset($1::jsonb) AS input("eventId" text,"userId" text,status text)
+      ORDER BY "eventId","userId"
+      ON CONFLICT (job_name) DO NOTHING`, JSON.stringify(terminal));
+  }
+  if (isInPrismaTransactionScope()) {
+    await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup('summary'));
+  }
+}
+
 module.exports = {
   TERMINAL_WORK_STATES,
   computeSummaryExpiresAt,
   legacyGlobalSummaryEntitlement,
   createSummaryWorkForEntitlement,
+  createSummaryWorkForEntitlements,
 };
