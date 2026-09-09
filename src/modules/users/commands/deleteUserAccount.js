@@ -224,6 +224,12 @@ function buildDeleteUserAccount(dependencies = {}) {
         });
       }
 
+      // Seeded assignment and window ledgers restrict participant/user deletion.
+      // Release this account's references after the existing membership/user
+      // locks, before either live-row deletion or historical anonymization.
+      await tx.seededRaceBucketAssignment.deleteMany({ where: { userId } });
+      await tx.seededRaceWindowMembership.deleteMany({ where: { userId } });
+
       // 1) Race participations: forfeit any held buy-ins into the pot, then
       //    detach the user from each race depending on race lifecycle.
       for (const participant of participations) {
