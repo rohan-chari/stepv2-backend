@@ -1,0 +1,165 @@
+{
+  "productionBase": "1bcf874f5cd8f2a84e7dbb980aada9c3feca9325",
+  "releaseA": "00baf02b29e30ccb7c964c493d2d4d76405c2b4a",
+  "releaseBImplementation": "65fbea725652671b279995eab2267a6519c9d416",
+  "runtimeSourceTree": "e73778285dee7b31bf8a730cf0765e9b6ec9de92",
+  "prismaSchemaBlob": "9cd8609c2704efaef59c9896cb6ecfc3e6cdebd9",
+  "candidateBranch": "shop-wardrobe-release-candidate",
+  "Abranch": "shop-wardrobe-release-a",
+  "status": "Shop source and targeted validation pass; unconditional done/deployment readiness withheld while listed unrelated integration assertions remain red.",
+  "logs": [
+    {
+      "log": "wardrobe-candidate-unit-post-cache.log",
+      "sha256": "22ea3026345f28bfa07d29afd99d905f64304e164ab2ebd3c1113a14fcdaeb79",
+      "results": {
+        "tests": 3371,
+        "pass": 3371,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 58231.640292
+      }
+    },
+    {
+      "log": "wardrobe-candidate-integration-full.log",
+      "sha256": "bdfb8745fcb1c47747189e1c1288575c6c7f1252b2fae6b88e5947bafbbcae53",
+      "results": {
+        "tests": 3225,
+        "pass": 3142,
+        "fail": 82,
+        "skipped": 1,
+        "duration_ms": 1121171.586125
+      }
+    },
+    {
+      "log": "wardrobe-production-baseline-failing.log",
+      "sha256": "d8a8d06272c7e6c07278fb7537936f5b4570af37c236757e6fea6999b53c64e6",
+      "results": {
+        "tests": 477,
+        "pass": 390,
+        "fail": 87,
+        "skipped": 0,
+        "duration_ms": 235945.676625
+      }
+    },
+    {
+      "log": "wardrobe-candidate-all-shop-final.log",
+      "sha256": "abbc9f266570c069bc895bf15490fdfa35d5c09d53e89f0ea9698645808e6b97",
+      "results": {
+        "tests": 29,
+        "pass": 29,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 6775.500209
+      }
+    },
+    {
+      "log": "wardrobe-candidate-redis-final.log",
+      "sha256": "10ad59ad213c762b556fb62483454383710e77654ddc4cd8ef538b4c32941735",
+      "results": {
+        "tests": 8,
+        "pass": 8,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 2131.06575
+      }
+    },
+    {
+      "log": "wardrobe-candidate-final-fixtures.log",
+      "sha256": "8b4c015e629319bb1967cdf4d647f1a3096e05ea1fec91ecf984d39688db0eec",
+      "results": {
+        "tests": 9,
+        "pass": 9,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 4549.6875
+      }
+    },
+    {
+      "log": "wardrobe-candidate-pg18-buffer.log",
+      "sha256": "099888f835640369c1b7c030d935ad7b684d4d24d432d53cae78e80a99baaff2",
+      "results": {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 1869.6125
+      }
+    },
+    {
+      "log": "wardrobe-candidate-recovery-isolated.log",
+      "sha256": "c7ff70a7093ff2753d71a35bd6720f29a5e58816eae41da0c22d365316c35275",
+      "results": {
+        "tests": 2,
+        "pass": 2,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 974.609542
+      }
+    },
+    {
+      "log": "wardrobe-production-recovery-isolated.log",
+      "sha256": "4897c2369290b593ef1d35566738fdbb25e80fe8cea333928aed6d488758a340",
+      "results": {
+        "tests": 2,
+        "pass": 2,
+        "fail": 0,
+        "skipped": 0,
+        "duration_ms": 944.203042
+      }
+    },
+    {
+      "log": "wardrobe-candidate-protocol-post-cache.log",
+      "sha256": "29f34379e7a5251e3a6adfb5cb25b5b0295698372b4be6fa767b7e9812d9f862",
+      "results": {}
+    },
+    {
+      "log": "wardrobe-candidate-queue-scoped.log",
+      "sha256": "ba6361a4996d0e8e2a2023e52c0e02a6844a0cda393debe92a0b4ef1313fbee8",
+      "results": {
+        "tests": 70,
+        "pass": 50,
+        "fail": 20,
+        "skipped": 0,
+        "duration_ms": 77871.297791
+      }
+    }
+  ],
+  "testFileSha256": {
+    "test/integration/character-wardrobes.test.js": "a0a78d887c294c8d3f03d16da06399f1fc2647ec09f89223cd598bc31d1bffc5",
+    "test/integration/character-wardrobe-writers.test.js": "1495242bc5548097cfb0151ad23a06313fc8b296e5787e0262dc0dbe6e089856",
+    "test/integration/character-wardrobe-query-evidence.test.js": "5a1e9c3a0c91a67e16244dd82a490d6b518c8ed54f6324c9567ade272f028af5",
+    "test/integration/character-wardrobe-operations.test.js": "2b3001db9279d420ee3cf77b530215c9ab0333379bab3d49c481749e114f0149",
+    "test/integration/character-wardrobe-cache.test.js": "ae6f27ed55ea25c5891a52263897fabaa5f818b19c92950c6010984cda24be25",
+    "test/integration/character-wardrobe-safety.test.js": "acfae1de6eacdd773fe0402e250caec9b20c6aab9d8ffbce9afb0ff1dcd42049",
+    "test/integration/seeded-account-deletion.test.js": "552d5d09fab88a61a2454ab6b2174d8d7621beab2e56dd8ba59b859c29beefe6",
+    "test/integration/completed-race-summary-cache.test.js": "ff5f8e5890ec132fff3f6dcf6c95b4e74c536f0ab4a6135180307803b291cb4c",
+    "test/integration/discard-cap-visibility.test.js": "920669b299eec33f3b62370e2fe02c4f58cd15c2cb39d6b72a0ac4af2683ee55",
+    "test/integration/race-queue-v2-closure-parity.test.js": "6846f2cb552d27403f3c5896e7d14b352c29ff0f49aa927bc88035f5bc1a75e1",
+    "test/integration/race-queue-v2-single-writer.test.js": "7499c069c4a580c1066c6b6d3b66be2d6353800e29e82d41e567e5381c0c60c3",
+    "test/integration/seeded-signup-recovery.test.js": "be39e69f4b72a9473182421377f4467a67feeb45315c4c3f236ff6638f3fbfd8"
+  },
+  "protocol": {
+    "aOnly": true,
+    "mixedWriters": true,
+    "rollbackToA": true,
+    "finalAppearanceRevision": 4
+  },
+  "sourceReview": "SHIP including account erasure, cache fallback, settings restoration and scenario claim isolation; final fixture follow-up review recorded in report commit",
+  "productionRecheck": {
+    "head": "1bcf874f5cd8f2a84e7dbb980aada9c3feca9325",
+    "productionOnlineWorkers": 2,
+    "staging": "stopped",
+    "readOnly": true
+  },
+  "testDatabaseSafety": {
+    "candidate": "localhost:5432/wardrobe-release-candidate_test",
+    "broad": "localhost:5432/steps-tracker-integration_test",
+    "baseline": "localhost:5432/wardrobe-production-baseline_test",
+    "pg18": "127.0.0.1:55549/wardrobe_pg18_test",
+    "pg18Version": "18.4",
+    "pg18OwnedClusterStopped": true,
+    "productionMigrationsApplied": false
+  },
+  "migrations": "All candidate migrations applied only locally; feature migration20260909190000_character_wardrobes additive. Production untouched.",
+  "contract": "Matches approved spec with coordinated additive canPreview; opaque text IDs. Existing clients retain legacy writer and unsupported-route fallback; A/B protocol verified."
+}

@@ -1,0 +1,1264 @@
+{
+  "candidate": {
+    "tests": "3225",
+    "pass": "3142",
+    "fail": "82",
+    "skipped": "1",
+    "duration_ms": "1121171.586125"
+  },
+  "baseline": {
+    "tests": "477",
+    "pass": "390",
+    "fail": "87",
+    "skipped": "0",
+    "duration_ms": "235945.676625"
+  },
+  "matchingSignatures": [
+    {
+      "file": "test/integration/batch-0808-admin-version-stats.test.js",
+      "name": "counts private vs public races, total and active",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: { privateTotal: 7, privateActive: 4, publicTotal: 3, publicActive: 1 },\nexpected: { privateTotal: 5, privateActive: 2, publicTotal: 3, publicActive: 1 },\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: { privateTotal: 7, privateActive: 4, publicTotal: 3, publicActive: 1 },\nexpected: { privateTotal: 5, privateActive: 2, publicTotal: 3, publicActive: 1 },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/batch-0808-admin-version-stats.test.js",
+      "name": "returns zeroed sections rather than omitting them when there is no data",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: { privateTotal: 2, privateActive: 2, publicTotal: 0, publicActive: 0 },\nexpected: { privateTotal: 0, privateActive: 0, publicTotal: 0, publicActive: 0 },\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: { privateTotal: 2, privateActive: 2, publicTotal: 0, publicActive: 0 },\nexpected: { privateTotal: 0, privateActive: 0, publicTotal: 0, publicActive: 0 },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/centralized-notification-delivery.test.js",
+      "name": "local provisioning stays notification-free and boundary activation projects durably",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/discard-cap-visibility.test.js",
+      "name": "the whole feature works with REDIS_URL unset",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: this suite must run without Redis \u2014 that is the point of the case\ncode: 'ERR_ASSERTION',\nactual: '',\nexpected: undefined,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: this suite must run without Redis \u2014 that is the point of the case\ncode: 'ERR_ASSERTION',\nactual: '',\nexpected: undefined,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/feature-batch-2026-07-24-discovery.test.js",
+      "name": "counts a featured race + bracket the viewer is NOT in, and excludes them once enrolled; /races/public unchanged",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "rejects funded race creation at the permanent five-membership ceiling",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "does not restore funded exposure enforcement when the legacy control is false",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "does not restore funded exposure enforcement when the legacy control is spoofed",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "serializes concurrent boundary creates with the per-user guard",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "serializes mixed-null healing against a funded release",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 6,\nexpected: 4,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 6,\nexpected: 4,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "releases an ordinary race membership slot on leave",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 7,\nexpected: 5,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/global-event-enrollment-query.test.js",
+      "name": "PG18 historical empty-page database work stays below the pre-implementation 8000-buffer budget",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^PostgreSQL 18\\./. Input:\ncode: 'ERR_ASSERTION',\nactual: 'PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit',\nexpected: /^PostgreSQL 18\\./,\noperator: 'match',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^PostgreSQL 18\\./. Input:\ncode: 'ERR_ASSERTION',\nactual: 'PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit',\nexpected: /^PostgreSQL 18\\./,\noperator: 'match',"
+    },
+    {
+      "file": "test/integration/global-event-reliability.test.js",
+      "name": "merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'COALESCE',\nexpected: 'IMMEDIATE',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'COALESCE',\nexpected: 'IMMEDIATE',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "name": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "name": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/notification-domain-isolation.test.js",
+      "name": "projects the real placement job's ending, team, slacker, and placement producers",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: TEAM_LEAD_CHANGED_V1 is appended by the real placement job\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: TEAM_LEAD_CHANGED_V1 is appended by the real placement job\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/notification-domain-isolation.test.js",
+      "name": "projects eligible and deleted-recipient outcomes from the real daily-mover job",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 2,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 2,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "4. signup with zero seeded races does not crash and warns AUTO_ENROLL_EMPTY",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 0,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 0,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: exactly one over-capacity relaxation join\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: exactly one over-capacity relaxation join\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "6. signup with a PENDING-only seeded race enrolls but grants no welcome boxes",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: auto-enroll should have joined the non-Daily race\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: auto-enroll should have joined the non-Daily race\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+      "name": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/powerups5-wave.test.js",
+      "name": "catalog exposes wave 5 only to capable clients and omits retired Imposter",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: DECOY visible with powerups5\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: DECOY visible with powerups5\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/powerups5-wave.test.js",
+      "name": "penalizes the target at expiry when the goal is missed",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: penalty applied at expiry\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: -1500,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: penalty applied at expiry\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: -1500,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/query-efficiency-enrollment.test.js",
+      "name": "real cron enrollment pages unique users in PostgreSQL",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'UTC',\nexpected: 'America/New_York',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'UTC',\nexpected: 'America/New_York',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/query-efficiency-resolution.test.js",
+      "name": "real resolution worker query trace and fence projection: team=true",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 400,\nexpected: 200,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 400,\nexpected: 200,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "keeps exact finish/placement/steps/join/user ordering and global ranks across pages",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>' ],\nexpected: [ '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>' ],\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>' ],\nexpected: [ '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>', '<uuid>' ],\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "uses a bounded indexed first page for 50 accepted participants",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 16,\nexpected: 15,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 16,\nexpected: 15,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "uses a bounded indexed first page for 500 accepted participants",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 16,\nexpected: 15,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 16,\nexpected: 15,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "uses a bounded indexed first page for 5000 accepted participants",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 16,\nexpected: 15,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 16,\nexpected: 15,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-leave-capability.test.js",
+      "name": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'FORFEIT',\nexpected: 'LEAVE',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'FORFEIT',\nexpected: 'LEAVE',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-powerup-placement-performance.test.js",
+      "name": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 100,\nexpected: 200,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 100,\nexpected: 200,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-preview-before-join.test.js",
+      "name": "REDIS_URL unset (the persist:true branch)",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: cached=false: a preview read must enqueue no resolution job\ncode: 'ERR_ASSERTION',\nactual: [ { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> }, { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> } ],\nexpected: [],\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: cached=false: a preview read must enqueue no resolution job\ncode: 'ERR_ASSERTION',\nactual: [ { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> }, { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> } ],\nexpected: [],\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-preview-before-join.test.js",
+      "name": "test Redis db15 + redisStandingsEnabled (the rebuild-lock branch)",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: cached=true: a preview read must enqueue no resolution job\ncode: 'ERR_ASSERTION',\nactual: [ { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> }, { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> } ],\nexpected: [],\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: cached=true: a preview read must enqueue no resolution job\ncode: 'ERR_ASSERTION',\nactual: [ { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> }, { id: '<uuid>', raceId: '<uuid>', generation: 0, processingGeneration: null, committedGeneration: 0, resolutionTimeZone: null, processingTimeZone: null, state: 'SUCCEEDED', attempts: 0, requestedAt: <timestamp>, startedAt: null, completedAt: <timestamp>, lastCompletedAt: <timestamp>, retryAt: null, notBeforeAt: null, leaseExpiresAt: null, leaseToken: null, lastErrorCode: null, triggeredByUserIds: [], processingTriggeredByUserIds: [], dirtyReasons: [], dirtyParticipantIds: [], dirtyPowerupTypes: [], dirtyPriority: 'IMMEDIATE', fullTriggerSeedOnly: false, queuePriority: 'LIVE', processingDirtyReasons: [], processingDirtyParticipantIds: [], processingDirtyPowerupTypes: [], processingDirtyPriority: 'IMMEDIATE', processingQueuePriority: 'LIVE', displayArtifactId: null, displayArtifactDigest: null, displayArtifactSchema: null, processingDisplayArtifactId: null, processingDisplayArtifactDigest: null, processingDisplayArtifactSchema: null, createdAt: <timestamp>, updatedAt: <timestamp> } ],\nexpected: [],\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "records the identical actor-target participant set at selection and at the fenced recheck",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ { stage: 'initial_selection', participantIds: [Array], participantCount: 1, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null }, { stage: 'fenced_recheck', participantIds: [Array], participantCount: 1, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null } ],\nexpected: [ { stage: 'initial_selection', participantIds: [Array], participantCount: 2, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null }, { stage: 'fenced_recheck', participantIds: [Array], participantCount: 2, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null } ],\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ { stage: 'initial_selection', participantIds: [Array], participantCount: 1, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null }, { stage: 'fenced_recheck', participantIds: [Array], participantCount: 1, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null } ],\nexpected: [ { stage: 'initial_selection', participantIds: [Array], participantCount: 2, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null }, { stage: 'fenced_recheck', participantIds: [Array], participantCount: 2, plan: 'DEPENDENCY_CLOSURE', fallbackReason: null } ],\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "unrelated SELF effect: only the uploader is scored and written",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: at least one closure member must carry a non-zero raw_steps, else the high-water column is untested\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: at least one closure member must carry a non-zero raw_steps, else the high-water column is untested\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "(ii) a non-closure crosser escalates to FULL with the mine still ACTIVE and zero partial writes",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: a non-closure crosser must escalate the generation\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: a non-closure crosser must escalate the generation\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "a FINISHED non-closure participant is judged at its frozen total, not its persisted one",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: a finished non-closure participant past the mine at its FROZEN total must escalate\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: a finished non-closure participant past the mine at its FROZEN total must escalate\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "(iii) an in+out crosser pair escalates and the FULL rerun picks the lower-total victim",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "losing the lease mid-closure writes nothing",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: the run must have detected the lost fence\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: the run must have detected the lost fence\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "a closure commit reaches onCommitted with the FULL roster",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: '<uuid>',\nexpected: '<uuid>',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: '<uuid>',\nexpected: '<uuid>',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+      "name": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 483,\nexpected: 1908,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 483,\nexpected: 1908,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+      "name": "graph reads stay a bounded constant and writes stay O(C) as the field grows 35x",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: size 10: the result must still carry the FULL roster (R9)\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 10,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: size 10: the result must still carry the FULL roster (R9)\ncode: 'ERR_ASSERTION',\nactual: 2,\nexpected: 10,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "flag off: a STEP_SYNC job logs every shadow field null and never enters the planner",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "a stale flag cannot resurrect shadow planning for an unrelated SELF effect",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "stale flag values leave persisted rows identical across an identical fixture",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: the comparison must cover non-trivial state, else this asserts nothing\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: the comparison must cover non-trivial state, else this asserts nothing\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "a stale flag cannot shadow-plan a race-wide effect",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "a stale flag never invokes an injected shadow planner",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "real watchdog exit rolls back, restarts, reclaims, and emails exactly once",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "uses resolution-first locks when G+1 score commit overlaps G placement persistence",
+      "candidateSignature": "",
+      "baselineSignature": ""
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "public mutation durably reserves an exact nudge intent before queued handoff",
+      "candidateSignature": "TypeError: Cannot read properties of null (reading 'state')",
+      "baselineSignature": "TypeError: Cannot read properties of null (reading 'state')"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "public sync creates and inline-claims one durable snapshot task when the post runner is unhealthy",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "public mutation resolves deferred nudge claims only after known task assembly failure",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "two users in the same two races sync concurrently: one job row per race, totals match a serial control, zero deadlocks over 50 iterations",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 4,\nexpected: 2,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 4,\nexpected: 2,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "settles source-input work without a retry loop for ended, cancelled, forfeited, and expired targets",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: ended\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: ended\ncode: 'ERR_ASSERTION',\nactual: 'QUEUED',\nexpected: 'SUCCEEDED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "N rapid syncs coalesce to <= 2 worker runs with correct totals, and EVERY triggering user's box state is processed",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: 12 syncs must coalesce to at most 2 runs, saw 3\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: 12 syncs must coalesce to at most 2 runs, saw 3\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "continuous generation bumps resolve at most once per RACE_RESOLVE_DEBOUNCE_MS",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: a continuously-bumped race must run once per debounce window, not spin\ncode: 'ERR_ASSERTION',\nactual: 3,\nexpected: 1,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: a continuously-bumped race must run once per debounce window, not spin\ncode: 'ERR_ASSERTION',\nactual: 3,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "users who enqueue DURING a run are processed by the follow-up run",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ '<uuid>', '<uuid>' ],\nexpected: [ '<uuid>' ],\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ '<uuid>', '<uuid>' ],\nexpected: [ '<uuid>' ],\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "a crashed run's triggering users are UNIONed back in on re-claim, never dropped",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ '<uuid>', '<uuid>' ],\nexpected: [ '<uuid>' ],\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\ncode: 'ERR_ASSERTION',\nactual: [ '<uuid>', '<uuid>' ],\nexpected: [ '<uuid>' ],\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-resolution-pending-scope.test.js",
+      "name": "publication preserves its failed attempt when HTTP advances generation before publication",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'failed_no_retry',\nexpected: 'succeeded',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'failed_no_retry',\nexpected: 'succeeded',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-resolution-pending-scope.test.js",
+      "name": "publication preserves its failed attempt when HTTP advances generation during Redis writes",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'SNAPSHOT_NOT_PUBLISHED',\nexpected: 'SNAPSHOT_GENERATION_ADVANCED',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'SNAPSHOT_NOT_PUBLISHED',\nexpected: 'SNAPSHOT_GENERATION_ADVANCED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-resolution-pending-scope.test.js",
+      "name": "a Redis write failure without newer input retains the generic publication error",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: inject failure at the real projection write boundary\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: inject failure at the real projection write boundary\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/referral-contest-joined-dashboard.test.js",
+      "name": "records exact event-time activity for create, direct join, and invite acceptance",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/resolved-impact-events-v2.test.js",
+      "name": "rolls back Drill Sergeant judgement with its v2 event, then retries once",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: undefined,\nexpected: 'DRILL_SERGEANT',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: undefined,\nexpected: 'DRILL_SERGEANT',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "serves a cold paged team bootstrap without polling for worker output",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: authoritative refresh remains queued\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: authoritative refresh remains queued\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "serves a cold frozen unpaged team bootstrap without polling for worker output",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: authoritative refresh remains queued\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: authoritative refresh remains queued\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "uses the worker's fresh lean team snapshot and hydrates names after masking",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: fresh worker snapshot needs no refresh\ncode: 'ERR_ASSERTION',\nactual: 1,\nexpected: 0,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: fresh worker snapshot needs no refresh\ncode: 'ERR_ASSERTION',\nactual: 1,\nexpected: 0,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "uses the worker's stale lean team snapshot and hydrates names after masking",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 300,\nexpected: 3000,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 300,\nexpected: 3000,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/tournaments.test.js",
+      "name": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: true,\nexpected: false,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: true,\nexpected: false,\noperator: 'strictEqual',"
+    }
+  ],
+  "differentSignatures": [
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "name": "HTTP step-sync dependency closure fails closed while that participant's local event is active",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: [{\"event\":\"race_resolution_v2_claim\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"jobId\":\"<uuid>\",\"raceId\":\"<uuid>\",\"leaseExpiresAt\":\"<timestamp>\",\"workerPid\":78877,\"queuePriority\":\"MAINTENANCE\",\"queueLagMs\":6},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"dependencyClosurePlanner\",\"parentPhase\":null,\"phaseStack\":[\"dependencyClosurePlanner\"],\"phaseElapsedMs\":0.001417,\"attemptElapsedMs\":0.049458,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.001417,\"monotonicAttemptElapsedMs\":0.049458,\"phaseInstance\":4},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000875,\"attemptElapsedMs\":1.76675,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000875,\"monotonicAttemptElapsedMs\":1.76675,\"phaseInstance\":5},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.0005,\"attemptElapsedMs\":1.784375,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.0005,\"monotonicAttemptElapsedMs\":1.784375,\"phaseInstance\":6},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":1.793291,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":1.793291,\"phaseInstance\":7},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":1.800833,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":1.800833,\"phaseInstance\":8},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000291,\"attemptElapsedMs\":1.81975,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000291,\"monotonicAttemptElapsedMs\":1.81975,\"phaseInstance\":9},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"artifactLookup\",\"parentPhase\":null,\"phaseStack\":[\"artifactLookup\"],\"phaseElapsedMs\":0.000167,\"attemptElapsedMs\":1.826291,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000167,\"monotonicAttemptElapsedMs\":1.826291,\"phaseInstance\":10},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"stepSyncScope\",\"parentPhase\":null,\"phaseStack\":[\"stepSyncScope\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":1.837125,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":1.837125,\"phaseInstance\":11},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"compute\",\"parentPhase\":null,\"phaseStack\":[\"compute\"],\"phaseElapsedMs\":0.000375,\"attemptElapsedMs\":1.974291,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000375,\"monotonicAttemptElapsedMs\":1.974291,\"phaseInstance\":12},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"prepareWrites\",\"parentPhase\":null,\"phaseStack\":[\"prepareWrites\"],\"phaseElapsedMs\":0.000875,\"attemptElapsedMs\":2.873166,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000875,\"monotonicAttemptElapsedMs\":2.873166,\"phaseInstance\":13},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"transaction\",\"parentPhase\":null,\"phaseStack\":[\"transaction\"],\"phaseElapsedMs\":0.000375,\"attemptElapsedMs\":2.886333,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000375,\"monotonicAttemptElapsedMs\":2.886333,\"phaseInstance\":14},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceAcquire\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceAcquire\"],\"phaseElapsedMs\":0.000792,\"attemptElapsedMs\":3.075166,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000792,\"monotonicAttemptElapsedMs\":3.075166,\"phaseInstance\":15},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceValidation\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceValidation\"],\"phaseElapsedMs\":0.000459,\"attemptElapsedMs\":3.310291,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000459,\"monotonicAttemptElapsedMs\":3.310291,\"phaseInstance\":16},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"participantWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"participantWrites\"],\"phaseElapsedMs\":0.001375,\"attemptElapsedMs\":6.054166,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.001375,\"monotonicAttemptElapsedMs\":6.054166,\"phaseInstance\":17},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"sideWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"sideWrites\"],\"phaseElapsedMs\":0.000541,\"attemptElapsedMs\":6.7205,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000541,\"monotonicAttemptElapsedMs\":6.7205,\"phaseInstance\":18},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"boxConsequences\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"boxConsequences\"],\"phaseElapsedMs\":0.000333,\"attemptElapsedMs\":6.742583,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000333,\"monotonicAttemptElapsedMs\":6.742583,\"phaseInstance\":19},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"recordSuccess\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"recordSuccess\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":6.888916,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":6.888916,\"phaseInstance\":20},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"placementHandoff\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"placementHandoff\"],\"phaseElapsedMs\":0.000291,\"attemptElapsedMs\":7.187208,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000291,\"monotonicAttemptElapsedMs\":7.187208,\"phaseInstance\":21},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postCommitHook\",\"parentPhase\":null,\"phaseStack\":[\"postCommitHook\"],\"phaseElapsedMs\":0.000458,\"attemptElapsedMs\":7.948875,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000458,\"monotonicAttemptElapsedMs\":7.948875,\"phaseInstance\":22},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"powerupStateSync\",\"parentPhase\":null,\"phaseStack\":[\"powerupStateSync\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":7.972416,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":7.972416,\"phaseInstance\":23},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postSettings\",\"parentPhase\":null,\"phaseStack\":[\"postSettings\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":8.012083,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":8.012083,\"phaseInstance\":24},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"overtakeNudges\",\"parentPhase\":null,\"phaseStack\":[\"overtakeNudges\"],\"phaseElapsedMs\":0.000209,\"attemptElapsedMs\":8.024416,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":78877,\"monotonicPhaseElapsedMs\":0.000209,\"monotonicAttemptElapsedMs\":8.024416,\"phaseInstance\":25},{\"event\":\"race_resolution_v2\",\"schemaVersion\":2,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"outcome\":\"commit\",\"queuePriority\":\"MAINTENANCE\",\"reasonClasses\":[\"STEP_INPUT_CHANGED\"],\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"artifactHit\":false,\"artifactFallbackReason\":null,\"dirtyParticipantCount\":1,\"fullParticipantCount\":1,\"triggeringUserCount\":1,\"changedRows\":1,\"activeImpactCreated\":0,\"activeImpactZero\":0,\"activeImpactSuppressed\":0,\"activeImpactFailures\":0,\"activeImpactMs\":0,\"activeImpactPersistMs\":0.013916,\"computeMs\":0,\"writeMs\":5,\"postTaskMs\":0,\"coreMs\":8,\"queueLagMs\":6,\"shadowClosurePlan\":null,\"shadowClosureFallbackReason\":null,\"shadowClosureCount\":null,\"shadowSourceCount\":null,\"shadowMinesActive\":null,\"shadowWouldEscalateOnMine\":null,\"shadowPlannerMs\":null,\"shadowRetainedSourceCount\":null,\"closureEscalatedOnMine\":false,\"closureFenceRejections\":0,\"closureFenceRejectionReason\":null,\"placementHandoffGeneration\":1,\"placementHandoffOutcome\":\"queued\",\"sourceInputFenceRejections\":0,\"sqlCount\":null,\"phaseMs\":{\"claimReadiness\":0.41925,\"fullTriggerPromotion\":1.733917,\"claim\":0.677958,\"planSettings\":0.040458,\"dependencyClosurePlanner\":1.698292,\"artifactLookup\":0.003792,\"stepSyncScope\":0.114208,\"compute\":0.896166,\"prepareWrites\":0.01225,\"transaction\":5.04425,\"fenceAcquire\":0.234375,\"fenceValidation\":1.585792,\"discardSuperseded\":0,\"participantWrites\":0.665958,\"sideWrites\":0.006458,\"boxConsequences\":0.1455,\"recordSuccess\":0.297042,\"placementHandoff\":0.383125,\"postSettings\":0.011875,\"postCommitHook\":0.023375,\"powerupStateSync\":0.039083,\"overtakeNudges\":0.411459,\"postTaskHandoff\":0},\"computePhaseMs\":{\"raceLoad\":0.035833,\"scoringPrefetch\":0.34575,\"globalEvents\":0.011875,\"participantScoring\":0.408041,\"hitchhikeCopies\":0.023125,\"leechAndCapture\":0.011083,\"activeImpactAttribution\":0,\"activeTimedImpactAttribution\":0,\"activeDefenseImpactAttribution\":0,\"activeEffects\":0.006292,\"trailMines\":0.003833},\"computePhaseQueryCaptureEnabled\":false,\"computePhaseQueryCount\":null,\"nudgePhaseMs\":{\"participantLoad\":0.389333,\"ranking\":0.002084,\"intentHandoff\":0},\"postHandoffPhaseMs\":{\"taskInsert\":0,\"resolveIntents\":0,\"taskUpdate\":0,\"intentInsert\":0,\"taskTransaction\":0,\"runnerReadiness\":0,\"inlineClaim\":0},\"stepSyncScopeOutcome\":\"invalid_envelope\",\"stepSyncScopeActiveEffectCount\":0,\"stepSyncScopePhaseMs\":{\"activeEffects\":0,\"raceHydration\":0}}]\ncode: 'ERR_ASSERTION',\nactual: 'DEPENDENCY_CLOSURE',\nexpected: 'FULL',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: [{\"event\":\"race_resolution_v2_claim\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"jobId\":\"<uuid>\",\"raceId\":\"<uuid>\",\"leaseExpiresAt\":\"<timestamp>\",\"workerPid\":87963,\"queuePriority\":\"MAINTENANCE\",\"queueLagMs\":7},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"dependencyClosurePlanner\",\"parentPhase\":null,\"phaseStack\":[\"dependencyClosurePlanner\"],\"phaseElapsedMs\":0.001458,\"attemptElapsedMs\":0.052084,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.001458,\"monotonicAttemptElapsedMs\":0.052084,\"phaseInstance\":4},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.001,\"attemptElapsedMs\":2.07825,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.001,\"monotonicAttemptElapsedMs\":2.07825,\"phaseInstance\":5},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000584,\"attemptElapsedMs\":2.100542,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000584,\"monotonicAttemptElapsedMs\":2.100542,\"phaseInstance\":6},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":2.11275,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":2.11275,\"phaseInstance\":7},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":2.121917,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":2.121917,\"phaseInstance\":8},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000375,\"attemptElapsedMs\":2.144792,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000375,\"monotonicAttemptElapsedMs\":2.144792,\"phaseInstance\":9},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"artifactLookup\",\"parentPhase\":null,\"phaseStack\":[\"artifactLookup\"],\"phaseElapsedMs\":0.000209,\"attemptElapsedMs\":2.154167,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000209,\"monotonicAttemptElapsedMs\":2.154167,\"phaseInstance\":10},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"stepSyncScope\",\"parentPhase\":null,\"phaseStack\":[\"stepSyncScope\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":2.16625,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":2.16625,\"phaseInstance\":11},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"compute\",\"parentPhase\":null,\"phaseStack\":[\"compute\"],\"phaseElapsedMs\":0.000417,\"attemptElapsedMs\":2.331917,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"FULL\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000417,\"monotonicAttemptElapsedMs\":2.331917,\"phaseInstance\":12},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"prepareWrites\",\"parentPhase\":null,\"phaseStack\":[\"prepareWrites\"],\"phaseElapsedMs\":0.001,\"attemptElapsedMs\":3.625792,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.001,\"monotonicAttemptElapsedMs\":3.625792,\"phaseInstance\":13},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"transaction\",\"parentPhase\":null,\"phaseStack\":[\"transaction\"],\"phaseElapsedMs\":0.000375,\"attemptElapsedMs\":3.641042,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000375,\"monotonicAttemptElapsedMs\":3.641042,\"phaseInstance\":14},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceAcquire\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceAcquire\"],\"phaseElapsedMs\":0.001208,\"attemptElapsedMs\":3.827875,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.001208,\"monotonicAttemptElapsedMs\":3.827875,\"phaseInstance\":15},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceValidation\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceValidation\"],\"phaseElapsedMs\":0.000458,\"attemptElapsedMs\":4.105417,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000458,\"monotonicAttemptElapsedMs\":4.105417,\"phaseInstance\":16},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"participantWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"participantWrites\"],\"phaseElapsedMs\":0.001167,\"attemptElapsedMs\":7.316667,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.001167,\"monotonicAttemptElapsedMs\":7.316667,\"phaseInstance\":17},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"sideWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"sideWrites\"],\"phaseElapsedMs\":0.000625,\"attemptElapsedMs\":8.113875,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000625,\"monotonicAttemptElapsedMs\":8.113875,\"phaseInstance\":18},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"boxConsequences\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"boxConsequences\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":8.13575,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":8.13575,\"phaseInstance\":19},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"recordSuccess\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"recordSuccess\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":8.276834,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":8.276834,\"phaseInstance\":20},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"placementHandoff\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"placementHandoff\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":8.556125,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":8.556125,\"phaseInstance\":21},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postCommitHook\",\"parentPhase\":null,\"phaseStack\":[\"postCommitHook\"],\"phaseElapsedMs\":0.000541,\"attemptElapsedMs\":9.150459,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000541,\"monotonicAttemptElapsedMs\":9.150459,\"phaseInstance\":22},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"powerupStateSync\",\"parentPhase\":null,\"phaseStack\":[\"powerupStateSync\"],\"phaseElapsedMs\":0.000291,\"attemptElapsedMs\":9.176042,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000291,\"monotonicAttemptElapsedMs\":9.176042,\"phaseInstance\":23},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postSettings\",\"parentPhase\":null,\"phaseStack\":[\"postSettings\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":9.214584,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":9.214584,\"phaseInstance\":24},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"overtakeNudges\",\"parentPhase\":null,\"phaseStack\":[\"overtakeNudges\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":9.22875,\"queuePriority\":\"MAINTENANCE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":87963,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":9.22875,\"phaseInstance\":25},{\"event\":\"race_resolution_v2\",\"schemaVersion\":2,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"outcome\":\"commit\",\"queuePriority\":\"MAINTENANCE\",\"reasonClasses\":[\"STEP_INPUT_CHANGED\"],\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"artifactHit\":false,\"artifactFallbackReason\":null,\"dirtyParticipantCount\":1,\"fullParticipantCount\":1,\"triggeringUserCount\":1,\"changedRows\":1,\"activeImpactCreated\":0,\"activeImpactZero\":0,\"activeImpactSuppressed\":0,\"activeImpactFailures\":0,\"activeImpactMs\":0,\"activeImpactPersistMs\":0.012791,\"computeMs\":1,\"writeMs\":6,\"postTaskMs\":0,\"coreMs\":9,\"queueLagMs\":7,\"shadowClosurePlan\":null,\"shadowClosureFallbackReason\":null,\"shadowClosureCount\":null,\"shadowSourceCount\":null,\"shadowMinesActive\":null,\"shadowWouldEscalateOnMine\":null,\"shadowPlannerMs\":null,\"shadowRetainedSourceCount\":null,\"closureEscalatedOnMine\":false,\"closureFenceRejections\":0,\"closureFenceRejectionReason\":null,\"placementHandoffGeneration\":1,\"placementHandoffOutcome\":\"queued\",\"sourceInputFenceRejections\":0,\"sqlCount\":null,\"phaseMs\":{\"claimReadiness\":0.428417,\"fullTriggerPromotion\":1.606791,\"claim\":0.658875,\"planSettings\":0.052626,\"dependencyClosurePlanner\":2.002542,\"artifactLookup\":0.004834,\"stepSyncScope\":0.138625,\"compute\":1.29075,\"prepareWrites\":0.014083,\"transaction\":5.49025,\"fenceAcquire\":0.277,\"fenceValidation\":2.023875,\"discardSuperseded\":0,\"participantWrites\":0.796417,\"sideWrites\":0.007375,\"boxConsequences\":0.140084,\"recordSuccess\":0.278042,\"placementHandoff\":0.397625,\"postSettings\":0.013792,\"postCommitHook\":0.025583,\"powerupStateSync\":0.037958,\"overtakeNudges\":0.431708,\"postTaskHandoff\":0},\"computePhaseMs\":{\"raceLoad\":0.053375,\"scoringPrefetch\":0.519833,\"globalEvents\":0.02,\"participantScoring\":0.568541,\"hitchhikeCopies\":0.039833,\"leechAndCapture\":0.01375,\"activeImpactAttribution\":0,\"activeTimedImpactAttribution\":0,\"activeDefenseImpactAttribution\":0,\"activeEffects\":0.0063750000000000005,\"trailMines\":0.00375},\"computePhaseQueryCaptureEnabled\":false,\"computePhaseQueryCount\":null,\"nudgePhaseMs\":{\"participantLoad\":0.409,\"ranking\":0.002208,\"intentHandoff\":0},\"postHandoffPhaseMs\":{\"taskInsert\":0,\"resolveIntents\":0,\"taskUpdate\":0,\"intentInsert\":0,\"taskTransaction\":0,\"runnerReadiness\":0,\"inlineClaim\":0},\"stepSyncScopeOutcome\":\"invalid_envelope\",\"stepSyncScopeActiveEffectCount\":0,\"stepSyncScopePhaseMs\":{\"activeEffects\":0,\"raceHydration\":0}}]\ncode: 'ERR_ASSERTION',\nactual: 'DEPENDENCY_CLOSURE',\nexpected: 'FULL',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "(i) a closure-member victim detonates byte-identically to FULL",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: alice must match the FULL control byte for byte through the detonation\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 5625, rawSteps: 9000, bonusSteps: -625, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\nexpected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\noperator: 'deepStrictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: the detonation must actually have penalised the victim, else parity is vacuous\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/redis-cache-c3-standings.test.js",
+      "name": "reuses the canonical pre-mine display while committing captured mine effects and feed",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: [{\"event\":\"race_resolution_v2_claim\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"jobId\":\"<uuid>\",\"raceId\":\"<uuid>\",\"leaseExpiresAt\":\"<timestamp>\",\"workerPid\":86856,\"queuePriority\":\"LIVE\",\"queueLagMs\":61},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"dependencyClosurePlanner\",\"parentPhase\":null,\"phaseStack\":[\"dependencyClosurePlanner\"],\"phaseElapsedMs\":0.001084,\"attemptElapsedMs\":0.03625,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.001084,\"monotonicAttemptElapsedMs\":0.03625,\"phaseInstance\":4},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000708,\"attemptElapsedMs\":3.054291,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000708,\"monotonicAttemptElapsedMs\":3.054291,\"phaseInstance\":5},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":3.064416,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":3.064416,\"phaseInstance\":6},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000209,\"attemptElapsedMs\":3.070291,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000209,\"monotonicAttemptElapsedMs\":3.070291,\"phaseInstance\":7},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000209,\"attemptElapsedMs\":3.076541,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000209,\"monotonicAttemptElapsedMs\":3.076541,\"phaseInstance\":8},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":3.086708,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":3.086708,\"phaseInstance\":9},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"artifactLookup\",\"parentPhase\":null,\"phaseStack\":[\"artifactLookup\"],\"phaseElapsedMs\":0.000167,\"attemptElapsedMs\":3.091375,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000167,\"monotonicAttemptElapsedMs\":3.091375,\"phaseInstance\":10},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"compute\",\"parentPhase\":null,\"phaseStack\":[\"compute\"],\"phaseElapsedMs\":0.000334,\"attemptElapsedMs\":3.125708,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000334,\"monotonicAttemptElapsedMs\":3.125708,\"phaseInstance\":11},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"prepareWrites\",\"parentPhase\":null,\"phaseStack\":[\"prepareWrites\"],\"phaseElapsedMs\":0.00075,\"attemptElapsedMs\":4.316666,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.00075,\"monotonicAttemptElapsedMs\":4.316666,\"phaseInstance\":12},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"transaction\",\"parentPhase\":null,\"phaseStack\":[\"transaction\"],\"phaseElapsedMs\":0.000291,\"attemptElapsedMs\":4.33025,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000291,\"monotonicAttemptElapsedMs\":4.33025,\"phaseInstance\":13},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceAcquire\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceAcquire\"],\"phaseElapsedMs\":0.001375,\"attemptElapsedMs\":4.518791,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.001375,\"monotonicAttemptElapsedMs\":4.518791,\"phaseInstance\":14},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceValidation\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceValidation\"],\"phaseElapsedMs\":0.000666,\"attemptElapsedMs\":4.843125,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000666,\"monotonicAttemptElapsedMs\":4.843125,\"phaseInstance\":15},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"participantWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"participantWrites\"],\"phaseElapsedMs\":0.001167,\"attemptElapsedMs\":8.89025,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.001167,\"monotonicAttemptElapsedMs\":8.89025,\"phaseInstance\":16},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"sideWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"sideWrites\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":8.903083,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":8.903083,\"phaseInstance\":17},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"boxConsequences\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"boxConsequences\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":8.921208,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":8.921208,\"phaseInstance\":18},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"recordSuccess\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"recordSuccess\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":9.05275,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":9.05275,\"phaseInstance\":19},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"placementHandoff\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"placementHandoff\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":9.49675,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":9.49675,\"phaseInstance\":20},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postCommitHook\",\"parentPhase\":null,\"phaseStack\":[\"postCommitHook\"],\"phaseElapsedMs\":0.00075,\"attemptElapsedMs\":10.425833,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.00075,\"monotonicAttemptElapsedMs\":10.425833,\"phaseInstance\":21},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"powerupStateSync\",\"parentPhase\":null,\"phaseStack\":[\"powerupStateSync\"],\"phaseElapsedMs\":0.000667,\"attemptElapsedMs\":12.6595,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000667,\"monotonicAttemptElapsedMs\":12.6595,\"phaseInstance\":22},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postSettings\",\"parentPhase\":null,\"phaseStack\":[\"postSettings\"],\"phaseElapsedMs\":0.000333,\"attemptElapsedMs\":12.706625,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.000333,\"monotonicAttemptElapsedMs\":12.706625,\"phaseInstance\":23},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"overtakeNudges\",\"parentPhase\":null,\"phaseStack\":[\"overtakeNudges\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":12.716125,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":86856,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":12.716125,\"phaseInstance\":24},{\"event\":\"race_resolution_v2\",\"schemaVersion\":2,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"outcome\":\"commit\",\"queuePriority\":\"LIVE\",\"reasonClasses\":[\"STEP_INPUT_CHANGED\"],\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"artifactHit\":false,\"artifactFallbackReason\":null,\"dirtyParticipantCount\":1,\"fullParticipantCount\":2,\"triggeringUserCount\":1,\"changedRows\":0,\"activeImpactCreated\":0,\"activeImpactZero\":0,\"activeImpactSuppressed\":0,\"activeImpactFailures\":0,\"activeImpactMs\":0,\"activeImpactPersistMs\":0.011541,\"computeMs\":1,\"writeMs\":6,\"postTaskMs\":3,\"coreMs\":13,\"queueLagMs\":61,\"shadowClosurePlan\":null,\"shadowClosureFallbackReason\":null,\"shadowClosureCount\":null,\"shadowSourceCount\":null,\"shadowMinesActive\":null,\"shadowWouldEscalateOnMine\":null,\"shadowPlannerMs\":null,\"shadowRetainedSourceCount\":null,\"closureEscalatedOnMine\":false,\"closureFenceRejections\":0,\"closureFenceRejectionReason\":null,\"placementHandoffGeneration\":3,\"placementHandoffOutcome\":\"queued\",\"sourceInputFenceRejections\":0,\"sqlCount\":null,\"phaseMs\":{\"claimReadiness\":0.781417,\"fullTriggerPromotion\":2.9375,\"claim\":1.45625,\"planSettings\":0.029043,\"dependencyClosurePlanner\":3.002834,\"artifactLookup\":0.003417,\"stepSyncScope\":0,\"compute\":1.188292,\"prepareWrites\":0.01275,\"transaction\":5.9865,\"fenceAcquire\":0.323875,\"fenceValidation\":2.624666,\"discardSuperseded\":0,\"participantWrites\":0.012959,\"sideWrites\":0.004583,\"boxConsequences\":0.13075,\"recordSuccess\":0.442417,\"placementHandoff\":0.584667,\"postSettings\":0.009208,\"postCommitHook\":2.233083,\"powerupStateSync\":0.046542,\"overtakeNudges\":0.547208,\"postTaskHandoff\":0},\"computePhaseMs\":{\"raceLoad\":0.061125,\"scoringPrefetch\":0.408959,\"globalEvents\":0.066209,\"participantScoring\":0.5965,\"hitchhikeCopies\":0,\"leechAndCapture\":0.016458,\"activeImpactAttribution\":0,\"activeTimedImpactAttribution\":0,\"activeDefenseImpactAttribution\":0,\"activeEffects\":0,\"trailMines\":0},\"computePhaseQueryCaptureEnabled\":false,\"computePhaseQueryCount\":null,\"nudgePhaseMs\":{\"participantLoad\":0.527875,\"ranking\":0.0035,\"intentHandoff\":0},\"postHandoffPhaseMs\":{\"taskInsert\":0,\"resolveIntents\":0,\"taskUpdate\":0,\"intentInsert\":0,\"taskTransaction\":0,\"runnerReadiness\":0,\"inlineClaim\":0},\"stepSyncScopeOutcome\":\"not_attempted\",\"stepSyncScopeActiveEffectCount\":0,\"stepSyncScopePhaseMs\":{\"activeEffects\":0,\"raceHydration\":0}}]\ncode: 'ERR_ASSERTION',\nactual: 'DEPENDENCY_CLOSURE',\nexpected: 'ARTIFACT_REUSE',\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: [{\"event\":\"race_resolution_v2_claim\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"jobId\":\"<uuid>\",\"raceId\":\"<uuid>\",\"leaseExpiresAt\":\"<timestamp>\",\"workerPid\":88487,\"queuePriority\":\"LIVE\",\"queueLagMs\":60},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"dependencyClosurePlanner\",\"parentPhase\":null,\"phaseStack\":[\"dependencyClosurePlanner\"],\"phaseElapsedMs\":0.00125,\"attemptElapsedMs\":0.063792,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00125,\"monotonicAttemptElapsedMs\":0.063792,\"phaseInstance\":4},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.001,\"attemptElapsedMs\":3.232042,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.001,\"monotonicAttemptElapsedMs\":3.232042,\"phaseInstance\":5},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000333,\"attemptElapsedMs\":3.248667,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000333,\"monotonicAttemptElapsedMs\":3.248667,\"phaseInstance\":6},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":3.255709,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":3.255709,\"phaseInstance\":7},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.000208,\"attemptElapsedMs\":3.263042,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000208,\"monotonicAttemptElapsedMs\":3.263042,\"phaseInstance\":8},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"planSettings\",\"parentPhase\":null,\"phaseStack\":[\"planSettings\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":3.2755,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":3.2755,\"phaseInstance\":9},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"artifactLookup\",\"parentPhase\":null,\"phaseStack\":[\"artifactLookup\"],\"phaseElapsedMs\":0.000167,\"attemptElapsedMs\":3.280625,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000167,\"monotonicAttemptElapsedMs\":3.280625,\"phaseInstance\":10},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"compute\",\"parentPhase\":null,\"phaseStack\":[\"compute\"],\"phaseElapsedMs\":0.000334,\"attemptElapsedMs\":3.326792,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"FULL\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000334,\"monotonicAttemptElapsedMs\":3.326792,\"phaseInstance\":11},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"prepareWrites\",\"parentPhase\":null,\"phaseStack\":[\"prepareWrites\"],\"phaseElapsedMs\":0.000625,\"attemptElapsedMs\":4.595875,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000625,\"monotonicAttemptElapsedMs\":4.595875,\"phaseInstance\":12},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"transaction\",\"parentPhase\":null,\"phaseStack\":[\"transaction\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":4.610542,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":4.610542,\"phaseInstance\":13},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceAcquire\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceAcquire\"],\"phaseElapsedMs\":0.000708,\"attemptElapsedMs\":4.858334,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000708,\"monotonicAttemptElapsedMs\":4.858334,\"phaseInstance\":14},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"fenceValidation\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"fenceValidation\"],\"phaseElapsedMs\":0.000459,\"attemptElapsedMs\":5.164625,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000459,\"monotonicAttemptElapsedMs\":5.164625,\"phaseInstance\":15},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"participantWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"participantWrites\"],\"phaseElapsedMs\":0.000625,\"attemptElapsedMs\":9.248042,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000625,\"monotonicAttemptElapsedMs\":9.248042,\"phaseInstance\":16},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"sideWrites\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"sideWrites\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":9.258209,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":9.258209,\"phaseInstance\":17},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"boxConsequences\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"boxConsequences\"],\"phaseElapsedMs\":0.000292,\"attemptElapsedMs\":9.279875,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000292,\"monotonicAttemptElapsedMs\":9.279875,\"phaseInstance\":18},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"recordSuccess\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"recordSuccess\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":9.40675,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":9.40675,\"phaseInstance\":19},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"placementHandoff\",\"parentPhase\":\"transaction\",\"phaseStack\":[\"transaction\",\"placementHandoff\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":9.837667,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":9.837667,\"phaseInstance\":20},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postCommitHook\",\"parentPhase\":null,\"phaseStack\":[\"postCommitHook\"],\"phaseElapsedMs\":0.000542,\"attemptElapsedMs\":10.7325,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000542,\"monotonicAttemptElapsedMs\":10.7325,\"phaseInstance\":21},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"powerupStateSync\",\"parentPhase\":null,\"phaseStack\":[\"powerupStateSync\"],\"phaseElapsedMs\":0.000833,\"attemptElapsedMs\":12.893292,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000833,\"monotonicAttemptElapsedMs\":12.893292,\"phaseInstance\":22},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"postSettings\",\"parentPhase\":null,\"phaseStack\":[\"postSettings\"],\"phaseElapsedMs\":0.000416,\"attemptElapsedMs\":12.946167,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.000416,\"monotonicAttemptElapsedMs\":12.946167,\"phaseInstance\":23},{\"event\":\"race_resolution_v2_phase\",\"schemaVersion\":3,\"observedAt\":\"<timestamp>\",\"checkpoint\":\"enter\",\"attemptId\":\"<uuid>:<uuid>\",\"activePhase\":\"overtakeNudges\",\"parentPhase\":null,\"phaseStack\":[\"overtakeNudges\"],\"phaseElapsedMs\":0.00025,\"attemptElapsedMs\":12.958792,\"queuePriority\":\"LIVE\",\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"workerPid\":88487,\"monotonicPhaseElapsedMs\":0.00025,\"monotonicAttemptElapsedMs\":12.958792,\"phaseInstance\":24},{\"event\":\"race_resolution_v2\",\"schemaVersion\":2,\"observedAt\":\"<timestamp>\",\"attemptId\":\"<uuid>:<uuid>\",\"outcome\":\"commit\",\"queuePriority\":\"LIVE\",\"reasonClasses\":[\"STEP_INPUT_CHANGED\"],\"resolutionPlan\":\"DEPENDENCY_CLOSURE\",\"artifactHit\":false,\"artifactFallbackReason\":null,\"dirtyParticipantCount\":1,\"fullParticipantCount\":2,\"triggeringUserCount\":1,\"changedRows\":0,\"activeImpactCreated\":0,\"activeImpactZero\":0,\"activeImpactSuppressed\":0,\"activeImpactFailures\":0,\"activeImpactMs\":0,\"activeImpactPersistMs\":0.013833,\"computeMs\":2,\"writeMs\":6,\"postTaskMs\":3,\"coreMs\":14,\"queueLagMs\":60,\"shadowClosurePlan\":null,\"shadowClosureFallbackReason\":null,\"shadowClosureCount\":null,\"shadowSourceCount\":null,\"shadowMinesActive\":null,\"shadowWouldEscalateOnMine\":null,\"shadowPlannerMs\":null,\"shadowRetainedSourceCount\":null,\"closureEscalatedOnMine\":false,\"closureFenceRejections\":0,\"closureFenceRejectionReason\":null,\"placementHandoffGeneration\":3,\"placementHandoffOutcome\":\"queued\",\"sourceInputFenceRejections\":0,\"sqlCount\":null,\"phaseMs\":{\"claimReadiness\":0.648375,\"fullTriggerPromotion\":2.477875,\"claim\":1.383916,\"planSettings\":0.035166,\"dependencyClosurePlanner\":3.144542,\"artifactLookup\":0.003792,\"stepSyncScope\":0,\"compute\":1.262917,\"prepareWrites\":0.0115,\"transaction\":6.02525,\"fenceAcquire\":0.302667,\"fenceValidation\":2.690459,\"discardSuperseded\":0,\"participantWrites\":0.006833,\"sideWrites\":0.004125,\"boxConsequences\":0.124,\"recordSuccess\":0.428042,\"placementHandoff\":0.569667,\"postSettings\":0.010125,\"postCommitHook\":2.156,\"powerupStateSync\":0.049833,\"overtakeNudges\":0.613292,\"postTaskHandoff\":0},\"computePhaseMs\":{\"raceLoad\":0.068167,\"scoringPrefetch\":0.481667,\"globalEvents\":0.052375,\"participantScoring\":0.588792,\"hitchhikeCopies\":0,\"leechAndCapture\":0.019375,\"activeImpactAttribution\":0,\"activeTimedImpactAttribution\":0,\"activeDefenseImpactAttribution\":0,\"activeEffects\":0,\"trailMines\":0},\"computePhaseQueryCaptureEnabled\":false,\"computePhaseQueryCount\":null,\"nudgePhaseMs\":{\"participantLoad\":0.588709,\"ranking\":0.003791,\"intentHandoff\":0},\"postHandoffPhaseMs\":{\"taskInsert\":0,\"resolveIntents\":0,\"taskUpdate\":0,\"intentInsert\":0,\"taskTransaction\":0,\"runnerReadiness\":0,\"inlineClaim\":0},\"stepSyncScopeOutcome\":\"not_attempted\",\"stepSyncScopeActiveEffectCount\":0,\"stepSyncScopePhaseMs\":{\"activeEffects\":0,\"raceHydration\":0}}]\ncode: 'ERR_ASSERTION',\nactual: 'DEPENDENCY_CLOSURE',\nexpected: 'ARTIFACT_REUSE',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/seeded-signup-recovery.test.js",
+      "name": "LEGACY: late signup recovery preserves requested scoring time and enrolls the event active at that time",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 59,\nexpected: 2,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 8,\nexpected: 2,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/seeded-signup-recovery.test.js",
+      "name": "BUCKET: late signup recovery preserves requested scoring time and enrolls the event active at that time",
+      "candidateSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 59,\nexpected: 2,\noperator: 'strictEqual',",
+      "baselineSignature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 8,\nexpected: 2,\noperator: 'strictEqual',"
+    }
+  ],
+  "candidateOnly": [
+    {
+      "file": "test/integration/completed-race-summary-cache.test.js",
+      "name": "returns the same HTTP result when Redis throws",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  500 !== 200\n  \n      at races (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/completed-race-summary-cache.test.js:96:10)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/completed-race-summary-cache.test.js:462:24)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 200,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 500,\nexpected: 200,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/powerup-character-batch-2026-07-25.test.js",
+      "name": "stamps the new 1h base window for ladder + fixed-window powerups",
+      "details": "  AssertionError [ERR_ASSERTION]: UPRISING cast should succeed\n  \n  400 !== 200\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/powerup-character-batch-2026-07-25.test.js:284:16)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Promise.all (index 0)\n      at async Suite.run (node:internal/test_runner/test:1771:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 400,\n    expected: 200,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: UPRISING cast should succeed\ncode: 'ERR_ASSERTION',\nactual: 400,\nexpected: 200,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "Leech target with multiple leechers: every leecher is in the closure",
+      "details": "  AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\n  + actual - expected\n  \n    {\n      bonusSteps: 0,\n      finishTotalSteps: null,\n      maxBonusSteps: 0,\n  +   nextBoxAtSteps: 10000,\n  +   rawSteps: 9000,\n  +   totalSteps: 3400\n  -   nextBoxAtSteps: 2000,\n  -   rawSteps: 0,\n  -   totalSteps: 0\n    }\n  \n      at assertParity (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-closure-parity.test.js:444:12)\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-closure-parity.test.js:587:37)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { totalSteps: 3400, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\n    expected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 3400, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\nexpected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "finished and forfeited participants keep identical frozen totals",
+      "details": "  AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\n  + actual - expected\n  \n    {\n      bonusSteps: 0,\n      finishTotalSteps: null,\n      maxBonusSteps: 0,\n  +   nextBoxAtSteps: 2000,\n  +   rawSteps: 0,\n  +   totalSteps: 0\n  -   nextBoxAtSteps: 10000,\n  -   rawSteps: 9000,\n  -   totalSteps: 5700\n    }\n  \n      at assertParity (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-closure-parity.test.js:444:12)\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-closure-parity.test.js:747:5)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\n    expected: { totalSteps: 5700, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\nexpected: { totalSteps: 5700, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "an effect created between the graph read and the fence rejects the closure and commits full state",
+      "details": "  AssertionError [ERR_ASSERTION]: a rejected closure must retry the same generation as FULL\n  + actual - expected\n  \n  + 'DEPENDENCY_CLOSURE'\n  - 'FULL'\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-closure-parity.test.js:1110:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Promise.all (index 0)\n      at async Suite.run (node:internal/test_runner/test:1771:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 'DEPENDENCY_CLOSURE',\n    expected: 'FULL',\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: a rejected closure must retry the same generation as FULL\ncode: 'ERR_ASSERTION',\nactual: 'DEPENDENCY_CLOSURE',\nexpected: 'FULL',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "FULL recovery with empty trigger arrays reconciles an overdue box exactly once",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  0 !== 1\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-single-writer.test.js:409:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 0,\n    expected: 1,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "retries without committing score when durable post-task preparation fails",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  + actual - expected\n  \n  + null\n  - 'INJECTED_PREPARE_FAILURE'\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-single-writer.test.js:762:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: null,\n    expected: 'INJECTED_PREPARE_FAILURE',\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: null,\nexpected: 'INJECTED_PREPARE_FAILURE',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "re-fences every force-FULL retry and refreshes a second lower correction in the same claim",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  0 !== 1000\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-release-candidate-20260909/test/integration/race-queue-v2-single-writer.test.js:1685:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 0,\n    expected: 1000,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 0,\nexpected: 1000,\noperator: 'strictEqual',"
+    }
+  ],
+  "baselineOnly": [
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "non-funded account deletion serializes against create, public join, and invite",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  500 !== 204\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/funded-exposure-admission.test.js:556:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 204,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 500,\nexpected: 204,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "account deletion waits behind C0 while the same race settles",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  500 !== 204\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/funded-exposure-admission.test.js:1144:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 204,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 500,\nexpected: 204,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "account deletion and a different-race admission leave no orphan membership",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  500 !== 204\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/funded-exposure-admission.test.js:1163:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 204,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 500,\nexpected: 204,\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/notification-domain-isolation.test.js",
+      "name": "retention waits for downstream delivery, survives account deletion, and cascades only terminal coordination rows",
+      "details": "  AssertionError [ERR_ASSERTION]: pending push outbox protects its source event\n  + actual - expected\n  \n    {\n  +   cleanupPagesUsed: 3,\n      deleted: 0,\n  +   eventReceiptsBackfilled: 0,\n  +   eventReceiptsDeleted: 0,\n  +   schedulePayloadsDeleted: 0,\n  +   scheduleReceiptsBackfilled: 0,\n  +   scheduleReceiptsDeleted: 0\n    }\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/notification-domain-isolation.test.js:1388:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { deleted: 0, eventReceiptsBackfilled: 0, scheduleReceiptsBackfilled: 0, eventReceiptsDeleted: 0, schedulePayloadsDeleted: 0, scheduleReceiptsDeleted: 0, cleanupPagesUsed: 3 },\n    expected: { deleted: 0 },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: pending push outbox protects its source event\ncode: 'ERR_ASSERTION',\nactual: { deleted: 0, eventReceiptsBackfilled: 0, scheduleReceiptsBackfilled: 0, eventReceiptsDeleted: 0, schedulePayloadsDeleted: 0, scheduleReceiptsDeleted: 0, cleanupPagesUsed: 3 },\nexpected: { deleted: 0 },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "transitive Leech chain: the closure expands to fixed point",
+      "details": "  AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\n  + actual - expected\n  \n    {\n      bonusSteps: 0,\n      finishTotalSteps: null,\n      maxBonusSteps: 0,\n  +   nextBoxAtSteps: 10000,\n  +   rawSteps: 9000,\n  +   totalSteps: 6200\n  -   nextBoxAtSteps: 2000,\n  -   rawSteps: 0,\n  -   totalSteps: 0\n    }\n  \n      at assertParity (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:444:12)\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:609:37)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { totalSteps: 6200, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\n    expected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 6200, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\nexpected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "both Hitchhike scoring versions match FULL",
+      "details": "  AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\n  + actual - expected\n  \n    {\n      bonusSteps: 0,\n      finishTotalSteps: null,\n      maxBonusSteps: 0,\n  +   nextBoxAtSteps: 2000,\n  +   rawSteps: 0,\n  +   totalSteps: 0\n  -   nextBoxAtSteps: 8000,\n  -   rawSteps: 6000,\n  -   totalSteps: 6000\n    }\n  \n      at assertParity (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:444:12)\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:637:37)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\n    expected: { totalSteps: 6000, rawSteps: 6000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 8000, finishTotalSteps: null },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\nexpected: { totalSteps: 6000, rawSteps: 6000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 8000, finishTotalSteps: null },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "mixed Leech + Hitchhike graph matches FULL",
+      "details": "  AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\n  + actual - expected\n  \n    {\n      bonusSteps: 0,\n      finishTotalSteps: null,\n      maxBonusSteps: 0,\n  +   nextBoxAtSteps: 10000,\n  +   rawSteps: 9000,\n  +   totalSteps: 6400\n  -   nextBoxAtSteps: 2000,\n  -   rawSteps: 0,\n  -   totalSteps: 0\n    }\n  \n      at assertParity (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:444:12)\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:663:37)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { totalSteps: 6400, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\n    expected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 6400, rawSteps: 9000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 10000, finishTotalSteps: null },\nexpected: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "joinedAt raw-score tie resolves identically",
+      "details": "  AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\n  + actual - expected\n  \n    {\n      bonusSteps: 0,\n      finishTotalSteps: null,\n      maxBonusSteps: 0,\n  +   nextBoxAtSteps: 2000,\n  +   rawSteps: 0,\n  -   nextBoxAtSteps: 6000,\n  -   rawSteps: 5000,\n      totalSteps: 0\n    }\n  \n      at assertParity (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:444:12)\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:777:5)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\n    expected: { totalSteps: 0, rawSteps: 5000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 6000, finishTotalSteps: null },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: closure role 0 must match the independent FULL control byte for byte\ncode: 'ERR_ASSERTION',\nactual: { totalSteps: 0, rawSteps: 0, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 2000, finishTotalSteps: null },\nexpected: { totalSteps: 0, rawSteps: 5000, bonusSteps: 0, maxBonusSteps: 0, nextBoxAtSteps: 6000, finishTotalSteps: null },\noperator: 'deepStrictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "an effect on a non-closure participant that becomes due between plan selection and the fence rejects the closure, and its stepsAtExpiry is still stamped",
+      "details": "  AssertionError [ERR_ASSERTION]: a due expiry on a NON-closure participant must send the generation to FULL\n  + actual - expected\n  \n  + 'DEPENDENCY_CLOSURE'\n  - 'FULL'\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-closure-parity.test.js:1160:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 'DEPENDENCY_CLOSURE',\n    expected: 'FULL',\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: a due expiry on a NON-closure participant must send the generation to FULL\ncode: 'ERR_ASSERTION',\nactual: 'DEPENDENCY_CLOSURE',\nexpected: 'FULL',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "a public step mutation before the STEP_SYNC fence falls back to FULL in the same run",
+      "details": "  AssertionError [ERR_ASSERTION]: both public mutations survive the fallback\n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-single-writer.test.js:1637:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: '==',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: both public mutations survive the fallback\ncode: 'ERR_ASSERTION',\nactual: false,\nexpected: true,\noperator: '==',"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "malformed mixed-version dirty metadata atomically becomes FULL instead of losing the enqueue",
+      "details": "  PrismaClientKnownRequestError: \n  Invalid `prisma.racePlacementTransitionJob.update()` invocation in\n  /private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-single-writer.test.js:1744:45\n  \n    1741 await prisma.raceParticipant.updateMany({\n    1742   where: { raceId }, data: { lastNotifiedPlacement: 99 },\n    1743 });\n  \u2192 1744 await prisma.racePlacementTransitionJob.update(\n  An operation failed because it depends on one or more records that were required but not found. No record was found for an update.\n      at Gr.handleRequestError (/private/tmp/shop-wardrobe-production-baseline-20260909/node_modules/@prisma/client/runtime/client.js:65:8286)\n      at Gr.handleAndLogRequestError (/private/tmp/shop-wardrobe-production-baseline-20260909/node_modules/@prisma/client/runtime/client.js:65:7581)\n      at Gr.request (/private/tmp/shop-wardrobe-production-baseline-20260909/node_modules/@prisma/client/runtime/client.js:65:7288)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async a (/private/tmp/shop-wardrobe-production-baseline-20260909/node_modules/@prisma/client/runtime/client.js:75:6730)\n      at async TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/race-queue-v2-single-writer.test.js:1744:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7)\n",
+      "signature": ""
+    },
+    {
+      "file": "test/integration/seeded-signup-recovery.test.js",
+      "name": "weekly inactivity maintenance keeps an explicit current Join while pruning the equivalent automatic empty member",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  + actual - expected\n  \n  + 'ACCEPTED'\n  - 'DECLINED'\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/seeded-signup-recovery.test.js:80:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 'ACCEPTED',\n    expected: 'DECLINED',\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 'ACCEPTED',\nexpected: 'DECLINED',\noperator: 'strictEqual',"
+    },
+    {
+      "file": "test/integration/tournaments.test.js",
+      "name": "tournament invite, decline, and start serialize against account deletion",
+      "details": "  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  500 !== 204\n  \n      at TestContext.<anonymous> (/private/tmp/shop-wardrobe-production-baseline-20260909/test/integration/tournaments.test.js:356:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1313:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 204,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "signature": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\ncode: 'ERR_ASSERTION',\nactual: 500,\nexpected: 204,\noperator: 'strictEqual',"
+    }
+  ],
+  "interpretation": {
+    "baseline": "Exact deployed runtime 1bcf874f5cd8f2a84e7dbb980aada9c3feca9325; only the 31 failing candidate suites were rerun, not the full baseline suite.",
+    "normalization": "Initial comparison uses exact test file/name and assertion/error signatures, with generated UUIDs/timestamps normalized. Metrics differences and later reruns are classified separately; totals alone do not establish attribution.",
+    "broadRunSourceTree": "a1f3eec98e5d37e45297ad8511822bdeedaa9d60",
+    "notFinalAggregate": "Targeted corrections after this broad run are recorded separately; do not subtract them to invent a new full-suite result."
+  },
+  "followupDispositions": [
+    {
+      "case": "completed-race-summary-cache: returns the same HTTP result when Redis throws",
+      "finding": "Repeated candidate 500 reproduced on exact deployed source once redisPresentationGenerationGuardEnabled was explicitly true. cleanDatabase retains app_settings; our new cache test had left this key enabled, while baseline defaulted false. Both worktrees have identical env/overlay symlinks.",
+      "correction": "Catch collaborator throw and use existing durable presentation fallback. Explicit guarded test coverage; restore prior cache settings after each test. Existing HTTP assertions unchanged.",
+      "validation": "Completed summary + new wardrobe public Redis tests 8/8; baseline forced-guard case fails 500 as expected."
+    },
+    {
+      "case": "powerup-character-batch: stamps the new 1h base window",
+      "finding": "UPRISING response400 expected200 now reproduces in both narrow reruns; no wardrobe purchase or fit path involved. Unresolved prior powerup policy/fixture mismatch; no duration or payout changes authorized."
+    },
+    {
+      "case": "closure-parity: a closure-member victim detonates byte-identically to FULL",
+      "finding": "Initial baseline failed earlier, but narrow baseline reproduces candidate computed-vs-zero parity assertion. Added scenario ownership assertion subsequently proves processOne selected another race for scenario fixtures."
+    },
+    {
+      "case": "closure-parity: Leech target with multiple leechers; finished/forfeited frozen totals",
+      "finding": "Unscoped processOne claims a different race from the scenario, demonstrated by new actual-vs-expected raceId assertion before prior business assertions. Real signup queues seeded races too.",
+      "correction": "Scope only scenario claimNext to exact raceId using real job model, retaining processOne readiness/lease/fence and every prior assertion; add claimed-race assertion."
+    },
+    {
+      "case": "closure-parity: effect created between graph read and fence",
+      "finding": "Initial candidate plan mismatch also reproduces on baseline; candidate narrow recheck passes. Existing unrelated planner/fixture uncertainty, not an established wardrobe regression."
+    },
+    {
+      "case": "single-writer: FULL recovery with empty triggers; force-FULL lower correction",
+      "finding": "Added claimed-race assertions demonstrate wrong pending race selected. Fixture claimNext scoped to scenario race; same real processOne path, no debounce bypass."
+    },
+    {
+      "case": "single-writer: durable post-task preparation failure",
+      "finding": "Initial candidate failure does not reproduce in either narrow recheck. Same unscoped job-claim assumption exists; fixture now scopes expected race without altering preparation assertions."
+    },
+    {
+      "case": "local-global-step-event-entitlements dependency closure; redis-cache-c3-standings pre-mine reuse",
+      "finding": "Same actual/expected plan and rejection category on both branches; only logged generated IDs/timings differ. Semantically matching failures despite initial textual-signature difference."
+    },
+    {
+      "case": "seeded-signup-recovery LEGACY and BUCKET",
+      "finding": "Resolved fixture catalog contamination: cleanDatabase retains race_seeds. Failed baseline subject had exactly one membership for each of8 seeds (canonical2 plus6 custom fixtures), not duplicate canonical enrollments. Candidate broad run had more retained custom seeds.",
+      "correction": "Temporarily activate only canonical daily/weekly seeds, snapshot/restore prior active/powerupsEnabled/updatedAt values; preserve every original assertion and all catalog rows.",
+      "validation": "Both LEGACY and BUCKET pass on candidate2/2 and exact-prod baseline2/2 with retained custom seeds. No production recovery defect established."
+    },
+    {
+      "case": "PG18 historical empty-page; discard-cap no-Redis; scoped queue cases",
+      "finding": "Final targeted verification passes: PG18 buffer regression1/1 in isolated PostgreSQL18.4 at127.0.0.1:55549 wardrobe_pg18_test, subsequently stopped. Nine strict fixture cases pass after explicit no-Redis setup and real scenario-owned queue claims. No original assertion was removed or weakened."
+    }
+  ],
+  "categories": {
+    "environment": {
+      "suites": [
+        "discard-cap-visibility",
+        "global-event-enrollment-query"
+      ],
+      "evidence": "Explicit REDIS_URL empty string differs from undefined assertion; local PostgreSQL16.14 differs from required18.x. No production behavior change is implied.",
+      "resolution": "Both named environment-only cases now green. PostgreSQL18 installed tooling used an isolated cluster; Redis fixture explicitly unsets/restores its prior environment value."
+    },
+    "signup_fixture_assumptions": {
+      "suites": [
+        "batch-0808-admin-version-stats",
+        "funded-exposure-admission",
+        "onboarding-revamp",
+        "feature-batch-2026-07-24-discovery",
+        "query-efficiency-enrollment",
+        "referral-contest-joined-dashboard"
+      ],
+      "evidence": "Deployed immediate-join creates additional seeded participation. Direct count assertions show +2 memberships (for example7 expected5). Older onboarding tests expect absent/pending seeded races. Other listed cases need fixture-specific follow-up; no assertion was altered."
+    },
+    "prior_policy_contracts": {
+      "suites": [
+        "powerups5-wave",
+        "powerup-character-batch-2026-07-25",
+        "race-leave-capability",
+        "tournaments"
+      ],
+      "evidence": "DECOY visibility assertion conflicts with permanent retirement; tournament powerupsEnabled expectedfalse conflicts with current true policy; old team leave expectsLEAVE receivesFORFEIT. Additional expiry/duration cases need separate policy/fixture investigation. No economy numbers or policies changed."
+    },
+    "performance_and_generation": {
+      "suites": [
+        "race-bootstrap-persisted-standings",
+        "race-queue-v2-closure-scaling",
+        "query-efficiency-resolution",
+        "race-powerup-placement-performance",
+        "team-race-read-performance"
+      ],
+      "evidence": "Standings16 expected15 measures Actual Rows from EXPLAIN, not query count: final SQL tie uses participantId while existing index ends userId. Requires separate index/order review. The477 fixture changes source samples without advancing immutable user scoring generation;475 cached users retain1 box while2 uncached users get4 (483 vs1908). Other listed performance cases remain unresolved exact-baseline failures."
+    },
+    "queue_event_cache_prior_behavior": {
+      "suites": [
+        "centralized-notification-delivery",
+        "global-event-reliability",
+        "local-global-step-event-entitlements",
+        "notification-domain-isolation",
+        "postgresql-coordinated-optimization-public-pipeline",
+        "race-preview-before-join",
+        "race-queue-v2-closure-parity",
+        "race-queue-v2-closure-shadow",
+        "race-queue-v2-single-writer",
+        "race-resolution-pending-scope",
+        "redis-cache-c3-standings",
+        "resolved-impact-events-v2"
+      ],
+      "evidence": "Named signatures retained above reproduce deployed behavior or varying queue fixture selection. Corrected scenario-owned claims are separately rerun. Remaining event/queue/cache assertions require focused prior-feature investigations; unchanged runtime files alone do not establish harmlessness."
+    },
+    "seeded_recovery_integrity": {
+      "suites": [
+        "seeded-signup-recovery"
+      ],
+      "status": "resolved fixture contamination",
+      "evidence": "Failed baseline memberships grouped by seed: exactly1 each of seed-daily-10k, seed-weekly-50k, cap-exclusion, ONBOARDING_REVAMP_DAILY, ONBOARDING_REVAMP_OTHER, SOURCE_FALLBACK, GENERIC_FALLBACK and PUBLIC_PREVIEW. Isolated catalog tests pass2/2 on both runtimes, restoring prior settings."
+    }
+  },
+  "finalQueueRerun": {
+    "tests": 70,
+    "pass": 50,
+    "fail": 20,
+    "skipped": 0,
+    "note": "Before the final mine/placement/watchdog fixture scope additions; those additions and the previous scoped cases pass in a subsequent9/9 targeted run. No inferred new broad total.",
+    "failureNames": [
+      "(i) a closure-member victim detonates byte-identically to FULL",
+      "(ii) a non-closure crosser escalates to FULL with the mine still ACTIVE and zero partial writes",
+      "(iii) an in+out crosser pair escalates and the FULL rerun picks the lower-total victim",
+      "an effect created between the graph read and the fence rejects the closure and commits full state",
+      "losing the lease mid-closure writes nothing",
+      "a closure commit reaches onCommitted with the FULL roster",
+      "real watchdog exit rolls back, restarts, reclaims, and emails exactly once",
+      "rolls score success back when its constant-size placement handoff fails",
+      "uses resolution-first locks when G+1 score commit overlaps G placement persistence",
+      "public mutation durably reserves an exact nudge intent before queued handoff",
+      "watchdog expiry immediately after authoritative success leaves every required post-task recoverable",
+      "public sync creates and inline-claims one durable snapshot task when the post runner is unhealthy",
+      "public mutation resolves deferred nudge claims only after known task assembly failure",
+      "two users in the same two races sync concurrently: one job row per race, totals match a serial control, zero deadlocks over 50 iterations",
+      "a public step mutation before the STEP_SYNC fence falls back to FULL in the same run",
+      "malformed mixed-version dirty metadata atomically becomes FULL instead of losing the enqueue",
+      "N rapid syncs coalesce to <= 2 worker runs with correct totals, and EVERY triggering user's box state is processed",
+      "continuous generation bumps resolve at most once per RACE_RESOLVE_DEBOUNCE_MS",
+      "users who enqueue DURING a run are processed by the follow-up run",
+      "a crashed run's triggering users are UNIONed back in on re-claim, never dropped"
+    ]
+  },
+  "originalFailureLatestDisposition": [
+    {
+      "file": "test/integration/batch-0808-admin-version-stats.test.js",
+      "name": "counts private vs public races, total and active",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/batch-0808-admin-version-stats.test.js",
+      "name": "returns zeroed sections rather than omitting them when there is no data",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/centralized-notification-delivery.test.js",
+      "name": "local provisioning stays notification-free and boundary activation projects durably",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/completed-race-summary-cache.test.js",
+      "name": "returns the same HTTP result when Redis throws",
+      "status": "pass",
+      "log": "wardrobe-candidate-redis-final.log"
+    },
+    {
+      "file": "test/integration/discard-cap-visibility.test.js",
+      "name": "the whole feature works with REDIS_URL unset",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/feature-batch-2026-07-24-discovery.test.js",
+      "name": "counts a featured race + bracket the viewer is NOT in, and excludes them once enrolled; /races/public unchanged",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "rejects funded race creation at the permanent five-membership ceiling",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "does not restore funded exposure enforcement when the legacy control is false",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "does not restore funded exposure enforcement when the legacy control is spoofed",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "serializes concurrent boundary creates with the per-user guard",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "serializes mixed-null healing against a funded release",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/funded-exposure-admission.test.js",
+      "name": "releases an ordinary race membership slot on leave",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/global-event-enrollment-query.test.js",
+      "name": "PG18 historical empty-page database work stays below the pre-implementation 8000-buffer budget",
+      "status": "pass",
+      "log": "wardrobe-candidate-pg18-buffer.log"
+    },
+    {
+      "file": "test/integration/global-event-reliability.test.js",
+      "name": "merges a concurrent STEP_SYNC queue reason and scopes with global-event activation",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "name": "HTTP step-sync dependency closure fails closed while that participant's local event is active",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "name": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/local-global-step-event-entitlements.test.js",
+      "name": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/notification-domain-isolation.test.js",
+      "name": "projects the real placement job's ending, team, slacker, and placement producers",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/notification-domain-isolation.test.js",
+      "name": "projects eligible and deleted-recipient outcomes from the real daily-mover job",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "4. signup with zero seeded races does not crash and warns AUTO_ENROLL_EMPTY",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "6. signup with a PENDING-only seeded race enrolls but grants no welcome boxes",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/onboarding-revamp.test.js",
+      "name": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+      "name": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/powerup-character-batch-2026-07-25.test.js",
+      "name": "stamps the new 1h base window for ladder + fixed-window powerups",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/powerups5-wave.test.js",
+      "name": "catalog exposes wave 5 only to capable clients and omits retired Imposter",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/powerups5-wave.test.js",
+      "name": "penalizes the target at expiry when the goal is missed",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/query-efficiency-enrollment.test.js",
+      "name": "real cron enrollment pages unique users in PostgreSQL",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/query-efficiency-resolution.test.js",
+      "name": "real resolution worker query trace and fence projection: team=true",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "keeps exact finish/placement/steps/join/user ordering and global ranks across pages",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "uses a bounded indexed first page for 50 accepted participants",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "uses a bounded indexed first page for 500 accepted participants",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-bootstrap-persisted-standings.test.js",
+      "name": "uses a bounded indexed first page for 5000 accepted participants",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-leave-capability.test.js",
+      "name": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-powerup-placement-performance.test.js",
+      "name": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-preview-before-join.test.js",
+      "name": "REDIS_URL unset (the persist:true branch)",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-preview-before-join.test.js",
+      "name": "test Redis db15 + redisStandingsEnabled (the rebuild-lock branch)",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "records the identical actor-target participant set at selection and at the fenced recheck",
+      "status": "pass",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "unrelated SELF effect: only the uploader is scored and written",
+      "status": "pass",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "Leech target with multiple leechers: every leecher is in the closure",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "finished and forfeited participants keep identical frozen totals",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "(i) a closure-member victim detonates byte-identically to FULL",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "(ii) a non-closure crosser escalates to FULL with the mine still ACTIVE and zero partial writes",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "a FINISHED non-closure participant is judged at its frozen total, not its persisted one",
+      "status": "pass",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "(iii) an in+out crosser pair escalates and the FULL rerun picks the lower-total victim",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "an effect created between the graph read and the fence rejects the closure and commits full state",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "losing the lease mid-closure writes nothing",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-parity.test.js",
+      "name": "a closure commit reaches onCommitted with the FULL roster",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+      "name": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-scaling.test.js",
+      "name": "graph reads stay a bounded constant and writes stay O(C) as the field grows 35x",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "flag off: a STEP_SYNC job logs every shadow field null and never enters the planner",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "a stale flag cannot resurrect shadow planning for an unrelated SELF effect",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "stale flag values leave persisted rows identical across an identical fixture",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "a stale flag cannot shadow-plan a race-wide effect",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-closure-shadow.test.js",
+      "name": "a stale flag never invokes an injected shadow planner",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "real watchdog exit rolls back, restarts, reclaims, and emails exactly once",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "FULL recovery with empty trigger arrays reconciles an overdue box exactly once",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "retries without committing score when durable post-task preparation fails",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "uses resolution-first locks when G+1 score commit overlaps G placement persistence",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "public mutation durably reserves an exact nudge intent before queued handoff",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "public sync creates and inline-claims one durable snapshot task when the post runner is unhealthy",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "public mutation resolves deferred nudge claims only after known task assembly failure",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "two users in the same two races sync concurrently: one job row per race, totals match a serial control, zero deadlocks over 50 iterations",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "re-fences every force-FULL retry and refreshes a second lower correction in the same claim",
+      "status": "pass",
+      "log": "wardrobe-candidate-final-fixtures.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "settles source-input work without a retry loop for ended, cancelled, forfeited, and expired targets",
+      "status": "pass",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "N rapid syncs coalesce to <= 2 worker runs with correct totals, and EVERY triggering user's box state is processed",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "continuous generation bumps resolve at most once per RACE_RESOLVE_DEBOUNCE_MS",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "users who enqueue DURING a run are processed by the follow-up run",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-queue-v2-single-writer.test.js",
+      "name": "a crashed run's triggering users are UNIONed back in on re-claim, never dropped",
+      "status": "fail",
+      "log": "wardrobe-candidate-queue-scoped.log"
+    },
+    {
+      "file": "test/integration/race-resolution-pending-scope.test.js",
+      "name": "publication preserves its failed attempt when HTTP advances generation before publication",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-resolution-pending-scope.test.js",
+      "name": "publication preserves its failed attempt when HTTP advances generation during Redis writes",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/race-resolution-pending-scope.test.js",
+      "name": "a Redis write failure without newer input retains the generic publication error",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/redis-cache-c3-standings.test.js",
+      "name": "reuses the canonical pre-mine display while committing captured mine effects and feed",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/referral-contest-joined-dashboard.test.js",
+      "name": "records exact event-time activity for create, direct join, and invite acceptance",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/resolved-impact-events-v2.test.js",
+      "name": "rolls back Drill Sergeant judgement with its v2 event, then retries once",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/seeded-signup-recovery.test.js",
+      "name": "LEGACY: late signup recovery preserves requested scoring time and enrolls the event active at that time",
+      "status": "pass",
+      "log": "wardrobe-candidate-recovery-isolated.log"
+    },
+    {
+      "file": "test/integration/seeded-signup-recovery.test.js",
+      "name": "BUCKET: late signup recovery preserves requested scoring time and enrolls the event active at that time",
+      "status": "pass",
+      "log": "wardrobe-candidate-recovery-isolated.log"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "serves a cold paged team bootstrap without polling for worker output",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "serves a cold frozen unpaged team bootstrap without polling for worker output",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "uses the worker's fresh lean team snapshot and hydrates names after masking",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/team-race-read-performance.test.js",
+      "name": "uses the worker's stale lean team snapshot and hydrates names after masking",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    },
+    {
+      "file": "test/integration/tournaments.test.js",
+      "name": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward",
+      "status": "not rerun since baseline comparison",
+      "log": "wardrobe-candidate-integration-full.log"
+    }
+  ],
+  "residualSuiteNames": [
+    "test/integration/batch-0808-admin-version-stats.test.js",
+    "test/integration/centralized-notification-delivery.test.js",
+    "test/integration/feature-batch-2026-07-24-discovery.test.js",
+    "test/integration/funded-exposure-admission.test.js",
+    "test/integration/global-event-reliability.test.js",
+    "test/integration/local-global-step-event-entitlements.test.js",
+    "test/integration/notification-domain-isolation.test.js",
+    "test/integration/onboarding-revamp.test.js",
+    "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js",
+    "test/integration/powerup-character-batch-2026-07-25.test.js",
+    "test/integration/powerups5-wave.test.js",
+    "test/integration/query-efficiency-enrollment.test.js",
+    "test/integration/query-efficiency-resolution.test.js",
+    "test/integration/race-bootstrap-persisted-standings.test.js",
+    "test/integration/race-leave-capability.test.js",
+    "test/integration/race-powerup-placement-performance.test.js",
+    "test/integration/race-preview-before-join.test.js",
+    "test/integration/race-queue-v2-closure-parity.test.js",
+    "test/integration/race-queue-v2-closure-scaling.test.js",
+    "test/integration/race-queue-v2-closure-shadow.test.js",
+    "test/integration/race-queue-v2-single-writer.test.js",
+    "test/integration/race-resolution-pending-scope.test.js",
+    "test/integration/redis-cache-c3-standings.test.js",
+    "test/integration/referral-contest-joined-dashboard.test.js",
+    "test/integration/resolved-impact-events-v2.test.js",
+    "test/integration/team-race-read-performance.test.js",
+    "test/integration/tournaments.test.js"
+  ],
+  "readiness": "Blocked from unconditional done/deploy-ready claim while unrelated broad integration assertions remain red. Named baseline reproductions are evidence, not a waiver of repository done rules."
+}
