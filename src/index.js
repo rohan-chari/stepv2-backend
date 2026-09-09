@@ -22,7 +22,7 @@ const {
   registerNotificationHandlers,
 } = require("./modules/notifications");
 const { scheduleRaceExpiryCheck } = require("./modules/races");
-const { scheduleSeededRaceRenewal } = require("./modules/races");
+const { scheduleSeededChallengePreparation } = require("./modules/races/jobs/seededChallengePreparation");
 const {
   scheduleTournamentSeedRenewal,
 } = require("./modules/tournaments");
@@ -109,7 +109,7 @@ function startServer({
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
   registerRaceListCacheInvalidation: registerRaceListCache = registerRaceListCacheInvalidation,
   scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
-  scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededRaceRenewal,
+  scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededChallengePreparation,
   scheduleTournamentSeedRenewal:
     scheduleTournamentRenewal = scheduleTournamentSeedRenewal,
   scheduleComputeRanks: scheduleRanks = scheduleComputeRanks,
@@ -309,7 +309,7 @@ function startServer({
         retainStopHandle(dispatcher({ processRole }));
       }
       scheduleRaceExpiry();
-      scheduleSeededRenewal();
+      retainStopHandle(scheduleSeededRenewal());
       scheduleTournamentRenewal();
       scheduleRanks();
       scheduleRankedWeeks();

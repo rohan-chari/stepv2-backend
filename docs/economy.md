@@ -344,3 +344,43 @@ and legacy response aliases must remain until this monetary tail and any
 recovery jobs drain; completed legacy history still needs defensive
 serialization afterward. `buyInEditEnabled` is relevant only to reconciliation
 on that remaining paid legacy lobby once creation is permanently funded.
+
+## Seeded challenge late admission and scoring
+
+**Source-only verification: 2026-09-09. No production configuration or player
+aggregates were queried for this entry.** Earlier production snapshots above
+remain historical observations, not current prize settings.
+
+- New race creation stamps prize calculation V2, coin unit **10**, and race
+  pool maximum **8,000**. Settlement resolves each race's own stamp; historical
+  V1 rows can retain different values. Sources:
+  `src/modules/races/services/fundedExposure.js:14-18,46-58,76-80`.
+- Seeded funded settlement counts accepted, ranked participants with positive
+  scored totals and uses the race's full duration. It does not prorate by a
+  participant's joining time. At the V2 unit, the uncapped raw pool contribution
+  is **10 coins per qualifying daily entrant** and **40 per qualifying weekly
+  entrant**, provided at least two players qualify. These are pool inputs,
+  not individual guaranteed awards or a measured median player's EV. Sources:
+  `src/modules/races/racePrizePool.js:46-52,94-110` and
+  `src/shared/economy/prizePool.js:30-37,65-82`.
+- Recipient payouts also depend on the race's payout preset, curve, and rounding
+  version. Rounding V1 raises each positive whole-coin award to a multiple of
+  five with a minimum of ten; issued coins can therefore exceed the raw pool.
+  Sources: `src/modules/races/racePayoutPresets.js:184-211` and
+  `src/modules/races/services/payoutRounding.js:22-40`.
+- Initial cohorts target 30–35 daily entrants and 75–100 weekly entrants;
+  maximum capacities are 35 and 100. Signup already supports admission into
+  active private cohorts and capped overflow, with server-selected available
+  capacity. Sources: `src/modules/races/services/seededRaceBuckets.js:34-59`
+  and `src/modules/races/commands/autoEnrollNewUser.js:172-368,531-583`.
+- Scoring starts at the later of race start and participant join time. Midday
+  entrants use time-window samples for their starting day, without a whole-day
+  total fallback. A sample crossing the join instant is prorated by interval
+  overlap, so its physical step timing is estimated. Sources:
+  `src/modules/races/services/raceStateResolution.js:83-86,135-183`,
+  `src/modules/races/queries/getRaceProgress.js:444-446,488-502`, and
+  `src/modules/steps/models/stepSample.js:584-605`.
+
+The immediate manual daily/weekly Join proposal has not changed this policy or
+these code paths. No admission-based payout adjustment or new walking minimum
+has been implemented as part of this analysis.

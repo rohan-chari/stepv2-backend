@@ -1386,6 +1386,102 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // owns the stamp, avoiding the scoring-row/queue-row lock inversion.
     await promoteMismatchedCommittedStepSync(job, prisma);
 
+    // Preparation owns reservations; only this lease-fenced worker can turn
+    // them into background participants. Run before even the closure planner
+    // reads the roster, including when the published shell is still empty.
+    const pureStepInput = Array.isArray(job.processingDirtyReasons) &&
+      job.processingDirtyReasons.length > 0 &&
+      job.processingDirtyReasons.every(reason => reason === 'STEP_SYNC' || reason === 'STEP_INPUT_CHANGED');
+    // Membership, activation, inventory and recovery producers durably wake
+    // this path. Pure step input cannot release inventory or add reservations.
+    // Unknown/empty/mixed envelopes retain the conservative recovery probe.
+    if (prisma.seededChallengePreparationGroup && !pureStepInput) {
+      // One indexed existence probe; ordinary scoring never opens the extra
+      // membership transactions. FULL envelopes also qualify because older
+      // queue producers do not preserve reason-specific metadata.
+      const tasks = await prisma.$queryRaw`
+        SELECT CASE WHEN g.state='MATERIALIZED' THEN 'PREPARED' ELSE 'MATERIALIZE' END AS operation
+        FROM seeded_challenge_preparation_groups g JOIN races r ON r.id=g.reserved_race_id
+        WHERE g.reserved_race_id=${job.raceId} AND (g.state <> 'MATERIALIZED' OR r.status='pending')
+        UNION ALL
+        SELECT 'REPAIR' AS operation WHERE EXISTS (
+          SELECT 1 FROM seeded_challenge_membership_repairs t
+          JOIN race_participants p ON p.id=t.source_participant_id
+          WHERE p.race_id=${job.raceId} AND t.state='PENDING' AND t.available_at<=${now()}
+        )
+        UNION ALL
+        SELECT 'WELCOME' AS operation WHERE EXISTS (
+          SELECT 1 FROM race_participants p JOIN races r ON r.id=p.race_id
+          JOIN users u ON u.id=p.user_id
+          WHERE r.id=${job.raceId} AND r.status='active' AND r.powerups_enabled=true
+            AND EXISTS (SELECT 1 FROM race_seeds s WHERE s.id=r.seed_id AND s.kind IN ('DAILY_10K','WEEKLY_50K'))
+            AND (SELECT count(*) FROM race_powerups box WHERE box.participant_id=p.id AND box.status IN ('held','mystery_box'))<p.powerup_slots
+            AND p.status='accepted' AND p.forfeited_at IS NULL AND u.is_review_account=false
+            AND COALESCE(NULLIF(u.apple_id,''),NULLIF(u.google_sub,'')) IS NOT NULL AND (EXISTS (
+              SELECT 1 FROM seeded_challenge_enrollment_requests i WHERE i.user_id=u.id
+                AND i.seed_id=r.seed_id AND i.window_start=COALESCE(r.scheduled_start_at,r.started_at) AND i.source='SIGNUP'
+            ) OR EXISTS (
+              SELECT 1 FROM onboarding_box_grant g WHERE g.apple_sub_hash=encode(sha256(convert_to(COALESCE(NULLIF(u.apple_id,''),NULLIF(u.google_sub,'')),'UTF8')),'hex')
+                AND g.granted_box_count<g.target_box_count
+            )) AND NOT EXISTS (
+              SELECT 1 FROM onboarding_box_grant g WHERE g.apple_sub_hash=encode(sha256(convert_to(COALESCE(NULLIF(u.apple_id,''),NULLIF(u.google_sub,'')),'UTF8')),'hex')
+                AND (g.target_box_count IS NULL OR g.granted_box_count>=g.target_box_count)
+            )
+        )`;
+      const operationNames = tasks.filter(task => task.operation !== 'PREPARED').map(task => task.operation);
+      // A newly materialized signup was absent from the existence probe above.
+      // Always check its durable gift entitlement after membership commits.
+      if (operationNames.includes('MATERIALIZE') && !operationNames.includes('WELCOME')) operationNames.push('WELCOME');
+      const operations = operationNames.map(name => name === 'MATERIALIZE'
+        ? require("../services/seededChallengeMaterialization").buildSeededChallengeMaterialization()
+        : name === 'WELCOME'
+          ? require("../services/seededChallengeWelcome").buildSeededChallengeWelcome()
+          : require("../services/seededChallengeMembershipRepair").buildSeededChallengeMembershipRepair());
+      if (operations.length) await dependencies.beforeSeededMembershipWrite?.({ job });
+      for (const operation of operations) {
+        const materialized = await prisma.$transaction(async tx => {
+          const fenced = await jobModel.acquireForWrite(tx, {
+            id: job.id, expectedLeaseToken: job.leaseToken, now: now(),
+          });
+          if (!fenced || new Date(fenced.leaseExpiresAt) <= now()) throw new FenceLostError();
+          return operation.processRace({ tx, raceId: job.raceId, now: now() });
+        }, { timeout: 15000, maxWait: 2000 });
+        for (const payload of materialized.events || []) {
+          try { events.emit('POWERUP_EARNED', payload); } catch (error) { logger.error?.('Recovered signup welcome notification failed', error); }
+        }
+        if (materialized.changed) {
+          // A membership change always uses a fresh full snapshot. Committed
+          // user-facing caches are invalidated only after the transaction.
+          job.processingDirtyReasons = [...new Set([...(job.processingDirtyReasons || []), "MEMBERSHIP_CHANGED"])];
+          await Promise.allSettled([
+            ...materialized.userIds.map(userId => require("../services/raceListCache").invalidateUser(userId)),
+            require("../services/raceProgressSnapshot").invalidateRaceProgress(job.raceId),
+            require("../../steps/services/globalStepEventEntitlement").invalidateHomeActiveGlobalEvent(materialized.userIds),
+          ]);
+        }
+      }
+      if (tasks.some(task => task.operation === 'MATERIALIZE' || task.operation === 'PREPARED')) {
+        const prepared = await prisma.$transaction(async tx => {
+          const fenced = await jobModel.acquireForWrite(tx, { id: job.id, expectedLeaseToken: job.leaseToken, now: now() });
+          if (!fenced || new Date(fenced.leaseExpiresAt) <= now()) throw new FenceLostError();
+          const race = await tx.race.findUnique({ where: { id: job.raceId }, select: { status: true } });
+          if (race?.status !== 'PENDING') return false;
+          // Materialization is durable, but scoring/boxes/placements begin at
+          // activation. A concurrent activation queues a newer generation;
+          // recordSuccess preserves it using the normal generation protocol.
+          const outcome = await jobModel.recordSuccess({ id: job.id, leaseToken: job.leaseToken,
+            processingGeneration: job.processingGeneration, now: now() }, tx);
+          if (!outcome.applied) throw new FenceLostError();
+          return true;
+        }, { timeout: 15000, maxWait: 2000 });
+        if (prepared) {
+          attempt.authoritativeCommitCompleted = true;
+          logger.log(JSON.stringify({ event: 'race_resolution_v2_prepared', jobId: job.id, raceId: job.raceId, attemptId }));
+          return { jobId: job.id, prepared: true };
+        }
+      }
+    }
+
     // Dependency closure is permanent. Ineligible or failed plans still fall
     // back to FULL through the existing correctness path.
     const closureShadow = NULL_CLOSURE_SHADOW_FIELDS;

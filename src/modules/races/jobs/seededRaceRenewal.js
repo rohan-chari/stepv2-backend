@@ -275,10 +275,17 @@ function buildRenewSeededRaces(dependencies = {}) {
           select: { status: true, seededBucketId: true },
         });
         if (!lockedRace || lockedRace.status !== "PENDING") return 0;
+        const manual = tx.seededRaceWindowMembership ? await tx.seededRaceWindowMembership.findMany({
+          where: { seedId: race.seedId, raceId: race.id, admissionSource: "MANUAL_CURRENT", userId: { in: inactiveIds } },
+          select: { userId: true },
+        }) : [];
+        const protectedIds = new Set(manual.map(row => row.userId));
+        const pruneIds = inactiveIds.filter(id => !protectedIds.has(id));
+        if (!pruneIds.length) return 0;
         const participantWhere = {
           raceId: race.id,
           status: "ACCEPTED",
-          userId: { in: inactiveIds },
+          userId: { in: pruneIds },
         };
         // Assignment rows intentionally retain their exact participant pointer
         // as the audit of the immutable plan. A private bucket therefore prunes
@@ -289,7 +296,7 @@ function buildRenewSeededRaces(dependencies = {}) {
           await tx.seededRaceBucketAssignment.updateMany({
             where: {
               bucketId: lockedRace.seededBucketId,
-              userId: { in: inactiveIds },
+              userId: { in: pruneIds },
             },
             data: { state: "PRUNED" },
           });
@@ -396,6 +403,11 @@ function buildRenewSeededRaces(dependencies = {}) {
             entangled.add(effect.targetUserId);
             entangled.add(effect.sourceUserId);
           }
+          const manual = tx.seededRaceWindowMembership ? await tx.seededRaceWindowMembership.findMany({
+            where: { seedId: race.seedId, raceId: race.id, admissionSource: "MANUAL_CURRENT", userId: { in: remaining } },
+            select: { userId: true },
+          }) : [];
+          for (const row of manual) entangled.add(row.userId);
           const doomed = remaining.filter((id) => !entangled.has(id));
           if (doomed.length === 0) return 0;
           const participantWhere = {
@@ -503,25 +515,26 @@ function buildRenewSeededRaces(dependencies = {}) {
         select: { id: true, userId: true, nextBoxAtSteps: true },
       });
       if (race.powerupsEnabled && race.powerupStepInterval) {
-        for (const p of rows) {
-          if (!p.nextBoxAtSteps) {
-            await tx.raceParticipant.update({
-              where: { id: p.id },
-              data: { nextBoxAtSteps: race.powerupStepInterval },
-            });
-          }
+        const missingThresholdIds = rows.filter(p => !p.nextBoxAtSteps).map(p => p.id);
+        if (missingThresholdIds.length) {
+          await tx.raceParticipant.updateMany({
+            where: { id: { in: missingThresholdIds }, raceId: race.id, status: "ACCEPTED", nextBoxAtSteps: 0 },
+            data: { nextBoxAtSteps: race.powerupStepInterval },
+          });
         }
       }
-      await enrollIfGlobalEventActive(tx, {
-        raceId: race.id,
-        userIds: rows.map((participant) => participant.userId),
-        at: now(),
-      });
-      await enqueueRaceResolution({
-        raceId: race.id,
-        reason: "RACE_START",
-        priority: "IMMEDIATE",
-      }, tx);
+      if (rows.length) {
+        await enrollIfGlobalEventActive(tx, {
+          raceId: race.id,
+          userIds: rows.map((participant) => participant.userId),
+          at: now(),
+        });
+        await enqueueRaceResolution({
+          raceId: race.id,
+          reason: "RACE_START",
+          priority: "IMMEDIATE",
+        }, tx);
+      }
       return rows;
     });
     if (!accepted) return null;
@@ -549,7 +562,7 @@ function buildRenewSeededRaces(dependencies = {}) {
   }
 
   // Idempotent per-seed reconcile: at steady state this is read-only.
-  async function reconcileSeed(seed, results) {
+  async function reconcileSeed(seed, results, phase = "ALL") {
     const nowDate = now();
     const nowMs = nowDate.getTime();
     const current = windowFor(seed, nowDate);
@@ -557,7 +570,7 @@ function buildRenewSeededRaces(dependencies = {}) {
     // Buckets finalise once, inside their own advisory-locked transaction, in a
     // short deterministic pre-boundary window. This never affects historical
     // legacy/global rows and fails closed if matching cannot complete.
-    if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
+    if (!dependencies.preparationCoordinator && phase !== "ACTIVATE" && ["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
       // Recovery path: elections are already closed for the current window,
       // so this can only materialize its durable pre-boundary BUCKET roster.
       // Re-run every tick until the idempotent finalizer succeeds; this covers
@@ -594,7 +607,7 @@ function buildRenewSeededRaces(dependencies = {}) {
     // The fallback preserves the narrow injected Prisma doubles used by the
     // long-standing lifecycle unit tests. Production always exposes findMany
     // and therefore promotes every due bucket.
-    const pending = typeof prisma.race.findMany === "function"
+    const pending = phase === "MAINTENANCE" ? [] : typeof prisma.race.findMany === "function"
       ? await prisma.race.findMany({
           where: {
             seedId: seed.id,
@@ -602,6 +615,7 @@ function buildRenewSeededRaces(dependencies = {}) {
             scheduledStartAt: { lte: nowDate },
           },
           orderBy: { scheduledStartAt: "asc" },
+          take: 32,
         })
       : [await prisma.race.findFirst({
           where: { seedId: seed.id, status: "PENDING" },
@@ -616,6 +630,8 @@ function buildRenewSeededRaces(dependencies = {}) {
       const race = await promoteSeededRace(seed, due);
       if (race) results.push({ action: "promoted", seedKind: seed.kind, race });
     }
+
+    if (phase === "ACTIVATE") return;
 
     // 2) Ensure an ACTIVE race covers `now`. (After a promotion the promoted race
     // covers it, so this is a no-op; it only creates on a true gap / cold start.)
@@ -685,7 +701,7 @@ function buildRenewSeededRaces(dependencies = {}) {
         const decidedMode = await readWindowMode({
           prisma, seedId: seed.id, windowStart: next.startedAt,
         });
-        if (decidedMode === "BUCKET") {
+        if (decidedMode === "BUCKET" && !dependencies.preparationCoordinator) {
           await seededBuckets.electAutomatic({
             seed, windowStart: next.startedAt, windowEnd: next.endsAt,
           });
@@ -725,7 +741,7 @@ function buildRenewSeededRaces(dependencies = {}) {
     }
   }
 
-  return async function renewSeededRaces() {
+  return async function renewSeededRaces({ phase = "ALL" } = {}) {
     const activeSeeds = await prisma.raceSeed.findMany({
       where: { active: true },
     });
@@ -735,7 +751,7 @@ function buildRenewSeededRaces(dependencies = {}) {
     const results = [];
     for (const seed of activeSeeds) {
       try {
-        await reconcileSeed(seed, results);
+        await reconcileSeed(seed, results, phase);
       } catch (error) {
         logger.error(
           `[CRON] Seeded race reconcile failed for ${seed.kind}:`,

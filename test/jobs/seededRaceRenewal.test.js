@@ -74,6 +74,12 @@ function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
       },
     },
     raceParticipant: {
+      async updateMany({ where, data }) {
+        const rows = (participantsByRace[where.raceId] || []).filter(p =>
+          where.id.in.includes(p.id) && p.status === where.status && p.nextBoxAtSteps === where.nextBoxAtSteps);
+        for (const row of rows) Object.assign(row, data);
+        return { count: rows.length };
+      },
       async findMany({ where }) {
         const list = participantsByRace[where.raceId] || [];
         return list.filter((p) => p.status === where.status);
