@@ -11,7 +11,7 @@ const { User } = require("../modules/users/models/user");
 const { prisma: defaultPrisma } = require("../db");
 const { appSettings: defaultAppSettings } = require("../shared/config/appSettings");
 const {
-  globalEventTimezoneMutation,
+  immediateGlobalEventTimezoneMutation,
 } = require("../modules/users/services/globalEventTimezone");
 const {
   recordOperationalCounters,
@@ -173,7 +173,7 @@ function buildRequireAuth(dependencies = {}) {
       if (!user || typeof userModel.updateGlobalEventTimezoneState !== "function") return;
       const rawTz = req.headers && req.headers["x-timezone"];
       if (!rawTz || rawTz !== req.timeZone) return;
-      const mutation = globalEventTimezoneMutation({
+      const mutation = immediateGlobalEventTimezoneMutation({
         user,
         observedTimezone: rawTz,
         now: new Date(),
@@ -212,7 +212,8 @@ function buildRequireAuth(dependencies = {}) {
             : Promise.resolve(),
         ]);
       }
-    } catch {
+    } catch (error) {
+      dependencies.timezoneOnError?.(error);
       // The requested endpoint always fails open; unchanged users.timezone is
       // the durable marker that makes the next authenticated request retry.
     }

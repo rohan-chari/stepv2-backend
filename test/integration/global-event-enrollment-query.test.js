@@ -95,8 +95,8 @@ test('zero-created full pages advance past exact-start/elapsed users to future t
     startsAt: new Date('2097-12-31T20:00:00Z'), endsAt: new Date('2098-01-02T00:00:00Z'),
     localStartMinute: 600, durationMinutes: 30, summaryAttributionVersion: 2,
   } });
-  await h.prisma.user.update({ where: { id: id(500) }, data: { globalEventTimezone: 'America/New_York' } });
-  await h.prisma.user.update({ where: { id: id(501) }, data: { globalEventTimezone: 'invalid-zone', timezone: 'Pacific/Kiritimati' } });
+  await h.prisma.user.update({ where: { id: id(500) }, data: { globalEventTimezone: 'America/New_York', timezone: 'America/New_York' } });
+  await h.prisma.user.update({ where: { id: id(501) }, data: { globalEventTimezone: 'invalid-zone', timezone: 'invalid-zone' } });
   const run = await h.tick({ now: boundaryNow, freezeBudget: true });
   const pages = run.pages.filter(q => JSON.parse(q.params)[0] === event.id);
   assert.equal(pages.length, 2, 'zero inserted in a full first page is not exhaustion');
@@ -136,7 +136,7 @@ test('legacy/current HTTP progress expose the same active event after the real s
   // Keep the local schedule inside the allowed 08:00–22:00 window at any UTC hour.
   const offset = current.getUTCHours() - 12;
   const timezone = offset === 0 ? 'UTC' : `Etc/GMT${offset > 0 ? '+' : ''}${offset}`;
-  const { user, token } = await createTestUser({ globalEventTimezone: timezone });
+  const { user, token } = await createTestUser({ globalEventTimezone: timezone, timezone });
   const start = new Date(current); start.setUTCSeconds(0, 0);
   const beforeStart = new Date(+start - 1);
   const race = await h.prisma.race.create({ data: {
@@ -189,4 +189,15 @@ test('PG18 historical empty-page database work stays below the pre-implementatio
   assert.ok(actual.buffers <= 8000,
     `candidate SELECT used ${actual.buffers} root shared-buffer accesses; fixed pre-change budget is 8000`);
   assert.ok(actual.buffers <= baseline.buffers * 0.25, 'at least 75% lower buffer work than frozen baseline');
+});
+
+
+test('scheduler uses authoritative phone timezone when legacy stable metadata disagrees', async()=>{
+  await seedUsers(1);
+  await h.prisma.user.update({where:{id:id(0)},data:{timezone:'UTC',globalEventTimezone:'America/Los_Angeles'}});
+  const events=await h.parents();await h.readyGeneration();
+  await h.tick({freezeBudget:true});
+  for(const event of events){
+    const rows=await enrolled(event);assert.equal(rows.length,1);assert.equal(rows[0].timezone,'UTC');
+  }
 });

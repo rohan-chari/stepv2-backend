@@ -14,6 +14,9 @@ function canonicalIanaTimeZone(timeZone) {
   }
 }
 
+// Legacy pure compatibility export. Production auth/scheduling uses
+// immediateGlobalEventTimezoneMutation below; this historical algorithm is retained
+// for existing internal consumers and its protected contract tests.
 // Returns the smallest write needed for the stable event-timezone state, or
 // null for the steady-state hot path. This never mutates users.timezone.
 function globalEventTimezoneMutation({ user, observedTimezone, now = new Date() }) {
@@ -59,7 +62,17 @@ function globalEventTimezoneMutation({ user, observedTimezone, now = new Date() 
   };
 }
 
+function immediateGlobalEventTimezoneMutation({ user, observedTimezone }) {
+  const observed = canonicalIanaTimeZone(observedTimezone);
+  if (!user || !observed) return null;
+  if (user.globalEventTimezone === observed &&
+      user.globalEventTimezoneCandidate == null && user.globalEventTimezoneCandidateSince == null) return null;
+  return { globalEventTimezone: observed, globalEventTimezoneCandidate: null,
+    globalEventTimezoneCandidateSince: null };
+}
+
 module.exports = {
+  immediateGlobalEventTimezoneMutation,
   STABILITY_MS,
   canonicalIanaTimeZone,
   isValidIanaTimeZone,

@@ -1,0 +1,38 @@
+[dotenv@17.3.1] injecting env (19) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+▶ bounded event ends and authoritative timezone HTTP contract
+  ✔ defers delayed revision zero past its old expiry until the revised projection arrives (PENDING) (254.253ms)
+  ✖ defers delayed revision zero past its old expiry until the revised projection arrives (ADMISSION_PENDING) (62.374667ms)
+  ✖ a full page of stale admitted schedules advances beyond now and the release worker returns (1074.6775ms)
+✖ bounded event ends and authoritative timezone HTTP contract (1401.272459ms)
+ℹ tests 3
+ℹ suites 1
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1660.137334
+
+✖ failing tests:
+
+test at test/integration/event-end-drain-timezone.test.js:195:57
+✖ defers delayed revision zero past its old expiry until the revised projection arrives (ADMISSION_PENDING) (62.374667ms)
+  AssertionError [ERR_ASSERTION]: deferred source revision must sleep beyond now
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:208:49)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/integration/event-end-drain-timezone.test.js:248:3
+✖ a full page of stale admitted schedules advances beyond now and the release worker returns (1074.6775ms)
+  Error: full stale page spun instead of sleeping
+      at Timeout._onTimeout (<backend>/test/integration/event-end-drain-timezone.test.js:260:90)
+      at listOnTimeout (node:internal/timers:605:17)
+      at process.processTimers (node:internal/timers:541:7)

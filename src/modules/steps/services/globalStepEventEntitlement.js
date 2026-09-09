@@ -371,6 +371,17 @@ async function ensureEntitlementForUser(tx, {
   if (!tx?.globalStepEventEntitlement || !event || !user?.id) return null;
   if (event.scheduleMode !== LOCAL_ENTITLEMENTS) return null;
 
+  const { acquireGlobalEnrollmentLock } = require('./globalEventEnrollment');
+  await acquireGlobalEnrollmentLock(tx);
+  // Caller may have loaded this user before a concurrent timezone commit.
+  if (typeof tx.user?.findUnique === 'function') {
+    user = await tx.user.findUnique({where:{id:user.id},select:{id:true,timezone:true,globalEventTimezone:true}});
+    if (!user) return null;
+    // Legacy standalone callers may supply a stable-zone snapshot. Persisted
+    // users always use their current authoritative zone after serialization.
+    user = { ...user, globalEventTimezone: user.timezone };
+    now = new Date(Math.max(+new Date(now), Date.now()));
+  }
   const existing = await tx.globalStepEventEntitlement.findUnique({
     where: { eventId_userId: { eventId: event.id, userId: user.id } },
   });
@@ -429,6 +440,8 @@ async function materializeEntitlementsForActiveRacers(event, {
   afterUserId = null,
   returnPage = false,
   generationUsable = isGenerationUsable,
+  afterDiscovery = async () => {},
+  decisionNow = () => new Date(Math.max(+new Date(now), Date.now())),
   recordCounters = async (tx, counters) => {
     const { recordOperationalCounters } = require("./globalStepEventObservability");
     return recordOperationalCounters(tx, counters);
@@ -468,11 +481,12 @@ SELECT person.id, person.timezone,
     batchSize,
     afterUserId,
   );
+  await afterDiscovery({ event, candidateUsers });
   const participants = candidateUsers.map((user) => ({ user }));
-  const current = new Date(now);
-  const prepared = participants.flatMap(({ user }) => {
-    const timezone = isValidIanaTimeZone(user.globalEventTimezone)
-      ? user.globalEventTimezone
+  let current = new Date(now);
+  const prepare = (participants) => participants.flatMap(({ user }) => {
+    const timezone = isValidIanaTimeZone(user.timezone)
+      ? user.timezone
       : FALLBACK_EVENT_TIMEZONE;
     const window = localEventWindowForZone({
       eventDay: event.eventDay,
@@ -497,6 +511,13 @@ SELECT person.id, person.timezone,
     typeof prisma.globalStepEventEntitlement?.createMany === "function";
   if (canBatch) {
     const created = await prisma.$transaction(async (tx) => {
+      const { acquireGlobalEnrollmentLock } = require('./globalEventEnrollment');
+      await acquireGlobalEnrollmentLock(tx);
+      current = new Date(decisionNow());
+      const freshUsers = typeof tx.user?.findMany === 'function'
+        ? await tx.user.findMany({where:{id:{in:candidateUsers.map(row=>row.id)}},select:{id:true,timezone:true,globalEventTimezone:true}})
+        : candidateUsers;
+      const prepared = prepare(freshUsers.map(user=>({user})));
       if (typeof tx.$queryRawUnsafe === "function") {
         const generationReady = await generationUsable({ client: tx, now: current });
         const result = await materializePreparedEntitlementsSetBased(tx, {
@@ -908,9 +929,9 @@ async function processDueEntitlementBoundaries({
   return result;
 }
 
-async function processDueEndMicroBatch({ prisma, now, batchSize }) {
-  const discovered = await prisma.globalStepEventEntitlement.findMany({
-    where: { endProcessedAt: null, endsAt: { lte: now } },
+async function processDueEndMicroBatch({ prisma = defaultPrisma, now = new Date(), batchSize = 100, ids: suppliedIds = null, bounded = false }) {
+  const discovered = suppliedIds ? suppliedIds.map(id=>({id})) : await prisma.globalStepEventEntitlement.findMany({
+    where: { endProcessedAt: null, endsAt: { lte: now }, OR: [{endNextAttemptAt:null},{endNextAttemptAt:{lte:now}}] },
     orderBy: [{ endsAt: 'asc' }, { id: 'asc' }], take: batchSize,
     select: { id: true },
   });
@@ -930,6 +951,7 @@ async function processDueEndMicroBatch({ prisma, now, batchSize }) {
   const discoveredImpacts = await readImpacts(prisma, ids);
   const raceIds = [...new Set(discoveredImpacts.map(row => row.raceId))].sort();
   return prisma.$transaction(async tx => {
+    if (bounded) await tx.$queryRawUnsafe("SELECT set_config('lock_timeout','100ms',true),set_config('statement_timeout','750ms',true)");
     // Match start-boundary/membership writers: sorted C0, global enrollment,
     // entitlement rows, then summary work. Discovery alone is not a fence.
     await acquireRaceWriteFencesSetBased(tx, raceIds, now);
@@ -938,6 +960,7 @@ async function processDueEndMicroBatch({ prisma, now, batchSize }) {
     const claims = await tx.$queryRawUnsafe(
       `SELECT id FROM global_step_event_entitlements
        WHERE id=ANY($1::text[]) AND end_processed_at IS NULL AND ends_at <= $2
+         AND (end_next_attempt_at IS NULL OR end_next_attempt_at <= $2)
        ORDER BY ends_at,id FOR UPDATE SKIP LOCKED`, ids, now);
     if (!claims.length) return [];
     const claimedIds = claims.map(row => row.id);
@@ -979,7 +1002,7 @@ async function processDueEndMicroBatch({ prisma, now, batchSize }) {
       where: { id: { in: claimedIds }, endProcessedAt: null }, data: { endProcessedAt: now },
     });
     return entitlements;
-  }, { timeout: 15_000, maxWait: 10_000 });
+  }, bounded ? { timeout: 1500, maxWait: 100 } : { timeout: 15_000, maxWait: 10_000 });
 }
 
 async function discoverDueStartIds({ prisma = defaultPrisma, now = new Date(), batchSize = 100 } = {}) {
@@ -1338,6 +1361,7 @@ module.exports = {
   materializeEntitlementsForActiveRacers,
   findDueEntitlementsForUpdate,
   processDueEntitlementBoundaries,
+  processDueEndMicroBatch,
   discoverDueStartIds,
   processDueStartMicroBatch,
   ensureRaceGlobalEventEligibility,

@@ -3,11 +3,12 @@ const {
   deferUntilAfterCommit,
   isInPrismaTransactionScope,
 } = require("../../../db");
+const timezoneCache = require("../../users/services/timezoneStateCache");
 const redisCache = require("../../../shared/cache/redisCache");
 const { DomainEventReceipt } = require("../../domainEvents/models/domainEventReceipt");
 const {
   canonicalIanaTimeZone,
-  globalEventTimezoneMutation,
+  immediateGlobalEventTimezoneMutation,
 } = require("../../users/services/globalEventTimezone");
 const { localEventWindowForZone } = require("../globalStepEvent");
 const { acquireRaceWriteFencesSetBased } = require("../../races/services/raceWriteFence");
@@ -28,19 +29,40 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
     observeStatement(name);
     return operation();
   };
-  return async function reconcileGlobalEventTimezone({ user, observedTimezone }) {
+  return async function reconcileGlobalEventTimezone({ user, observedTimezone, repairPending = false }) {
     const canonicalTimezone = canonicalIanaTimeZone(observedTimezone);
     if (!user?.id || !canonicalTimezone) return null;
-    const current = now();
-    const stableMutation = globalEventTimezoneMutation({
+    // Reuse the already authenticated row on unchanged requests. Redis is
+    // consulted only for a mismatch/candidate repair, never per step upload.
+    if (!repairPending && (user.timezone !== canonicalTimezone ||
+        immediateGlobalEventTimezoneMutation({ user, observedTimezone: canonicalTimezone }))) {
+      if (redisCache.isEnabled()) {
+        const state = await timezoneCache.read(user.id, () => prisma.user.findUnique({
+          where: { id: user.id }, select: { timezone: true, globalEventTimezone: true,
+            globalEventTimezoneCandidate: true, globalEventTimezoneCandidateSince: true },
+        }));
+        if (state) user = { ...user, ...state };
+      }
+    }
+    let current = now();
+    let stableMutation = immediateGlobalEventTimezoneMutation({
       user,
       observedTimezone: canonicalTimezone,
       now: current,
     });
-    const timezoneChanged = user.timezone !== canonicalTimezone;
-    if (!timezoneChanged && !stableMutation) return null;
+    let timezoneChanged = user.timezone !== canonicalTimezone;
+    // Explicit operator repair for already-promoted accounts; never supplied by
+    // HTTP callers. Only the current, confirmed stable zone may be repaired.
+    if (repairPending && (timezoneChanged ||
+        canonicalIanaTimeZone(user.globalEventTimezone) !== canonicalTimezone)) {
+      throw new Error("Pending timezone repair requires matching device and stable zones");
+    }
+    if (!timezoneChanged && !stableMutation && !repairPending) return null;
 
-    const discovery = timezoneChanged
+    // Synchronize legacy metadata and repair schedules from the former policy
+    // in the same transaction. An unchanged request needs no timezone SQL.
+    const reconcilePending = repairPending || timezoneChanged || Boolean(stableMutation?.globalEventTimezone);
+    const discovery = reconcilePending
       ? (await statement("readiness-candidates-races", () => prisma.$queryRawUnsafe(
           `WITH live AS (
              SELECT logical_owner_id,generation,capabilities
@@ -68,8 +90,8 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
              WHERE entitlement.user_id=$6
                 AND entitlement.start_processed_at IS NULL
                 AND entitlement.starts_at > $2
+                AND entitlement.timezone <> $7
                 AND parent.schedule_mode='LOCAL_ENTITLEMENTS'
-                AND parent.starts_at > $2
               ORDER BY entitlement.starts_at,entitlement.id
               LIMIT 4
            ), races AS (
@@ -83,7 +105,7 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
                   COALESCE((SELECT jsonb_agg(to_jsonb(candidates) ORDER BY "startsAt",id) FROM candidates),'[]'::jsonb) AS candidates,
                   COALESCE((SELECT ids FROM races),ARRAY[]::text[]) AS "raceIds"`,
           JSON.stringify(GENERATION_CAPABILITIES), current, REQUIRED_GENERATION,
-          [...EXPECTED_LOGICAL_OWNERS].sort(), READY_WINDOW_MS, user.id,
+          [...EXPECTED_LOGICAL_OWNERS].sort(), READY_WINDOW_MS, user.id, canonicalTimezone,
         )))[0]
       : { generationReady: true, candidates: [], raceIds: [] };
     const candidates = Array.isArray(discovery?.candidates) ? discovery.candidates : [];
@@ -92,24 +114,8 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
     // requires generation-2 relocation but the rolling census is not ready.
     if (!generationReady) return { deferred: true, timezone: user.timezone };
 
-    const raceIds = candidates.length
-      ? [...new Set((discovery?.raceIds || []).filter(Boolean))].sort()
-      : [];
-    const relocationInputs = candidates.map((candidate) => {
-      const window = localEventWindowForZone({
-        eventDay: candidate.eventDay,
-        localStartMinute: candidate.localStartMinute,
-        durationMinutes: candidate.durationMinutes,
-        timeZone: canonicalTimezone,
-      });
-      return {
-        id: candidate.id,
-        startsAt: window.startsAt.toISOString(),
-        endsAt: window.endsAt.toISOString(),
-        localDate: window.localDate,
-      };
-    });
-    return prisma.$transaction(async (tx) => {
+    const raceIds = [...new Set((discovery?.raceIds || []).filter(Boolean))].sort();
+    const result = await prisma.$transaction(async (tx) => {
       await statement("transaction-timeouts", () => tx.$queryRawUnsafe(
         "SELECT set_config('lock_timeout','100ms',true), set_config('statement_timeout','400ms',true)",
       ));
@@ -119,18 +125,45 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
       }
       await acquireRaceWriteFencesSetBased(tx, raceIds, current);
       await afterRaceFences({ tx, raceIds });
-      const closureRows = candidates.length ? await statement("global-lock-race-closure", () => tx.$queryRawUnsafe(
+      const { acquireGlobalEnrollmentLock } = require('./globalEventEnrollment');
+      await acquireGlobalEnrollmentLock(tx);
+      const closureRows = await statement("global-lock-race-closure", () => tx.$queryRawUnsafe(
         `WITH global_lock AS MATERIALIZED (
-           SELECT pg_advisory_xact_lock(hashtextextended('global-event-enrollment',0))
+           SELECT 1
+         ), person AS MATERIALIZED (
+           SELECT users.* FROM users CROSS JOIN global_lock WHERE users.id=$1 FOR UPDATE OF users
          )
-         SELECT COALESCE(array_agg(DISTINCT participant.race_id ORDER BY participant.race_id),ARRAY[]::text[]) AS ids
-           FROM race_participants participant
-           JOIN races race ON race.id=participant.race_id
-           CROSS JOIN global_lock
-          WHERE participant.user_id=$1 AND participant.status='accepted'
-            AND race.status='active'`,
-        user.id,
-      )) : [{ ids: [] }];
+         SELECT (SELECT to_jsonb(person) FROM person) AS person,
+           COALESCE((SELECT jsonb_agg(value) FROM (
+             SELECT entitlement.id,parent.event_day AS "eventDay",parent.local_start_minute AS "localStartMinute",
+               parent.duration_minutes AS "durationMinutes", entitlement.starts_at AS "startsAt"
+             FROM global_step_event_entitlements entitlement JOIN global_step_events parent ON parent.id=entitlement.event_id
+             WHERE entitlement.user_id=$1 AND entitlement.start_processed_at IS NULL
+               AND entitlement.end_processed_at IS NULL AND entitlement.timezone<>$2 AND entitlement.starts_at>$3
+               AND parent.schedule_mode='LOCAL_ENTITLEMENTS'
+             ORDER BY entitlement.starts_at,entitlement.id LIMIT 100
+           ) value),'[]'::jsonb) AS candidates,
+           COALESCE((SELECT array_agg(DISTINCT participant.race_id ORDER BY participant.race_id)
+             FROM race_participants participant JOIN races race ON race.id=participant.race_id
+             WHERE participant.user_id=$1 AND participant.status='accepted' AND race.status='active'),ARRAY[]::text[]) AS ids
+           FROM global_lock`, user.id, canonicalTimezone, now(),
+      ));
+      current = now(); // Eligibility is decided after waiting for serialization.
+      const stored = closureRows[0]?.person;
+      if (!stored) return null;
+      const lockedUser = { ...user, timezone: stored.timezone,
+        globalEventTimezone: stored.global_event_timezone,
+        globalEventTimezoneCandidate: stored.global_event_timezone_candidate,
+        globalEventTimezoneCandidateSince: stored.global_event_timezone_candidate_since };
+      if (repairPending && (stored.timezone !== canonicalTimezone || stored.global_event_timezone !== canonicalTimezone)) {
+        throw new Error("User timezone changed during pending schedule repair; retry preview");
+      }
+      timezoneChanged = stored.timezone !== canonicalTimezone;
+      stableMutation = immediateGlobalEventTimezoneMutation({ user: lockedUser, observedTimezone: canonicalTimezone });
+      const lockedCandidates = closureRows[0]?.candidates || [];
+      if (lockedCandidates.length && discovery?.generationReady !== true) {
+        return { deferred: true, timezone: stored.timezone };
+      }
       const closedRaceIds = [...new Set((closureRows[0]?.ids || []).filter(Boolean))].sort();
       if (closedRaceIds.some((id) => !raceIds.includes(id))) {
         const error = new Error("global-event race lock set expanded during timezone reconciliation");
@@ -138,7 +171,20 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
         error.retryable = true;
         throw error;
       }
-      const eligibleRows = candidates.length ? await statement("eligibility-lock", () => tx.$queryRawUnsafe(
+      let updatedUser = null;
+      async function relocatePage(page) {
+      const relocationInputs = page.map(candidate => {
+        const window = localEventWindowForZone({ ...candidate, timeZone: canonicalTimezone });
+        return { id: candidate.id, startsAt: window.startsAt.toISOString(), endsAt: window.endsAt.toISOString(), localDate: window.localDate };
+      });
+      if (relocationInputs.length) {
+        // Delivery takes these same schedule row locks. Recheck terminal status
+        // in the following statement after any concurrent admission commits.
+        await tx.$queryRawUnsafe(`SELECT id FROM notification_schedules
+          WHERE recipient_user_id=$2 AND source_ref=ANY($1::text[]) ORDER BY id FOR UPDATE`, relocationInputs.map(row=>row.id), user.id);
+        current = now();
+      }
+      const eligibleRows = relocationInputs.length ? await statement("eligibility-lock", () => tx.$queryRawUnsafe(
         `WITH input AS (
            SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(
              id text, "startsAt" timestamp, "endsAt" timestamp, "localDate" text
@@ -158,7 +204,8 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
               AND entitlement.starts_at > $3
               AND input."startsAt" > $3
               AND parent.schedule_mode='LOCAL_ENTITLEMENTS'
-              AND parent.starts_at > $3
+              AND entitlement.end_processed_at IS NULL
+              AND entitlement.timezone<>$4
             ORDER BY entitlement.starts_at, entitlement.id
             FOR UPDATE OF entitlement
          )
@@ -167,6 +214,15 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
           WHERE NOT EXISTS (
                   SELECT 1 FROM domain_event_outbox event
                    WHERE event.event_key='GLOBAL_STEP_EVENT_ACTIVATED_V1:' || locked.id
+                )
+            AND NOT EXISTS (
+                  SELECT 1 FROM notification_schedules schedule
+                   WHERE schedule.recipient_user_id=$2 AND schedule.source_ref=locked.id AND schedule.status NOT IN ('PENDING','ADMISSION_PENDING')
+                )
+            AND NOT EXISTS (
+                  SELECT 1 FROM notification_schedule_receipts receipt
+                   WHERE receipt.recipient_user_id=$2 AND receipt.source_id=locked.id
+                     AND receipt.terminal_status IS NOT NULL
                 )
             AND NOT EXISTS (
                   SELECT 1 FROM global_event_race_impacts impact
@@ -183,16 +239,18 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
                      AND neighbor.ends_at > locked."startsAt"
                 )
           ORDER BY locked."oldStartsAt", locked.id`,
-        JSON.stringify(relocationInputs), user.id, current,
+        JSON.stringify(relocationInputs), user.id, current, canonicalTimezone,
       )) : [];
-      const userData = {
-        ...(timezoneChanged ? { timezone: canonicalTimezone } : {}),
-        ...(stableMutation || {}),
-      };
-      const updatedUser = Object.keys(userData).length
-        ? await statement("user-update", () => tx.user.update({ where: { id: user.id }, data: userData }))
-        : user;
-      await afterUserUpdate({ tx, user: updatedUser, eligibleRows });
+      if (!updatedUser) {
+        const userData = {
+          ...(timezoneChanged ? { timezone: canonicalTimezone } : {}),
+          ...(stableMutation || {}),
+        };
+        updatedUser = Object.keys(userData).length
+          ? await statement("user-update", () => tx.user.update({ where: { id: user.id }, data: userData }))
+          : lockedUser;
+        await afterUserUpdate({ tx, user: updatedUser, eligibleRows });
+      }
       const relocated = eligibleRows.length ? await statement("entitlement-update", () => tx.$queryRawUnsafe(
         `WITH input AS (
            SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(
@@ -221,6 +279,18 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
         }))), canonicalTimezone, current,
       )) : [];
       if (relocated.length) {
+        // Relocation and the existing pending notification revision commit as
+        // one fact. A delayed/replayed projection cannot expire the old window.
+        await tx.$executeRawUnsafe(`UPDATE notification_schedules schedule
+          SET available_at=entitlement.starts_at, expires_at=CASE WHEN schedule.admission_class IS NOT NULL THEN entitlement.ends_at-interval '60 seconds' ELSE entitlement.ends_at END,
+              source_revision=entitlement.schedule_revision,
+              payload=schedule.payload || jsonb_build_object('startsAt',entitlement.starts_at,'endsAt',entitlement.ends_at),
+              updated_at=$2
+          FROM global_step_event_entitlements entitlement
+          WHERE schedule.recipient_user_id=$3 AND schedule.source_ref=entitlement.id AND entitlement.id=ANY($1::text[])
+            AND schedule.status IN ('PENDING','ADMISSION_PENDING')
+            AND schedule.source_revision < entitlement.schedule_revision`, relocated.map(row => row.id), current, user.id);
+
         const eventInputs = relocated.map((entitlement) => {
           const source = eligibleRows.find((row) => row.id === entitlement.id);
           return {
@@ -290,12 +360,36 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
             redisCache.publishDurableQueueWakeup("domain-event"));
         }
       }
+        return relocated;
+      }
+      const relocated = [];
+      let page = lockedCandidates;
+      for (;;) {
+        relocated.push(...await relocatePage(page));
+        if (page.length < 100) break;
+        const cursor = page[page.length - 1];
+        // Original startsAt/id is a stable keyset even when eligible rows move;
+        // ineligible rows left in their former zone cannot stall the next page.
+        page = await tx.$queryRawUnsafe(`SELECT entitlement.id,
+            entitlement.starts_at AS "startsAt",parent.event_day AS "eventDay",
+            parent.local_start_minute AS "localStartMinute",parent.duration_minutes AS "durationMinutes"
+          FROM global_step_event_entitlements entitlement
+          JOIN global_step_events parent ON parent.id=entitlement.event_id
+          WHERE entitlement.user_id=$1 AND entitlement.start_processed_at IS NULL
+            AND entitlement.end_processed_at IS NULL AND entitlement.timezone<>$2
+            AND entitlement.starts_at>$3 AND parent.schedule_mode='LOCAL_ENTITLEMENTS'
+            AND (entitlement.starts_at,entitlement.id)>($4::timestamp,$5::text)
+          ORDER BY entitlement.starts_at,entitlement.id LIMIT 100`,
+          user.id,canonicalTimezone,now(),new Date(cursor.startsAt),cursor.id);
+      }
       return {
         timezone: updatedUser.timezone,
         user: updatedUser,
         relocated: relocated.map((row) => row.id),
       };
-    }, { timeout: 500, maxWait: 100 });
+    }, { timeout: 1500, maxWait: 100 });
+    if (result?.user) await timezoneCache.invalidate(user.id);
+    return result;
   };
 }
 

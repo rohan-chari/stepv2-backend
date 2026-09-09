@@ -104,7 +104,7 @@ async function globalEventStillEligible(tx, row, current) {
     where: { id: row.sourceRef },
     select: {
       userId: true, startsAt: true, endsAt: true, eventId: true,
-      startOutcome: true, startProcessedAt: true,
+      startOutcome: true, startProcessedAt: true, scheduleRevision: true,
     },
   });
   // Legacy-global schedules used event IDs as sourceRef. They were normally
@@ -398,7 +398,7 @@ function buildNotificationIntentService(dependencies = {}) {
         ? await tx.$queryRawUnsafe(
           `SELECT id, recipient_user_id AS "recipientUserId", type, title, body,
                   payload, delivery_key AS "deliveryKey", available_at AS "availableAt",
-                  expires_at AS "expiresAt", source_ref AS "sourceRef"
+                  expires_at AS "expiresAt", source_ref AS "sourceRef", source_revision AS "sourceRevision"
              FROM notification_schedules
             WHERE status=$1 AND available_at <= $2
             ORDER BY available_at ASC, id ASC
@@ -417,7 +417,7 @@ function buildNotificationIntentService(dependencies = {}) {
         where: { id: { in: sourceRefs } },
         select: {
           id: true, userId: true, eventId: true, startsAt: true, endsAt: true,
-          startOutcome: true, startProcessedAt: true,
+          startOutcome: true, startProcessedAt: true, scheduleRevision: true,
         },
       }) : [];
       const entitlementById = new Map(entitlements.map((row) => [row.id, row]));
@@ -443,6 +443,11 @@ function buildNotificationIntentService(dependencies = {}) {
         expired: [], pending: [], dormant: [], canceled: [], eligible: [],
       };
       for (const row of rows) {
+        const source = entitlementById.get(row.sourceRef);
+        if (source && Number(row.sourceRevision || 0) < Number(source.scheduleRevision || 0)) {
+          categories.pending.push(row);
+          continue; // Delayed projection must not expire a superseded window.
+        }
         const expiresAt = row.expiresAt ? new Date(row.expiresAt) : null;
         if (expiresAt && expiresAt <= current) {
           categories.expired.push(row);

@@ -985,6 +985,103 @@ describe("global-event reliability v2 contract", () => {
     assert.equal(await prisma.inboxAlert.count({ where: { userId: account.user.id } }), 0);
   });
 
+  for (const deferPromotion of [false, true, "repair"]) {
+    it(`relocates events created during timezone stability wait on promotion${deferPromotion === "repair" ? " via support repair" : deferPromotion ? " after readiness retry" : ""}`, async () => {
+      const current = new Date();
+      await makeGenerationReady(current, "timezone-promotion");
+      const account = await createTestUser({
+        timezone: "America/New_York",
+        globalEventTimezone: deferPromotion === "repair" ? "America/New_York" : "America/Los_Angeles",
+        globalEventTimezoneCandidate: deferPromotion === "repair" ? null : "America/New_York",
+        globalEventTimezoneCandidateSince: deferPromotion === "repair" ? null : new Date(+current - 49 * 3600_000),
+      });
+      const eventDay = new Date(+current + 3 * 86400_000).toISOString().slice(0, 10);
+      const event = await prisma.globalStepEvent.create({ data: {
+        startsAt: new Date(+current + 3600_000), endsAt: new Date(+current + 5 * 86400_000),
+        multiplier: 2, scheduleMode: "LOCAL_ENTITLEMENTS", eventDay,
+        localStartMinute: 600, durationMinutes: 30,
+      } });
+      // This row was generated using the old stable zone AFTER the phone zone changed.
+      const oldStart = new Date(`${eventDay}T18:00:00.000Z`);
+      const laHour = Number(new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Los_Angeles", hour: "numeric", hourCycle: "h23",
+      }).format(oldStart));
+      oldStart.setUTCHours(oldStart.getUTCHours() + 10 - laHour);
+      const entitlement = await prisma.globalStepEventEntitlement.create({ data: {
+        eventId: event.id, userId: account.user.id, timezone: "America/Los_Angeles",
+        localDate: eventDay, startsAt: oldStart, endsAt: new Date(+oldStart + 1800_000),
+      } });
+      if (deferPromotion === true) {
+        await prisma.globalStepEventCronOwner.create({ data: {
+          ownerId: "promotion-legacy", generation: 1, localAware: false,
+          heartbeatAt: current, expiresAt: new Date(+current + 60_000),
+        } });
+        const deferred = await request(server.baseUrl, "GET", "/auth/me", {
+          token: account.token, headers: { "x-timezone": "America/New_York" },
+        });
+        assert.equal(deferred.status, 200);
+        const pending = await prisma.user.findUniqueOrThrow({ where: { id: account.user.id } });
+        assert.equal(pending.globalEventTimezone, "America/Los_Angeles", "promotion must remain retryable");
+        await prisma.globalStepEventCronOwner.delete({ where: { ownerId: "promotion-legacy" } });
+      }
+      if (deferPromotion === "repair") {
+        // The global envelope has begun in other zones, but this user's old
+        // and corrected windows are both future: safe support repair.
+        await prisma.globalStepEvent.update({ where: { id: event.id }, data: {
+          startsAt: new Date(+current - 3600_000),
+        } });
+        const activeParent = await prisma.globalStepEvent.create({ data: {
+          startsAt: new Date(+current - 3600_000), endsAt: new Date(+current + 3600_000),
+          scheduleMode: "LOCAL_ENTITLEMENTS", localStartMinute: 600, durationMinutes: 30,
+          eventDay: new Date(+current - 86400_000).toISOString().slice(0, 10),
+        } });
+        const active = await prisma.globalStepEventEntitlement.create({ data: {
+          eventId: activeParent.id, userId: account.user.id, timezone: "America/Los_Angeles",
+          localDate: activeParent.eventDay, startsAt: new Date(+current - 60_000),
+          endsAt: new Date(+current + 1740_000), startProcessedAt: current,
+          startOutcome: "ACTIVATED_ON_TIME",
+        } });
+        const run = require("node:util").promisify(require("node:child_process").execFile);
+        const script = require("node:path").resolve(__dirname, "../../scripts/repair-global-event-timezone.js");
+        const args = [script, `--user-id=${account.user.id}`];
+        const preview = await run(process.execPath, args, { env: process.env });
+        assert.ok(preview.stdout.includes(entitlement.id));
+        assert.equal((await prisma.globalStepEventEntitlement.findUniqueOrThrow({ where: { id: entitlement.id } })).scheduleRevision, 0);
+        // A child CLI starts after the original heartbeat; refresh its leases.
+        await makeGenerationReady(new Date(), "timezone-promotion");
+        const applied = await run(process.execPath, [...args, "--apply"], { env: process.env });
+        assert.ok(applied.stdout.includes(`"relocated":["${entitlement.id}"]`));
+        const preserved = await prisma.globalStepEventEntitlement.findUniqueOrThrow({ where: { id: active.id } });
+        assert.equal(preserved.timezone, active.timezone);
+        assert.equal(+preserved.startsAt, +active.startsAt);
+        assert.equal(+preserved.endsAt, +active.endsAt);
+        assert.equal(preserved.scheduleRevision, 0);
+        const replay = await run(process.execPath, [...args, "--apply"], { env: process.env });
+        assert.ok(replay.stdout.includes('"relocated":[]'));
+      }
+      const response = await request(server.baseUrl, "GET", "/auth/me", {
+        token: account.token, headers: { "x-timezone": "America/New_York" },
+      });
+      assert.equal(response.status, 200);
+      const relocated = await prisma.globalStepEventEntitlement.findUniqueOrThrow({ where: { id: entitlement.id } });
+      assert.equal(relocated.timezone, "America/New_York");
+      assert.equal(relocated.scheduleRevision, 1);
+      assert.equal(+relocated.startsAt, +oldStart - 3 * 3600_000);
+      const scheduled = await prisma.domainEventOutbox.findUniqueOrThrow({
+        where: { eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlement.id}:1` },
+      });
+      assert.equal(new Date(scheduled.payload.startsAt).toISOString(), relocated.startsAt.toISOString());
+      const promoted = await prisma.user.findUniqueOrThrow({ where: { id: account.user.id } });
+      assert.equal(promoted.globalEventTimezone, "America/New_York");
+      assert.equal(promoted.globalEventTimezoneCandidate, null);
+      const repeated = await request(server.baseUrl, "GET", "/auth/me", {
+        token: account.token, headers: { "x-timezone": "America/New_York" },
+      });
+      assert.equal(repeated.status, 200);
+      assert.equal((await prisma.globalStepEventEntitlement.findUniqueOrThrow({ where: { id: entitlement.id } })).scheduleRevision, 1);
+    });
+  }
+
   it("revision-relocates a pending entitlement across consecutive timezone changes", async () => {
     const current = new Date();
     await makeGenerationReady(current, "timezone-repeat");

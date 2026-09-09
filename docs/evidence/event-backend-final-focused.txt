@@ -1,0 +1,45 @@
+[dotenv@17.3.1] injecting env (19) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+▶ bounded event ends and authoritative timezone HTTP contract
+  ✔ immediately commits authoritative zone and clears legacy candidates with no pending events; return travel and old clients work (174.779125ms)
+  ✔ moves a personal future window after worldwide parent start and revises notification atomically before delayed projection/old expiry (68.580334ms)
+  ✔ preserves an individually started event while immediately changing subsequent scheduling zone (45.813875ms)
+  ✔ drains over 1000 ends through cron continuations, coalesces ticks, leaves future rows, and stops cleanly (1313.725709ms)
+  ✔ serializes a discovered old-zone enrollment after a timezone commit, with zero initial entitlement candidates (308.728ms)
+  ✔ isolates a poison end row across bounded three-attempt passes and restart without losing healthy rows (1520.418209ms)
+  ✔ reloads newly inserted candidates when enrollment commits while a timezone request waits for serialization (3099.825541ms)
+  ✔ uses the decision clock after locks and preserves an event that started while waiting (3064.6795ms)
+  ✔ preserves an admitted notification and a recalculated start in the past (78.715209ms)
+  ✔ does no timezone database statements for repeated unchanged, absent and invalid headers (3034.469292ms)
+  ✔ backs off a globally contended end transaction and recovers without overlapping scheduled ticks (898.364875ms)
+  ✔ defers delayed revision zero past its old expiry until the revised projection arrives (PENDING) (102.472875ms)
+  ✔ defers delayed revision zero past its old expiry until the revised projection arrives (ADMISSION_PENDING) (72.77825ms)
+  ✔ atomically reconciles more than one bounded page of future events instead of silently leaving overflow stale (130.187833ms)
+  ✔ coalesces a maintenance tick during an end-only continuation instead of starving maintenance (544.718666ms)
+  ✔ a full page of stale admitted schedules advances beyond now and the release worker returns (64.407416ms)
+✔ bounded event ends and authoritative timezone HTTP contract (14532.609916ms)
+[dotenv@17.3.1] injecting env (19) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[redisCache] subscriber-connection failed (further subscriber-connection errors suppressed for 60s): connect ECONNREFUSED 127.0.0.1:37317
+[redisCache] subscribe failed (further subscribe errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] getJSON failed (further getJSON errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] setJSON failed (further setJSON errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] evalLua failed (further evalLua errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] publishInvalidate failed (further publishInvalidate errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] del failed (further del errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+✔ uses committed Redis state on a stale local-auth cache, invalidates on travel, and falls back during Redis outage (219.844291ms)
+[dotenv@17.3.1] injecting env (19) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+✔ creates an event and fans out to active-race participants at the chosen time (68.338ms)
+✔ local future-horizon maintenance does not suppress an unfenced legacy day (2.334958ms)
+✔ idempotent: does not create a second event when one already exists for the chosen time (1.061584ms)
+✔ concurrent ticks retain one event and the losing tick skips heavy participant work (8.137166ms)
+✔ uses the creation transaction's enrollment snapshot for the only fan-out (2.419209ms)
+✔ does nothing when now is before the chosen time (1.019167ms)
+✔ uses a one-minute default interval (18.314792ms)
+✔ stop prevents queued ticks and waits for the active scheduler run (0.116083ms)
+ℹ tests 25
+ℹ suites 1
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15499.140166

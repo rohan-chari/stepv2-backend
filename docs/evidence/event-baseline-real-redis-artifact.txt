@@ -1,0 +1,30 @@
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+✖ HTTP display artifact cannot cross a participant's local entitlement end fingerprint (2019.706416ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2326.467167
+
+✖ failing tests:
+
+test at test/integration/local-global-step-event-entitlements.test.js:1504:1
+✖ HTTP display artifact cannot cross a participant's local entitlement end fingerprint (2019.706416ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(await boundaryWorker.processOne())
+
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/integration/local-global-step-event-entitlements.test.js:1581:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

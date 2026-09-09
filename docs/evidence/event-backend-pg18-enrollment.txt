@@ -1,0 +1,19 @@
+[dotenv@17.3.1] injecting env (18) from .env -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+✔ scheduler excludes every race/membership state, deduplicates users and respects event-local entitlements (243.608333ms)
+✔ scheduler drains 500 distinct candidates, terminal page, retry and newly eligible lower ID (554.022875ms)
+✔ scheduler drains 601 distinct candidates, terminal page, retry and newly eligible lower ID (644.550042ms)
+✔ zero-created full pages advance past exact-start/elapsed users to future timezone users (523.256542ms)
+✔ concurrent public scheduler producers retain unique entitlements and scheduled event obligations (169.524208ms)
+✔ generation not ready still enrolls but emits no generation-two obligations (121.375791ms)
+✔ legacy/current HTTP progress expose the same active event after the real scheduled lifecycle (207.802167ms)
+{"enrollmentWorkRegression":{"version":"PostgreSQL 18.4 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit","dimensions":{"history":30000,"historicalUsers":30000,"active":1000,"activeMemberships":2500,"activeRaces":160,"historicalRaces":600,"missing":0},"tick":{"elapsedMs":13.289958999999726,"queryCount":21,"counts":{"SELECT":16,"INSERT":0,"UPDATE":0,"DELETE":0,"WITH":2,"BEGIN":0,"COMMIT":3,"ROLLBACK":0,"OTHER":0}},"actual":{"planningMs":0.119,"executionMs":3.515,"hits":749,"reads":0,"buffers":749,"tempRead":0,"tempWritten":0,"rows":0,"visits":[{"relation":"race_participants","type":"Seq Scan","rows":32500,"loops":1,"removed":0},{"relation":"races","type":"Bitmap Heap Scan","rows":160,"loops":1,"removed":0},{"relation":"global_step_event_entitlements","type":"Seq Scan","rows":1000,"loops":1,"removed":1000},{"relation":"users","type":"Seq Scan","rows":1,"loops":1,"removed":0}]},"baseline":{"planningMs":0.27,"executionMs":9.438,"hits":35099,"reads":0,"buffers":35099,"tempRead":0,"tempWritten":0,"rows":0,"visits":[{"relation":"race_participants","type":"Index Scan","rows":32500,"loops":1,"removed":0},{"relation":"races","type":"Index Scan","rows":0.21,"loops":760,"removed":1},{"relation":"global_step_event_entitlements","type":"Index Only Scan","rows":1000,"loops":1,"removed":0},{"relation":"users","type":"Seq Scan","rows":1,"loops":1,"removed":0}]}}}
+✔ PG18 historical empty-page database work stays below the pre-implementation 8000-buffer budget (1427.84ms)
+✔ scheduler uses authoritative phone timezone when legacy stable metadata disagrees (120.970792ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4397.94275

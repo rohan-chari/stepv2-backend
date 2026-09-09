@@ -77,7 +77,7 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
     // make an on-time edge stale while future parents are being prepared.
     // Start edges are owned by the continuous set-based boundary drain. This
     // legacy scheduler retains end-edge compatibility processing only.
-    await processBoundaries({ now: current, processStarts: false });
+    if (!dependencies.skipEndBoundaries) await processBoundaries({ now: current, processStarts: false });
     const materializationStarted = Date.now();
     async function drainParent(event) {
       let afterUserId = null;
@@ -88,6 +88,8 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
           batchSize: MATERIALIZATION_BATCH_SIZE,
           afterUserId,
           returnPage: true,
+          afterDiscovery: dependencies.materializationAfterDiscovery,
+          decisionNow: now,
         });
         // Compatibility for narrow injected doubles and old internal callers.
         if (typeof page === "number") {
@@ -323,21 +325,49 @@ const maybeStartGlobalEvent = buildMaybeStartGlobalEvent();
 function scheduleGlobalStepEvents(dependencies = {}) {
   const interval = dependencies.intervalMs || SCHEDULER_INTERVAL_MS;
   const logger = dependencies.logger || console;
-  const runFn = dependencies.maybeStartGlobalEvent || maybeStartGlobalEvent;
+  const runFn = dependencies.maybeStartGlobalEvent || buildMaybeStartGlobalEvent({ ...dependencies, skipEndBoundaries: true });
+  const { buildGlobalEventEndDrain } = require('./globalEventEndDrain');
+  const endDrain = dependencies.endDrain || buildGlobalEventEndDrain(dependencies);
   const schedule = dependencies.setInterval || setInterval;
 
   let stopped = false;
   let running = null;
-  async function run() {
-    if (stopped) return null;
-    if (running) return running;
-    running = (async () => {
-    try {
-      await runFn();
-    } catch (error) {
-      logger.error("[CRON] Global step event scheduler error:", error);
+  let continuation = null;
+  let runningMaintenance = false;
+  let pendingMaintenance = false;
+  function run(maintenance = true) {
+    if (stopped) return Promise.resolve(null);
+    if (running) {
+      if (maintenance && !runningMaintenance) pendingMaintenance = true;
+      return running;
     }
-    })().finally(() => { running = null; });
+    maintenance = maintenance || pendingMaintenance;
+    pendingMaintenance = false;
+    runningMaintenance = maintenance;
+    if (continuation) { clearTimeout(continuation); continuation=null; }
+    let nextDelay = null;
+    running = (async () => {
+      if (maintenance) {
+        try { await runFn(); }
+        catch(error) { logger.error('[CRON] Global step event scheduler error:',error); }
+      }
+      if (stopped) return;
+      try {
+        const result = await endDrain.run({ isStopped: () => stopped });
+        if (result?.more) nextDelay = Math.max(1,result.retryAfterMs || dependencies.endContinuationMs || 250);
+      } catch(error) {
+        nextDelay=1000;
+        logger.error('[CRON] Global event end drain failed:',error);
+      }
+    })().finally(() => {
+      running=null;
+      runningMaintenance=false;
+      if (pendingMaintenance && nextDelay === null) nextDelay=250;
+      if (!stopped && nextDelay !== null && !continuation) {
+        continuation=setTimeout(() => { continuation=null; void run(false); },nextDelay);
+        continuation.unref?.();
+      }
+    });
     return running;
   }
 
@@ -353,6 +383,9 @@ function scheduleGlobalStepEvents(dependencies = {}) {
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
+      if (continuation) clearTimeout(continuation);
+      continuation = null;
+      pendingMaintenance = false;
       await running;
     },
   };

@@ -1,0 +1,30 @@
+[
+  {
+    "name": "baseline1000",
+    "summary_rows": 1000,
+    "bad_summaries": 0,
+    "artifacts": 2000,
+    "bad_artifacts": 0
+  },
+  {
+    "name": "candidate1000",
+    "summary_rows": 1000,
+    "bad_summaries": 0,
+    "artifacts": 2000,
+    "bad_artifacts": 0
+  },
+  {
+    "name": "baseline5000",
+    "summary_rows": 100,
+    "bad_summaries": 0,
+    "artifacts": 200,
+    "bad_artifacts": 0
+  },
+  {
+    "name": "candidate5000",
+    "summary_rows": 165,
+    "bad_summaries": 0,
+    "artifacts": 348,
+    "bad_artifacts": 0
+  }
+]

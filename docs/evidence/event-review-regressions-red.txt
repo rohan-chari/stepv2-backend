@@ -1,0 +1,48 @@
+[dotenv@17.3.1] injecting env (19) from .env -- tip: 🛡️ auth for agents: https://vestauth.com
+▶ bounded event ends and authoritative timezone HTTP contract
+  ✔ defers delayed revision zero past its old expiry until the revised projection arrives (PENDING) (256.959292ms)
+  ✖ defers delayed revision zero past its old expiry until the revised projection arrives (ADMISSION_PENDING) (67.905709ms)
+  ✖ coalesces a maintenance tick during an end-only continuation instead of starving maintenance (1784.426083ms)
+✖ bounded event ends and authoritative timezone HTTP contract (2118.148291ms)
+ℹ tests 3
+ℹ suites 1
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2338.84825
+
+✖ failing tests:
+
+test at test/integration/event-end-drain-timezone.test.js:195:57
+✖ defers delayed revision zero past its old expiry until the revised projection arrives (ADMISSION_PENDING) (67.905709ms)
+  AssertionError [ERR_ASSERTION]: deferred source revision must sleep beyond now
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:208:49)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/integration/event-end-drain-timezone.test.js:231:3
+✖ coalesces a maintenance tick during an end-only continuation instead of starving maintenance (1784.426083ms)
+  AssertionError [ERR_ASSERTION]: minute maintenance request during continuation must survive
+
+  1 !== 2
+
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:244:14)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

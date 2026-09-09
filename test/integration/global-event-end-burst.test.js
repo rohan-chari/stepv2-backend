@@ -280,3 +280,43 @@ test('in-challenge HTTP samples retain 2x scoring through end batching and summa
     assert.equal((await result.json()).progress.participants.find(p => p.userId === f.account.user.id).totalSteps, 220);
   }
 });
+
+test('bounded concurrent end drains and timezone travel retain late-upload historical 2x for frozen and current clients', { timeout: 90000 }, async () => {
+  const f = await fixture(10);
+  const { scheduleGlobalStepEvents } = require('../../src/modules/steps/jobs/globalStepEventScheduler');
+  const first=scheduleGlobalStepEvents({maybeStartGlobalEvent:async()=>{},logger});
+  const second=scheduleGlobalStepEvents({maybeStartGlobalEvent:async()=>{},logger});
+  try {
+    const changed=request(server.baseUrl,'GET','/auth/me',{token:f.account.token,headers:{'X-Timezone':'America/Los_Angeles'}});
+    await Promise.all([first.tick(),second.tick()]);
+    assert.equal((await changed).status,200);
+  } finally {await first.stop();await second.stop();}
+  assert.equal(await prisma.globalStepEventEntitlement.count({where:{eventId:f.event.id,endProcessedAt:{not:null}}}),10);
+  assert.ok((await prisma.globalStepEventEntitlement.findMany({where:{eventId:f.event.id}})).every(row=>row.timezone==='UTC'));
+
+  const response = await request(server.baseUrl, 'POST', '/steps/sync-v2', {
+    token: f.account.token, headers: { 'Idempotency-Key': randomUUID(), 'X-Timezone': 'UTC' },
+    body: { ...f.body, steps: 160, samples: [...f.body.samples, {
+      periodStart: new Date(+f.event.startsAt + 60000).toISOString(),
+      periodEnd: new Date(+f.event.endsAt - 60000).toISOString(), steps: 60,
+    }] },
+  });
+  assert.equal(response.status, 202, await response.text());
+  const summaryTick = buildGlobalEventSummaryTick({ logger });
+  const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
+  let totals = [];
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await summaryTick();
+    for (const race of f.races) await worker.processRace({ raceId: race.id });
+    totals = await prisma.raceParticipant.findMany({ where: { userId: f.account.user.id }, select: { totalSteps: true } });
+    if (totals.every(p => p.totalSteps === 220)) break;
+  }
+  assert.ok(totals.every(p => p.totalSteps === 220), `100 outside + 60 doubled: ${JSON.stringify(totals)}`);
+  for (const race of f.races) for (const features of ['', 'powerups2,powerups3,powerups4,powerups5']) {
+    const result = await request(server.baseUrl, 'GET', `/races/${race.id}/progress`, {
+      token: f.account.token, headers: { 'X-Client-Features': features, 'X-Timezone': 'UTC' },
+    });
+    assert.equal(result.status, 200);
+    assert.equal((await result.json()).progress.participants.find(p => p.userId === f.account.user.id).totalSteps, 220);
+  }
+});

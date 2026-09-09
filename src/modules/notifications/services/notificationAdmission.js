@@ -82,6 +82,8 @@ async function releaseEventNotificationPage({
               schedule.available_at AS "availableAt",
               schedule.expires_at AS "expiresAt",
               schedule.source_ref AS "sourceRef",
+              schedule.source_revision AS "sourceRevision",
+              entitlement.schedule_revision AS "entitlementRevision",
               schedule.admission_sequence AS "admissionSequence",
               entitlement.event_id AS "eventId",
               entitlement.user_id AS "entitlementUserId",
@@ -110,7 +112,8 @@ async function releaseEventNotificationPage({
     const eligible = [];
     const deferred = [];
     for (const row of rows) {
-      if (row.expiresAt && new Date(row.expiresAt) <= current) expired.push(row);
+      if (Number(row.sourceRevision || 0) < Number(row.entitlementRevision || 0)) deferred.push(row);
+      else if (row.expiresAt && new Date(row.expiresAt) <= current) expired.push(row);
       else if (row.startOutcome === "NO_ACTIVE_RACES") dormant.push(row);
       else if (!row.sourceRef || !row.eventId || new Date(row.entitlementEndsAt) <= current ||
           row.startOutcome === "SKIPPED_STALE") canceled.push(row);
@@ -150,7 +153,10 @@ async function releaseEventNotificationPage({
     if (deferred.length) {
       const deferrals = deferred.map((row) => {
         const startsAt = new Date(row.entitlementStartsAt);
-        const expiresAt = row.expiresAt ? new Date(row.expiresAt) : null;
+        const staleSource = Number(row.sourceRevision || 0) < Number(row.entitlementRevision || 0);
+        // Obsolete expiry belongs to the old window. Clamping to it would keep
+        // a full stale page due forever and spin the release loop without pause.
+        const expiresAt = !staleSource && row.expiresAt ? new Date(row.expiresAt) : null;
         const recoveryAt = startsAt > current
           ? startsAt
           : new Date(current.getTime() + ADMISSION_RECOVERY_DEFER_MS);

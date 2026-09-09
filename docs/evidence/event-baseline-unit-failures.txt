@@ -1,0 +1,113 @@
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+✔ entitlement snapshots stable timezone once and duplicate workers adopt it (8.911916ms)
+✔ null or invalid stable timezone snapshots New York without changing the user (0.19675ms)
+✔ after a local window ends no entitlement is created (0.172958ms)
+✔ eventsForUser is the only participant lookup seam (0.4625ms)
+✔ stable timezone candidate promotes only after 48 hours of matching observations (0.29125ms)
+✔ legacy IANA aliases are canonicalized before becoming durable event timezones (0.136584ms)
+✔ settlement eligibility repair inserts a missing impact before loading the event map (1.093167ms)
+✔ settlement eligibility repair still enrolls v2 membership before WAITING_SYNC capture (0.221625ms)
+✔ settlement eligibility repair uses a long enough transaction timeout for weekly fields (0.136875ms)
+✔ boundary workers claim due entitlement ids with SKIP LOCKED (0.229958ms)
+✔ eligible local windows are clipped to the participant join instant (0.126625ms)
+✔ prefetched scoped memberships preserve IDs and clipping without a participant query (0.140375ms)
+✔ viewer active lookup requires an accepted non-forfeited live membership (0.110458ms)
+✖ materialization cursor advances past a full page of ended timezone candidates (0.283833ms)
+✖ production materialization writes one bounded entitlement/event page instead of per-user transactions (0.221625ms)
+✖ production materialization persists a 500-user page with one set-based statement (0.254291ms)
+✔ race start takes C0 before the global-event enrollment lock (0.50725ms)
+✔ all direct race invitation membership mutations enter C0 (0.864208ms)
+✔ global-event boundary enqueues take existing-race C0s before global lock (0.103167ms)
+✔ new-race participant writers establish the shared C0 row before membership (1.229ms)
+✔ explicit membership-writer inventory declares the universal lock prerequisites (1.141375ms)
+✔ tournament lock helper enforces global -> sorted user guards -> tournament row (0.1895ms)
+✔ tournament advancement guards every surviving user before the tournament row and revalidates (0.247417ms)
+✔ AST inventory detects direct delegates, nested relation writes, and non-race directories (6.324375ms)
+✖ AST inventory exhaustively pins every race/tournament participant mutation (362.42575ms)
+✔ AST inventory pins indirect participant-writer call sites and callers (219.342666ms)
+✔ worker-owned box scalar writes require caller tx after advisory locks and before job success (0.296417ms)
+✔ every inventoried mutation is explicitly classified and membership writers name their lock owner (0.851125ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 24
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 737.652
+
+✖ failing tests:
+
+test at test/services/localGlobalEventEntitlement.test.js:465:1
+✖ materialization cursor advances past a full page of ended timezone candidates (0.283833ms)
+  TypeError: prisma.$queryRawUnsafe is not a function
+      at materializeEntitlementsForActiveRacers (/private/tmp/bara-event-baseline-20260909/src/modules/steps/services/globalStepEventEntitlement.js:444:39)
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/services/localGlobalEventEntitlement.test.js:490:23)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7)
+
+test at test/services/localGlobalEventEntitlement.test.js:573:1
+✖ production materialization writes one bounded entitlement/event page instead of per-user transactions (0.221625ms)
+  TypeError: prisma.$queryRawUnsafe is not a function
+      at materializeEntitlementsForActiveRacers (/private/tmp/bara-event-baseline-20260909/src/modules/steps/services/globalStepEventEntitlement.js:444:39)
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/services/localGlobalEventEntitlement.test.js:589:22)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7)
+
+test at test/services/localGlobalEventEntitlement.test.js:605:1
+✖ production materialization persists a 500-user page with one set-based statement (0.254291ms)
+  TypeError: prisma.$queryRawUnsafe is not a function
+      at materializeEntitlementsForActiveRacers (/private/tmp/bara-event-baseline-20260909/src/modules/steps/services/globalStepEventEntitlement.js:444:39)
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/services/localGlobalEventEntitlement.test.js:618:22)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7)
+
+test at test/services/raceWriteFenceInventory.test.js:318:1
+✖ AST inventory exhaustively pins every race/tournament participant mutation (362.42575ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ... Skipped lines
+
+    {
+      'src/modules/loadTesting/fixtures.js': [
+        'raceParticipant.create',
+        'raceParticipant.deleteMany'
+      ],
+  ...
+        'raw.race_participants.update',
+  +     'raw.race_participants.update'
+      ],
+      'src/modules/races/jobs/raceSeriesRenewal.js': [
+        'raceParticipant.create'
+      ],
+      'src/modules/races/jobs/seededRaceRenewal.js': [
+
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/services/raceWriteFenceInventory.test.js:332:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { 'src/modules/loadTesting/fixtures.js': [ 'raceParticipant.create', 'raceParticipant.deleteMany' ], 'src/modules/loadTesting/globalEventSyncFixture.js': [ 'raceParticipant.deleteMany' ], 'src/modules/loadTesting/racesTabOpenFixtures.js': [ 'raceParticipant.deleteMany', 'tournamentParticipant.deleteMany' ], 'src/modules/notifications/dailyMover.js': [ 'participantModel.update', 'raw.race_participants.update' ], 'src/modules/powerups/commands/expireEffects.js': [ 'raceParticipant.updateMany' ], 'src/modules/powerups/commands/openMysteryBox.js': [ 'participantModel.update' ], 'src/modules/powerups/commands/rollPowerup.js': [ 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/commands/autoEnrollNewUser.js': [ 'raceParticipant.create', 'raceParticipant.create' ], 'src/modules/races/commands/autoJoinFeaturedRaces.js': [ 'raceParticipant.createMany' ], 'src/modules/races/commands/cancelRace.js': [ 'participantModel.update' ], 'src/modules/races/commands/completeRace.js': [ 'participantModel.update', 'raceParticipant.updateMany', 'tournamentParticipant.update', 'tournamentParticipant.update' ], 'src/modules/races/commands/createRace.js': [ 'participantModel.create' ], 'src/modules/races/commands/createRaceRematch.js': [ 'raceParticipant.createMany' ], 'src/modules/races/commands/forfeitRace.js': [ 'raceParticipant.updateMany' ], 'src/modules/races/commands/inviteToRace.js': [ 'participantModel.createMany', 'raceParticipant.createMany' ], 'src/modules/races/commands/joinRaceCore.js': [ 'participantModel.create', 'raceParticipant.create' ], 'src/modules/races/commands/kickRaceParticipant.js': [ 'participantModel.delete', 'raceParticipant.delete' ], 'src/modules/races/commands/leaveRace.js': [ 'participantModel.delete', 'raceParticipant.delete' ], 'src/modules/races/commands/markRaceResultsSeen.js': [ 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/commands/respondToRaceInvite.js': [ 'participantModel.update', 'participantModel.updateLiveInvite', 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/commands/setRaceChatMute.js': [ 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/commands/setRacePlacementMute.js': [ 'raceParticipant.update' ], 'src/modules/races/commands/startRace.js': [ 'participantModel.update' ], 'src/modules/races/commands/switchRaceTeam.js': [ 'participantModel.update', 'raceParticipant.update' ], 'src/modules/races/jobs/placementRecompute.js': [ 'participantModel.update', 'participantModel.update', 'participantModel.update', 'participantModel.update' ], 'src/modules/races/jobs/raceAdminCommandRunner.js': [ 'raceParticipant.create', 'raceParticipant.update' ], 'src/modules/races/jobs/raceExpiry.js': [ 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/jobs/raceResolutionQueueV2.js': [ 'raceParticipant.update', 'raw.race_participants.update', 'raw.race_participants.update', 'raw.race_participants.update' ], 'src/modules/races/jobs/raceSeriesRenewal.js': [ 'raceParticipant.create' ], 'src/modules/races/jobs/seededRaceRenewal.js': [ 'raceParticipant.deleteMany', 'raceParticipant.deleteMany', 'raceParticipant.update', 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/models/raceParticipant.js': [ 'raceParticipant.create', 'raceParticipant.createMany', 'raceParticipant.delete', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.updateMany', 'raceParticipant.updateMany', 'raceParticipant.updateMany', 'raceParticipant.updateMany', 'raw.race_participants.update', 'raw.race_participants.update' ], 'src/modules/races/models/racePlacementBaseline.js': [ 'raw.race_participants.update' ], 'src/modules/races/services/commitRaceStart.js': [ 'raceParticipant.update' ], 'src/modules/races/services/fundedExposure.js': [ 'raceParticipant.update', 'raceParticipant.updateMany', 'tournamentParticipant.update', 'tournamentParticipant.updateMany' ], 'src/modules/races/services/highMultiplierAlert.js': [ 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/services/legacyBuyInRemediation.js': [ 'raceParticipant.update', 'raceParticipant.updateMany' ], 'src/modules/races/services/racePowerupStateSync.js': [ 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/services/raceResolutionDeliveryIntents.js': [ 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/services/seededRaceBuckets.js': [ 'raceParticipant.createMany', 'raceParticipant.delete' ], 'src/modules/tournaments/commands/cancelTournament.js': [ 'tournamentParticipant.update' ], 'src/modules/tournaments/commands/createTournament.js': [ 'nested.participants.create', 'tournamentParticipant.createMany' ], 'src/modules/tournaments/commands/forfeitTournament.js': [ 'raceParticipant.update' ], 'src/modules/tournaments/commands/inviteToTournament.js': [ 'tournamentParticipant.create', 'tournamentParticipant.update' ], 'src/modules/tournaments/commands/joinTournamentCore.js': [ 'tournamentParticipant.create', 'tournamentParticipant.update', 'tournamentParticipant.update' ], 'src/modules/tournaments/commands/setTournamentFavorite.js': [ 'tournamentParticipant.update', 'tournamentParticipant.updateMany' ], 'src/modules/tournaments/services/tournamentParticipants.js': [ 'tournamentParticipant.update' ], 'src/modules/tournaments/services/tournamentRounds.js': [ 'raceParticipant.create' ], 'src/modules/tournaments/services/tournamentStart.js': [ 'tournamentParticipant.update', 'tournamentParticipant.update' ], 'src/modules/users/commands/deleteUserAccount.js': [ 'raceParticipant.delete', 'raceParticipant.delete', 'raceParticipant.update', 'tournamentParticipant.delete', 'tournamentParticipant.delete', 'tournamentParticipant.update' ] },
+    expected: { 'src/modules/loadTesting/fixtures.js': [ 'raceParticipant.create', 'raceParticipant.deleteMany' ], 'src/modules/loadTesting/globalEventSyncFixture.js': [ 'raceParticipant.deleteMany' ], 'src/modules/loadTesting/racesTabOpenFixtures.js': [ 'raceParticipant.deleteMany', 'tournamentParticipant.deleteMany' ], 'src/modules/notifications/dailyMover.js': [ 'participantModel.update', 'raw.race_participants.update' ], 'src/modules/powerups/commands/openMysteryBox.js': [ 'participantModel.update' ], 'src/modules/powerups/commands/expireEffects.js': [ 'raceParticipant.updateMany' ], 'src/modules/powerups/commands/rollPowerup.js': [ 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/commands/autoEnrollNewUser.js': [ 'raceParticipant.create', 'raceParticipant.create' ], 'src/modules/races/commands/autoJoinFeaturedRaces.js': [ 'raceParticipant.createMany' ], 'src/modules/races/commands/cancelRace.js': [ 'participantModel.update' ], 'src/modules/races/commands/completeRace.js': [ 'participantModel.update', 'raceParticipant.updateMany', 'tournamentParticipant.update', 'tournamentParticipant.update' ], 'src/modules/races/commands/createRace.js': [ 'participantModel.create' ], 'src/modules/races/commands/createRaceRematch.js': [ 'raceParticipant.createMany' ], 'src/modules/races/commands/forfeitRace.js': [ 'raceParticipant.updateMany' ], 'src/modules/races/commands/inviteToRace.js': [ 'participantModel.createMany', 'raceParticipant.createMany' ], 'src/modules/races/commands/joinRaceCore.js': [ 'participantModel.create', 'raceParticipant.create' ], 'src/modules/races/commands/kickRaceParticipant.js': [ 'participantModel.delete', 'raceParticipant.delete' ], 'src/modules/races/commands/leaveRace.js': [ 'participantModel.delete', 'raceParticipant.delete' ], 'src/modules/races/commands/markRaceResultsSeen.js': [ 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/commands/respondToRaceInvite.js': [ 'participantModel.update', 'participantModel.updateLiveInvite', 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/commands/setRaceChatMute.js': [ 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/commands/setRacePlacementMute.js': [ 'raceParticipant.update' ], 'src/modules/races/commands/startRace.js': [ 'participantModel.update' ], 'src/modules/races/commands/switchRaceTeam.js': [ 'participantModel.update', 'raceParticipant.update' ], 'src/modules/races/jobs/placementRecompute.js': [ 'participantModel.update', 'participantModel.update', 'participantModel.update', 'participantModel.update' ], 'src/modules/races/jobs/raceAdminCommandRunner.js': [ 'raceParticipant.create', 'raceParticipant.update' ], 'src/modules/races/jobs/raceExpiry.js': [ 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/jobs/raceResolutionQueueV2.js': [ 'raceParticipant.update', 'raw.race_participants.update', 'raw.race_participants.update' ], 'src/modules/races/jobs/raceSeriesRenewal.js': [ 'raceParticipant.create' ], 'src/modules/races/jobs/seededRaceRenewal.js': [ 'raceParticipant.deleteMany', 'raceParticipant.deleteMany', 'raceParticipant.update', 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/models/raceParticipant.js': [ 'raceParticipant.create', 'raceParticipant.createMany', 'raceParticipant.delete', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.update', 'raceParticipant.updateMany', 'raceParticipant.updateMany', 'raceParticipant.updateMany', 'raceParticipant.updateMany', 'raw.race_participants.update', 'raw.race_participants.update' ], 'src/modules/races/models/racePlacementBaseline.js': [ 'raw.race_participants.update' ], 'src/modules/races/services/commitRaceStart.js': [ 'raceParticipant.update' ], 'src/modules/races/services/fundedExposure.js': [ 'raceParticipant.update', 'raceParticipant.updateMany', 'tournamentParticipant.update', 'tournamentParticipant.updateMany' ], 'src/modules/races/services/highMultiplierAlert.js': [ 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/services/legacyBuyInRemediation.js': [ 'raceParticipant.update', 'raceParticipant.updateMany' ], 'src/modules/races/services/racePowerupStateSync.js': [ 'raceParticipant.update', 'raceParticipant.update' ], 'src/modules/races/services/raceResolutionDeliveryIntents.js': [ 'raceParticipant.updateMany', 'raceParticipant.updateMany' ], 'src/modules/races/services/seededRaceBuckets.js': [ 'raceParticipant.createMany', 'raceParticipant.delete' ], 'src/modules/tournaments/commands/cancelTournament.js': [ 'tournamentParticipant.update' ], 'src/modules/tournaments/commands/createTournament.js': [ 'nested.participants.create', 'tournamentParticipant.createMany' ], 'src/modules/tournaments/commands/forfeitTournament.js': [ 'raceParticipant.update' ], 'src/modules/tournaments/commands/inviteToTournament.js': [ 'tournamentParticipant.create', 'tournamentParticipant.update' ], 'src/modules/tournaments/commands/joinTournamentCore.js': [ 'tournamentParticipant.create', 'tournamentParticipant.update', 'tournamentParticipant.update' ], 'src/modules/tournaments/commands/setTournamentFavorite.js': [ 'tournamentParticipant.update', 'tournamentParticipant.updateMany' ], 'src/modules/tournaments/services/tournamentParticipants.js': [ 'tournamentParticipant.update' ], 'src/modules/tournaments/services/tournamentRounds.js': [ 'raceParticipant.create' ], 'src/modules/tournaments/services/tournamentStart.js': [ 'tournamentParticipant.update', 'tournamentParticipant.update' ], 'src/modules/users/commands/deleteUserAccount.js': [ 'raceParticipant.delete', 'raceParticipant.delete', 'raceParticipant.update', 'tournamentParticipant.delete', 'tournamentParticipant.delete', 'tournamentParticipant.update' ] },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

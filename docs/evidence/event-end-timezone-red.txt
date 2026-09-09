@@ -1,0 +1,100 @@
+[dotenv@17.3.1] injecting env (19) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+▶ bounded event ends and authoritative timezone HTTP contract
+  ✖ immediately commits authoritative zone and clears legacy candidates with no pending events; return travel and old clients work (346.924041ms)
+  ✖ moves a personal future window after worldwide parent start and revises notification atomically before delayed projection/old expiry (46.954125ms)
+  ✖ preserves an individually started event while immediately changing subsequent scheduling zone (33.5985ms)
+  ✖ drains over 1000 ends through cron continuations, coalesces ticks, leaves future rows, and stops cleanly (20320.994333ms)
+✖ bounded event ends and authoritative timezone HTTP contract (20757.973583ms)
+ℹ tests 4
+ℹ suites 1
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21042.013542
+
+✖ failing tests:
+
+test at test/integration/event-end-drain-timezone.test.js:27:3
+✖ immediately commits authoritative zone and clears legacy candidates with no pending events; return travel and old clients work (346.924041ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'America/New_York'
+  - 'America/Los_Angeles'
+             ^
+
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:33:48)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1771:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'America/New_York',
+    expected: 'America/Los_Angeles',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/integration/event-end-drain-timezone.test.js:40:3
+✖ moves a personal future window after worldwide parent start and revises notification atomically before delayed projection/old expiry (46.954125ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'America/New_York'
+  - 'America/Los_Angeles'
+             ^
+
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:47:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'America/New_York',
+    expected: 'America/Los_Angeles',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/integration/event-end-drain-timezone.test.js:54:3
+✖ preserves an individually started event while immediately changing subsequent scheduling zone (33.5985ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'America/New_York'
+  - 'America/Los_Angeles'
+             ^
+
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:59:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'America/New_York',
+    expected: 'America/Los_Angeles',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/integration/event-end-drain-timezone.test.js:61:3
+✖ drains over 1000 ends through cron continuations, coalesces ticks, leaves future rows, and stops cleanly (20320.994333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1001
+
+      at TestContext.<anonymous> (<backend>/test/integration/event-end-drain-timezone.test.js:72:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1001,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

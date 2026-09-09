@@ -1,0 +1,16 @@
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "bara_event_baseline_regression_test", schema "public" at "localhost:5432"
+
+250 migrations found in prisma/migrations
+
+Applying migration `20260909050000_event_end_retry`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260909050000_event_end_retry/
+    └─ migration.sql
+
+All migrations have been successfully applied.

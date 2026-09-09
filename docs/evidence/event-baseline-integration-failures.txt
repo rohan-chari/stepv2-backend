@@ -1,0 +1,113 @@
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+▶ global-event reliability v2 contract
+  ✖ merges a concurrent STEP_SYNC queue reason and scopes with global-event activation (173.746333ms)
+✖ global-event reliability v2 contract (183.537833ms)
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+✖ HTTP step-sync dependency closure fails closed while that participant's local event is active (236.194875ms)
+[redisCache] subscriber-connection failed (further subscriber-connection errors suppressed for 60s): connect ECONNREFUSED 127.0.0.1:6379
+[redisCache] subscribe failed (further subscribe errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] client-connection failed (further client-connection errors suppressed for 60s): connect ECONNREFUSED 127.0.0.1:6379
+[redisCache] getJSON failed (further getJSON errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] setJSON failed (further setJSON errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+social-cache { surface: 'presentation', outcome: 'bypass/error', durationMs: 0 }
+social-cache { surface: 'presentation', outcome: 'bypass/error', durationMs: 2 }
+✖ enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary (120.303042ms)
+[redisCache] subscriber-connection failed (further subscriber-connection errors suppressed for 60s): connect ECONNREFUSED 127.0.0.1:6379
+[redisCache] subscribe failed (further subscribe errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] client-connection failed (further client-connection errors suppressed for 60s): connect ECONNREFUSED 127.0.0.1:6379
+[redisCache] getJSON failed (further getJSON errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] setJSON failed (further setJSON errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] metadata-admission failed (details suppressed; further metadata-admission errors suppressed for 60s)
+[redisCache] publishDurableQueueWakeup failed (further publishDurableQueueWakeup errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] withLock-acquire failed (further withLock-acquire errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] del failed (further del errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+[redisCache] ping failed (further ping errors suppressed for 60s): Stream isn't writeable and enableOfflineQueue options is false
+✖ HTTP display artifact cannot cross a participant's local entitlement end fingerprint (87.571292ms)
+ℹ tests 4
+ℹ suites 1
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1097.734292
+
+✖ failing tests:
+
+test at test/integration/global-event-reliability.test.js:1348:3
+✖ merges a concurrent STEP_SYNC queue reason and scopes with global-event activation (173.746333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'COALESCE'
+  - 'IMMEDIATE'
+
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/integration/global-event-reliability.test.js:1406:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Promise.all (index 26)
+      at async Suite.run (node:internal/test_runner/test:1771:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'COALESCE',
+    expected: 'IMMEDIATE',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/integration/local-global-step-event-entitlements.test.js:1306:1
+✖ HTTP step-sync dependency closure fails closed while that participant's local event is active (236.194875ms)
+  AssertionError [ERR_ASSERTION]: [{"event":"race_resolution_v2_claim","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.458Z","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","jobId":"fc7b6e05-ee96-4685-a5d1-0b340ec468f0","raceId":"3ac3b348-fa20-4dff-88c3-b647f4108013","leaseExpiresAt":"2026-09-09T04:57:43.456Z","workerPid":20850,"queuePriority":"MAINTENANCE","queueLagMs":29},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.460Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"dependencyClosurePlanner","parentPhase":null,"phaseStack":["dependencyClosurePlanner"],"phaseElapsedMs":0.021125,"attemptElapsedMs":1.933208,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.021125,"monotonicAttemptElapsedMs":1.933208,"phaseInstance":4},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"planSettings","parentPhase":null,"phaseStack":["planSettings"],"phaseElapsedMs":0.0035,"attemptElapsedMs":12.009833,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.0035,"monotonicAttemptElapsedMs":12.009833,"phaseInstance":5},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"planSettings","parentPhase":null,"phaseStack":["planSettings"],"phaseElapsedMs":0.002041,"attemptElapsedMs":12.048375,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.002041,"monotonicAttemptElapsedMs":12.048375,"phaseInstance":6},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"planSettings","parentPhase":null,"phaseStack":["planSettings"],"phaseElapsedMs":0.001125,"attemptElapsedMs":12.068791,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.001125,"monotonicAttemptElapsedMs":12.068791,"phaseInstance":7},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"planSettings","parentPhase":null,"phaseStack":["planSettings"],"phaseElapsedMs":0.001084,"attemptElapsedMs":12.087791,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.001084,"monotonicAttemptElapsedMs":12.087791,"phaseInstance":8},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"planSettings","parentPhase":null,"phaseStack":["planSettings"],"phaseElapsedMs":0.001083,"attemptElapsedMs":12.114958,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.001083,"monotonicAttemptElapsedMs":12.114958,"phaseInstance":9},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"artifactLookup","parentPhase":null,"phaseStack":["artifactLookup"],"phaseElapsedMs":0.001542,"attemptElapsedMs":12.135916,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.001542,"monotonicAttemptElapsedMs":12.135916,"phaseInstance":10},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"stepSyncScope","parentPhase":null,"phaseStack":["stepSyncScope"],"phaseElapsedMs":0.001625,"attemptElapsedMs":12.202,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.001625,"monotonicAttemptElapsedMs":12.202,"phaseInstance":11},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.470Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"compute","parentPhase":null,"phaseStack":["compute"],"phaseElapsedMs":0.001792,"attemptElapsedMs":12.435458,"queuePriority":"MAINTENANCE","resolutionPlan":"FULL","workerPid":20850,"monotonicPhaseElapsedMs":0.001792,"monotonicAttemptElapsedMs":12.435458,"phaseInstance":12},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.477Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"prepareWrites","parentPhase":null,"phaseStack":["prepareWrites"],"phaseElapsedMs":0.003916,"attemptElapsedMs":18.905041,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.003916,"monotonicAttemptElapsedMs":18.905041,"phaseInstance":13},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.477Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"transaction","parentPhase":null,"phaseStack":["transaction"],"phaseElapsedMs":0.001333,"attemptElapsedMs":18.9685,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.001333,"monotonicAttemptElapsedMs":18.9685,"phaseInstance":14},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.477Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"fenceAcquire","parentPhase":"transaction","phaseStack":["transaction","fenceAcquire"],"phaseElapsedMs":0.002,"attemptElapsedMs":19.77025,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.002,"monotonicAttemptElapsedMs":19.77025,"phaseInstance":15},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.479Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"fenceValidation","parentPhase":"transaction","phaseStack":["transaction","fenceValidation"],"phaseElapsedMs":0.000833,"attemptElapsedMs":20.841625,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.000833,"monotonicAttemptElapsedMs":20.841625,"phaseInstance":16},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.488Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"participantWrites","parentPhase":"transaction","phaseStack":["transaction","participantWrites"],"phaseElapsedMs":0.00225,"attemptElapsedMs":29.928875,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.00225,"monotonicAttemptElapsedMs":29.928875,"phaseInstance":17},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.492Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"sideWrites","parentPhase":"transaction","phaseStack":["transaction","sideWrites"],"phaseElapsedMs":0.00075,"attemptElapsedMs":34.038541,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.00075,"monotonicAttemptElapsedMs":34.038541,"phaseInstance":18},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.492Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"boxConsequences","parentPhase":"transaction","phaseStack":["transaction","boxConsequences"],"phaseElapsedMs":0.000541,"attemptElapsedMs":34.166,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.000541,"monotonicAttemptElapsedMs":34.166,"phaseInstance":19},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.492Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"recordSuccess","parentPhase":"transaction","phaseStack":["transaction","recordSuccess"],"phaseElapsedMs":0.000458,"attemptElapsedMs":34.323458,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.000458,"monotonicAttemptElapsedMs":34.323458,"phaseInstance":20},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.493Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"placementHandoff","parentPhase":"transaction","phaseStack":["transaction","placementHandoff"],"phaseElapsedMs":0.0005,"attemptElapsedMs":34.916041,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.0005,"monotonicAttemptElapsedMs":34.916041,"phaseInstance":21},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.495Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"postCommitHook","parentPhase":null,"phaseStack":["postCommitHook"],"phaseElapsedMs":0.000875,"attemptElapsedMs":37.422666,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.000875,"monotonicAttemptElapsedMs":37.422666,"phaseInstance":22},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.495Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"powerupStateSync","parentPhase":null,"phaseStack":["powerupStateSync"],"phaseElapsedMs":0.000334,"attemptElapsedMs":37.484083,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.000334,"monotonicAttemptElapsedMs":37.484083,"phaseInstance":23},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.495Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"postSettings","parentPhase":null,"phaseStack":["postSettings"],"phaseElapsedMs":0.000375,"attemptElapsedMs":37.528166,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.000375,"monotonicAttemptElapsedMs":37.528166,"phaseInstance":24},{"event":"race_resolution_v2_phase","schemaVersion":3,"observedAt":"2026-09-09T04:57:13.495Z","checkpoint":"enter","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","activePhase":"overtakeNudges","parentPhase":null,"phaseStack":["overtakeNudges"],"phaseElapsedMs":0.00025,"attemptElapsedMs":37.544833,"queuePriority":"MAINTENANCE","resolutionPlan":"DEPENDENCY_CLOSURE","workerPid":20850,"monotonicPhaseElapsedMs":0.00025,"monotonicAttemptElapsedMs":37.544833,"phaseInstance":25},{"event":"race_resolution_v2","schemaVersion":2,"observedAt":"2026-09-09T04:57:13.498Z","attemptId":"f4d4bba6-333e-4c29-9a1c-c109a5d3c55e:a09cdc67-4a1a-4974-b321-1f8e842129e5","outcome":"commit","queuePriority":"MAINTENANCE","reasonClasses":["STEP_INPUT_CHANGED"],"resolutionPlan":"DEPENDENCY_CLOSURE","artifactHit":false,"artifactFallbackReason":null,"dirtyParticipantCount":1,"fullParticipantCount":1,"triggeringUserCount":1,"changedRows":1,"activeImpactCreated":0,"activeImpactZero":0,"activeImpactSuppressed":0,"activeImpactFailures":0,"activeImpactMs":0,"activeImpactPersistMs":0.091084,"computeMs":7,"writeMs":18,"postTaskMs":3,"coreMs":40,"queueLagMs":29,"shadowClosurePlan":null,"shadowClosureFallbackReason":null,"shadowClosureCount":null,"shadowSourceCount":null,"shadowMinesActive":null,"shadowWouldEscalateOnMine":null,"shadowPlannerMs":null,"shadowRetainedSourceCount":null,"closureEscalatedOnMine":false,"closureFenceRejections":0,"closureFenceRejectionReason":null,"placementHandoffGeneration":1,"placementHandoffOutcome":"queued","sourceInputFenceRejections":0,"sqlCount":null,"phaseMs":{"claimReadiness":1.632542,"fullTriggerPromotion":3.362875,"claim":1.294375,"planSettings":0.091,"dependencyClosurePlanner":10.06775,"artifactLookup":0.038125,"stepSyncScope":0.141667,"compute":6.459292,"prepareWrites":0.061458,"transaction":18.341375,"fenceAcquire":1.06525,"fenceValidation":5.889917,"discardSuperseded":0,"participantWrites":4.10525,"sideWrites":0.03075,"boxConsequences":0.153958,"recordSuccess":0.588542,"placementHandoff":2.166583,"postSettings":0.014333,"postCommitHook":0.05925,"powerupStateSync":0.0385,"overtakeNudges":2.480833,"postTaskHandoff":0},"computePhaseMs":{"raceLoad":0.066042,"scoringPrefetch":1.954833,"globalEvents":0.10875,"participantScoring":3.477292,"hitchhikeCopies":0.092125,"leechAndCapture":0.129458,"activeImpactAttribution":0,"activeTimedImpactAttribution":0,"activeDefenseImpactAttribution":0,"activeEffects":0.096625,"trailMines":0.081833},"computePhaseQueryCaptureEnabled":false,"computePhaseQueryCount":null,"nudgePhaseMs":{"participantLoad":2.330416,"ranking":0.029167,"intentHandoff":0},"postHandoffPhaseMs":{"taskInsert":0,"resolveIntents":0,"taskUpdate":0,"intentInsert":0,"taskTransaction":0,"runnerReadiness":0,"inlineClaim":0},"stepSyncScopeOutcome":"invalid_envelope","stepSyncScopeActiveEffectCount":0,"stepSyncScopePhaseMs":{"activeEffects":0,"raceHydration":0}}]
+  + actual - expected
+
+  + 'DEPENDENCY_CLOSURE'
+  - 'FULL'
+
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/integration/local-global-step-event-entitlements.test.js:1365:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'DEPENDENCY_CLOSURE',
+    expected: 'FULL',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/integration/local-global-step-event-entitlements.test.js:1434:1
+✖ enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary (120.303042ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(await redisCache.getJSON(cacheKeys.homeActiveGlobalEvent(active.id)))
+
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/integration/local-global-step-event-entitlements.test.js:1482:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/integration/local-global-step-event-entitlements.test.js:1504:1
+✖ HTTP display artifact cannot cross a participant's local entitlement end fingerprint (87.571292ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(queuedWithArtifact.displayArtifactId)
+
+      at TestContext.<anonymous> (/private/tmp/bara-event-baseline-20260909/test/integration/local-global-step-event-entitlements.test.js:1565:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
