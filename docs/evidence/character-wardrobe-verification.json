@@ -13,13 +13,6 @@
     "fail": 0,
     "skip": 0
   },
-  "fullUnit": {
-    "tests": 3370,
-    "pass": 3364,
-    "fail": 6,
-    "newStructuralFailureFixed": true,
-    "unchangedPreAFailures": 5
-  },
   "fullIntegration": {
     "tests": 3155,
     "pass": 3103,
@@ -94,11 +87,60 @@
       "failure": "40P01 deadlock in cleanDatabase before test behavior; passed baseline isolated suite"
     }
   ],
-  "note": "Broad suites remain red. Baseline reproduction does not fix these failures or prove them harmless; no blanket deployment readiness claim.",
+  "note": "Full unit is green after reviewed fixture-only corrections. Broad integration remains red; baseline reproduction does not prove remaining failures harmless. No blanket deployment readiness claim.",
   "currentIsolatedTransientRecheck": {
     "tests": 13,
     "pass": 13,
     "fail": 0,
     "skip": 0
+  },
+  "initialFullUnit": {
+    "tests": 3370,
+    "pass": 3364,
+    "fail": 6,
+    "newStructuralFailureFixed": true,
+    "unchangedPreAFailures": 5
+  },
+  "fullUnit": {
+    "tests": 3371,
+    "pass": 3371,
+    "fail": 0,
+    "skip": 0,
+    "durationMs": 60910.652084,
+    "afterFixtureCommit": "5c5fdbc"
+  },
+  "baselineFixtureFollowup": {
+    "commit": "5c5fdbc",
+    "review": "SHIP; all existing assertion properties retained; test-only changes",
+    "targetedUnit": {
+      "tests": 32,
+      "pass": 32,
+      "fail": 0
+    },
+    "integrationBaselineFailuresCorrected": 14,
+    "integrationInitialSelectedRun": {
+      "tests": 67,
+      "pass": 59,
+      "fail": 8
+    },
+    "subsequentRetesting": {
+      "retention": {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0
+      },
+      "giveawayWholeFile": {
+        "tests": 5,
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    "notes": [
+      "Five disjoint-player concurrency and seven read-only failures passed unchanged after fixture timezone matched device timezone.",
+      "Exact additive retention result and injected referral creation dates repaired two more baseline failures.",
+      "Persisted-standings ordering/query-count changes were ineffective and reverted; its four failures remain.",
+      "Two notification-producer failures remain unchanged.",
+      "Full integration has not been repeated after fixture corrections; do not infer a new full-suite count."
+    ]
   }
 }
