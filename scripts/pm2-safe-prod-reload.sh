@@ -60,9 +60,6 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
   # The exact old owner is gone. Wait the full legacy delivery lease before a
   # new cron can claim any row that an old binary might have held.
   sleep 30
-  pm2 start "$CONFIG" --only steps-tracker-cron
-  node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
-  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=http,cron --baseline-file="$BASELINE_FILE"
 
   # A resolution process runs both the core queue and the post-task runner.
   # Never overlap artifacts here: an older runner would accept the additive
@@ -86,8 +83,10 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
     sleep 1
   done
   pm2 start "$CONFIG" --only steps-tracker-resolution
+  # Only the new canonical worker can consume reservation-backed shells.
+  # Keep cron stopped until that worker has replaced the old artifact.
+  pm2 start "$CONFIG" --only steps-tracker-cron
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
-  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=http,cron,resolution --baseline-file="$BASELINE_FILE"
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory --verify-live-config
   node "$GUARD" --pool-budget-mode=final --baseline-file="$BASELINE_FILE"
   pm2 save

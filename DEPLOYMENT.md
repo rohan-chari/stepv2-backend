@@ -173,7 +173,7 @@ the compatibility baseline `4 × 20 = 80`. Deployment B adds two HTTP workers
 at 10 each, resolution at 8, and cron at 4: `2 × 10 + 8 + 4 = 32`, and makes a
 missing production role value fatal. The wrapper derives the target from the
 checked-out ecosystem revision, captures the exact live baseline, serializes
-resolution → cron → HTTP, verifies every untransitioned/transitioned process,
+HTTP → stop old cron and resolution → start resolution → start cron, verifies the HTTP transition and final complete topology,
 checks the HTTP memory sentinel, and requires the final live aggregate to equal
 that revision's reviewed target before `pm2 save`. Do not skip Deployment A or
 bypass the wrapper with a direct mutating PM2 command.

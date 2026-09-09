@@ -135,8 +135,9 @@ local/test-only. The capacity harness keeps its isolated
 Before the reload, verify in the DigitalOcean control plane and record the
 managed-pool mode, pool size, reserve size (if any), and direct database
 maximum. Then run the wrapper, which performs static preflight and transitions
-both HTTP workers → cron → resolution. This order removes legacy HTTP/cron
-claim paths before the new dedicated owner may claim. Before the first reload it captures the
+both HTTP workers, stops and proves the old cron and resolution owners gone,
+then starts resolution before cron. This removes legacy claim paths and ensures
+that only the new worker sees newly published preparation shells. Before the first reload it captures the
 exact live per-process pool baseline; every untransitioned process must remain
 identical to that snapshot, and every transitioned process must exactly match
 the current ecosystem target. This also applies when reviewed targets change.

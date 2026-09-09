@@ -408,7 +408,13 @@ test("the production reload wrapper serializes and reapplies ecosystem config", 
   assert.ok([httpReload, sentinelCheck, resolutionReload, cronReload].every((index) => index >= 0));
   const finalStrict = lines.findIndex((line) => line.includes("--pool-budget-mode=final"));
   assert.ok(httpReload < cronReload);
-  assert.ok(cronReload < resolutionReload);
+  assert.ok(resolutionReload < cronReload);
+  const cronStop = lines.indexOf("pm2 stop steps-tracker-cron");
+  const resolutionStop = lines.indexOf("pm2 stop steps-tracker-resolution");
+  assert.ok(httpReload < cronStop && cronStop < resolutionStop);
+  assert.ok(resolutionStop < resolutionReload);
+  assert.ok(cronReload < sentinelCheck);
+  assert.equal(lines.slice(cronStop, cronReload).some(line => line.startsWith('node "$GUARD"')), false, "All-role topology validation would reject intentional cron downtime");
   assert.ok(resolutionReload < sentinelCheck);
   assert.ok(sentinelCheck < finalStrict);
 });
