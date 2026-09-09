@@ -124,3 +124,44 @@ node --test --test-concurrency=1 --test-force-exit test/integration/global-event
 contain the comparison. Production CPU improvement and the 70% idle target
 remain unverified until an explicitly authorized deployment and observation of
 a comparable natural challenge-end cohort.
+
+
+## Authorized production deployment
+
+User explicitly authorized deployment. Release `1dcc981` on
+`release/event-end-batch-20260909`, tagged
+`deploy/event-end-batch-20260909-1dcc981`, contains only this change above the
+running `7915ad8`. The unrelated local Home cooldown fix was excluded. All eight
+new integration tests passed again on this exact release using local test
+PostgreSQL and synthetic credentials.
+
+Preflight found no missing or unfinished migrations. Managed transaction pool
+size remains 40, direct max_connections 50. The existing server package-lock
+modification was backed up and its checksum verified unchanged. No migration,
+package installation, data seed, runtime configuration, or capacity change was
+needed. The guarded rolling wrapper passed at approximately 03:31:56 UTC,
+verified two HTTP / one cron / one resolution processes and aggregate pool
+ceiling 32, and saved PM2. Staging remained stopped.
+
+API and Redis health passed during and after the transition. Required referral
+catch-up audit/apply/final audit all reported zero missing rows; apply wrote zero
+rows. Five direct database CPU samples over 80 seconds averaged 48.17% busy
+(range 37.84–55.86%); a single pre-deploy sample was 56.11% busy. This is neither
+a matched-traffic comparison nor a natural challenge-end measurement.
+
+No end-batch rollback or deadlock appeared in the observed error-log interval.
+Existing billing/configuration and scheduled-race eligibility errors continued.
+Two P2028 timeouts did occur: one DELETE /notifications/device-token returned
+HTTP 500 after 7.016s, and one placement transition reported a retryable failure.
+The 23:33 EDT access-log minute also had 15 requests over five seconds. These are
+in unchanged code paths; this observation does not establish their cause or
+claim they are fixed. At 03:34:17 UTC the resolution queue had four queued jobs
+(oldest 3.76s) and one running (5.80s), down from a transient 62.6s queue-age alarm.
+The completed 23:31/23:32 minutes had zero HTTP 5xx; the partial 23:34 minute had
+zero at the final check. API/Redis health still passed.
+
+The next observed natural end cohort is scheduled for 03:53 UTC (23:53 EDT),
+with 110 currently registered entitlements. It has not been observed by this
+deployment verification. Production burst CPU improvement and the 70% idle
+target remain unverified. The broader eight baseline test failures remain
+unresolved as documented above.
