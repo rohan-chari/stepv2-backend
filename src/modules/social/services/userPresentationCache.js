@@ -261,10 +261,16 @@ function buildUserPresentationCache(dependencies = {}) {
       cacheKeys.userCosmetics(id),
       cacheKeys.userCosmeticsVersion(id),
     ]);
-    const batch = await capacity.measurePhase(
-      "cacheLookup",
-      () => redisCache.getManyJSON(pairs),
-    );
+    let batch;
+    try {
+      batch = await capacity.measurePhase(
+        "cacheLookup",
+        () => redisCache.getManyJSON(pairs),
+      );
+    } catch {
+      // A cache collaborator failure must not prevent durable presentation reads.
+      batch = { ok: false, values: [] };
+    }
     if (!batch.ok || batch.values.length !== pairs.length) {
       cacheErrorOperations += 1;
       cacheErrorFallbackIdentities = unique.length;

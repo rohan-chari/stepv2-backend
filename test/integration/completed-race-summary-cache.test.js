@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { after, before, beforeEach, describe, it } = require("node:test");
+const { after, afterEach, before, beforeEach, describe, it } = require("node:test");
 const IORedis = require("ioredis");
 
 const ENV_PREFIX = "completed-summary:";
@@ -39,6 +39,7 @@ let live;
 let probe;
 let skipReason;
 let completedRankingLoads = 0;
+let previousGuardSetting;
 
 async function enableRedis() {
   process.env.REDIS_URL = live.url;
@@ -79,6 +80,18 @@ beforeEach(async () => {
   await appSettings.setFlag("redisCacheRaceListEnabled", true);
   await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
   await appSettings.setFlag("apiRaceListCompactV1Enabled", true);
+  previousGuardSetting = await prisma.appSetting.findUnique({ where: { key: "redisPresentationGenerationGuardEnabled" } });
+  await appSettings.setFlag("redisPresentationGenerationGuardEnabled", true);
+});
+
+afterEach(async () => {
+  const key = "redisPresentationGenerationGuardEnabled";
+  if (previousGuardSetting) {
+    await prisma.appSetting.upsert({ where: { key }, create: previousGuardSetting, update: { value: previousGuardSetting.value } });
+  } else {
+    await prisma.appSetting.deleteMany({ where: { key } });
+  }
+  appSettings.bustCache();
 });
 
 after(async () => {
