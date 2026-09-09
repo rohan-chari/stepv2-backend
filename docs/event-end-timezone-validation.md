@@ -1,7 +1,7 @@
 # Event-end draining and timezone validation
 
-Status: implementation, review and fresh-database v4 validation complete. No
-production or staging changes. Requirements: [approved spec](event-end-drain-timezone-requirements.md).
+Status: implementation, review and fresh-database v4 validation complete.
+Backend deployment was subsequently authorized and is recorded in the deployment audit. Requirements: [approved spec](event-end-drain-timezone-requirements.md).
 
 ## What changed
 
@@ -182,7 +182,9 @@ workload on a shared local host; it is not a production capacity guarantee.
 ### Delivery status and limits
 
 Frontend commit: `00c749e` (request timezone refresh). Backend implementation and
-raw v4 evidence are on the matching review branch. Neither has been deployed.
+raw v4 evidence were prepared on the matching review branch. The backend was
+subsequently [deployed to production](event-end-timezone-production-deploy-2026-09-09.md);
+the frontend app change remains unreleased.
 The older 48-hour pure helper remains only for compatibility tests/internal
 callers; production auth and persisted enrollment use the immediate policy.
 
