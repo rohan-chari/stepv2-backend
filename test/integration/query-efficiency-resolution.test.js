@@ -17,6 +17,12 @@ for(const isTeamRace of [false,true]) test(`real resolution worker query trace a
  const users=Array.from({length:99},(_,i)=>({id:randomUUID(),appleId:`worker-trace-${i}`,displayName:`Member ${i}`,timezone:'UTC'}));
  await prisma.user.createMany({data:users});
  await prisma.raceParticipant.createMany({data:[viewer.user,...users].map(u=>({raceId,userId:u.id,status:'ACCEPTED',team:isTeamRace?'TEAM_A':null,joinedAt:startedAt,buyInStatus:'NONE'}))});
+ // A 100-person race is a subset of the user population. With only its own
+ // members in users, PostgreSQL can cheaply hash the entire tiny table, and
+ // the historical buffer guard instead depends on leftover bloat/statistics.
+ // Pin the background population and statistics before observing the worker.
+ for(let page=0;page<10;page++)await prisma.user.createMany({data:Array.from({length:1000},(_,i)=>({id:randomUUID(),appleId:`worker-background-${page}-${i}`,timezone:'UTC'}))});
+ for(const table of ['users','races','race_participants'])await prisma.$executeRawUnsafe(`VACUUM (ANALYZE) ${table}`);
  server=await getSharedServer();
  const intakeQueries=[];prisma.$on('query',m=>intakeQueries.push(m));
  const upload=await request(server.baseUrl,'POST','/steps/samples',{token:viewer.token,headers:{'X-Timezone':'UTC'},body:{samples:[{periodStart:new Date(+now-3*3600000).toISOString(),periodEnd:new Date(+now-2*3600000).toISOString(),steps:100}]}});
@@ -39,7 +45,7 @@ for(const isTeamRace of [false,true]) test(`real resolution worker query trace a
    await delay(250);
   }
   assert.ok(done?.committedGeneration>=queued.generation,`worker completes uploaded generation: ${logs.slice(-5000)}`);
-  const result=await request(server.baseUrl,'GET',`/races/${raceId}/progress`,{token:viewer.token,headers:{'X-Timezone':'UTC'}});assert.equal(result.status,200);
+  const result=await request(server.baseUrl,'GET',`/races/${raceId}/progress`,{token:viewer.token,headers:{'X-Timezone':'UTC',...(isTeamRace?{'X-Client-Features':'team_races,team_races_10v10_v1'}:{})}});assert.equal(result.status,200);
   const progress=(await result.json()).progress;const mine=progress.participants.find(p=>p.userId===viewer.user.id);assert.ok(mine);assert.equal(mine.totalSteps,100);assert.equal(mine.displayName,'Worker Viewer');
   if(!isTeamRace)await delay(5500);
   const sampleReads=messages.filter(m=>m.query.includes('JOIN step_samples sample')&&m.query.includes('requested.ordinal'));

@@ -7,14 +7,31 @@ function number(value) {
 
 async function recordOperationalCounters(client = defaultPrisma, deltas = {}) {
   if (!client?.globalStepEventOperationalCounter) return false;
+  const entries = [];
   for (const [metric, rawDelta] of Object.entries(deltas)) {
     const delta = BigInt(Math.max(0, Math.round(Number(rawDelta) || 0)));
-    if (delta === 0n) continue;
-    await client.globalStepEventOperationalCounter.upsert({
-      where: { metric },
-      create: { metric, value: delta },
-      update: { value: { increment: delta } },
-    });
+    if (delta !== 0n) entries.push({ metric, delta: delta.toString(), ordinal: entries.length });
+  }
+  if (entries.length && typeof client.$executeRawUnsafe === "function") {
+    // Preserve the producers' existing lock order during mixed-binary deploys.
+    // Alphabetical order would invert scoringQueries -> scoringLatencyMs.
+    await client.$executeRawUnsafe(`
+      INSERT INTO global_step_event_operational_counters (metric,value,updated_at)
+      SELECT item.metric,item.delta,$2::timestamp
+      FROM jsonb_to_recordset($1::jsonb) AS item(metric text,delta bigint,ordinal integer)
+      ORDER BY item.ordinal
+      ON CONFLICT (metric) DO UPDATE
+      SET value=global_step_event_operational_counters.value+EXCLUDED.value,
+          updated_at=EXCLUDED.updated_at`, JSON.stringify(entries), new Date());
+  } else {
+    // Preserve support for callers exposing only the model delegate.
+    for (const { metric, delta } of entries) {
+      await client.globalStepEventOperationalCounter.upsert({
+        where: { metric },
+        create: { metric, value: BigInt(delta) },
+        update: { value: { increment: BigInt(delta) } },
+      });
+    }
   }
   return true;
 }

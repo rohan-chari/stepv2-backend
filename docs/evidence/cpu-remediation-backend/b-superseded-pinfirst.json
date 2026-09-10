@@ -1,0 +1,74 @@
+[
+  {
+    "mode": "candidate",
+    "distribution": "superseded-pinned",
+    "population": 6763,
+    "repetition": 0,
+    "calls": 54,
+    "executionMs": 71.325,
+    "buffers": 76565,
+    "walBytes": 27547,
+    "maxFunctionExecutionMs": 4.081,
+    "changedRoots": 0
+  },
+  {
+    "mode": "candidate",
+    "distribution": "superseded-pinned",
+    "population": 6763,
+    "repetition": 1,
+    "calls": 54,
+    "executionMs": 75.14399999999999,
+    "buffers": 98135,
+    "walBytes": 16312,
+    "maxFunctionExecutionMs": 2.492,
+    "changedRoots": 0
+  },
+  {
+    "mode": "candidate",
+    "distribution": "superseded-pinned",
+    "population": 6763,
+    "repetition": 2,
+    "calls": 54,
+    "executionMs": 75.67199999999997,
+    "buffers": 105900,
+    "walBytes": 16058,
+    "maxFunctionExecutionMs": 2.372,
+    "changedRoots": 0
+  },
+  {
+    "mode": "candidate",
+    "distribution": "superseded-pinned",
+    "population": 67630,
+    "repetition": 0,
+    "calls": 530,
+    "executionMs": 5415.437000000009,
+    "buffers": 2256220,
+    "walBytes": 152405,
+    "maxFunctionExecutionMs": 22.772,
+    "changedRoots": 0
+  },
+  {
+    "mode": "candidate",
+    "distribution": "superseded-pinned",
+    "population": 67630,
+    "repetition": 1,
+    "calls": 530,
+    "executionMs": 5898.706999999999,
+    "buffers": 3175504,
+    "walBytes": 4625908,
+    "maxFunctionExecutionMs": 51.829,
+    "changedRoots": 0
+  },
+  {
+    "mode": "candidate",
+    "distribution": "superseded-pinned",
+    "population": 67630,
+    "repetition": 2,
+    "calls": 530,
+    "executionMs": 6250.964,
+    "buffers": 3977199,
+    "walBytes": 151581,
+    "maxFunctionExecutionMs": 31.543,
+    "changedRoots": 0
+  }
+]

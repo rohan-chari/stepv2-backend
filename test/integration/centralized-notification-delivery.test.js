@@ -246,12 +246,14 @@ describe("centralized notification delivery", { concurrency: 1 }, () => {
 
   it("local provisioning stays notification-free and boundary activation projects durably", async () => {
     await cleanDatabase();
-    const { user } = await createTestUser({ globalEventTimezone: "America/New_York" });
-    const startsAt = new Date("2026-08-24T14:00:00.000Z");
-    const endsAt = new Date("2026-08-24T14:30:00.000Z");
+    // Persisted users use authoritative timezone and a wall-clock freshness
+    // floor. Keep this future fixture eligible without changing its boundary assertions.
+    const { user } = await createTestUser({ timezone: "America/New_York", globalEventTimezone: "America/New_York" });
+    const startsAt = new Date("2098-08-24T14:00:00.000Z");
+    const endsAt = new Date("2098-08-24T14:30:00.000Z");
     const event = await prisma.globalStepEvent.create({
       data: {
-        eventDay: "2026-08-24",
+        eventDay: "2098-08-24",
         scheduleMode: "LOCAL_ENTITLEMENTS",
         localStartMinute: 600,
         durationMinutes: 30,
@@ -297,7 +299,13 @@ describe("centralized notification delivery", { concurrency: 1 }, () => {
     }), 1);
     assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 0);
 
-    await buildNotificationProjector({ prisma, now: () => startsAt }).run();
+    await buildNotificationProjector({
+      prisma,
+      now: () => startsAt,
+      notificationIntentService: buildNotificationIntentService({
+        prisma, now: () => startsAt,
+      }),
+    }).run();
     assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 1);
     assert.equal(await prisma.notificationSchedule.count({ where: { recipientUserId: user.id } }), 0);
     const entitlement = await prisma.globalStepEventEntitlement.findUniqueOrThrow({

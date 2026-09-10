@@ -64,6 +64,9 @@ describe('early seeded preparation and HTTP joins', () => {
     const ids = Array.from({ length: 501 }, () => randomUUID()).sort();
     await prisma.user.createMany({ data: ids.map(id => ({ id, appleId: `scan-${id}`,
       autoJoinFeaturedRaces: true, clientFeatures: ['seeded_race_buckets'],
+      // These users were already eligible before the captured boundary. The
+      // insertion trigger otherwise stamps eligibility with today's DB clock.
+      seededAutomaticEligibleAt: new Date('2026-09-01T00:00:00Z'),
       createdAt: new Date('2026-09-01T00:00:00Z') })) });
     for (const day of ['2026-09-08', '2026-09-09']) {
       await prisma.stepSample.createMany({ data: ids.map(userId => ({ userId, steps: 1000,

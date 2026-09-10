@@ -61,18 +61,20 @@ async function publish(f) {
   });
 }
 async function withWorker(run, beforePublication = null) {
-  const child = spawn(process.execPath, ['--require', './test/integration/fixtures/query-efficiency/observe-resolution.cjs', '--require', './test/integration/fixtures/boundary-proof/pause-publication.cjs', 'src/index.js'], {
+  const child = spawn(process.execPath, ['--require', './test/integration/fixtures/query-efficiency/observe-cpu-remediation.cjs', '--require', './test/integration/fixtures/query-efficiency/observe-resolution.cjs', '--require', './test/integration/fixtures/boundary-proof/pause-publication.cjs', 'src/index.js'], {
     cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test', STEPS_PROCESS_ROLE: 'resolution',
       TEST_PAUSE_BOUNDARY_PUBLICATION: beforePublication ? '1' : '0',
       NODE_APP_INSTANCE: '0', PORT: '0', CRON_START_DELAY_MS: '0', RACE_QUEUE_V2_QUIET_PERIOD_MS: '0' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   const workerQueries = [];
+  workerQueries.protocol = [];
   let output = '';
   child.stdout.on('data', data => { output += data; });
   child.stderr.on('data', data => { output += data; });
   child.on('message', async message => {
     if (message.kind === 'query') workerQueries.push(message.query);
+    if (message.kind === 'cpu-query') workerQueries.protocol.push(message);
     if (message.kind === 'before-boundary-publication') {
       await beforePublication();
       child.send({ kind: 'resume-boundary-publication' });
@@ -113,6 +115,15 @@ describe('worker-stamped display boundary proof through HTTP', () => {
     const index = JSON.parse(await redis.get(`${prefix}v1:race:progress:index:${f.id}`));
     assert.deepEqual(index.boundaryProof, snapshot.boundaryProof);
     assert.equal(workerQueries.filter(query => query.includes('display_boundary_proof')).length, 1);
+    if (process.env.CPU_QUERY_EVIDENCE) require('node:fs').writeFileSync(process.env.CPU_QUERY_EVIDENCE, JSON.stringify(workerQueries.protocol, null, 2));
+    const boundary = workerQueries.protocol.filter(q => q.family === 'display-boundary');
+    assert.equal(boundary.length, 1);
+    assert.match(boundary[0].name || '', /^steps_read_v1_[a-f0-9]{48}$/, 'real publication must admit the stable boundary shape to bounded preparation');
+    for (const family of ['post-task-readiness', 'post-task-finish']) {
+      const selected = workerQueries.protocol.filter(q => q.family === family);
+      assert.ok(selected.length, `${family} must execute in the real worker`);
+      assert.ok(selected.every(q => /^steps_(read|query)_v1_[a-f0-9]{48}$/.test(q.name || '')), `${family} must use bounded preparation`);
+    }
     assert.equal((await get(f)).progress.participants[0].totalSteps, 100);
   });
   it('includes future PENDING local entitlement starts for accepted race members', async () => {

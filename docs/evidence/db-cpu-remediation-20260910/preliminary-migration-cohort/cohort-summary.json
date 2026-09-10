@@ -1,0 +1,128 @@
+{
+  "method": "Three alternating baseline/candidate runs; medians of run metrics, not pooled request quantiles. App CPU is not database CPU.",
+  "runs": {
+    "baseline": [
+      {
+        "durationMs": 8777,
+        "admissionRetries": 5706,
+        "httpAttemptP95Ms": 515.0531249999999,
+        "acceptedAttemptP95Ms": 705.5991249999997,
+        "uploadIncludingRetriesP95Ms": 2014.3801249999997,
+        "changedSqlCalls": 22252,
+        "changedAppCpuMs": 6217.671,
+        "changedSampleRanges": 1000,
+        "duplicateSqlCalls": 12009,
+        "duplicateAppCpuMs": 2262.3149999999996,
+        "duplicateSampleRanges": 0
+      },
+      {
+        "durationMs": 8237,
+        "admissionRetries": 5521,
+        "httpAttemptP95Ms": 425.9357500000001,
+        "acceptedAttemptP95Ms": 619.4468750000001,
+        "uploadIncludingRetriesP95Ms": 1762.8658329999998,
+        "changedSqlCalls": 22212,
+        "changedAppCpuMs": 5651.233,
+        "changedSampleRanges": 1000,
+        "duplicateSqlCalls": 12007,
+        "duplicateAppCpuMs": 2141.4310000000005,
+        "duplicateSampleRanges": 0
+      },
+      {
+        "durationMs": 8426,
+        "admissionRetries": 5488,
+        "httpAttemptP95Ms": 446.47466699999995,
+        "acceptedAttemptP95Ms": 603.2537910000001,
+        "uploadIncludingRetriesP95Ms": 1721.4046249999997,
+        "changedSqlCalls": 22201,
+        "changedAppCpuMs": 5612.87,
+        "changedSampleRanges": 1000,
+        "duplicateSqlCalls": 12007,
+        "duplicateAppCpuMs": 2165.7099999999996,
+        "duplicateSampleRanges": 0
+      }
+    ],
+    "candidate": [
+      {
+        "durationMs": 8621,
+        "admissionRetries": 5649,
+        "httpAttemptP95Ms": 432.6736249999999,
+        "acceptedAttemptP95Ms": 629.3991249999999,
+        "uploadIncludingRetriesP95Ms": 1740.0260829999997,
+        "changedSqlCalls": 22254,
+        "changedAppCpuMs": 5664.91,
+        "changedSampleRanges": 1000,
+        "duplicateSqlCalls": 12007,
+        "duplicateAppCpuMs": 2109.896,
+        "duplicateSampleRanges": 0
+      },
+      {
+        "durationMs": 8452,
+        "admissionRetries": 5405,
+        "httpAttemptP95Ms": 425.90804100000014,
+        "acceptedAttemptP95Ms": 592.6890829999998,
+        "uploadIncludingRetriesP95Ms": 1644.3230420000004,
+        "changedSqlCalls": 22230,
+        "changedAppCpuMs": 5609.96,
+        "changedSampleRanges": 1000,
+        "duplicateSqlCalls": 12007,
+        "duplicateAppCpuMs": 2189.869,
+        "duplicateSampleRanges": 0
+      },
+      {
+        "durationMs": 8316,
+        "admissionRetries": 5278,
+        "httpAttemptP95Ms": 423.675334,
+        "acceptedAttemptP95Ms": 546.242459,
+        "uploadIncludingRetriesP95Ms": 1636.8160420000004,
+        "changedSqlCalls": 22272,
+        "changedAppCpuMs": 5586.696,
+        "changedSampleRanges": 1000,
+        "duplicateSqlCalls": 12007,
+        "duplicateAppCpuMs": 2157.901,
+        "duplicateSampleRanges": 0
+      }
+    ]
+  },
+  "medians": {
+    "baseline": {
+      "durationMs": 8426,
+      "admissionRetries": 5521,
+      "httpAttemptP95Ms": 446.47466699999995,
+      "acceptedAttemptP95Ms": 619.4468750000001,
+      "uploadIncludingRetriesP95Ms": 1762.8658329999998,
+      "changedSqlCalls": 22212,
+      "changedAppCpuMs": 5651.233,
+      "changedSampleRanges": 1000,
+      "duplicateSqlCalls": 12007,
+      "duplicateAppCpuMs": 2165.7099999999996,
+      "duplicateSampleRanges": 0
+    },
+    "candidate": {
+      "durationMs": 8452,
+      "admissionRetries": 5405,
+      "httpAttemptP95Ms": 425.90804100000014,
+      "acceptedAttemptP95Ms": 592.6890829999998,
+      "uploadIncludingRetriesP95Ms": 1644.3230420000004,
+      "changedSqlCalls": 22254,
+      "changedAppCpuMs": 5609.96,
+      "changedSampleRanges": 1000,
+      "duplicateSqlCalls": 12007,
+      "duplicateAppCpuMs": 2157.901,
+      "duplicateSampleRanges": 0
+    }
+  },
+  "candidateReductionPercent": {
+    "durationMs": -0.30856871587943147,
+    "admissionRetries": 2.101068646984239,
+    "httpAttemptP95Ms": 4.60644858938879,
+    "acceptedAttemptP95Ms": 4.319626602362037,
+    "uploadIncludingRetriesP95Ms": 6.724436357034969,
+    "changedSqlCalls": -0.1890869800108108,
+    "changedAppCpuMs": 0.730336193889014,
+    "changedSampleRanges": 0.0,
+    "duplicateSqlCalls": 0.0,
+    "duplicateAppCpuMs": 0.360574592166063,
+    "duplicateSampleRanges": null
+  }
+}

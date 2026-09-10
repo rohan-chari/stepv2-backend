@@ -51,7 +51,7 @@ async function censusSnapshotRepairs() {
 async function drainSnapshotRepairs() {
   const lease = crypto.randomUUID();
   const rows = await prisma.$queryRawUnsafe(
-    `WITH due AS (SELECT task_id FROM race_snapshot_repair_intents WHERE terminal_at IS NULL AND available_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND (lease_expires_at IS NULL OR lease_expires_at<=(statement_timestamp() AT TIME ZONE 'UTC')) ORDER BY available_at,task_id LIMIT 100 FOR UPDATE SKIP LOCKED)
+    `/* steps:prepared-query:v1 */WITH due AS (SELECT task_id FROM race_snapshot_repair_intents WHERE terminal_at IS NULL AND available_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND (lease_expires_at IS NULL OR lease_expires_at<=(statement_timestamp() AT TIME ZONE 'UTC')) ORDER BY available_at,task_id LIMIT 100 FOR UPDATE SKIP LOCKED)
  UPDATE race_snapshot_repair_intents i SET lease_token=$1::uuid,lease_expires_at=clock_timestamp()+interval '30 seconds',attempt_count=attempt_count+1 FROM due WHERE i.task_id=due.task_id RETURNING i.*`,
     lease,
   );

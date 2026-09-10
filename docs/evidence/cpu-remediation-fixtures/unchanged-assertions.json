@@ -1,0 +1,20 @@
+[
+  {
+    "file": "test/integration/step-sync-large-race-batch.test.js",
+    "originalAssertionStatements": 59,
+    "allAssertionCallTextUnchanged": true,
+    "baselineAndCandidateFixturesIdentical": true
+  },
+  {
+    "file": "test/integration/query-efficiency-resolution.test.js",
+    "originalAssertionStatements": 19,
+    "allAssertionCallTextUnchanged": true,
+    "baselineAndCandidateFixturesIdentical": true
+  },
+  {
+    "file": "test/integration/seeded-early-preparation.test.js",
+    "originalAssertionStatements": 45,
+    "allAssertionCallTextUnchanged": true,
+    "baselineAndCandidateFixturesIdentical": true
+  }
+]

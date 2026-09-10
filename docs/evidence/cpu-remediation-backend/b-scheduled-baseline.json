@@ -1,0 +1,68 @@
+[
+  {
+    "mode": "baseline",
+    "population": 6763,
+    "repetition": 0,
+    "calls": 54,
+    "executionMs": 143.759,
+    "buffers": 366255,
+    "walBytes": 5535311,
+    "maxFunctionExecutionMs": 7.128,
+    "changedRoots": 6763
+  },
+  {
+    "mode": "baseline",
+    "population": 6763,
+    "repetition": 1,
+    "calls": 54,
+    "executionMs": 142.82999999999998,
+    "buffers": 419902,
+    "walBytes": 4942021,
+    "maxFunctionExecutionMs": 6.333,
+    "changedRoots": 6763
+  },
+  {
+    "mode": "baseline",
+    "population": 6763,
+    "repetition": 2,
+    "calls": 54,
+    "executionMs": 124.35699999999999,
+    "buffers": 435530,
+    "walBytes": 4844215,
+    "maxFunctionExecutionMs": 5.915,
+    "changedRoots": 6763
+  },
+  {
+    "mode": "baseline",
+    "population": 67630,
+    "repetition": 0,
+    "calls": 530,
+    "executionMs": 2851.798000000002,
+    "buffers": 20719209,
+    "walBytes": 54082624,
+    "maxFunctionExecutionMs": 17.379,
+    "changedRoots": 67630
+  },
+  {
+    "mode": "baseline",
+    "population": 67630,
+    "repetition": 1,
+    "calls": 530,
+    "executionMs": 2451.122,
+    "buffers": 20582810,
+    "walBytes": 48091444,
+    "maxFunctionExecutionMs": 12.231,
+    "changedRoots": 67630
+  },
+  {
+    "mode": "baseline",
+    "population": 67630,
+    "repetition": 2,
+    "calls": 530,
+    "executionMs": 2433.110000000003,
+    "buffers": 20817386,
+    "walBytes": 48100835,
+    "maxFunctionExecutionMs": 16.084,
+    "changedRoots": 67630
+  }
+]

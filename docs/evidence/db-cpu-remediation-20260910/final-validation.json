@@ -1,0 +1,133 @@
+{
+  "candidateUnit": {
+    "command": "npm run test:unit",
+    "tests": 3397,
+    "pass": 3397,
+    "fail": 0,
+    "skip": 0,
+    "redis": "disabled",
+    "log": "final-unit-isolated.log.gz"
+  },
+  "candidateIntegration": {
+    "files": [
+      "test/integration/race-resolution-planning-input-reuse.test.js",
+      "test/integration/query-efficiency-notification-parent.test.js",
+      "test/integration/capture-maintenance-contention.test.js",
+      "test/integration/api-contract-resolution-query-count.test.js",
+      "test/integration/race-resolution-pending-scope.test.js",
+      "test/integration/race-resolution-post-task-storage.test.js",
+      "test/integration/db-cpu-prepared-discovery.test.js",
+      "test/integration/durable-capture-interval-reuse.test.js",
+      "test/integration/seeded-early-preparation.test.js",
+      "test/integration/centralized-notification-delivery.test.js",
+      "test/integration/db-cpu-operational-counters.test.js",
+      "test/integration/race-display-boundary-proof.test.js",
+      "test/integration/durable-capture-compaction-cadence.test.js",
+      "test/integration/durable-capture-root-budget.test.js",
+      "test/integration/race-resolution-memory-reuse.test.js",
+      "test/integration/durable-capture-snapshot-bounds.test.js",
+      "test/integration/db-cpu-prepared-lanes.test.js",
+      "test/integration/durable-capture-terminal-cleanup.test.js",
+      "test/integration/summary-notification-cpu.test.js",
+      "test/integration/step-intake-legacy-contract.test.js",
+      "test/integration/durable-capture-root-sweep.test.js",
+      "test/integration/query-efficiency-resolution.test.js",
+      "test/integration/durable-capture-facts-foundation.test.js",
+      "test/integration/global-event-capture-fact-reuse.test.js",
+      "test/integration/step-sync-large-race-batch.test.js",
+      "test/integration/prepared-read-worker.test.js",
+      "test/integration/prepared-worker-queries.test.js",
+      "test/integration/read-only-race-progress.test.js",
+      "test/integration/query-efficiency-suggestions.test.js",
+      "test/integration/discovery-featured-bracket-joinable.test.js",
+      "test/integration/team-races-10v10-discovery.test.js",
+      "test/integration/inbox-unread-contract.test.js",
+      "test/integration/inbox-read-all.test.js"
+    ],
+    "commandPrefix": "node --test --test-concurrency=1 --test-force-exit",
+    "database": "cpu_remediation_acceptance_test",
+    "databaseHost": "127.0.0.1:55439",
+    "redis": "REDIS_URL empty; REDIS_TEST_URL redis://127.0.0.1:16450",
+    "status": "passed after required Redis configuration rerun",
+    "distinctTests": 209,
+    "filesCount": 33,
+    "unresolvedFailures": 0,
+    "skipped": 0,
+    "combinedRun": {
+      "pass": 203,
+      "fail": 3,
+      "cancelled": 3,
+      "log": "final-integration-isolated.log.gz"
+    },
+    "requiredRedisRerun": {
+      "files": [
+        "test/integration/race-resolution-pending-scope.test.js",
+        "test/integration/team-races-10v10-discovery.test.js"
+      ],
+      "tests": 8,
+      "pass": 8,
+      "fail": 0,
+      "cancelled": 0,
+      "redis": "REDIS_URL and REDIS_TEST_URL redis://127.0.0.1:16450/15",
+      "log": "final-redis-contracts.log.gz"
+    },
+    "explanation": "Publication tests need live Redis to produce display proofs; team discovery requires logical DB15. The targeted rerun includes two tests already passing in the combined run. No assertion was changed."
+  },
+  "cohort": {
+    "users": 1000,
+    "races": 50,
+    "acceptedPerRun": 2000,
+    "repetitionsPerVersion": 3,
+    "passedRuns": 6,
+    "baseline": "de7e8955708b0256ea67beb14d1fa2855a064a43",
+    "summary": "cohort-summary.json",
+    "candidateDatabase": "cpu_remediation_final_test",
+    "migrationChecksum": "38f8cdf49a2c5d626ae5483095121c88cbea56c9096060a8ae73b4bb325f34ba",
+    "preliminaryResults": "preliminary-migration-cohort/"
+  },
+  "preparedCompatibility": {
+    "passed": true,
+    "checks": [
+      "transaction failure propagated",
+      "rollback",
+      "backend reconnect",
+      "additive DDL",
+      "changed committed values"
+    ],
+    "pool": "owned localhost56450 transaction PgBouncer"
+  },
+  "productionChanged": false,
+  "finalMigrationValidation": {
+    "database": "cpu_remediation_final_test",
+    "migrationChecksum": "38f8cdf49a2c5d626ae5483095121c88cbea56c9096060a8ae73b4bb325f34ba",
+    "freshApplication": "passed",
+    "tests": 82,
+    "pass": 82,
+    "fail": 0,
+    "skipped": 0,
+    "files": [
+      "test/integration/durable-capture-facts-foundation.test.js",
+      "test/integration/durable-capture-root-sweep.test.js",
+      "test/integration/durable-capture-compaction-cadence.test.js",
+      "test/integration/durable-capture-root-budget.test.js",
+      "test/integration/durable-capture-snapshot-bounds.test.js",
+      "test/integration/durable-capture-terminal-cleanup.test.js",
+      "test/integration/durable-capture-interval-reuse.test.js",
+      "test/integration/global-event-capture-fact-reuse.test.js",
+      "test/integration/summary-notification-cpu.test.js",
+      "test/integration/db-cpu-prepared-discovery.test.js"
+    ],
+    "log": "final-migration-tests.log.gz",
+    "sourceChangeSinceBroadSuite": "Only migration changed; affected capture/maintenance/global-event/summary suites and expanded discovery revalidated. Two additional regression tests."
+  },
+  "review": {
+    "codeReviewer": "SHIP",
+    "blockers": 0,
+    "architect": "APPROVE",
+    "optionalObservation": "Externally locked eligible root could extend an advisory hold; ordinary pins exclude the overlap and no normal-path deadlock was established.",
+    "productionCpuSavings": "unmeasured",
+    "totalChargedMaintenanceLockWallTime": "increased; disclosed separately from reduced execution/buffers/WAL"
+  },
+  "cleanup": "Owned HTTP/worker processes, Redis16449/16450 and PgBouncer56449/56450 stopped; existing PG18 and synthetic databases retained.",
+  "releaseBranch": "codex/db-cpu-remediation-20260910"
+}

@@ -1487,7 +1487,7 @@ const Race = {
       ? Prisma.sql`AND r.seed_id IS NULL`
       : Prisma.empty;
 
-    return prisma.$queryRaw`
+    return prisma.$queryRaw`/* steps:prepared-read:v1 */
       -- Count eligible races in one pass; materialize rosters only for the
       -- final page. Capacity filtering must stay before the page limit.
 WITH eligible AS MATERIALIZED (

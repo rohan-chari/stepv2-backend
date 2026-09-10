@@ -1,0 +1,74 @@
+[
+  {
+    "mode": "baseline",
+    "distribution": "superseded-pinned",
+    "population": 6763,
+    "repetition": 0,
+    "calls": 54,
+    "executionMs": 163.303,
+    "buffers": 571249,
+    "walBytes": 4218126,
+    "maxFunctionExecutionMs": 9.278,
+    "changedRoots": 6763
+  },
+  {
+    "mode": "baseline",
+    "distribution": "superseded-pinned",
+    "population": 6763,
+    "repetition": 1,
+    "calls": 54,
+    "executionMs": 179.101,
+    "buffers": 651532,
+    "walBytes": 4218503,
+    "maxFunctionExecutionMs": 5.78,
+    "changedRoots": 6763
+  },
+  {
+    "mode": "baseline",
+    "distribution": "superseded-pinned",
+    "population": 6763,
+    "repetition": 2,
+    "calls": 54,
+    "executionMs": 171.90100000000004,
+    "buffers": 658630,
+    "walBytes": 4077149,
+    "maxFunctionExecutionMs": 5.846,
+    "changedRoots": 6763
+  },
+  {
+    "mode": "baseline",
+    "distribution": "superseded-pinned",
+    "population": 67630,
+    "repetition": 0,
+    "calls": 530,
+    "executionMs": 4881.834000000002,
+    "buffers": 38634437,
+    "walBytes": 41431535,
+    "maxFunctionExecutionMs": 37.511,
+    "changedRoots": 67630
+  },
+  {
+    "mode": "baseline",
+    "distribution": "superseded-pinned",
+    "population": 67630,
+    "repetition": 1,
+    "calls": 530,
+    "executionMs": 4773.8579999999965,
+    "buffers": 39110984,
+    "walBytes": 40893573,
+    "maxFunctionExecutionMs": 47.889,
+    "changedRoots": 67630
+  },
+  {
+    "mode": "baseline",
+    "distribution": "superseded-pinned",
+    "population": 67630,
+    "repetition": 2,
+    "calls": 530,
+    "executionMs": 5224.943,
+    "buffers": 39478768,
+    "walBytes": 57368302,
+    "maxFunctionExecutionMs": 95.671,
+    "changedRoots": 67630
+  }
+]

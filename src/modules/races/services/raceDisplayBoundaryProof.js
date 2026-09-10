@@ -85,7 +85,7 @@ async function build({ raceId, input, race, prisma }) {
   // One bounded result, no participant/event objects hydrated. > scoredAt is
   // intentional: a deferred task must also discover boundaries already crossed
   // while it waited. PENDING local entitlements are future display inputs.
-  const rows = await prisma.$queryRawUnsafe(`
+  const rows = await prisma.$queryRawUnsafe(`/* steps:prepared-read:v1 */
     SELECT MIN(boundary) AS "nextBoundaryAt" FROM (
       SELECT starts_at AS boundary FROM global_step_events
        WHERE schedule_mode='LEGACY_GLOBAL' AND starts_at > $2::timestamp

@@ -1,0 +1,116 @@
+{
+  "cpu_samples": 121,
+  "cpu_span_seconds": 3599.937941789627,
+  "max_cpu_sample_gap_seconds": 31.34072995185852,
+  "pgss_snapshots": 61,
+  "pgss_stats_reset_unchanged": true,
+  "pgss_deallocation_passes": 2,
+  "pgsm_completed_minutes": 60,
+  "pgsm_duplicate_records": 0,
+  "pgsm_timeout_recovered": [
+    {
+      "at": "2026-09-10T15:32:03.631Z",
+      "type": "error",
+      "code": "57014"
+    }
+  ],
+  "http_worker_minutes": 120,
+  "http_flush_records": 122,
+  "http_timestamp_labels_corrected": 15,
+  "locally_verified_source_hashes": [
+    "metrics.jsonl",
+    "pgsm.jsonl",
+    "logs.jsonl",
+    "tables.jsonl",
+    "probe-start.jsonl",
+    "cleanup-probe.jsonl",
+    "swap-start.jsonl",
+    "swap-end.jsonl"
+  ],
+  "source_hashes": {
+    "metrics.jsonl": {
+      "sha256": "37032da7df05aafb10fa648cbc678bb8711a8b43c1372aa7a4fc8a979f4332c3",
+      "bytes": 18734587
+    },
+    "stats.jsonl": {
+      "sha256": "05d7905014ef3b64986c5ebb990224819bfce9a7725179292644aabf345450d0",
+      "bytes": 444629334
+    },
+    "pgsm.jsonl": {
+      "sha256": "a8628fe8594b4d84500191054ebf48583e0a06764fde8d66686add18f7d80e53",
+      "bytes": 24164363
+    },
+    "logs.jsonl": {
+      "sha256": "667ad5d8fc03dbb71362335f704af3a3b862928e18daeb45eae6574fefda464e",
+      "bytes": 2545601
+    },
+    "tables.jsonl": {
+      "sha256": "9c32df42b67b87a0a55b3b9cc86298b3cf9f349c84bb696525f5dffc0c188b82",
+      "bytes": 606252
+    },
+    "probe-start.jsonl": {
+      "sha256": "06810af3c9e10c7d957e04f149e0f8901b8c647c9e3d660401ded460f790ca82",
+      "bytes": 62206
+    },
+    "cleanup-probe.jsonl": {
+      "sha256": "19c9a2e5dc8d9a5acae44fab83780479ccd56de81cbe9254032ccd15ed99d7a7",
+      "bytes": 11149
+    },
+    "explain.jsonl": {
+      "sha256": "1d1b8be9e317f66cdede330908edeabbf0d8e15cb532ff541b012ccadbe0f37f",
+      "bytes": 4489
+    },
+    "swap-start.jsonl": {
+      "sha256": "d62cdb0883ec73b56d00548b9d2f6d52ba9cb6a5312d2cbd13c6aa8bc6548e9d",
+      "bytes": 7520
+    },
+    "swap-end.jsonl": {
+      "sha256": "095cc1d32705d818e796938249377609420e7c61daa7b24cff7334d0012d290e",
+      "bytes": 7645
+    }
+  },
+  "runtime_end": {
+    "at": "2026-09-10T16:12:19.731837+00:00",
+    "commit": "3a60332e17dac7f843f107fb788e8479875104ef",
+    "working_tree": "M package-lock.json",
+    "processes": [
+      {
+        "name": "steps-tracker-staging",
+        "status": "stopped",
+        "pid": 0
+      },
+      {
+        "name": "steps-tracker-resolution",
+        "status": "online",
+        "pid": 1528375
+      },
+      {
+        "name": "steps-tracker-cron",
+        "status": "online",
+        "pid": 1528393
+      },
+      {
+        "name": "steps-tracker",
+        "status": "online",
+        "pid": 1528265
+      },
+      {
+        "name": "steps-tracker",
+        "status": "online",
+        "pid": 1528279
+      }
+    ]
+  },
+  "collector_shutdown": {
+    "checkedAt": "2026-09-10T16:17:24.127382+00:00",
+    "collectorPids": [
+      1537833,
+      1537834,
+      1538578,
+      1539152,
+      1540325,
+      1541428
+    ],
+    "stillRunning": []
+  }
+}

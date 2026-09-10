@@ -1,0 +1,7 @@
+{
+  "sameClientAcrossReconnect": true,
+  "backendChanged": true,
+  "afterAnalyzePassed": true,
+  "afterTransactionErrorPassed": true,
+  "rowsPreserved": true
+}

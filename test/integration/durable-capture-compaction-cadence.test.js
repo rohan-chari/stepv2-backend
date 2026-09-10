@@ -1,3 +1,4 @@
+const cpuObservation = require('./fixtures/query-efficiency/observe-cpu-remediation.cjs');
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { setTimeout: delay } = require("node:timers/promises");
@@ -136,6 +137,10 @@ it("the real summary wake coordinator continues compaction without another user 
     }
     assert.deepEqual(errors, []);
     assert.ok(due, "the persisted maintenance deadline must arm the production wake coordinator");
+    const deadlines = cpuObservation.events.filter(event => event.family === 'summary-due');
+    if (process.env.CPU_SUMMARY_EVIDENCE) require('node:fs').writeFileSync(process.env.CPU_SUMMARY_EVIDENCE, JSON.stringify(deadlines, null, 2));
+    assert.ok(deadlines.length > 0);
+    assert.ok(deadlines.every(query => /^steps_query_v1_[a-f0-9]{48}$/.test(query.name || '')), 'zero-parameter summary deadline must be admitted to bounded preparation');
     assert.ok(await journalCount(account.user.id));
     await delay(1100);
     await due.fn();

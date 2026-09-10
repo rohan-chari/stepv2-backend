@@ -1,0 +1,22 @@
+{
+  "baseline": "de7e8955708b0256ea67beb14d1fa2855a064a43",
+  "sources": {
+    "src/modules/races/jobs/raceResolutionQueueV2.js": "44dbf3c605274d56a694042145320b1a3752c97d8b6076d050148ed911b592ac",
+    "src/modules/races/models/race.js": "3d5b7f0ed30b48d8f0422f58409524a430bcf693c44376bab8cf58659b9df9ac",
+    "src/modules/races/models/raceResolutionJobV2.js": "d321f468bfe220c0e0e37429a8bf6e367bf349e71cd7c926977ab5a20c34a35f",
+    "src/modules/races/models/raceResolutionPostTask.js": "2010dd11db27de659a833573752f313400ebc207a8bf42bded41a3b042f85160",
+    "src/modules/races/models/raceSnapshotRepairIntent.js": "80f004593ebdd8ec96cd80c874713fbf04f80cad054c3807c2e9b090462038f5",
+    "src/modules/races/queries/attachRaceViewerState.js": "b7f0abc7db6bbc9d100456beb939876e2c25fb02cade73df4b529f19b57a5c0a",
+    "src/modules/races/services/raceDisplayBoundaryProof.js": "5e2bf940f20ca33b0f40c47d9ed8ff43fe55e94e07730bfc6ccb6336b47ca803",
+    "src/modules/steps/jobs/globalEventSummary.js": "480d170ba58fcd6faf63c4a7480fdc4058f54d29351136c340a396f627055ca2",
+    "src/modules/steps/services/globalStepEventObservability.js": "02d676d3a8d325019008d6e906acee9156304b753dd58e56fb0395c1db108f7c",
+    "src/modules/tournaments/models/tournament.js": "c26aafc8c21494cff8168d74b78f7c53595ba3074fde10199d3df3dedccc6b42",
+    "src/shared/observability/eventSurgeTelemetry.js": "577b8c48bebc838a4823cff12dc5727cbd32dc01fd50db886b526f8baf361060",
+    "prisma/migrations/20260910010000_capture_root_readonly_sweep/migration.sql": "38f8cdf49a2c5d626ae5483095121c88cbea56c9096060a8ae73b4bb325f34ba"
+  },
+  "migrationChecksumVerifiedOnFreshDatabase": true,
+  "freshDatabase": "cpu_remediation_final_test",
+  "postgresPort": 55439,
+  "preparedPoolPort": 56450,
+  "productionChanged": false
+}

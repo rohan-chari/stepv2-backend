@@ -1,0 +1,37 @@
+[
+  {
+    "kind": "cpu-query",
+    "family": "post-task-readiness",
+    "query": "SELECT\n           COALESCE((\n             SELECT EXTRACT(EPOCH FROM ($1 - MIN(requested_at))) * 1000\n             FROM race_resolution_post_tasks\n             WHERE state IN ('queued','running')\n           ), 0)::float8 AS \"oldestPendingLagMs\",\n           (\n             (SELECT COUNT(*) FROM race_resolution_delivery_intents intent\n              JOIN race_resolution_post_tasks task ON task.id=intent.task_id\n              WHERE intent.state='attempting'\n                AND task.lease_expires_at IS NOT NULL\n                AND task.lease_expires_at <= $1)\n             +\n             (SELECT COUNT(*) FROM race_resolution_post_tasks task\n              WHERE task.snapshot_state='attempting'\n                AND task.lease_expires_at IS NOT NULL\n                AND task.lease_expires_at <= $1)\n           )::int AS \"expiredAttemptCount\"",
+    "values": [
+      "2026-09-10 17:24:03.697"
+    ],
+    "name": null,
+    "backendPid": 29989309
+  },
+  {
+    "kind": "cpu-query",
+    "family": "display-boundary",
+    "query": "/* steps:prepared-read:v1 */\n    SELECT MIN(boundary) AS \"nextBoundaryAt\" FROM (\n      SELECT starts_at AS boundary FROM global_step_events\n       WHERE schedule_mode='LEGACY_GLOBAL' AND starts_at > $2::timestamp\n      UNION ALL SELECT ends_at FROM global_step_events\n       WHERE schedule_mode='LEGACY_GLOBAL' AND ends_at > $2::timestamp\n      UNION ALL SELECT entitlement.starts_at FROM global_step_event_entitlements entitlement\n       JOIN race_participants participant ON participant.user_id=entitlement.user_id\n       JOIN global_step_events event ON event.id=entitlement.event_id\n       WHERE participant.race_id=$1 AND participant.status='accepted'\n         AND event.schedule_mode='LOCAL_ENTITLEMENTS'\n         AND entitlement.start_outcome IN ('PENDING','ACTIVATED_ON_TIME','ACTIVATED_LATE_JOIN')\n         AND entitlement.starts_at > $2::timestamp\n      UNION ALL SELECT entitlement.ends_at FROM global_step_event_entitlements entitlement\n       JOIN race_participants participant ON participant.user_id=entitlement.user_id\n       JOIN global_step_events event ON event.id=entitlement.event_id\n       WHERE participant.race_id=$1 AND participant.status='accepted'\n         AND event.schedule_mode='LOCAL_ENTITLEMENTS'\n         AND entitlement.start_outcome IN ('PENDING','ACTIVATED_ON_TIME','ACTIVATED_LATE_JOIN')\n         AND entitlement.ends_at > $2::timestamp\n    ) display_boundary_proof",
+    "values": [
+      "96a336d2-84e5-4753-a098-7887147b22af",
+      "2026-09-10T17:24:03.668Z"
+    ],
+    "name": "steps_read_v1_8394724cacac903265e3e507581a8aaf939953cf2a05518d",
+    "backendPid": 152839512
+  },
+  {
+    "kind": "cpu-query",
+    "family": "post-task-finish",
+    "query": "WITH failures AS (\n           SELECT COUNT(*)::int AS count\n           FROM race_resolution_delivery_intents\n           WHERE task_id=$1 AND state IN ('rejected_no_retry','ambiguous_at_most_once')\n         ), pending AS (\n           SELECT COUNT(*)::int AS count\n           FROM race_resolution_delivery_intents\n           WHERE task_id=$1 AND state IN ('pending','attempting')\n         ), finished AS (\n         UPDATE race_resolution_post_tasks task\n         SET state=CASE WHEN failures.count > 0 OR COALESCE($4::text,task.snapshot_state) IN ('failed_no_retry','ambiguous_at_most_once')\n                        THEN 'succeeded_with_failures' ELSE 'succeeded' END,\n             snapshot_state=COALESCE($4::text,task.snapshot_state),\n             snapshot_error_code=CASE WHEN $4::text IS NULL THEN task.snapshot_error_code ELSE $5::text END,\n             snapshot_completed_at=CASE WHEN $4::text IS NULL THEN task.snapshot_completed_at ELSE $3 END,\n             completed_at=$3, lease_expires_at=NULL, lease_token=NULL, updated_at=$3\n         FROM failures, pending\n         WHERE task.id=$1 AND task.lease_token=$2 AND pending.count=0\n           AND (($4::text IS NULL AND task.snapshot_state NOT IN ('pending','attempting'))\n             OR ($4::text IS NOT NULL AND task.snapshot_state='attempting'))\n         RETURNING task.race_id, task.source_generation, task.dedupe_key,\n           task.state, task.snapshot_state, task.intent_count, failures.count\n         ), receipt AS (\n           INSERT INTO race_resolution_post_task_receipts (\n             race_id, source_generation, dedupe_key, terminal_state,\n             snapshot_state, intent_count, failure_count, completed_at\n           ) SELECT race_id, source_generation, dedupe_key, state,\n                    snapshot_state, intent_count, count, $3 FROM finished\n           ON CONFLICT (race_id,source_generation) DO NOTHING\n           RETURNING race_id,source_generation,dedupe_key,terminal_state,\n                     snapshot_state,intent_count,failure_count,completed_at\n         ), validated AS (\n           SELECT inserted.terminal_state FROM receipt inserted\n           UNION ALL\n           SELECT stored.terminal_state\n             FROM finished expected\n             JOIN race_resolution_post_task_receipts stored\n               ON stored.race_id=expected.race_id\n              AND stored.source_generation=expected.source_generation\n              AND stored.dedupe_key=expected.dedupe_key\n              AND stored.terminal_state=expected.state\n              AND stored.snapshot_state=expected.snapshot_state\n              AND stored.intent_count=expected.intent_count\n              AND stored.failure_count=expected.count\n              AND stored.completed_at IS NOT DISTINCT FROM $3\n            WHERE NOT EXISTS (SELECT 1 FROM receipt)\n         ) SELECT (SELECT COUNT(*)::int FROM finished) AS \"finishedCount\",\n                  (SELECT terminal_state FROM validated LIMIT 1) AS state",
+    "values": [
+      "0f010e79-7977-4175-9108-f398ab7b6955",
+      "9f63f6b4-a8ba-4655-b004-63f26150d4ed",
+      "2026-09-10 17:24:03.711",
+      "succeeded",
+      null
+    ],
+    "name": null,
+    "backendPid": 152839512
+  }
+]

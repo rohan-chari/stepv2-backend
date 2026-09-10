@@ -1,0 +1,10 @@
+[
+  {
+    "kind": "cpu-query",
+    "family": "summary-due",
+    "query": "SELECT LEAST(\n       (SELECT next_due_at FROM durable_capture_compaction_schedule WHERE singleton),\n       (SELECT MIN(available_at) FROM durable_global_event_capture_requests WHERE status='PENDING'),\n       (SELECT MIN(lease_until) FROM durable_global_event_capture_requests WHERE status='PROCESSING'),\n       (SELECT MIN(expires_at) FROM durable_global_event_capture_requests WHERE status IN ('PENDING','PROCESSING')),\n       (SELECT MIN(available_at) FROM global_event_summary_work\n         WHERE status='QUEUED' AND lease_until IS NULL),\n       (SELECT MIN(lease_until) FROM global_event_summary_work\n         WHERE status='PROCESSING' AND lease_until IS NOT NULL),\n       (SELECT MIN(available_at) FROM global_event_summary_work\n         WHERE status='PROCESSING' AND lease_until IS NULL),\n       (SELECT MIN(available_at) FROM global_event_summary_work\n         WHERE status='WAITING_RACES' AND ready_at IS NOT NULL\n           AND lease_until IS NULL),\n       (SELECT MIN(available_at) FROM global_event_summary_work\n         WHERE status='WAITING_RACES' AND ready_at IS NOT NULL\n           AND lease_until <= CURRENT_TIMESTAMP),\n       (SELECT MIN(lease_until) FROM global_event_summary_work\n         WHERE status='WAITING_RACES' AND ready_at IS NOT NULL\n           AND available_at <= CURRENT_TIMESTAMP\n           AND lease_until > CURRENT_TIMESTAMP),\n       (SELECT MIN(expires_at) FROM global_event_summary_work\n         WHERE status='WAITING_SYNC' AND lease_until IS NULL),\n       (SELECT MIN(expires_at) FROM global_event_summary_work\n         WHERE status='WAITING_SYNC' AND lease_until <= CURRENT_TIMESTAMP),\n       (SELECT MIN(lease_until) FROM global_event_summary_work\n         WHERE status='WAITING_SYNC' AND expires_at <= CURRENT_TIMESTAMP\n           AND lease_until > CURRENT_TIMESTAMP)\n     ) AS \"dueAt\"",
+    "values": [],
+    "name": null,
+    "backendPid": 1557436593
+  }
+]

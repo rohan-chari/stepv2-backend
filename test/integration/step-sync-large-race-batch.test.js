@@ -3,6 +3,7 @@ const { randomUUID } = require("node:crypto");
 const { describe, it, before, beforeEach, after } = require("node:test");
 process.env.PRISMA_QUERY_EVENTS_ENABLED = "true";
 const { getSharedServer, cleanDatabase, createTestUser, request, prisma } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // Real HTTP intake, real transactions, and real query events. No queue/scorer
 // utilities are called: the public upload must perform the durable fan-out.
@@ -12,18 +13,18 @@ describe("step sync batches large-race durable fan-out", () => {
   const settingKeys = ["raceResolutionQueuedGenerationMergeV1Enabled", "raceResolutionBurstCoalescingV1Enabled"];
   let priorSettings;
   before(async () => {
-    priorSettings = await prisma.appSetting.findMany({ where: { key: { in: settingKeys } } });
-    // Node's historical test defaults differ from permanent production behavior.
-    // Seed production configuration before the server's first settings read.
-    for (const key of settingKeys) await prisma.appSetting.upsert({
-      where: { key }, create: { key, value: true }, update: { value: true },
-    });
+    priorSettings = await Promise.all(settingKeys.map((key) => appSettings.getFlag(key)));
+    // The app is constructed while setup is imported and may already have
+    // cached historical test defaults. Use the existing permanent-setting test
+    // seam so these production-path fixtures cannot inherit a cached false.
+    for (const key of settingKeys) await appSettings.setFlag(key, true);
     baseUrl = (await getSharedServer()).baseUrl;
     prisma.$on("query", (event) => { if (queries) queries.push(event.query); });
   });
   after(async () => {
-    await prisma.appSetting.deleteMany({ where: { key: { in: settingKeys } } });
-    if (priorSettings?.length) await prisma.appSetting.createMany({ data: priorSettings });
+    for (let index = 0; index < settingKeys.length; index += 1) {
+      await appSettings.setFlag(settingKeys[index], priorSettings[index]);
+    }
   });
   beforeEach(cleanDatabase);
 

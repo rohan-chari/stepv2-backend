@@ -1,0 +1,30 @@
+{
+  "baselineCommit": "de7e8955708b0256ea67beb14d1fa2855a064a43",
+  "originalUnitTests": 3391,
+  "originalUnitFailures": 0,
+  "additionalTelemetryRegressionsOnBaseline": {
+    "tests": 6,
+    "pass": 1,
+    "fail": 5
+  },
+  "telemetryCandidate": {
+    "tests": 8,
+    "pass": 8
+  },
+  "countersInitialPublicBaseline": {
+    "tests": 2,
+    "pass": 1,
+    "fail": 1,
+    "observedCounterWrites": 2
+  },
+  "countersCandidate": {
+    "tests": 3,
+    "pass": 3,
+    "observedCounterWrites": 1
+  },
+  "notes": [
+    "Baseline full-unit log includes six new telemetry regressions; all pre-existing3391 tests passed after required test-only env and existing local capacity overlay were supplied.",
+    "Initial baseline-paths log contains ten subsequently investigated fixture failures; final repaired fixture evidence is retained separately.",
+    "Counter test now also includes rollback and exact legacy duplicate response checks; comparison should retain final baseline rerun."
+  ]
+}

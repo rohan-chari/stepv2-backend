@@ -242,7 +242,7 @@ const Tournament = {
   // review, and public predicates all precede the combined LIMIT 4. Featured
   // rows sort first; each group is newest-first with id as the stable tie break.
   async findPublicSuggestions({ userId, limit = 4 }) {
-    return prisma.$queryRaw`
+    return prisma.$queryRaw`/* steps:prepared-read:v1 */
       WITH eligible AS (
         SELECT
           t.id,

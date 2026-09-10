@@ -481,7 +481,7 @@ async function repairSummaryReadiness(prisma, current, batchSize = 100) {
 
 async function nextSummaryDueAt(prisma = defaultPrisma) {
   const [row = {}] = await prisma.$queryRawUnsafe(
-    `SELECT LEAST(
+    `/* steps:prepared-query:v1 */SELECT LEAST(
        (SELECT next_due_at FROM durable_capture_compaction_schedule WHERE singleton),
        (SELECT MIN(available_at) FROM durable_global_event_capture_requests WHERE status='PENDING'),
        (SELECT MIN(lease_until) FROM durable_global_event_capture_requests WHERE status='PROCESSING'),

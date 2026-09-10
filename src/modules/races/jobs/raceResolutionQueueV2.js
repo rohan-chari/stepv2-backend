@@ -1399,7 +1399,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // One indexed existence probe; ordinary scoring never opens the extra
       // membership transactions. FULL envelopes also qualify because older
       // queue producers do not preserve reason-specific metadata.
-      const tasks = await prisma.$queryRaw`
+      const tasks = await prisma.$queryRaw`/* steps:prepared-read:v1 */
         SELECT CASE WHEN g.state='MATERIALIZED' THEN 'PREPARED' ELSE 'MATERIALIZE' END AS operation
         FROM seeded_challenge_preparation_groups g JOIN races r ON r.id=g.reserved_race_id
         WHERE g.reserved_race_id=${job.raceId} AND (g.state <> 'MATERIALIZED' OR r.status='pending')

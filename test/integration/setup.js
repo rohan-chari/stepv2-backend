@@ -14,6 +14,7 @@ const TABLES_IN_ORDER = [
   "billing_cosmetic_releases", "billing_reroll_operations", "billing_inbox",
   "billing_reconciliation", "billing_subscriptions", "billing_purchases", "billing_identities",
   "durable_capture_compaction_schedule",
+  "durable_capture_root_sweep",
   "global_event_recovery_candidates",
   "global_event_recovery_seed",
   "global_event_recovery_event_refresh",

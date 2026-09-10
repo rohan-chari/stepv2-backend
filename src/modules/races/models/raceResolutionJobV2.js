@@ -431,7 +431,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           claimFloor,
         );
         const rows = await tx.$queryRawUnsafe(
-          `WITH candidates AS MATERIALIZED (
+          `/* steps:prepared-query:v1 */WITH candidates AS MATERIALIZED (
              SELECT trigger.id,trigger.race_id,trigger.user_id,trigger.participant_id,
                     trigger.resolution_time_zone,trigger.requested_at
                FROM race_resolution_full_triggers trigger

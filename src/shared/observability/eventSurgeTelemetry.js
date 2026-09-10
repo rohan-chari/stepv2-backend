@@ -1,3 +1,4 @@
+const { randomUUID } = require("node:crypto");
 const redisCacheDefault = require("../cache/redisCache");
 const cacheKeysDefault = require("../cache/cacheKeys");
 
@@ -61,6 +62,10 @@ function createEventSurgeTelemetry({
   let state = stateForMinute();
   let timer = null;
   let stopped = false;
+  const bootId = randomUUID();
+  let intervalSequence = 0;
+  let intervalStartedAtMs = nowMs();
+  let scheduledDeadlineMs = Math.floor(intervalStartedAtMs / 60_000) * 60_000 + 60_000;
 
   function recordHttpRequest({ endpointClass = "other", path = "unknown", status = 0, durationMs = 0 } = {}) {
     const normalized = ENDPOINT_CLASSES.has(endpointClass) ? endpointClass : "other";
@@ -115,7 +120,15 @@ function createEventSurgeTelemetry({
     try { pool = getDbPoolPressure?.() || null; } catch {}
     return {
       event: "event_surge_v1", schema: "event_surge_v1", role, instance,
-      minuteStartedAt: new Date(Math.floor(capturedAtMs / 60_000) * 60_000 - 60_000).toISOString(),
+      // Keep the legacy label as the minute containing the actual start. A
+      // delayed or manually flushed interval is described by the additive
+      // actual bounds, never reconstructed as invented one-minute buckets.
+      minuteStartedAt: new Date(Math.floor(intervalStartedAtMs / 60_000) * 60_000).toISOString(),
+      intervalId: `${bootId}:${intervalSequence}`,
+      intervalStartedAt: new Date(intervalStartedAtMs).toISOString(),
+      intervalEndedAt: new Date(capturedAtMs).toISOString(),
+      intervalDurationMs: capturedAtMs - intervalStartedAtMs,
+      scheduledDeadlineAt: new Date(scheduledDeadlineMs).toISOString(),
       capturedAt: new Date(capturedAtMs).toISOString(),
       http: {
         interactive: serializeEndpoint(state.http.interactive),
@@ -152,6 +165,11 @@ function createEventSurgeTelemetry({
   async function flush(capturedAtMs = nowMs()) {
     const value = snapshot(capturedAtMs);
     state = stateForMinute();
+    intervalStartedAtMs = capturedAtMs;
+    intervalSequence += 1;
+    if (capturedAtMs >= scheduledDeadlineMs) {
+      scheduledDeadlineMs = Math.floor(capturedAtMs / 60_000) * 60_000 + 60_000;
+    }
     try { logger.log(JSON.stringify(value)); } catch {}
     try { await redisCache?.setJSON?.(cacheKeys.eventSurge(role, instance), value, SNAPSHOT_TTL_SECONDS); } catch {}
     return value;
@@ -160,11 +178,15 @@ function createEventSurgeTelemetry({
   function arm() {
     if (stopped) return;
     const current = nowMs();
-    const boundary = Math.floor(current / 60_000) * 60_000 + 60_000;
+    const boundary = scheduledDeadlineMs;
     timer = setTimer(async () => {
       timer = null;
       if (stopped) return;
-      await flush(nowMs());
+      const capturedAtMs = nowMs();
+      // Timers can fire just before the deadline. Keep this interval's state
+      // and deadline intact instead of flushing twice around the boundary.
+      if (capturedAtMs < scheduledDeadlineMs) { arm(); return; }
+      await flush(capturedAtMs);
       arm();
     }, Math.max(1, boundary - current));
     timer?.unref?.();

@@ -604,7 +604,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       )) throw new TypeError("invalid terminal snapshot state");
       return prisma.$transaction(async (tx) => {
         const rows = await tx.$queryRawUnsafe(
-          `WITH failures AS (
+          `/* steps:prepared-query:v1 */WITH failures AS (
            SELECT COUNT(*)::int AS count
            FROM race_resolution_delivery_intents
            WHERE task_id=$1 AND state IN ('rejected_no_retry','ambiguous_at_most_once')
@@ -786,7 +786,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
 
     async readinessSnapshot({ now = new Date() } = {}) {
       const rows = await prisma.$queryRawUnsafe(
-        `SELECT
+        `/* steps:prepared-read:v1 */SELECT
            COALESCE((
              SELECT EXTRACT(EPOCH FROM ($1 - MIN(requested_at))) * 1000
              FROM race_resolution_post_tasks

@@ -1,4 +1,3 @@
-const { Prisma } = require("@prisma/client");
 const { prisma: defaultPrisma } = require("../../../db");
 
 function collectRaceRows(value) {
@@ -17,7 +16,7 @@ function buildAttachRaceViewerState(dependencies = {}) {
     // One bounded viewer-overlay read for the whole response. Correlated EXISTS
     // checks avoid hydrating participant/scoring rosters and keep shared cache
     // fragments viewer-neutral.
-    const cores = await prisma.$queryRaw(Prisma.sql`
+    const cores = await prisma.$queryRawUnsafe(`/* steps:prepared-read:v1 */
       SELECT r.id,
              r.creator_id AS "creatorId",
              r.seed_id AS "seedId",
@@ -31,7 +30,7 @@ function buildAttachRaceViewerState(dependencies = {}) {
              EXISTS (
                SELECT 1 FROM race_participants rp
                 WHERE rp.race_id = r.id
-                  AND rp.user_id = ${userId}
+                  AND rp.user_id = $1
                   AND rp.status = 'accepted'::"RaceParticipantStatus"
              ) AS "viewerAccepted",
              (
@@ -56,13 +55,13 @@ function buildAttachRaceViewerState(dependencies = {}) {
              EXISTS (
                SELECT 1 FROM race_series_subscriptions subscription
                 WHERE subscription.series_id = r.series_id
-                  AND subscription.user_id = ${userId}
+                  AND subscription.user_id = $1
                   AND subscription.active = true
              ) AS subscribed
         FROM races r
         LEFT JOIN race_series rs ON rs.id = r.series_id
-       WHERE r.id IN (${Prisma.join(ids)})
-    `);
+       WHERE r.id = ANY($2::text[])
+    `, userId, ids);
     const coreById = new Map(cores.map((row) => [row.id, row]));
     for (const output of rows) {
       const core = coreById.get(output.id);

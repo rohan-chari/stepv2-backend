@@ -1,0 +1,1044 @@
+{
+  "schema": "db-cpu-work-accounting-v1",
+  "users": 1000,
+  "races": 50,
+  "httpWorkers": 2,
+  "resolutionConcurrency": 2,
+  "durationMs": 8237,
+  "statuses": {
+    "202": 2000,
+    "500": 5521
+  },
+  "admissionRetries": 5521,
+  "httpAttemptP95Ms": 425.9357500000001,
+  "acceptedAttemptP95Ms": 619.4468750000001,
+  "uploadIncludingRetriesP95Ms": 1762.8658329999998,
+  "changed": [
+    {
+      "role": "http0",
+      "admissionRejected": 1686,
+      "calls": 8521,
+      "elapsedMs": 8401.37957499999,
+      "appCpuUserMs": 1999.371,
+      "appCpuSystemMs": 187.022,
+      "sampleRangeReads": 0,
+      "newUniqueSampleRanges": 0,
+      "shapes": [
+        {
+          "id": "79663c1d3b43ceaf",
+          "query": "COMMIT",
+          "calls": 1000,
+          "elapsedMs": 432.1302619999933
+        },
+        {
+          "id": "8429d540c3f3139a",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1) OFFSET $2",
+          "calls": 447,
+          "elapsedMs": 1935.4572869999988
+        },
+        {
+          "id": "52da63f5d6f011cc",
+          "query": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 249.63646600001084
+        },
+        {
+          "id": "0db12ab3aca5754d",
+          "query": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status IN ('QUEUED', 'PROCESSING', 'WAITING_RACES') AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 ORDER BY work.expires_at ASC, work.id ASC LIMIT 1) UNION ALL (SELECT 'waiting' AS kind, 1 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", event.starts_at AS \"eventStartsAt\", event.ends_at AS \"eventEndsAt\", event.multiplier::double precision AS \"eventMultiplier\", event.schedule_mode::text AS \"eventScheduleMode\", event.summary_attribution_version AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status = 'WAITING_SYNC' AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 AND event.ends_at <= $2::timestamp ORDER BY work.expires_at ASC, work.id ASC) ORDER BY \"kindOrder\" ASC, \"expiresAt\" ASC, id ASC",
+          "calls": 500,
+          "elapsedMs": 368.15662200000384
+        },
+        {
+          "id": "3c24b52ebe00bc57",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2,$3,$4) OFFSET $5",
+          "calls": 1,
+          "elapsedMs": 5.089124999999967
+        },
+        {
+          "id": "a970a57c793cbdf2",
+          "query": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generation=user_scoring_input_versions.generation RETURNING generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", (xmax = 0) AS inserted ) SELECT state.*, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS \"dbNowMs\" FROM (SELECT * FROM locked UNION ALL SELECT * FROM created) state",
+          "calls": 500,
+          "elapsedMs": 271.1383709999923
+        },
+        {
+          "id": "e7b1808b32f050ad",
+          "query": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS \"storageChanged\" FROM persisted CROSS JOIN prior UNION ALL SELECT id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\",date, created_at AS \"createdAt\",TRUE AS existed,FALSE AS \"storageChanged\" FROM steps WHERE user_id=$1 AND date=$2::date AND steps IS NOT DISTINCT FROM $3 AND NOT EXISTS (SELECT 1 FROM persisted)",
+          "calls": 500,
+          "elapsedMs": 433.0637499999948
+        },
+        {
+          "id": "95b8738667904f87",
+          "query": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp",
+          "calls": 500,
+          "elapsedMs": 205.30365900000174
+        },
+        {
+          "id": "2868df7523f429da",
+          "query": "WITH deleted AS (DELETE FROM step_samples stored USING unnest($12::timestamp[], $13::timestamp[]) AS input_window(period_start,period_end) WHERE stored.user_id=$11 AND stored.period_end > input_window.period_start AND stored.period_start < input_window.period_end AND NOT (stored.period_start = ANY($12::timestamp[])) RETURNING stored.id) INSERT INTO step_samples (id,user_id,period_start,period_end,steps,source_name,source_id, source_device_id,device_model,recording_method,metadata,created_at) VALUES (gen_random_uuid(), $1, $2::timestamp, $3::timestamp, $4::int, $5, $6, $7, $8, $9, $10::jsonb, now()) ON CONFLICT (user_id, period_start) DO UPDATE SET period_end=EXCLUDED.period_end,steps=EXCLUDED.steps, source_name=EXCLUDED.source_name,source_id=EXCLUDED.source_id, source_device_id=EXCLUDED.source_device_id, device_model=EXCLUDED.device_model, recording_method=EXCLUDED.recording_method,metadata=EXCLUDED.metadata WHERE (step_samples.period_end, step_samples.steps, step_samples.source_name, step_samples.source_id, step_samples.source_device_id, step_samples.device_model, step_samples.recording_method, step_samples.metadata) IS DISTINCT FROM (EXCLUDED.period_end, EXCLUDED.steps, EXCLUDED.source_name, EXCLUDED.source_id, EXCLUDED.source_device_id, EXCLUDED.device_model, EXCLUDED.recording_method, EXCLUDED.metadata)",
+          "calls": 500,
+          "elapsedMs": 421.6333059999997
+        },
+        {
+          "id": "70df566c2a5927ee",
+          "query": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time",
+          "calls": 500,
+          "elapsedMs": 245.81955500000686
+        },
+        {
+          "id": "80f585342c459402",
+          "query": "SELECT race.id AS \"raceId\",participant.id AS \"participantId\", race.max_participants AS \"maxParticipants\" FROM races race JOIN race_participants participant ON participant.race_id=race.id WHERE race.status='active' AND participant.user_id=$1 AND participant.status='accepted' ORDER BY race.id",
+          "calls": 500,
+          "elapsedMs": 341.57891600000085
+        },
+        {
+          "id": "5c273a300663472b",
+          "query": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, resolution_time_zone, state, attempts, requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids, dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority, queue_priority, display_artifact_id, display_artifact_digest, display_artifact_schema, created_at, updated_at ) SELECT gen_random_uuid()::text, i.\"raceId\", 1, i.\"resolutionTimeZone\", 'queued', 0, $2::timestamp, i.\"notBeforeAt\", i.\"triggered\", '[]'::jsonb, i.\"dirtyReasons\", i.\"dirtyParticipantIds\", i.\"dirtyPowerupTypes\", i.\"dirtyPriority\", i.\"queuePriority\", i.\"artifactId\", i.\"artifactDigest\", i.\"artifactSchema\", $2::timestamp, $2::timestamp FROM jsonb_to_recordset($1::jsonb) AS i( \"raceId\" text, \"resolutionTimeZone\" text, \"triggered\" jsonb, \"dirtyReasons\" jsonb, \"dirtyParticipantIds\" jsonb, \"dirtyPowerupTypes\" jsonb, \"dirtyPriority\" text, \"queuePriority\" text, \"artifactId\" text, \"artifactDigest\" text, \"artifactSchema\" integer, \"notBeforeAt\" timestamp ) ORDER BY i.\"raceId\" ON CONFLICT (race_id) DO UPDATE SET generation = CASE WHEN $3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation) THEN race_resolution_jobs_v2.generation ELSE race_resolution_jobs_v2.generation + 1 END, resolution_time_zone = COALESCE(EXCLUDED.resolution_time_zone, race_resolution_jobs_v2.resolution_time_zone), state = CASE WHEN race_resolution_jobs_v2.state = 'running' THEN 'running'::\"RaceResolutionJobState\" ELSE 'queued'::\"RaceResolutionJobState\" END, attempts = CASE WHEN race_resolution_jobs_v2.state = 'running' THEN race_resolution_jobs_v2.attempts ELSE 0 END, requested_at = CASE WHEN race_resolution_jobs_v2.state IN ('queued', 'running') THEN race_resolution_jobs_v2.requested_at ELSE $2::timestamp END, retry_at = NULL, last_error_code = NULL, lease_expires_at = CASE WHEN $3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation) THEN NULL ELSE race_resolution_jobs_v2.lease_expires_at END, lease_token = CASE WHEN $3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation) THEN NULL ELSE race_resolution_jobs_v2.lease_token END, triggered_by_user_ids = ( SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb) FROM jsonb_array_elements( race_resolution_jobs_v2.triggered_by_user_ids || EXCLUDED.triggered_by_user_ids ) AS v ), dirty_reasons = CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array' OR NOT race_resolution_jobs_v2.dirty_reasons <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running')) OR race_resolution_jobs_v2.dirty_reasons ? 'FULL' OR EXCLUDED.dirty_reasons ? 'FULL' OR (jsonb_array_length(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) > 1000 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) ) scope_check) > 1000) OR (jsonb_array_length(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) > 64 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ) scope_check) > 64) THEN '[\"FULL\"]'::jsonb || CASE WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY' THEN '[\"EFFECT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END || CASE WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'GLOBAL_EVENT_BOUNDARY' THEN '[\"GLOBAL_EVENT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, dirty_participant_ids = CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array' OR NOT race_resolution_jobs_v2.dirty_reasons <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running')) OR race_resolution_jobs_v2.dirty_reasons ? 'FULL' OR EXCLUDED.dirty_reasons ? 'FULL' OR (jsonb_array_length(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) > 1000 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) ) scope_check) > 1000) THEN '[]'::jsonb ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value HAVING COUNT(*) >= 1 ) stable ) END, dirty_powerup_types = CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array' OR NOT race_resolution_jobs_v2.dirty_reasons <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running')) OR race_resolution_jobs_v2.dirty_reasons ? 'FULL' OR EXCLUDED.dirty_reasons ? 'FULL' OR (jsonb_array_length(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) > 64 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ) scope_check) > 64) THEN CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) = 'array' AND jsonb_typeof(EXCLUDED.dirty_powerup_types) = 'array' AND (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY' AND (race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ? 'UMBRELLA' THEN '[\"UMBRELLA\"]'::jsonb ELSE '[]'::jsonb END ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, dirty_priority = CASE WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE' THEN 'IMMEDIATE' ELSE 'COALESCE' END, queue_priority = CASE WHEN race_resolution_jobs_v2.queue_priority = 'SETTLEMENT' OR EXCLUDED.queue_priority = 'SETTLEMENT' THEN 'SETTLEMENT' WHEN race_resolution_jobs_v2.queue_priority = 'RECOVERY' OR EXCLUDED.queue_priority = 'RECOVERY' THEN 'RECOVERY' WHEN race_resolution_jobs_v2.queue_priority = 'LIVE' OR EXCLUDED.queue_priority = 'LIVE' THEN 'LIVE' ELSE 'MAINTENANCE' END, not_before_at = CASE WHEN $4::boolean THEN NULL WHEN EXCLUDED.not_before_at IS NOT NULL AND EXCLUDED.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY' THEN GREATEST( COALESCE(race_resolution_jobs_v2.not_before_at,'-infinity'::timestamp), EXCLUDED.not_before_at ) WHEN EXCLUDED.not_before_at IS NOT NULL THEN LEAST( COALESCE(race_resolution_jobs_v2.not_before_at,EXCLUDED.not_before_at), EXCLUDED.not_before_at ) ELSE race_resolution_jobs_v2.not_before_at END, display_artifact_id = CASE WHEN EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND (NOT ($3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb) THEN EXCLUDED.display_artifact_id ELSE NULL END, display_artifact_digest = CASE WHEN EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND (NOT ($3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb) THEN EXCLUDED.display_artifact_digest ELSE NULL END, display_artifact_schema = CASE WHEN EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND (NOT ($3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb) THEN EXCLUDED.display_artifact_schema ELSE NULL END, updated_at = $2::timestamp WHERE $4::boolean OR NOT ( EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND NOT race_resolution_jobs_v2.full_trigger_seed_only AND ( (race_resolution_jobs_v2.state = 'queued'::\"RaceResolutionJobState\" AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR (race_resolution_jobs_v2.state = 'running'::\"RaceResolutionJobState\" AND race_resolution_jobs_v2.processing_generation IS NOT NULL AND race_resolution_jobs_v2.generation > race_resolution_jobs_v2.processing_generation) ) AND race_resolution_jobs_v2.resolution_time_zone IS NOT DISTINCT FROM EXCLUDED.resolution_time_zone AND race_resolution_jobs_v2.display_artifact_id IS NOT DISTINCT FROM EXCLUDED.display_artifact_id AND race_resolution_jobs_v2.display_artifact_digest IS NOT DISTINCT FROM EXCLUDED.display_artifact_digest AND race_resolution_jobs_v2.display_artifact_schema IS NOT DISTINCT FROM EXCLUDED.display_artifact_schema AND jsonb_typeof(race_resolution_jobs_v2.triggered_by_user_ids) = 'array' AND NOT jsonb_path_exists(race_resolution_jobs_v2.triggered_by_user_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') AND race_resolution_jobs_v2.triggered_by_user_ids @> EXCLUDED.triggered_by_user_ids AND race_resolution_jobs_v2.dirty_participant_ids = EXCLUDED.dirty_participant_ids AND race_resolution_jobs_v2.dirty_powerup_types = EXCLUDED.dirty_powerup_types ) RETURNING id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_by_user_ids AS \"triggeredByUserIds\", processing_triggered_by_user_ids AS \"processingTriggeredByUserIds\", dirty_reasons AS \"dirtyReasons\", dirty_participant_ids AS \"dirtyParticipantIds\", dirty_powerup_types AS \"dirtyPowerupTypes\", dirty_priority AS \"dirtyPriority\", full_trigger_seed_only AS \"fullTriggerSeedOnly\", queue_priority AS \"queuePriority\", processing_dirty_reasons AS \"processingDirtyReasons\", processing_dirty_participant_ids AS \"processingDirtyParticipantIds\", processing_dirty_powerup_types AS \"processingDirtyPowerupTypes\", processing_dirty_priority AS \"processingDirtyPriority\", processing_queue_priority AS \"processingQueuePriority\", display_artifact_id AS \"displayArtifactId\", display_artifact_digest AS \"displayArtifactDigest\", display_artifact_schema AS \"displayArtifactSchema\", processing_display_artifact_id AS \"processingDisplayArtifactId\", processing_display_artifact_digest AS \"processingDisplayArtifactDigest\", processing_display_artifact_schema AS \"processingDisplayArtifactSchema\"",
+          "calls": 500,
+          "elapsedMs": 1985.0279660000024
+        },
+        {
+          "id": "8721f117c021b409",
+          "query": "UPDATE user_scoring_input_versions SET generation = generation + $2::bigint, scoring_watermark=$3, next_sample_boundary_at=$4, source_queue_semantics_generation=COALESCE( $5::bigint, source_queue_semantics_generation ), updated_at=CURRENT_TIMESTAMP WHERE user_id=$1",
+          "calls": 500,
+          "elapsedMs": 232.26451399999746
+        },
+        {
+          "id": "ed7212bd11e224ee",
+          "query": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1",
+          "calls": 500,
+          "elapsedMs": 243.5481230000098
+        },
+        {
+          "id": "e20ddfa776358ced",
+          "query": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_generation\", \"public\".\"global_event_summary_work\".\"required_race_count\", \"public\".\"global_event_summary_work\".\"final_race_count\", \"public\".\"global_event_summary_work\".\"race_reconciled_at\", \"public\".\"global_event_summary_work\".\"ready_at\", \"public\".\"global_event_summary_work\".\"next_recovery_at\", \"public\".\"global_event_summary_work\".\"available_at\", \"public\".\"global_event_summary_work\".\"lease_until\", \"public\".\"global_event_summary_work\".\"lease_token\", \"public\".\"global_event_summary_work\".\"attempt_count\", \"public\".\"global_event_summary_work\".\"last_error_code\", \"public\".\"global_event_summary_work\".\"created_at\", \"public\".\"global_event_summary_work\".\"updated_at\" FROM \"public\".\"global_event_summary_work\" LEFT JOIN \"public\".\"global_step_events\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"global_event_summary_work\".\"event_id\") WHERE (\"public\".\"global_event_summary_work\".\"user_id\" = $1 AND \"public\".\"global_event_summary_work\".\"status\" IN ($2,$3,$4) AND \"public\".\"global_event_summary_work\".\"expires_at\" > $5 AND (\"j0\".\"summary_attribution_version\" = $6 AND (\"j0\".\"id\" IS NOT NULL))) ORDER BY \"public\".\"global_event_summary_work\".\"expires_at\" ASC, \"public\".\"global_event_summary_work\".\"id\" ASC LIMIT $7 OFFSET $8",
+          "calls": 500,
+          "elapsedMs": 275.29573799999866
+        },
+        {
+          "id": "d1a3a1b3f0ad3eca",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 239.2829639999984
+        },
+        {
+          "id": "b5360c12cb0c2bbd",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)",
+          "calls": 500,
+          "elapsedMs": 200.98995199999922
+        },
+        {
+          "id": "790d931acde0f64f",
+          "query": "WITH input_rows AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS input( \"requestIndex\" integer, id text, \"lastSeenAt\" timestamptz, \"lastAppVersion\" text ) ), input AS ( SELECT id, (array_agg(\"lastSeenAt\" ORDER BY \"requestIndex\" DESC))[1] AS \"lastSeenAt\", (array_agg(\"lastAppVersion\" ORDER BY \"requestIndex\" DESC) FILTER (WHERE \"lastAppVersion\" IS NOT NULL))[1] AS \"lastAppVersion\" FROM input_rows GROUP BY id ) UPDATE users AS existing SET last_seen_at = input.\"lastSeenAt\", last_app_version = COALESCE(input.\"lastAppVersion\", existing.last_app_version) FROM input WHERE existing.id = input.id AND (existing.last_seen_at IS DISTINCT FROM input.\"lastSeenAt\" OR (input.\"lastAppVersion\" IS NOT NULL AND existing.last_app_version IS DISTINCT FROM input.\"lastAppVersion\"))",
+          "calls": 49,
+          "elapsedMs": 229.06708199999912
+        },
+        {
+          "id": "0d44cfa9f61d8e97",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2) OFFSET $3",
+          "calls": 23,
+          "elapsedMs": 84.33270799999991
+        },
+        {
+          "id": "fd44d820ec047eaf",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2,$3) OFFSET $4",
+          "calls": 1,
+          "elapsedMs": 2.5632089999999152
+        }
+      ]
+    },
+    {
+      "role": "http1",
+      "admissionRejected": 1752,
+      "calls": 8525,
+      "elapsedMs": 8465.664187000022,
+      "appCpuUserMs": 1978.681,
+      "appCpuSystemMs": 192.962,
+      "sampleRangeReads": 0,
+      "newUniqueSampleRanges": 0,
+      "shapes": [
+        {
+          "id": "79663c1d3b43ceaf",
+          "query": "COMMIT",
+          "calls": 1000,
+          "elapsedMs": 441.6170430000068
+        },
+        {
+          "id": "8429d540c3f3139a",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1) OFFSET $2",
+          "calls": 444,
+          "elapsedMs": 1847.333085000003
+        },
+        {
+          "id": "52da63f5d6f011cc",
+          "query": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 253.24183099999777
+        },
+        {
+          "id": "0db12ab3aca5754d",
+          "query": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status IN ('QUEUED', 'PROCESSING', 'WAITING_RACES') AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 ORDER BY work.expires_at ASC, work.id ASC LIMIT 1) UNION ALL (SELECT 'waiting' AS kind, 1 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", event.starts_at AS \"eventStartsAt\", event.ends_at AS \"eventEndsAt\", event.multiplier::double precision AS \"eventMultiplier\", event.schedule_mode::text AS \"eventScheduleMode\", event.summary_attribution_version AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status = 'WAITING_SYNC' AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 AND event.ends_at <= $2::timestamp ORDER BY work.expires_at ASC, work.id ASC) ORDER BY \"kindOrder\" ASC, \"expiresAt\" ASC, id ASC",
+          "calls": 500,
+          "elapsedMs": 358.4911609999956
+        },
+        {
+          "id": "a970a57c793cbdf2",
+          "query": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generation=user_scoring_input_versions.generation RETURNING generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", (xmax = 0) AS inserted ) SELECT state.*, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS \"dbNowMs\" FROM (SELECT * FROM locked UNION ALL SELECT * FROM created) state",
+          "calls": 500,
+          "elapsedMs": 280.33491000000254
+        },
+        {
+          "id": "3c24b52ebe00bc57",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2,$3,$4) OFFSET $5",
+          "calls": 1,
+          "elapsedMs": 7.783000000000129
+        },
+        {
+          "id": "e7b1808b32f050ad",
+          "query": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS \"storageChanged\" FROM persisted CROSS JOIN prior UNION ALL SELECT id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\",date, created_at AS \"createdAt\",TRUE AS existed,FALSE AS \"storageChanged\" FROM steps WHERE user_id=$1 AND date=$2::date AND steps IS NOT DISTINCT FROM $3 AND NOT EXISTS (SELECT 1 FROM persisted)",
+          "calls": 500,
+          "elapsedMs": 417.26886900000295
+        },
+        {
+          "id": "95b8738667904f87",
+          "query": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp",
+          "calls": 500,
+          "elapsedMs": 199.04807300000925
+        },
+        {
+          "id": "2868df7523f429da",
+          "query": "WITH deleted AS (DELETE FROM step_samples stored USING unnest($12::timestamp[], $13::timestamp[]) AS input_window(period_start,period_end) WHERE stored.user_id=$11 AND stored.period_end > input_window.period_start AND stored.period_start < input_window.period_end AND NOT (stored.period_start = ANY($12::timestamp[])) RETURNING stored.id) INSERT INTO step_samples (id,user_id,period_start,period_end,steps,source_name,source_id, source_device_id,device_model,recording_method,metadata,created_at) VALUES (gen_random_uuid(), $1, $2::timestamp, $3::timestamp, $4::int, $5, $6, $7, $8, $9, $10::jsonb, now()) ON CONFLICT (user_id, period_start) DO UPDATE SET period_end=EXCLUDED.period_end,steps=EXCLUDED.steps, source_name=EXCLUDED.source_name,source_id=EXCLUDED.source_id, source_device_id=EXCLUDED.source_device_id, device_model=EXCLUDED.device_model, recording_method=EXCLUDED.recording_method,metadata=EXCLUDED.metadata WHERE (step_samples.period_end, step_samples.steps, step_samples.source_name, step_samples.source_id, step_samples.source_device_id, step_samples.device_model, step_samples.recording_method, step_samples.metadata) IS DISTINCT FROM (EXCLUDED.period_end, EXCLUDED.steps, EXCLUDED.source_name, EXCLUDED.source_id, EXCLUDED.source_device_id, EXCLUDED.device_model, EXCLUDED.recording_method, EXCLUDED.metadata)",
+          "calls": 500,
+          "elapsedMs": 416.5436260000022
+        },
+        {
+          "id": "70df566c2a5927ee",
+          "query": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time",
+          "calls": 500,
+          "elapsedMs": 235.82337899999789
+        },
+        {
+          "id": "80f585342c459402",
+          "query": "SELECT race.id AS \"raceId\",participant.id AS \"participantId\", race.max_participants AS \"maxParticipants\" FROM races race JOIN race_participants participant ON participant.race_id=race.id WHERE race.status='active' AND participant.user_id=$1 AND participant.status='accepted' ORDER BY race.id",
+          "calls": 500,
+          "elapsedMs": 336.9956370000002
+        },
+        {
+          "id": "5c273a300663472b",
+          "query": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, resolution_time_zone, state, attempts, requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids, dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority, queue_priority, display_artifact_id, display_artifact_digest, display_artifact_schema, created_at, updated_at ) SELECT gen_random_uuid()::text, i.\"raceId\", 1, i.\"resolutionTimeZone\", 'queued', 0, $2::timestamp, i.\"notBeforeAt\", i.\"triggered\", '[]'::jsonb, i.\"dirtyReasons\", i.\"dirtyParticipantIds\", i.\"dirtyPowerupTypes\", i.\"dirtyPriority\", i.\"queuePriority\", i.\"artifactId\", i.\"artifactDigest\", i.\"artifactSchema\", $2::timestamp, $2::timestamp FROM jsonb_to_recordset($1::jsonb) AS i( \"raceId\" text, \"resolutionTimeZone\" text, \"triggered\" jsonb, \"dirtyReasons\" jsonb, \"dirtyParticipantIds\" jsonb, \"dirtyPowerupTypes\" jsonb, \"dirtyPriority\" text, \"queuePriority\" text, \"artifactId\" text, \"artifactDigest\" text, \"artifactSchema\" integer, \"notBeforeAt\" timestamp ) ORDER BY i.\"raceId\" ON CONFLICT (race_id) DO UPDATE SET generation = CASE WHEN $3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation) THEN race_resolution_jobs_v2.generation ELSE race_resolution_jobs_v2.generation + 1 END, resolution_time_zone = COALESCE(EXCLUDED.resolution_time_zone, race_resolution_jobs_v2.resolution_time_zone), state = CASE WHEN race_resolution_jobs_v2.state = 'running' THEN 'running'::\"RaceResolutionJobState\" ELSE 'queued'::\"RaceResolutionJobState\" END, attempts = CASE WHEN race_resolution_jobs_v2.state = 'running' THEN race_resolution_jobs_v2.attempts ELSE 0 END, requested_at = CASE WHEN race_resolution_jobs_v2.state IN ('queued', 'running') THEN race_resolution_jobs_v2.requested_at ELSE $2::timestamp END, retry_at = NULL, last_error_code = NULL, lease_expires_at = CASE WHEN $3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation) THEN NULL ELSE race_resolution_jobs_v2.lease_expires_at END, lease_token = CASE WHEN $3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation) THEN NULL ELSE race_resolution_jobs_v2.lease_token END, triggered_by_user_ids = ( SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb) FROM jsonb_array_elements( race_resolution_jobs_v2.triggered_by_user_ids || EXCLUDED.triggered_by_user_ids ) AS v ), dirty_reasons = CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array' OR NOT race_resolution_jobs_v2.dirty_reasons <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running')) OR race_resolution_jobs_v2.dirty_reasons ? 'FULL' OR EXCLUDED.dirty_reasons ? 'FULL' OR (jsonb_array_length(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) > 1000 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) ) scope_check) > 1000) OR (jsonb_array_length(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) > 64 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ) scope_check) > 64) THEN '[\"FULL\"]'::jsonb || CASE WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY' THEN '[\"EFFECT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END || CASE WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'GLOBAL_EVENT_BOUNDARY' THEN '[\"GLOBAL_EVENT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, dirty_participant_ids = CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array' OR NOT race_resolution_jobs_v2.dirty_reasons <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running')) OR race_resolution_jobs_v2.dirty_reasons ? 'FULL' OR EXCLUDED.dirty_reasons ? 'FULL' OR (jsonb_array_length(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) > 1000 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) ) scope_check) > 1000) THEN '[]'::jsonb ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value HAVING COUNT(*) >= 1 ) stable ) END, dirty_powerup_types = CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array' OR NOT race_resolution_jobs_v2.dirty_reasons <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running')) OR race_resolution_jobs_v2.dirty_reasons ? 'FULL' OR EXCLUDED.dirty_reasons ? 'FULL' OR (jsonb_array_length(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) > 64 AND (SELECT COUNT(*) FROM ( SELECT DISTINCT value FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ) scope_check) > 64) THEN CASE WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) = 'array' AND jsonb_typeof(EXCLUDED.dirty_powerup_types) = 'array' AND (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY' AND (race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ? 'UMBRELLA' THEN '[\"UMBRELLA\"]'::jsonb ELSE '[]'::jsonb END ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, dirty_priority = CASE WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE' THEN 'IMMEDIATE' ELSE 'COALESCE' END, queue_priority = CASE WHEN race_resolution_jobs_v2.queue_priority = 'SETTLEMENT' OR EXCLUDED.queue_priority = 'SETTLEMENT' THEN 'SETTLEMENT' WHEN race_resolution_jobs_v2.queue_priority = 'RECOVERY' OR EXCLUDED.queue_priority = 'RECOVERY' THEN 'RECOVERY' WHEN race_resolution_jobs_v2.queue_priority = 'LIVE' OR EXCLUDED.queue_priority = 'LIVE' THEN 'LIVE' ELSE 'MAINTENANCE' END, not_before_at = CASE WHEN $4::boolean THEN NULL WHEN EXCLUDED.not_before_at IS NOT NULL AND EXCLUDED.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY' THEN GREATEST( COALESCE(race_resolution_jobs_v2.not_before_at,'-infinity'::timestamp), EXCLUDED.not_before_at ) WHEN EXCLUDED.not_before_at IS NOT NULL THEN LEAST( COALESCE(race_resolution_jobs_v2.not_before_at,EXCLUDED.not_before_at), EXCLUDED.not_before_at ) ELSE race_resolution_jobs_v2.not_before_at END, display_artifact_id = CASE WHEN EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND (NOT ($3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb) THEN EXCLUDED.display_artifact_id ELSE NULL END, display_artifact_digest = CASE WHEN EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND (NOT ($3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb) THEN EXCLUDED.display_artifact_digest ELSE NULL END, display_artifact_schema = CASE WHEN EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND (NOT ($3::boolean AND race_resolution_jobs_v2.state = 'queued' AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb) THEN EXCLUDED.display_artifact_schema ELSE NULL END, updated_at = $2::timestamp WHERE $4::boolean OR NOT ( EXCLUDED.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND race_resolution_jobs_v2.dirty_reasons = '[\"DISPLAY_REFRESH\"]'::jsonb AND NOT race_resolution_jobs_v2.full_trigger_seed_only AND ( (race_resolution_jobs_v2.state = 'queued'::\"RaceResolutionJobState\" AND (race_resolution_jobs_v2.lease_expires_at IS NULL OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp) AND (race_resolution_jobs_v2.processing_generation IS NULL OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)) OR (race_resolution_jobs_v2.state = 'running'::\"RaceResolutionJobState\" AND race_resolution_jobs_v2.processing_generation IS NOT NULL AND race_resolution_jobs_v2.generation > race_resolution_jobs_v2.processing_generation) ) AND race_resolution_jobs_v2.resolution_time_zone IS NOT DISTINCT FROM EXCLUDED.resolution_time_zone AND race_resolution_jobs_v2.display_artifact_id IS NOT DISTINCT FROM EXCLUDED.display_artifact_id AND race_resolution_jobs_v2.display_artifact_digest IS NOT DISTINCT FROM EXCLUDED.display_artifact_digest AND race_resolution_jobs_v2.display_artifact_schema IS NOT DISTINCT FROM EXCLUDED.display_artifact_schema AND jsonb_typeof(race_resolution_jobs_v2.triggered_by_user_ids) = 'array' AND NOT jsonb_path_exists(race_resolution_jobs_v2.triggered_by_user_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') AND race_resolution_jobs_v2.triggered_by_user_ids @> EXCLUDED.triggered_by_user_ids AND race_resolution_jobs_v2.dirty_participant_ids = EXCLUDED.dirty_participant_ids AND race_resolution_jobs_v2.dirty_powerup_types = EXCLUDED.dirty_powerup_types ) RETURNING id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_by_user_ids AS \"triggeredByUserIds\", processing_triggered_by_user_ids AS \"processingTriggeredByUserIds\", dirty_reasons AS \"dirtyReasons\", dirty_participant_ids AS \"dirtyParticipantIds\", dirty_powerup_types AS \"dirtyPowerupTypes\", dirty_priority AS \"dirtyPriority\", full_trigger_seed_only AS \"fullTriggerSeedOnly\", queue_priority AS \"queuePriority\", processing_dirty_reasons AS \"processingDirtyReasons\", processing_dirty_participant_ids AS \"processingDirtyParticipantIds\", processing_dirty_powerup_types AS \"processingDirtyPowerupTypes\", processing_dirty_priority AS \"processingDirtyPriority\", processing_queue_priority AS \"processingQueuePriority\", display_artifact_id AS \"displayArtifactId\", display_artifact_digest AS \"displayArtifactDigest\", display_artifact_schema AS \"displayArtifactSchema\", processing_display_artifact_id AS \"processingDisplayArtifactId\", processing_display_artifact_digest AS \"processingDisplayArtifactDigest\", processing_display_artifact_schema AS \"processingDisplayArtifactSchema\"",
+          "calls": 500,
+          "elapsedMs": 2166.8660409999975
+        },
+        {
+          "id": "8721f117c021b409",
+          "query": "UPDATE user_scoring_input_versions SET generation = generation + $2::bigint, scoring_watermark=$3, next_sample_boundary_at=$4, source_queue_semantics_generation=COALESCE( $5::bigint, source_queue_semantics_generation ), updated_at=CURRENT_TIMESTAMP WHERE user_id=$1",
+          "calls": 500,
+          "elapsedMs": 236.6247919999946
+        },
+        {
+          "id": "ed7212bd11e224ee",
+          "query": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1",
+          "calls": 500,
+          "elapsedMs": 229.51642599999718
+        },
+        {
+          "id": "e20ddfa776358ced",
+          "query": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_generation\", \"public\".\"global_event_summary_work\".\"required_race_count\", \"public\".\"global_event_summary_work\".\"final_race_count\", \"public\".\"global_event_summary_work\".\"race_reconciled_at\", \"public\".\"global_event_summary_work\".\"ready_at\", \"public\".\"global_event_summary_work\".\"next_recovery_at\", \"public\".\"global_event_summary_work\".\"available_at\", \"public\".\"global_event_summary_work\".\"lease_until\", \"public\".\"global_event_summary_work\".\"lease_token\", \"public\".\"global_event_summary_work\".\"attempt_count\", \"public\".\"global_event_summary_work\".\"last_error_code\", \"public\".\"global_event_summary_work\".\"created_at\", \"public\".\"global_event_summary_work\".\"updated_at\" FROM \"public\".\"global_event_summary_work\" LEFT JOIN \"public\".\"global_step_events\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"global_event_summary_work\".\"event_id\") WHERE (\"public\".\"global_event_summary_work\".\"user_id\" = $1 AND \"public\".\"global_event_summary_work\".\"status\" IN ($2,$3,$4) AND \"public\".\"global_event_summary_work\".\"expires_at\" > $5 AND (\"j0\".\"summary_attribution_version\" = $6 AND (\"j0\".\"id\" IS NOT NULL))) ORDER BY \"public\".\"global_event_summary_work\".\"expires_at\" ASC, \"public\".\"global_event_summary_work\".\"id\" ASC LIMIT $7 OFFSET $8",
+          "calls": 500,
+          "elapsedMs": 258.40839600000027
+        },
+        {
+          "id": "d1a3a1b3f0ad3eca",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 224.49246399999993
+        },
+        {
+          "id": "b5360c12cb0c2bbd",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)",
+          "calls": 500,
+          "elapsedMs": 193.0152859999971
+        },
+        {
+          "id": "790d931acde0f64f",
+          "query": "WITH input_rows AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS input( \"requestIndex\" integer, id text, \"lastSeenAt\" timestamptz, \"lastAppVersion\" text ) ), input AS ( SELECT id, (array_agg(\"lastSeenAt\" ORDER BY \"requestIndex\" DESC))[1] AS \"lastSeenAt\", (array_agg(\"lastAppVersion\" ORDER BY \"requestIndex\" DESC) FILTER (WHERE \"lastAppVersion\" IS NOT NULL))[1] AS \"lastAppVersion\" FROM input_rows GROUP BY id ) UPDATE users AS existing SET last_seen_at = input.\"lastSeenAt\", last_app_version = COALESCE(input.\"lastAppVersion\", existing.last_app_version) FROM input WHERE existing.id = input.id AND (existing.last_seen_at IS DISTINCT FROM input.\"lastSeenAt\" OR (input.\"lastAppVersion\" IS NOT NULL AND existing.last_app_version IS DISTINCT FROM input.\"lastAppVersion\"))",
+          "calls": 54,
+          "elapsedMs": 268.89483100000143
+        },
+        {
+          "id": "0d44cfa9f61d8e97",
+          "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"seeded_automatic_eligible_at\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users\".\"profile_photo_prompt_dismissed_at\", \"public\".\"users\".\"rename_chip_shown_count\", \"public\".\"users\".\"rename_chip_dismissed_at\", \"public\".\"users\".\"step_goal\", \"public\".\"users\".\"last_step_sync_at\", \"public\".\"users\".\"last_home_pull_step_sync_at\", \"public\".\"users\".\"last_silent_push_sent_at\", \"public\".\"users\".\"coins\", \"public\".\"users\".\"last_daily_claim_date\", \"public\".\"users\".\"daily_streak_day\", \"public\".\"users\".\"daily_login_streak\", \"public\".\"users\".\"is_review_account\", \"public\".\"users\".\"hidden_from_leaderboard\", \"public\".\"users\".\"auto_join_featured_races\", \"public\".\"users\".\"first_race_onboarding_seen\", \"public\".\"users\".\"tutorial_onboarding_seen\", \"public\".\"users\".\"current_tier\", \"public\".\"users\".\"current_division\", \"public\".\"users\".\"ranked_tier_v2\", \"public\".\"users\".\"ranked_tier_v2_since\", \"public\".\"users\".\"referral_code\", \"public\".\"users\".\"referred_by_code\", \"public\".\"users\".\"client_features\", \"public\".\"users\".\"client_features_at\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\", \"public\".\"users\".\"daily_reward_reminders_enabled\", \"public\".\"users\".\"step_milestone_reminders_enabled\", \"public\".\"users\".\"shop_tutorial_completed_at\", \"public\".\"users\".\"last_app_version\", \"public\".\"users\".\"last_seen_at\", \"public\".\"users\".\"metrics_v2_eligible_at\", \"public\".\"users\".\"metrics_v2_eligible_epoch_id\", \"public\".\"users\".\"metrics_v2_signup_eligible\", \"public\".\"users\".\"metrics_v2_signup_epoch_id\", \"public\".\"users\".\"created_at\", \"public\".\"users\".\"appearance_revision\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2) OFFSET $3",
+          "calls": 26,
+          "elapsedMs": 93.36533700000109
+        }
+      ]
+    },
+    {
+      "role": "resolution",
+      "admissionRejected": 0,
+      "calls": 5166,
+      "elapsedMs": 4407.855071999981,
+      "appCpuUserMs": 1143.934,
+      "appCpuSystemMs": 149.263,
+      "sampleRangeReads": 1000,
+      "newUniqueSampleRanges": 1000,
+      "shapes": [
+        {
+          "id": "0d4359106b56f35f",
+          "query": "SELECT race_id AS \"raceId\" FROM race_umbrella_interceptions WHERE status = 'PENDING' AND resolves_at <= $1::timestamp GROUP BY race_id ORDER BY MIN(resolves_at), race_id LIMIT $2",
+          "calls": 7,
+          "elapsedMs": 13.426167000000078
+        },
+        {
+          "id": "59cfd20d79e24525",
+          "query": "SELECT \"public\".\"app_settings\".\"key\", \"public\".\"app_settings\".\"value\", \"public\".\"app_settings\".\"updated_at\" FROM \"public\".\"app_settings\" WHERE \"public\".\"app_settings\".\"key\" IN ($1,$2) OFFSET $3",
+          "calls": 2,
+          "elapsedMs": 8.123417000000245
+        },
+        {
+          "id": "ca8d087e1bd60d31",
+          "query": "WITH candidate AS ( SELECT id FROM race_admin_commands WHERE (status = 'PENDING' AND available_at <= $1) OR (status = 'RUNNING' AND lease_expires_at < $2) ORDER BY available_at ASC, created_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 1 ) UPDATE race_admin_commands command SET status = 'RUNNING', lease_token = $3, lease_expires_at = $4, attempts = attempts + 1, updated_at = $5 FROM candidate WHERE command.id = candidate.id RETURNING command.*",
+          "calls": 7,
+          "elapsedMs": 4.470749999999498
+        },
+        {
+          "id": "59032b06d6f51117",
+          "query": "SELECT effect_id,race_id FROM race_effect_deadlines WHERE dispatched_revision IS NULL AND deadline_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND NOT(race_id=ANY($2::text[])) ORDER BY deadline_at,race_id,effect_id LIMIT $1",
+          "calls": 149,
+          "elapsedMs": 547.1358290000019
+        },
+        {
+          "id": "79663c1d3b43ceaf",
+          "query": "COMMIT",
+          "calls": 354,
+          "elapsedMs": 62.76496600000519
+        },
+        {
+          "id": "5c657c3b7b38bb89",
+          "query": "/* steps:prepared-query:v1 */ WITH candidate AS ( SELECT p.id FROM race_placement_transition_jobs p JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id WHERE ( (p.state IN ('queued','retry') AND p.not_before_at <= $1 AND (p.retry_at IS NULL OR p.retry_at <= $1)) OR (p.state='running' AND p.lease_expires_at <= clock_timestamp()) ) AND p.requested_generation > COALESCE(p.completed_generation, 0) AND r.state='succeeded' AND r.generation > 0 AND r.processing_generation=r.generation AND r.generation=p.requested_generation AND r.last_completed_at IS NOT NULL ORDER BY p.requested_at, p.race_id LIMIT 1 FOR UPDATE OF p SKIP LOCKED ) UPDATE race_placement_transition_jobs p SET state='running', processing_generation=p.requested_generation, processing_observed_at=p.observed_at, started_at=$1, lease_token=$2, lease_expires_at=clock_timestamp() + interval '30 seconds', attempts=p.attempts+1, updated_at=$1 FROM candidate WHERE p.id=candidate.id RETURNING p.id, p.race_id AS \"raceId\", p.requested_generation AS \"requestedGeneration\", p.processing_generation AS \"processingGeneration\", p.completed_generation AS \"completedGeneration\", p.state, p.requested_at AS \"requestedAt\", p.observed_at AS \"observedAt\", p.processing_observed_at AS \"processingObservedAt\", p.not_before_at AS \"notBeforeAt\", p.attempts, p.retry_at AS \"retryAt\", p.started_at AS \"startedAt\", p.completed_at AS \"completedAt\", p.last_completed_at AS \"lastCompletedAt\", p.lease_token AS \"leaseToken\", p.lease_expires_at AS \"leaseExpiresAt\", p.last_error_code AS \"lastErrorCode\"",
+          "calls": 135,
+          "elapsedMs": 27.535453999998936
+        },
+        {
+          "id": "9a1da891bdc0b672",
+          "query": "SELECT race_id FROM race_progress_refresh_intents WHERE available_at<=(statement_timestamp() AT TIME ZONE 'UTC') ORDER BY available_at,race_id LIMIT 100",
+          "calls": 149,
+          "elapsedMs": 522.9966619999996
+        },
+        {
+          "id": "62f5ce21560ce777",
+          "query": "WITH due AS (SELECT task_id FROM race_snapshot_repair_intents WHERE terminal_at IS NULL AND available_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND (lease_expires_at IS NULL OR lease_expires_at<=(statement_timestamp() AT TIME ZONE 'UTC')) ORDER BY available_at,task_id LIMIT 100 FOR UPDATE SKIP LOCKED) UPDATE race_snapshot_repair_intents i SET lease_token=$1::uuid,lease_expires_at=clock_timestamp()+interval '30 seconds',attempt_count=attempt_count+1 FROM due WHERE i.task_id=due.task_id RETURNING i.*",
+          "calls": 149,
+          "elapsedMs": 552.1467150000019
+        },
+        {
+          "id": "698de34778c18764",
+          "query": "/* steps:prepared-query:v1 */ SELECT LEAST( (SELECT MIN(GREATEST(p.not_before_at,COALESCE(p.retry_at,'-infinity'::timestamp))) FROM race_placement_transition_jobs p JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id WHERE p.state IN ('queued','retry') AND p.requested_generation > COALESCE(p.completed_generation,0) AND r.state='succeeded' AND r.generation > 0 AND r.processing_generation=r.generation AND r.generation=p.requested_generation AND r.last_completed_at IS NOT NULL), (SELECT MIN(p.lease_expires_at) FROM race_placement_transition_jobs p JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id WHERE p.state='running' AND p.requested_generation > COALESCE(p.completed_generation,0) AND r.state='succeeded' AND r.generation > 0 AND r.processing_generation=r.generation AND r.generation=p.requested_generation AND r.last_completed_at IS NOT NULL) ) AS \"dueAt\"",
+          "calls": 79,
+          "elapsedMs": 22.724790999996912
+        },
+        {
+          "id": "40f2339d0ec46260",
+          "query": "WITH candidate_races AS ( SELECT trigger.race_id, MIN(trigger.requested_at) AS requested_at, MAX(trigger.resolution_time_zone) AS resolution_time_zone FROM ( SELECT trigger.race_id,trigger.requested_at, trigger.resolution_time_zone FROM race_resolution_full_triggers trigger JOIN races race ON race.id=trigger.race_id WHERE race.status='active' ORDER BY trigger.requested_at,trigger.id LIMIT $1 ) trigger GROUP BY trigger.race_id ) INSERT INTO race_resolution_jobs_v2 ( id,race_id,generation,resolution_time_zone,state,attempts, requested_at,not_before_at,triggered_by_user_ids, processing_triggered_by_user_ids,dirty_reasons, dirty_participant_ids,dirty_powerup_types,dirty_priority, queue_priority,created_at,updated_at ) SELECT gen_random_uuid()::text,race_id,1,resolution_time_zone, 'queued',0,requested_at,$3,'[]'::jsonb,'[]'::jsonb, '[\"FULL\"]'::jsonb,'[]'::jsonb,'[]'::jsonb, 'COALESCE','MAINTENANCE',requested_at,$2 FROM candidate_races ON CONFLICT (race_id) DO NOTHING",
+          "calls": 5,
+          "elapsedMs": 6.532623999998577
+        },
+        {
+          "id": "e705fe7429b71e87",
+          "query": "WITH candidates AS MATERIALIZED ( SELECT trigger.id,trigger.race_id,trigger.user_id,trigger.participant_id, trigger.resolution_time_zone,trigger.requested_at FROM race_resolution_full_triggers trigger JOIN race_resolution_jobs_v2 job ON job.race_id=trigger.race_id JOIN races race ON race.id=trigger.race_id WHERE race.status='active' AND ( job.full_trigger_seed_only OR NOT (job.dirty_reasons ? 'STEP_INPUT_CHANGED') OR jsonb_array_length(job.dirty_participant_ids) < 500 ) ORDER BY trigger.requested_at,trigger.id LIMIT $1 FOR UPDATE SKIP LOCKED ), grouped AS MATERIALIZED ( SELECT race_id,MIN(requested_at) AS requested_at, MAX(resolution_time_zone) AS resolution_time_zone, COUNT(*)::int AS trigger_count, BOOL_AND(user_id IS NOT NULL AND participant_id IS NOT NULL) AS all_scoped, COUNT(DISTINCT user_id)::int AS scoped_user_count, COUNT(DISTINCT participant_id)::int AS scoped_participant_count, COALESCE(jsonb_agg(DISTINCT to_jsonb(user_id)) FILTER (WHERE user_id IS NOT NULL),'[]'::jsonb) AS user_ids, COALESCE(jsonb_agg(DISTINCT to_jsonb(participant_id)) FILTER (WHERE participant_id IS NOT NULL),'[]'::jsonb) AS participant_ids FROM candidates GROUP BY race_id ), scoped AS MATERIALIZED ( SELECT grouped.*, grouped.all_scoped AND grouped.scoped_user_count <= 1000 AND grouped.scoped_participant_count <= 1000 AND ( job.full_trigger_seed_only OR NOT (job.dirty_reasons ? 'FULL') ) AND ( SELECT COUNT(DISTINCT value) <= 1000 FROM jsonb_array_elements( (CASE WHEN job.full_trigger_seed_only THEN '[]'::jsonb ELSE job.triggered_by_user_ids END) || grouped.user_ids ) merged(value) ) AND ( SELECT COUNT(DISTINCT value) <= 1000 FROM jsonb_array_elements( (CASE WHEN job.full_trigger_seed_only THEN '[]'::jsonb ELSE job.dirty_participant_ids END) || grouped.participant_ids ) merged(value) ) AS can_scope FROM grouped JOIN race_resolution_jobs_v2 job ON job.race_id=grouped.race_id ), promoted AS ( UPDATE race_resolution_jobs_v2 job SET generation=CASE WHEN job.state='running' THEN job.generation+1 WHEN job.state='queued' THEN job.generation ELSE job.generation+1 END, resolution_time_zone=COALESCE(scoped.resolution_time_zone, job.resolution_time_zone), state=CASE WHEN job.state='running' THEN job.state ELSE 'queued'::\"RaceResolutionJobState\" END, attempts=CASE WHEN job.state='running' THEN job.attempts ELSE 0 END, requested_at=CASE WHEN job.state IN ('queued','running') THEN job.requested_at ELSE scoped.requested_at END, not_before_at=GREATEST( '-infinity'::timestamp, CASE WHEN job.state='queued' AND (job.queue_priority='LIVE' OR job.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY') THEN COALESCE(job.not_before_at,'-infinity'::timestamp) WHEN scoped.can_scope THEN CASE WHEN job.state='running' THEN $4::timestamp ELSE GREATEST( COALESCE(job.not_before_at,$4::timestamp), $4::timestamp ) END ELSE GREATEST( COALESCE(job.not_before_at,'-infinity'::timestamp), $3::timestamp ) END ), retry_at=NULL,last_error_code=NULL, triggered_by_user_ids=CASE WHEN scoped.can_scope THEN ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb) FROM ( SELECT value,MIN(ordinality) AS first_ordinal FROM jsonb_array_elements( (CASE WHEN job.full_trigger_seed_only THEN '[]'::jsonb ELSE job.triggered_by_user_ids END) || scoped.user_ids ) WITH ORDINALITY AS merged(value,ordinality) GROUP BY value ) stable ) ELSE '[]'::jsonb END, dirty_reasons=CASE WHEN scoped.can_scope THEN ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb) FROM ( SELECT value,MIN(ordinality) AS first_ordinal FROM jsonb_array_elements( (CASE WHEN job.full_trigger_seed_only THEN ( SELECT COALESCE(jsonb_agg(value ORDER BY ordinality),'[]'::jsonb) FROM jsonb_array_elements(job.dirty_reasons) WITH ORDINALITY AS preserved(value,ordinality) WHERE value IN ('\"EFFECT_BOUNDARY\"'::jsonb, '\"GLOBAL_EVENT_BOUNDARY\"'::jsonb) ) ELSE job.dirty_reasons END) || '[\"STEP_INPUT_CHANGED\"]'::jsonb ) WITH ORDINALITY AS merged(value,ordinality) WHERE value <> '\"STEP_SYNC\"'::jsonb GROUP BY value ) stable ) ELSE '[\"FULL\"]'::jsonb || CASE WHEN job.dirty_reasons ? 'EFFECT_BOUNDARY' THEN '[\"EFFECT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END || CASE WHEN job.dirty_reasons ? 'GLOBAL_EVENT_BOUNDARY' THEN '[\"GLOBAL_EVENT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END END, dirty_participant_ids=CASE WHEN scoped.can_scope THEN ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal),'[]'::jsonb) FROM ( SELECT value,MIN(ordinality) AS first_ordinal FROM jsonb_array_elements( (CASE WHEN job.full_trigger_seed_only THEN '[]'::jsonb ELSE job.dirty_participant_ids END) || scoped.participant_ids ) WITH ORDINALITY AS merged(value,ordinality) GROUP BY value ) stable ) ELSE '[]'::jsonb END, dirty_powerup_types=CASE WHEN scoped.can_scope THEN job.dirty_powerup_types WHEN job.dirty_reasons ? 'EFFECT_BOUNDARY' AND job.dirty_powerup_types ? 'UMBRELLA' THEN '[\"UMBRELLA\"]'::jsonb ELSE '[]'::jsonb END, dirty_priority='COALESCE', queue_priority=CASE WHEN job.state='queued' AND job.queue_priority='LIVE' THEN 'LIVE' ELSE 'MAINTENANCE' END, full_trigger_seed_only=false,updated_at=$2 FROM scoped WHERE job.race_id=scoped.race_id RETURNING job.race_id ), deleted AS ( DELETE FROM race_resolution_full_triggers trigger USING candidates,promoted WHERE trigger.id=candidates.id AND candidates.race_id=promoted.race_id RETURNING trigger.id ) SELECT (SELECT COUNT(*)::int FROM deleted) AS promoted, (SELECT COUNT(*)::int FROM grouped) AS races",
+          "calls": 5,
+          "elapsedMs": 7.695166999999856
+        },
+        {
+          "id": "32c4ae6ad2880222",
+          "query": "/* steps:prepared-query:v1 */ WITH candidate AS ( SELECT id FROM race_resolution_jobs_v2 WHERE $4::text IS NULL AND ( ( state = 'queued' AND ($5::boolean OR retry_at IS NULL OR retry_at <= $1) AND ($5::boolean OR not_before_at IS NULL OR not_before_at <= $1) ) OR ( state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1 ) ) ORDER BY CASE queue_priority WHEN 'SETTLEMENT' THEN 0 WHEN 'RECOVERY' THEN 1 WHEN 'LIVE' THEN 2 ELSE 3 END, requested_at ASC, race_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED ) UPDATE race_resolution_jobs_v2 j SET state = 'running', processing_generation = j.generation, processing_time_zone = j.resolution_time_zone, started_at = $1, lease_expires_at = $2, lease_token = $3, attempts = j.attempts + 1, processing_triggered_by_user_ids = ( SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb) FROM jsonb_array_elements( j.processing_triggered_by_user_ids || j.triggered_by_user_ids ) AS v ), processing_dirty_reasons = CASE WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array' OR NOT (j.processing_dirty_reasons || j.dirty_reasons) <@ '[\"DISPLAY_REFRESH\",\"STEP_SYNC\",\"STEP_INPUT_CHANGED\",\"POWERUP_MUTATION\",\"BOX_OPEN\",\"JOIN_LEAVE_KICK\",\"FORFEIT_TEAM\",\"RACE_START\",\"EFFECT_BOUNDARY\",\"GLOBAL_EVENT_BOUNDARY\",\"RECOVERY\",\"DAILY_MOVER\",\"FULL\"]'::jsonb OR jsonb_typeof(j.processing_dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(j.processing_dirty_participant_ids || j.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR jsonb_typeof(j.processing_dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(j.processing_dirty_powerup_types || j.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (j.processing_dirty_reasons = '[]'::jsonb AND j.dirty_reasons = '[]'::jsonb) OR (j.processing_dirty_reasons || j.dirty_reasons) ? 'FULL' OR (SELECT COUNT(DISTINCT value) FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)) > 1000 OR (SELECT COUNT(DISTINCT value) FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64 THEN '[\"FULL\"]'::jsonb || CASE WHEN (j.processing_dirty_reasons || j.dirty_reasons) ? 'EFFECT_BOUNDARY' THEN '[\"EFFECT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END || CASE WHEN (j.processing_dirty_reasons || j.dirty_reasons) ? 'GLOBAL_EVENT_BOUNDARY' THEN '[\"GLOBAL_EVENT_BOUNDARY\"]'::jsonb ELSE '[]'::jsonb END ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(j.processing_dirty_reasons || j.dirty_reasons) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, processing_dirty_participant_ids = CASE WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array' OR (j.processing_dirty_reasons || j.dirty_reasons) ? 'FULL' OR jsonb_typeof(j.processing_dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_participant_ids) IS DISTINCT FROM 'array' OR jsonb_path_exists(j.processing_dirty_participant_ids || j.dirty_participant_ids, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (SELECT COUNT(DISTINCT value) FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)) > 1000 THEN '[]'::jsonb ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, processing_dirty_powerup_types = CASE WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array' OR (j.processing_dirty_reasons || j.dirty_reasons) ? 'FULL' OR jsonb_typeof(j.processing_dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_typeof(j.dirty_powerup_types) IS DISTINCT FROM 'array' OR jsonb_path_exists(j.processing_dirty_powerup_types || j.dirty_powerup_types, '$[*] ? (@.type() != \"string\" || @ == \"\")') OR (SELECT COUNT(DISTINCT value) FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64 THEN CASE WHEN jsonb_typeof(j.processing_dirty_powerup_types) = 'array' AND jsonb_typeof(j.dirty_powerup_types) = 'array' AND (j.processing_dirty_reasons || j.dirty_reasons) ? 'EFFECT_BOUNDARY' AND (j.processing_dirty_powerup_types || j.dirty_powerup_types) ? 'UMBRELLA' THEN '[\"UMBRELLA\"]'::jsonb ELSE '[]'::jsonb END ELSE ( SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb) FROM ( SELECT value, MIN(ordinality) AS first_ordinal FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types) WITH ORDINALITY AS merged(value, ordinality) GROUP BY value ) stable ) END, processing_dirty_priority = CASE WHEN j.processing_dirty_reasons = '[]'::jsonb THEN j.dirty_priority WHEN j.processing_dirty_priority = 'IMMEDIATE' OR j.dirty_priority = 'IMMEDIATE' THEN 'IMMEDIATE' ELSE 'COALESCE' END, processing_queue_priority = j.queue_priority, processing_display_artifact_id = j.display_artifact_id, processing_display_artifact_digest = j.display_artifact_digest, processing_display_artifact_schema = j.display_artifact_schema, triggered_by_user_ids = '[]'::jsonb, dirty_reasons = '[]'::jsonb, dirty_participant_ids = '[]'::jsonb, dirty_powerup_types = '[]'::jsonb, dirty_priority = 'COALESCE', queue_priority = 'LIVE', display_artifact_id = NULL, display_artifact_digest = NULL, display_artifact_schema = NULL, updated_at = $1 FROM candidate c WHERE j.id = c.id RETURNING j.id, j.race_id AS \"raceId\", generation, j.processing_generation AS \"processingGeneration\", j.resolution_time_zone AS \"resolutionTimeZone\", j.processing_time_zone AS \"processingTimeZone\", state, attempts, j.requested_at AS \"requestedAt\", j.started_at AS \"startedAt\", j.completed_at AS \"completedAt\", j.last_completed_at AS \"lastCompletedAt\", j.retry_at AS \"retryAt\", j.not_before_at AS \"notBeforeAt\", j.lease_expires_at AS \"leaseExpiresAt\", j.lease_token AS \"leaseToken\", j.last_error_code AS \"lastErrorCode\", j.triggered_by_user_ids AS \"triggeredByUserIds\", j.processing_triggered_by_user_ids AS \"processingTriggeredByUserIds\", j.dirty_reasons AS \"dirtyReasons\", j.dirty_participant_ids AS \"dirtyParticipantIds\", j.dirty_powerup_types AS \"dirtyPowerupTypes\", j.dirty_priority AS \"dirtyPriority\", j.full_trigger_seed_only AS \"fullTriggerSeedOnly\", j.queue_priority AS \"queuePriority\", j.processing_dirty_reasons AS \"processingDirtyReasons\", j.processing_dirty_participant_ids AS \"processingDirtyParticipantIds\", j.processing_dirty_powerup_types AS \"processingDirtyPowerupTypes\", j.processing_dirty_priority AS \"processingDirtyPriority\", j.processing_queue_priority AS \"processingQueuePriority\", j.display_artifact_id AS \"displayArtifactId\", j.display_artifact_digest AS \"displayArtifactDigest\", j.display_artifact_schema AS \"displayArtifactSchema\", j.processing_display_artifact_id AS \"processingDisplayArtifactId\", j.processing_display_artifact_digest AS \"processingDisplayArtifactDigest\", j.processing_display_artifact_schema AS \"processingDisplayArtifactSchema\"",
+          "calls": 489,
+          "elapsedMs": 1688.5801030000068
+        },
+        {
+          "id": "9dd7acf74f999d6b",
+          "query": "SELECT LEAST( (SELECT MIN(GREATEST(COALESCE(not_before_at,clock_timestamp()), COALESCE(retry_at,clock_timestamp()))) FROM race_resolution_jobs_v2 WHERE state='queued'), (SELECT MIN(lease_expires_at) FROM race_resolution_jobs_v2 WHERE state='running') ) AS \"dueAt\"",
+          "calls": 20,
+          "elapsedMs": 31.000832000000173
+        },
+        {
+          "id": "6e44fa117aeac3fa",
+          "query": "/* steps:prepared-query:v1 */ WITH candidate_ids AS MATERIALIZED ( SELECT id, requested_at FROM ( (SELECT id, requested_at FROM race_resolution_post_tasks WHERE state='queued' AND not_before_at <= $1 ORDER BY not_before_at, requested_at, id LIMIT 16) UNION ALL (SELECT id, requested_at FROM race_resolution_post_tasks WHERE state='running' AND lease_expires_at <= $1 ORDER BY lease_expires_at, requested_at, id LIMIT 16) ) branches ORDER BY requested_at, id LIMIT 16 ), candidate AS ( SELECT task.id FROM race_resolution_post_tasks task JOIN candidate_ids USING (id) ORDER BY task.requested_at, task.id LIMIT 1 FOR UPDATE OF task SKIP LOCKED ) UPDATE race_resolution_post_tasks task SET state='running', started_at=COALESCE(started_at,$1), lease_expires_at=$2, lease_token=$3, updated_at=$1 FROM candidate WHERE task.id=candidate.id RETURNING task.id, task.race_id AS \"raceId\", task.source_generation AS \"sourceGeneration\", task.requested_at AS \"requestedAt\", task.snapshot_state AS \"snapshotState\", task.snapshot_command AS \"snapshotCommand\", task.lease_token AS \"leaseToken\", EXISTS (SELECT 1 FROM race_resolution_delivery_intents intent WHERE intent.task_id=task.id) AS \"hasIntents\"",
+          "calls": 56,
+          "elapsedMs": 14.159332000002905
+        },
+        {
+          "id": "b478e497c94c1730",
+          "query": "SELECT LEAST( (SELECT MIN(not_before_at) FROM race_resolution_post_tasks WHERE state='queued'), (SELECT MIN(lease_expires_at) FROM race_resolution_post_tasks WHERE state='running') ) AS \"dueAt\"",
+          "calls": 3,
+          "elapsedMs": 0.6402079999998023
+        },
+        {
+          "id": "6872015875e46326",
+          "query": "SELECT id FROM race_resolution_post_tasks WHERE snapshot_state='pending' AND ((state='queued' AND not_before_at<=$1) OR (state='running' AND lease_expires_at<=$1)) ORDER BY requested_at,id LIMIT 16",
+          "calls": 7,
+          "elapsedMs": 13.101500999999189
+        },
+        {
+          "id": "6394f03953555490",
+          "query": "SELECT id FROM race_series_renewal_jobs WHERE ( state IN ('QUEUED'::\"RaceSeriesRenewalJobState\", 'FAILED_RETRYABLE'::\"RaceSeriesRenewalJobState\") AND (retry_at IS NULL OR retry_at <= NOW()) ) OR ( state = 'RUNNING'::\"RaceSeriesRenewalJobState\" AND lease_expires_at <= NOW() ) ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1",
+          "calls": 1,
+          "elapsedMs": 0.916957999999795
+        },
+        {
+          "id": "96d49c9ff9b49972",
+          "query": "/* steps:prepared-read:v1 */ SELECT id, target_participant_id AS \"targetParticipantId\", target_user_id AS \"targetUserId\", source_user_id AS \"sourceUserId\", powerup_id AS \"powerupId\", UPPER(type::text) AS type, CASE status WHEN 'active_effect' THEN 'ACTIVE' WHEN 'expired_effect' THEN 'EXPIRED' ELSE UPPER(status::text) END AS status, starts_at AS \"startsAt\", expires_at AS \"expiresAt\", metadata, updated_at AS \"updatedAt\", race_id AS \"raceId\", created_at AS \"createdAt\" FROM race_active_effects WHERE race_id=$1 AND (status='active_effect' OR (status='expired_effect' AND UPPER(type::text) = ANY($2::text[]))) ORDER BY id",
+          "calls": 100,
+          "elapsedMs": 23.994243000001006
+        },
+        {
+          "id": "cc25e888545ffe73",
+          "query": "/* steps:prepared-read:v1 */ WITH members AS ( SELECT DISTINCT participant.user_id FROM race_participants participant WHERE participant.race_id=$1 AND participant.status='accepted' ) SELECT members.user_id AS \"userId\", version.generation::text AS generation, CASE WHEN version.generation IS NULL THEN EXISTS (SELECT 1 FROM steps source WHERE source.user_id=members.user_id) ELSE false END AS \"hasSteps\", CASE WHEN version.generation IS NULL THEN EXISTS (SELECT 1 FROM step_samples source WHERE source.user_id=members.user_id) ELSE false END AS \"hasSamples\", CASE WHEN version.scoring_watermark IS NOT NULL AND version.source_queue_semantics_generation=version.generation AND (version.next_sample_boundary_at IS NULL OR version.next_sample_boundary_at > $2) THEN version.next_sample_boundary_at ELSE (SELECT MIN(source.period_end) FROM step_samples source WHERE source.user_id=members.user_id AND source.period_end > $2) END AS \"nextSampleBoundary\" FROM members LEFT JOIN user_scoring_input_versions version ON version.user_id=members.user_id ORDER BY members.user_id",
+          "calls": 100,
+          "elapsedMs": 36.36696099999517
+        },
+        {
+          "id": "f3f01d5547381aea",
+          "query": "/* steps:prepared-read:v1 */ SELECT race.id AS \"r_id\", race.name AS \"r_name\", (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS \"r_scheduledStartAt\", race.team_a_name AS \"r_teamAName\", race.team_b_name AS \"r_teamBName\", UPPER(race.status::text) AS \"r_status\", (EXTRACT(EPOCH FROM race.started_at) * 1000)::float8 AS \"r_startedAt\", (EXTRACT(EPOCH FROM race.ends_at) * 1000)::float8 AS \"r_endsAt\", race.timezone AS \"r_timezone\", race.target_steps AS \"r_targetSteps\", race.time_based AS \"r_timeBased\", race.powerups_enabled AS \"r_powerupsEnabled\", race.powerup_step_interval AS \"r_powerupStepInterval\", race.is_team_race AS \"r_isTeamRace\", race.team_size AS \"r_teamSize\", participant.id AS \"p_id\", participant.user_id AS \"p_userId\", UPPER(participant.status::text) AS \"p_status\", participant.total_steps AS \"p_totalSteps\", participant.raw_steps AS \"p_rawSteps\", participant.bonus_steps AS \"p_bonusSteps\", participant.max_bonus_steps AS \"p_maxBonusSteps\", participant.next_box_at_steps AS \"p_nextBoxAtSteps\", participant.powerup_slots AS \"p_powerupSlots\", (EXTRACT(EPOCH FROM participant.finished_at) * 1000)::float8 AS \"p_finishedAt\", participant.finish_total_steps AS \"p_finishTotalSteps\", (EXTRACT(EPOCH FROM participant.forfeited_at) * 1000)::float8 AS \"p_forfeitedAt\", (EXTRACT(EPOCH FROM participant.joined_at) * 1000)::float8 AS \"p_joinedAt\", UPPER(participant.team::text) AS \"p_team\", participant.placement AS \"p_placement\", participant.last_notified_placement AS \"p_lastNotifiedPlacement\", (EXTRACT(EPOCH FROM participant.high_multiplier_notified_at) * 1000)::float8 AS \"p_highMultiplierNotifiedAt\", (EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000)::float8 AS \"p_totalsUpdatedAt\" , person.id AS \"u_id\", person.display_name AS \"u_displayName\" FROM races race LEFT JOIN race_participants participant ON participant.race_id=race.id LEFT JOIN users person ON person.id=participant.user_id WHERE race.id=$1 ORDER BY participant.id",
+          "calls": 100,
+          "elapsedMs": 52.77004300000408
+        },
+        {
+          "id": "46cebbe151843c5f",
+          "query": "/* steps:prepared-read:v1 */ WITH race_window AS ( SELECT started_at FROM races WHERE id=$1 ), schedule AS ( SELECT COALESCE(( SELECT NOT EXISTS ( SELECT 1 FROM ( SELECT source.starts_at AS boundary_at, source.id AS event_id, 'START'::text AS boundary_kind FROM global_step_events source JOIN race_window race ON source.ends_at > race.started_at WHERE source.schedule_mode='LEGACY_GLOBAL' UNION ALL SELECT source.ends_at AS boundary_at, source.id AS event_id, 'END'::text AS boundary_kind FROM global_step_events source JOIN race_window race ON source.ends_at > race.started_at WHERE source.schedule_mode='LEGACY_GLOBAL' ) boundary WHERE boundary.boundary_at <= (to_timestamp($3::float8 / 1000) AT TIME ZONE 'UTC') AND (boundary.boundary_at, boundary.event_id, boundary.boundary_kind) > (cursor.boundary_at, cursor.event_id, cursor.boundary_kind) ) FROM global_step_event_boundary_cursors cursor WHERE cursor.key='global' ), false) AS current ), candidate_events AS ( SELECT event.id, event.starts_at, event.ends_at, event.multiplier, event.label, event.schedule_mode, event.summary_attribution_version, NULL::text AS entitlement_id, NULL::text AS impact_id, NULL::text AS impact_status, NULL::text AS user_id FROM global_step_events event JOIN races race ON race.id=$1 WHERE event.schedule_mode='LEGACY_GLOBAL' AND event.ends_at > race.started_at AND event.starts_at <= $2 UNION ALL SELECT event.id, entitlement.starts_at, entitlement.ends_at, event.multiplier, event.label, event.schedule_mode, event.summary_attribution_version, entitlement.id, impact.id, impact.status, entitlement.user_id FROM global_step_event_entitlements entitlement JOIN global_step_events event ON event.id=entitlement.event_id AND event.schedule_mode='LOCAL_ENTITLEMENTS' JOIN global_event_race_impacts impact ON impact.event_id=entitlement.event_id AND impact.user_id=entitlement.user_id AND impact.race_id=$1 JOIN races race ON race.id=$1 WHERE entitlement.start_outcome IN ('ACTIVATED_ON_TIME','ACTIVATED_LATE_JOIN') AND entitlement.ends_at > race.started_at AND entitlement.starts_at <= $2 ) SELECT event.id, event.starts_at AS \"startsAt\", event.ends_at AS \"endsAt\", event.multiplier, event.label, event.schedule_mode AS \"scheduleMode\", event.summary_attribution_version AS \"summaryAttributionVersion\", event.entitlement_id AS \"entitlementId\", event.impact_id AS \"impactId\", event.impact_status AS \"impactStatus\", event.user_id AS \"userId\", schedule.current AS \"globalBoundaryScheduleCurrent\" FROM schedule LEFT JOIN candidate_events event ON TRUE ORDER BY event.starts_at, event.id",
+          "calls": 100,
+          "elapsedMs": 45.49616600000354
+        },
+        {
+          "id": "aeb5b1403b4de109",
+          "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"steps\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) AND \"public\".\"steps\".\"date\" >= $21 AND \"public\".\"steps\".\"date\" <= $22) ORDER BY \"public\".\"steps\".\"date\" ASC OFFSET $23",
+          "calls": 50,
+          "elapsedMs": 18.23854200000369
+        },
+        {
+          "id": "b2f16949dec9ca9f",
+          "query": "/* steps:prepared-read:v1 */ WITH requested AS MATERIALIZED ( SELECT input.user_id, input.range_start, input.range_end, input.ordinal FROM jsonb_to_recordset($1::jsonb) AS input( user_id text, range_start timestamp, range_end timestamp, ordinal integer ) LIMIT 25 ) SELECT requested.ordinal, sample.id, sample.user_id AS \"userId\", sample.period_start AS \"start\", sample.period_end AS \"end\", sample.steps FROM requested JOIN step_samples sample ON sample.user_id = requested.user_id AND sample.period_end > requested.range_start AND sample.period_start < requested.range_end WHERE $2::integer IS NULL OR (requested.ordinal, sample.period_start, sample.id) > ($2::integer, $3::timestamp, $4::text) ORDER BY requested.ordinal, sample.period_start, sample.id LIMIT $5",
+          "calls": 50,
+          "elapsedMs": 17.251044000002366
+        },
+        {
+          "id": "00e5d03d0ed6fbc0",
+          "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"race_id\" = $1 AND \"public\".\"race_active_effects\".\"status\" = CAST($2::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $3",
+          "calls": 100,
+          "elapsedMs": 22.495622999996158
+        },
+        {
+          "id": "2f9fbdcc8ead8a46",
+          "query": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"summary_attribution_version\", \"public\".\"global_step_events\".\"created_at\" FROM \"public\".\"global_step_events\" WHERE (\"public\".\"global_step_events\".\"schedule_mode\" = $1 AND \"public\".\"global_step_events\".\"starts_at\" < $2 AND \"public\".\"global_step_events\".\"ends_at\" > $3) ORDER BY \"public\".\"global_step_events\".\"starts_at\" ASC OFFSET $4",
+          "calls": 100,
+          "elapsedMs": 25.96274600000106
+        },
+        {
+          "id": "3bbe6ae9082dfb2c",
+          "query": "SELECT \"public\".\"global_step_event_entitlements\".\"id\", \"public\".\"global_step_event_entitlements\".\"event_id\", \"public\".\"global_step_event_entitlements\".\"user_id\", \"public\".\"global_step_event_entitlements\".\"timezone\", \"public\".\"global_step_event_entitlements\".\"local_date\", \"public\".\"global_step_event_entitlements\".\"starts_at\", \"public\".\"global_step_event_entitlements\".\"ends_at\", \"public\".\"global_step_event_entitlements\".\"start_outcome\", \"public\".\"global_step_event_entitlements\".\"start_processed_at\", \"public\".\"global_step_event_entitlements\".\"end_processed_at\", \"public\".\"global_step_event_entitlements\".\"end_attempt_count\", \"public\".\"global_step_event_entitlements\".\"end_next_attempt_at\", \"public\".\"global_step_event_entitlements\".\"end_last_error_code\", \"public\".\"global_step_event_entitlements\".\"created_at\", \"public\".\"global_step_event_entitlements\".\"updated_at\", \"public\".\"global_step_event_entitlements\".\"timezone_relocated_at\", \"public\".\"global_step_event_entitlements\".\"timezone_relocated_from\", \"public\".\"global_step_event_entitlements\".\"schedule_revision\", \"public\".\"global_step_event_entitlements\".\"start_attempt_count\", \"public\".\"global_step_event_entitlements\".\"start_next_attempt_at\", \"public\".\"global_step_event_entitlements\".\"start_last_error_code\", \"public\".\"global_step_event_entitlements\".\"start_failed_at\" FROM \"public\".\"global_step_event_entitlements\" LEFT JOIN \"public\".\"global_step_events\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"global_step_event_entitlements\".\"event_id\") WHERE (\"public\".\"global_step_event_entitlements\".\"user_id\" IN ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) AND \"public\".\"global_step_event_entitlements\".\"starts_at\" < $21 AND \"public\".\"global_step_event_entitlements\".\"ends_at\" > $22 AND \"public\".\"global_step_event_entitlements\".\"start_outcome\" IN ($23,$24) AND (\"j0\".\"schedule_mode\" = $25 AND (\"j0\".\"id\" IS NOT NULL))) ORDER BY \"public\".\"global_step_event_entitlements\".\"starts_at\" ASC OFFSET $26",
+          "calls": 100,
+          "elapsedMs": 32.4881219999952
+        },
+        {
+          "id": "8c1d9960a652871a",
+          "query": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"summary_attribution_version\", \"public\".\"global_step_events\".\"created_at\" FROM \"public\".\"global_step_events\" WHERE \"public\".\"global_step_events\".\"id\" IN (NULL) OFFSET $1",
+          "calls": 100,
+          "elapsedMs": 15.5786199999975
+        },
+        {
+          "id": "07683a593233be16",
+          "query": "SELECT id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_by_user_ids AS \"triggeredByUserIds\", processing_triggered_by_user_ids AS \"processingTriggeredByUserIds\", dirty_reasons AS \"dirtyReasons\", dirty_participant_ids AS \"dirtyParticipantIds\", dirty_powerup_types AS \"dirtyPowerupTypes\", dirty_priority AS \"dirtyPriority\", full_trigger_seed_only AS \"fullTriggerSeedOnly\", queue_priority AS \"queuePriority\", processing_dirty_reasons AS \"processingDirtyReasons\", processing_dirty_participant_ids AS \"processingDirtyParticipantIds\", processing_dirty_powerup_types AS \"processingDirtyPowerupTypes\", processing_dirty_priority AS \"processingDirtyPriority\", processing_queue_priority AS \"processingQueuePriority\", display_artifact_id AS \"displayArtifactId\", display_artifact_digest AS \"displayArtifactDigest\", display_artifact_schema AS \"displayArtifactSchema\", processing_display_artifact_id AS \"processingDisplayArtifactId\", processing_display_artifact_digest AS \"processingDisplayArtifactDigest\", processing_display_artifact_schema AS \"processingDisplayArtifactSchema\" FROM race_resolution_jobs_v2 WHERE ($1::text IS NULL OR id = $1) AND ($2::text IS NULL OR race_id = $2) AND ($3::text IS NULL OR lease_token = $3) FOR UPDATE",
+          "calls": 50,
+          "elapsedMs": 10.21700200000032
+        },
+        {
+          "id": "772d2352f8e19eb7",
+          "query": "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS \"dbNowMs\"",
+          "calls": 50,
+          "elapsedMs": 5.9417530000000625
+        },
+        {
+          "id": "628a42685a91b4a3",
+          "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"powerup_slots\", \"public\".\"race_participants\".\"box_progress_steps\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"race_id\" = $1 AND \"public\".\"race_participants\".\"user_id\" IN ($2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) AND \"public\".\"race_participants\".\"status\" = CAST($22::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($23::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL))) ORDER BY \"public\".\"race_participants\".\"user_id\" ASC, \"public\".\"race_participants\".\"id\" ASC OFFSET $24",
+          "calls": 50,
+          "elapsedMs": 16.61804199999733
+        },
+        {
+          "id": "b73acdffd6095a64",
+          "query": "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+          "calls": 1000,
+          "elapsedMs": 130.8744249999745
+        },
+        {
+          "id": "eb752934783987e3",
+          "query": "SELECT id, user_id AS \"userId\", next_box_at_steps AS \"nextBoxAtSteps\", powerup_slots AS \"powerupSlots\", status, forfeited_at AS \"forfeitedAt\" FROM race_participants WHERE id = ANY($1::text[]) ORDER BY user_id, id FOR UPDATE",
+          "calls": 50,
+          "elapsedMs": 10.903625999995711
+        },
+        {
+          "id": "7925deb8b8f105d1",
+          "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"created_at\" FROM \"public\".\"race_powerups\" WHERE \"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) ORDER BY \"public\".\"race_powerups\".\"participant_id\" ASC, \"public\".\"race_powerups\".\"created_at\" ASC, \"public\".\"race_powerups\".\"id\" ASC OFFSET $21",
+          "calls": 50,
+          "elapsedMs": 10.239299999998366
+        },
+        {
+          "id": "397505afcd1da245",
+          "query": "UPDATE race_participants participant SET box_progress_steps=changed.\"boxProgressSteps\" FROM jsonb_to_recordset($1::jsonb) AS changed(id text,\"boxProgressSteps\" integer) WHERE participant.id=changed.id AND participant.race_id=$2 AND participant.status='accepted' AND participant.finished_at IS NULL AND participant.forfeited_at IS NULL AND participant.box_progress_steps IS DISTINCT FROM changed.\"boxProgressSteps\"",
+          "calls": 50,
+          "elapsedMs": 21.866204000000835
+        },
+        {
+          "id": "ce6bb8c8a75291c5",
+          "query": "SELECT id FROM race_participants WHERE id = ANY($1::text[]) ORDER BY user_id ASC, id ASC FOR UPDATE",
+          "calls": 50,
+          "elapsedMs": 9.64475500000026
+        },
+        {
+          "id": "e61ba1ffdcb2129e",
+          "query": "WITH input AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS row( \"participantId\" text, \"totalSteps\" integer, \"hasTotal\" boolean, \"rawSteps\" integer, \"hasRaw\" boolean, \"bonusDecrement\" integer ) ), resolved AS ( SELECT participant.id, input.\"totalSteps\", input.\"hasTotal\", input.\"rawSteps\", input.\"hasRaw\", GREATEST( 0, CASE WHEN input.\"hasTotal\" THEN input.\"totalSteps\" ELSE participant.total_steps END ) AS base_total, GREATEST(0, -participant.total_steps) AS legacy_overkill, LEAST( input.\"bonusDecrement\", GREATEST( 0, CASE WHEN input.\"hasTotal\" THEN input.\"totalSteps\" ELSE participant.total_steps END ) ) AS actual_penalty FROM race_participants participant JOIN input ON input.\"participantId\" = participant.id ) UPDATE race_participants participant SET total_steps = resolved.base_total - resolved.actual_penalty, raw_steps = CASE WHEN resolved.\"hasRaw\" THEN resolved.\"rawSteps\" ELSE participant.raw_steps END, bonus_steps = participant.bonus_steps + resolved.legacy_overkill - resolved.actual_penalty, totals_updated_at = CASE WHEN resolved.\"hasTotal\" THEN $2 ELSE participant.totals_updated_at END FROM resolved WHERE participant.id = resolved.id RETURNING participant.id",
+          "calls": 50,
+          "elapsedMs": 40.925006999998004
+        },
+        {
+          "id": "b9a821b71c489d54",
+          "query": "UPDATE race_resolution_jobs_v2 SET state = CASE WHEN generation = $3 THEN 'succeeded'::\"RaceResolutionJobState\" ELSE 'queued'::\"RaceResolutionJobState\" END, attempts = CASE WHEN generation = $3 THEN attempts ELSE 0 END, completed_at = $4, last_completed_at = $4, retry_at = NULL, not_before_at = $5, lease_expires_at = NULL, lease_token = NULL, last_error_code = NULL, processing_triggered_by_user_ids = '[]'::jsonb, processing_dirty_reasons = '[]'::jsonb, processing_dirty_participant_ids = '[]'::jsonb, processing_dirty_powerup_types = '[]'::jsonb, processing_dirty_priority = 'COALESCE', processing_queue_priority = 'LIVE', processing_display_artifact_id = NULL, processing_display_artifact_digest = NULL, processing_display_artifact_schema = NULL, updated_at = $4 WHERE id = $1 AND lease_token = $2 RETURNING generation",
+          "calls": 50,
+          "elapsedMs": 12.103168999995432
+        },
+        {
+          "id": "8056756f1622c952",
+          "query": "INSERT INTO race_placement_transition_jobs ( id, race_id, requested_generation, state, requested_at, observed_at, not_before_at, attempts, created_at, updated_at ) VALUES ( gen_random_uuid(), $1, $2, 'queued', $4::timestamp, $3::timestamp, $4::timestamp + interval '1 second', 0, $4::timestamp, $4::timestamp ) ON CONFLICT (race_id) DO UPDATE SET requested_generation = EXCLUDED.requested_generation, state = CASE WHEN race_placement_transition_jobs.state = 'running' THEN 'running'::\"RacePlacementTransitionJobState\" ELSE 'queued'::\"RacePlacementTransitionJobState\" END, requested_at = CASE WHEN race_placement_transition_jobs.state IN ('running','succeeded') THEN EXCLUDED.requested_at ELSE race_placement_transition_jobs.requested_at END, observed_at = EXCLUDED.observed_at, not_before_at = EXCLUDED.not_before_at, attempts = CASE WHEN race_placement_transition_jobs.state = 'running' THEN race_placement_transition_jobs.attempts ELSE 0 END, retry_at = CASE WHEN race_placement_transition_jobs.state = 'running' THEN race_placement_transition_jobs.retry_at ELSE NULL END, last_error_code = CASE WHEN race_placement_transition_jobs.state = 'running' THEN race_placement_transition_jobs.last_error_code ELSE NULL END, completed_at = CASE WHEN race_placement_transition_jobs.state = 'running' THEN race_placement_transition_jobs.completed_at ELSE NULL END, updated_at = EXCLUDED.updated_at WHERE EXCLUDED.requested_generation > race_placement_transition_jobs.requested_generation RETURNING id, race_id AS \"raceId\", requested_generation AS \"requestedGeneration\", processing_generation AS \"processingGeneration\", completed_generation AS \"completedGeneration\", state, requested_at AS \"requestedAt\", observed_at AS \"observedAt\", processing_observed_at AS \"processingObservedAt\", not_before_at AS \"notBeforeAt\", attempts, retry_at AS \"retryAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", lease_token AS \"leaseToken\", lease_expires_at AS \"leaseExpiresAt\", last_error_code AS \"lastErrorCode\"",
+          "calls": 50,
+          "elapsedMs": 12.61903600000278
+        },
+        {
+          "id": "4a00500cf54473a2",
+          "query": "SELECT \"public\".\"race_resolution_post_task_receipts\".\"race_id\", \"public\".\"race_resolution_post_task_receipts\".\"source_generation\", \"public\".\"race_resolution_post_task_receipts\".\"dedupe_key\", \"public\".\"race_resolution_post_task_receipts\".\"terminal_state\", \"public\".\"race_resolution_post_task_receipts\".\"completed_at\" FROM \"public\".\"race_resolution_post_task_receipts\" WHERE ((\"public\".\"race_resolution_post_task_receipts\".\"race_id\" = $1 AND \"public\".\"race_resolution_post_task_receipts\".\"source_generation\" = $2) AND 1=1) LIMIT $3 OFFSET $4",
+          "calls": 50,
+          "elapsedMs": 7.278000000002066
+        },
+        {
+          "id": "f02f152a4f8c935e",
+          "query": "INSERT INTO race_resolution_post_tasks ( id, race_id, source_generation, dedupe_key, state, requested_at, not_before_at, snapshot_state, snapshot_command, payload_bytes, intent_count, created_at, updated_at ) VALUES ($1,$2,$3,$4,'queued',$5,$5,'pending',$6::jsonb,$7,$8,$5,$5) ON CONFLICT (race_id, source_generation) DO NOTHING RETURNING id",
+          "calls": 50,
+          "elapsedMs": 10.138669000002665
+        },
+        {
+          "id": "9561a34f7c80c176",
+          "query": "UPDATE race_resolution_post_tasks SET snapshot_command=$2::jsonb, payload_bytes=$3, intent_count=$4, updated_at=$5 WHERE id=$1",
+          "calls": 50,
+          "elapsedMs": 9.004210000000057
+        },
+        {
+          "id": "dc37c76d012bf1bb",
+          "query": "SELECT COALESCE(( SELECT EXTRACT(EPOCH FROM ($1 - MIN(requested_at))) * 1000 FROM race_resolution_post_tasks WHERE state IN ('queued','running') ), 0)::float8 AS \"oldestPendingLagMs\", ( (SELECT COUNT(*) FROM race_resolution_delivery_intents intent JOIN race_resolution_post_tasks task ON task.id=intent.task_id WHERE intent.state='attempting' AND task.lease_expires_at IS NOT NULL AND task.lease_expires_at <= $1) + (SELECT COUNT(*) FROM race_resolution_post_tasks task WHERE task.snapshot_state='attempting' AND task.lease_expires_at IS NOT NULL AND task.lease_expires_at <= $1) )::int AS \"expiredAttemptCount\"",
+          "calls": 2,
+          "elapsedMs": 1.3445410000003903
+        },
+        {
+          "id": "b86fda613cc66783",
+          "query": "SELECT \"public\".\"app_settings\".\"key\", \"public\".\"app_settings\".\"value\", \"public\".\"app_settings\".\"updated_at\" FROM \"public\".\"app_settings\" WHERE (\"public\".\"app_settings\".\"key\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+          "calls": 47,
+          "elapsedMs": 7.610872000001109
+        },
+        {
+          "id": "9ac15ba9f56d4fef",
+          "query": "UPDATE race_resolution_post_tasks SET snapshot_state='attempting', snapshot_attempt_id=$3, snapshot_attempted_at=$4, updated_at=$4 WHERE id=$1 AND lease_token=$2 AND snapshot_state='pending' RETURNING id",
+          "calls": 50,
+          "elapsedMs": 12.7532059999985
+        },
+        {
+          "id": "5bfffaceecdf9dec",
+          "query": "SELECT 1 FROM race_resolution_post_tasks WHERE race_id=$1 AND source_generation>=$2 AND snapshot_state='succeeded' UNION ALL SELECT 1 FROM race_resolution_post_task_receipts WHERE race_id=$1 AND source_generation>=$2 AND snapshot_state='succeeded' LIMIT 1",
+          "calls": 50,
+          "elapsedMs": 9.475791999999274
+        },
+        {
+          "id": "1bc5fa9e544a555a",
+          "query": "SELECT id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_by_user_ids AS \"triggeredByUserIds\", processing_triggered_by_user_ids AS \"processingTriggeredByUserIds\", dirty_reasons AS \"dirtyReasons\", dirty_participant_ids AS \"dirtyParticipantIds\", dirty_powerup_types AS \"dirtyPowerupTypes\", dirty_priority AS \"dirtyPriority\", full_trigger_seed_only AS \"fullTriggerSeedOnly\", queue_priority AS \"queuePriority\", processing_dirty_reasons AS \"processingDirtyReasons\", processing_dirty_participant_ids AS \"processingDirtyParticipantIds\", processing_dirty_powerup_types AS \"processingDirtyPowerupTypes\", processing_dirty_priority AS \"processingDirtyPriority\", processing_queue_priority AS \"processingQueuePriority\", display_artifact_id AS \"displayArtifactId\", display_artifact_digest AS \"displayArtifactDigest\", display_artifact_schema AS \"displayArtifactSchema\", processing_display_artifact_id AS \"processingDisplayArtifactId\", processing_display_artifact_digest AS \"processingDisplayArtifactDigest\", processing_display_artifact_schema AS \"processingDisplayArtifactSchema\" FROM race_resolution_jobs_v2 WHERE race_id = $1",
+          "calls": 200,
+          "elapsedMs": 37.218377000002874
+        },
+        {
+          "id": "0bc2658121f466f7",
+          "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"economic_realm\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coins\", \"public\".\"races\".\"prize_calculation_version\", \"public\".\"races\".\"payout_rounding_version\", \"public\".\"races\".\"payout_rounding_metadata\", \"public\".\"races\".\"exit_actions_enabled\", \"public\".\"races\".\"payout_curve\", \"public\".\"races\".\"creation_source\", \"public\".\"races\".\"start_policy\", \"public\".\"races\".\"team_pool_mult_bps\", \"public\".\"races\".\"team_payout_version\", \"public\".\"races\".\"team_winner_reward_coins\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"scheduled_start_at\", \"public\".\"races\".\"scheduled_end_at\", \"public\".\"races\".\"timezone\", \"public\".\"races\".\"completed_at\", \"public\".\"races\".\"winner_user_id\", \"public\".\"races\".\"powerups_enabled\", \"public\".\"races\".\"powerup_step_interval\", \"public\".\"races\".\"is_public\", \"public\".\"races\".\"max_participants\", \"public\".\"races\".\"time_based\", \"public\".\"races\".\"share_token\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"team_a_name\", \"public\".\"races\".\"team_b_name\", \"public\".\"races\".\"winner_team\"::text, \"public\".\"races\".\"tournament_id\", \"public\".\"races\".\"tournament_round\", \"public\".\"races\".\"tournament_match_index\", \"public\".\"races\".\"tournament_powerups_activated_at\", \"public\".\"races\".\"seeded_bucket_id\", \"public\".\"races\".\"rematch_source_race_id\", \"public\".\"races\".\"rematch_root_race_id\", \"public\".\"races\".\"series_id\", \"public\".\"races\".\"series_generation\", \"public\".\"races\".\"series_predecessor_race_id\", \"public\".\"races\".\"settlement_completed_at\", \"public\".\"races\".\"recurring_payout_min_raw_steps\", \"public\".\"races\".\"recurring_payout_policy_version\", \"public\".\"races\".\"created_at\", \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (\"public\".\"races\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+          "calls": 50,
+          "elapsedMs": 11.899624999999105
+        },
+        {
+          "id": "55ba151f80ee59f6",
+          "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"public\".\"race_participants\".\"max_bonus_steps\", \"public\".\"race_participants\".\"max_box_progress_steps\", \"public\".\"race_participants\".\"powerup_slots\", \"public\".\"race_participants\".\"buy_in_amount\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"buy_in_version\", \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"last_notified_placement\", \"public\".\"race_participants\".\"high_multiplier_notified_at\", \"public\".\"race_participants\".\"finished_at\", \"public\".\"race_participants\".\"finish_total_steps\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"last_read_race_chat_at\", \"public\".\"race_participants\".\"last_chat_push_at\", \"public\".\"race_participants\".\"chat_muted\", \"public\".\"race_participants\".\"placement_alerts_muted\", \"public\".\"race_participants\".\"day_start_placement\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\", \"public\".\"race_participants\".\"funded_exposure_millicoins\", \"public\".\"race_participants\".\"funded_exposure_rate_millicoins_per_day\" FROM \"public\".\"race_participants\" WHERE \"public\".\"race_participants\".\"race_id\" = $1 ORDER BY \"public\".\"race_participants\".\"joined_at\" ASC, \"public\".\"race_participants\".\"id\" ASC OFFSET $2",
+          "calls": 50,
+          "elapsedMs": 15.386000999997123
+        },
+        {
+          "id": "25a54555f4a6d6fd",
+          "query": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"bracket_size\" FROM \"public\".\"tournaments\" WHERE \"public\".\"tournaments\".\"id\" = $1 OFFSET $2",
+          "calls": 50,
+          "elapsedMs": 10.099083999998584
+        },
+        {
+          "id": "f6eae51f50356904",
+          "query": "SELECT MIN(boundary) AS \"nextBoundaryAt\" FROM ( SELECT starts_at AS boundary FROM global_step_events WHERE schedule_mode='LEGACY_GLOBAL' AND starts_at > $2::timestamp UNION ALL SELECT ends_at FROM global_step_events WHERE schedule_mode='LEGACY_GLOBAL' AND ends_at > $2::timestamp UNION ALL SELECT entitlement.starts_at FROM global_step_event_entitlements entitlement JOIN race_participants participant ON participant.user_id=entitlement.user_id JOIN global_step_events event ON event.id=entitlement.event_id WHERE participant.race_id=$1 AND participant.status='accepted' AND event.schedule_mode='LOCAL_ENTITLEMENTS' AND entitlement.start_outcome IN ('PENDING','ACTIVATED_ON_TIME','ACTIVATED_LATE_JOIN') AND entitlement.starts_at > $2::timestamp UNION ALL SELECT entitlement.ends_at FROM global_step_event_entitlements entitlement JOIN race_participants participant ON participant.user_id=entitlement.user_id JOIN global_step_events event ON event.id=entitlement.event_id WHERE participant.race_id=$1 AND participant.status='accepted' AND event.schedule_mode='LOCAL_ENTITLEMENTS' AND entitlement.start_outcome IN ('PENDING','ACTIVATED_ON_TIME','ACTIVATED_LATE_JOIN') AND entitlement.ends_at > $2::timestamp ) display_boundary_proof",
+          "calls": 50,
+          "elapsedMs": 36.01175199999943
+        },
+        {
+          "id": "7e4b45e76fbf01bb",
+          "query": "WITH failures AS ( SELECT COUNT(*)::int AS count FROM race_resolution_delivery_intents WHERE task_id=$1 AND state IN ('rejected_no_retry','ambiguous_at_most_once') ), pending AS ( SELECT COUNT(*)::int AS count FROM race_resolution_delivery_intents WHERE task_id=$1 AND state IN ('pending','attempting') ), finished AS ( UPDATE race_resolution_post_tasks task SET state=CASE WHEN failures.count > 0 OR COALESCE($4::text,task.snapshot_state) IN ('failed_no_retry','ambiguous_at_most_once') THEN 'succeeded_with_failures' ELSE 'succeeded' END, snapshot_state=COALESCE($4::text,task.snapshot_state), snapshot_error_code=CASE WHEN $4::text IS NULL THEN task.snapshot_error_code ELSE $5::text END, snapshot_completed_at=CASE WHEN $4::text IS NULL THEN task.snapshot_completed_at ELSE $3 END, completed_at=$3, lease_expires_at=NULL, lease_token=NULL, updated_at=$3 FROM failures, pending WHERE task.id=$1 AND task.lease_token=$2 AND pending.count=0 AND (($4::text IS NULL AND task.snapshot_state NOT IN ('pending','attempting')) OR ($4::text IS NOT NULL AND task.snapshot_state='attempting')) RETURNING task.race_id, task.source_generation, task.dedupe_key, task.state, task.snapshot_state, task.intent_count, failures.count ), receipt AS ( INSERT INTO race_resolution_post_task_receipts ( race_id, source_generation, dedupe_key, terminal_state, snapshot_state, intent_count, failure_count, completed_at ) SELECT race_id, source_generation, dedupe_key, state, snapshot_state, intent_count, count, $3 FROM finished ON CONFLICT (race_id,source_generation) DO NOTHING RETURNING race_id,source_generation,dedupe_key,terminal_state, snapshot_state,intent_count,failure_count,completed_at ), validated AS ( SELECT inserted.terminal_state FROM receipt inserted UNION ALL SELECT stored.terminal_state FROM finished expected JOIN race_resolution_post_task_receipts stored ON stored.race_id=expected.race_id AND stored.source_generation=expected.source_generation AND stored.dedupe_key=expected.dedupe_key AND stored.terminal_state=expected.state AND stored.snapshot_state=expected.snapshot_state AND stored.intent_count=expected.intent_count AND stored.failure_count=expected.count AND stored.completed_at IS NOT DISTINCT FROM $3 WHERE NOT EXISTS (SELECT 1 FROM receipt) ) SELECT (SELECT COUNT(*)::int FROM finished) AS \"finishedCount\", (SELECT terminal_state FROM validated LIMIT 1) AS state",
+          "calls": 50,
+          "elapsedMs": 26.874417000000903
+        },
+        {
+          "id": "76937742fba776a9",
+          "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"last_notified_placement\", \"public\".\"race_participants\".\"placement_alerts_muted\", \"public\".\"race_participants\".\"finished_at\", \"public\".\"race_participants\".\"forfeited_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"team\"::text FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" = $1 AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\")) ORDER BY \"public\".\"race_participants\".\"joined_at\" ASC, \"public\".\"race_participants\".\"id\" ASC OFFSET $3",
+          "calls": 100,
+          "elapsedMs": 35.64870499999506
+        },
+        {
+          "id": "ba0537bef993a5db",
+          "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"timezone\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"payout_curve\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_a_name\", \"public\".\"races\".\"team_b_name\" FROM \"public\".\"races\" WHERE (\"public\".\"races\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+          "calls": 100,
+          "elapsedMs": 24.743704000004072
+        },
+        {
+          "id": "596d9dd3691cf701",
+          "query": "SELECT race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", state, last_completed_at AS \"lastCompletedAt\" FROM race_resolution_jobs_v2 WHERE race_id=$1 FOR UPDATE",
+          "calls": 50,
+          "elapsedMs": 9.238081999996211
+        },
+        {
+          "id": "8ebe8637aac4633e",
+          "query": "SELECT p.id, p.race_id AS \"raceId\", p.requested_generation AS \"requestedGeneration\", p.processing_generation AS \"processingGeneration\", p.completed_generation AS \"completedGeneration\", p.state, p.requested_at AS \"requestedAt\", p.observed_at AS \"observedAt\", p.processing_observed_at AS \"processingObservedAt\", p.not_before_at AS \"notBeforeAt\", p.attempts, p.retry_at AS \"retryAt\", p.started_at AS \"startedAt\", p.completed_at AS \"completedAt\", p.last_completed_at AS \"lastCompletedAt\", p.lease_token AS \"leaseToken\", p.lease_expires_at AS \"leaseExpiresAt\", p.last_error_code AS \"lastErrorCode\" FROM race_placement_transition_jobs p WHERE p.id=$1::uuid AND p.state='running' AND p.lease_token=$2 AND p.processing_generation=$3 AND p.lease_expires_at > clock_timestamp() FOR UPDATE",
+          "calls": 50,
+          "elapsedMs": 10.503961000011259
+        },
+        {
+          "id": "74cff254f04ce805",
+          "query": "WITH proposed AS ( SELECT p.\"participantId\", p.\"expectedPlacement\", p.\"nextPlacement\" FROM jsonb_to_recordset($1::jsonb) AS p( \"participantId\" text, \"expectedPlacement\" integer, \"nextPlacement\" integer ) ) UPDATE race_participants participant SET last_notified_placement=proposed.\"nextPlacement\" FROM proposed WHERE participant.id=proposed.\"participantId\" AND participant.last_notified_placement IS NOT DISTINCT FROM proposed.\"expectedPlacement\" RETURNING participant.id",
+          "calls": 50,
+          "elapsedMs": 23.800415999996403
+        },
+        {
+          "id": "98071f62206846e2",
+          "query": "UPDATE race_placement_transition_jobs SET state='succeeded', completed_generation=$3, processing_generation=NULL, processing_observed_at=NULL, completed_at=$4, last_completed_at=$4, lease_token=NULL, lease_expires_at=NULL, retry_at=NULL, last_error_code=NULL, updated_at=$4 WHERE id=$1::uuid AND state='running' AND lease_token=$2 AND processing_generation=$3 AND requested_generation=$3 AND lease_expires_at > clock_timestamp() RETURNING id, race_id AS \"raceId\", requested_generation AS \"requestedGeneration\", processing_generation AS \"processingGeneration\", completed_generation AS \"completedGeneration\", state, requested_at AS \"requestedAt\", observed_at AS \"observedAt\", processing_observed_at AS \"processingObservedAt\", not_before_at AS \"notBeforeAt\", attempts, retry_at AS \"retryAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", lease_token AS \"leaseToken\", lease_expires_at AS \"leaseExpiresAt\", last_error_code AS \"lastErrorCode\"",
+          "calls": 50,
+          "elapsedMs": 12.27975300000162
+        }
+      ]
+    }
+  ],
+  "duplicate": [
+    {
+      "role": "http0",
+      "admissionRejected": 1020,
+      "calls": 6000,
+      "elapsedMs": 2824.6459089998807,
+      "appCpuUserMs": 965.816,
+      "appCpuSystemMs": 80.191,
+      "sampleRangeReads": 0,
+      "newUniqueSampleRanges": 0,
+      "shapes": [
+        {
+          "id": "79663c1d3b43ceaf",
+          "query": "COMMIT",
+          "calls": 1000,
+          "elapsedMs": 395.5888299999788
+        },
+        {
+          "id": "52da63f5d6f011cc",
+          "query": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 237.66841299999032
+        },
+        {
+          "id": "0db12ab3aca5754d",
+          "query": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status IN ('QUEUED', 'PROCESSING', 'WAITING_RACES') AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 ORDER BY work.expires_at ASC, work.id ASC LIMIT 1) UNION ALL (SELECT 'waiting' AS kind, 1 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", event.starts_at AS \"eventStartsAt\", event.ends_at AS \"eventEndsAt\", event.multiplier::double precision AS \"eventMultiplier\", event.schedule_mode::text AS \"eventScheduleMode\", event.summary_attribution_version AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status = 'WAITING_SYNC' AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 AND event.ends_at <= $2::timestamp ORDER BY work.expires_at ASC, work.id ASC) ORDER BY \"kindOrder\" ASC, \"expiresAt\" ASC, id ASC",
+          "calls": 500,
+          "elapsedMs": 400.2527230000087
+        },
+        {
+          "id": "a970a57c793cbdf2",
+          "query": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generation=user_scoring_input_versions.generation RETURNING generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", (xmax = 0) AS inserted ) SELECT state.*, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS \"dbNowMs\" FROM (SELECT * FROM locked UNION ALL SELECT * FROM created) state",
+          "calls": 500,
+          "elapsedMs": 241.7259529999901
+        },
+        {
+          "id": "e7b1808b32f050ad",
+          "query": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS \"storageChanged\" FROM persisted CROSS JOIN prior UNION ALL SELECT id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\",date, created_at AS \"createdAt\",TRUE AS existed,FALSE AS \"storageChanged\" FROM steps WHERE user_id=$1 AND date=$2::date AND steps IS NOT DISTINCT FROM $3 AND NOT EXISTS (SELECT 1 FROM persisted)",
+          "calls": 500,
+          "elapsedMs": 260.05479599999853
+        },
+        {
+          "id": "95b8738667904f87",
+          "query": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp",
+          "calls": 500,
+          "elapsedMs": 192.3161719999698
+        },
+        {
+          "id": "70df566c2a5927ee",
+          "query": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time",
+          "calls": 500,
+          "elapsedMs": 210.07400599999346
+        },
+        {
+          "id": "ed7212bd11e224ee",
+          "query": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1",
+          "calls": 500,
+          "elapsedMs": 214.13320500000737
+        },
+        {
+          "id": "e20ddfa776358ced",
+          "query": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_generation\", \"public\".\"global_event_summary_work\".\"required_race_count\", \"public\".\"global_event_summary_work\".\"final_race_count\", \"public\".\"global_event_summary_work\".\"race_reconciled_at\", \"public\".\"global_event_summary_work\".\"ready_at\", \"public\".\"global_event_summary_work\".\"next_recovery_at\", \"public\".\"global_event_summary_work\".\"available_at\", \"public\".\"global_event_summary_work\".\"lease_until\", \"public\".\"global_event_summary_work\".\"lease_token\", \"public\".\"global_event_summary_work\".\"attempt_count\", \"public\".\"global_event_summary_work\".\"last_error_code\", \"public\".\"global_event_summary_work\".\"created_at\", \"public\".\"global_event_summary_work\".\"updated_at\" FROM \"public\".\"global_event_summary_work\" LEFT JOIN \"public\".\"global_step_events\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"global_event_summary_work\".\"event_id\") WHERE (\"public\".\"global_event_summary_work\".\"user_id\" = $1 AND \"public\".\"global_event_summary_work\".\"status\" IN ($2,$3,$4) AND \"public\".\"global_event_summary_work\".\"expires_at\" > $5 AND (\"j0\".\"summary_attribution_version\" = $6 AND (\"j0\".\"id\" IS NOT NULL))) ORDER BY \"public\".\"global_event_summary_work\".\"expires_at\" ASC, \"public\".\"global_event_summary_work\".\"id\" ASC LIMIT $7 OFFSET $8",
+          "calls": 500,
+          "elapsedMs": 249.0373889999828
+        },
+        {
+          "id": "d1a3a1b3f0ad3eca",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 226.42237899997053
+        },
+        {
+          "id": "b5360c12cb0c2bbd",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)",
+          "calls": 500,
+          "elapsedMs": 197.3720429999903
+        }
+      ]
+    },
+    {
+      "role": "http1",
+      "admissionRejected": 1063,
+      "calls": 6000,
+      "elapsedMs": 2787.239981000017,
+      "appCpuUserMs": 972.829,
+      "appCpuSystemMs": 79.237,
+      "sampleRangeReads": 0,
+      "newUniqueSampleRanges": 0,
+      "shapes": [
+        {
+          "id": "79663c1d3b43ceaf",
+          "query": "COMMIT",
+          "calls": 1000,
+          "elapsedMs": 377.5969960000075
+        },
+        {
+          "id": "52da63f5d6f011cc",
+          "query": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 237.1580429999958
+        },
+        {
+          "id": "0db12ab3aca5754d",
+          "query": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status IN ('QUEUED', 'PROCESSING', 'WAITING_RACES') AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 ORDER BY work.expires_at ASC, work.id ASC LIMIT 1) UNION ALL (SELECT 'waiting' AS kind, 1 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", event.starts_at AS \"eventStartsAt\", event.ends_at AS \"eventEndsAt\", event.multiplier::double precision AS \"eventMultiplier\", event.schedule_mode::text AS \"eventScheduleMode\", event.summary_attribution_version AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.status = 'WAITING_SYNC' AND work.expires_at > $2::timestamp AND event.summary_attribution_version = 2 AND event.ends_at <= $2::timestamp ORDER BY work.expires_at ASC, work.id ASC) ORDER BY \"kindOrder\" ASC, \"expiresAt\" ASC, id ASC",
+          "calls": 500,
+          "elapsedMs": 388.192873999993
+        },
+        {
+          "id": "a970a57c793cbdf2",
+          "query": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generation=user_scoring_input_versions.generation RETURNING generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", (xmax = 0) AS inserted ) SELECT state.*, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS \"dbNowMs\" FROM (SELECT * FROM locked UNION ALL SELECT * FROM created) state",
+          "calls": 500,
+          "elapsedMs": 244.2222459999648
+        },
+        {
+          "id": "e7b1808b32f050ad",
+          "query": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS \"storageChanged\" FROM persisted CROSS JOIN prior UNION ALL SELECT id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\",date, created_at AS \"createdAt\",TRUE AS existed,FALSE AS \"storageChanged\" FROM steps WHERE user_id=$1 AND date=$2::date AND steps IS NOT DISTINCT FROM $3 AND NOT EXISTS (SELECT 1 FROM persisted)",
+          "calls": 500,
+          "elapsedMs": 260.6393489999882
+        },
+        {
+          "id": "95b8738667904f87",
+          "query": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp",
+          "calls": 500,
+          "elapsedMs": 190.6037930000257
+        },
+        {
+          "id": "70df566c2a5927ee",
+          "query": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time",
+          "calls": 500,
+          "elapsedMs": 211.4211969999924
+        },
+        {
+          "id": "ed7212bd11e224ee",
+          "query": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1",
+          "calls": 500,
+          "elapsedMs": 215.1404870000024
+        },
+        {
+          "id": "e20ddfa776358ced",
+          "query": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_generation\", \"public\".\"global_event_summary_work\".\"required_race_count\", \"public\".\"global_event_summary_work\".\"final_race_count\", \"public\".\"global_event_summary_work\".\"race_reconciled_at\", \"public\".\"global_event_summary_work\".\"ready_at\", \"public\".\"global_event_summary_work\".\"next_recovery_at\", \"public\".\"global_event_summary_work\".\"available_at\", \"public\".\"global_event_summary_work\".\"lease_until\", \"public\".\"global_event_summary_work\".\"lease_token\", \"public\".\"global_event_summary_work\".\"attempt_count\", \"public\".\"global_event_summary_work\".\"last_error_code\", \"public\".\"global_event_summary_work\".\"created_at\", \"public\".\"global_event_summary_work\".\"updated_at\" FROM \"public\".\"global_event_summary_work\" LEFT JOIN \"public\".\"global_step_events\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"global_event_summary_work\".\"event_id\") WHERE (\"public\".\"global_event_summary_work\".\"user_id\" = $1 AND \"public\".\"global_event_summary_work\".\"status\" IN ($2,$3,$4) AND \"public\".\"global_event_summary_work\".\"expires_at\" > $5 AND (\"j0\".\"summary_attribution_version\" = $6 AND (\"j0\".\"id\" IS NOT NULL))) ORDER BY \"public\".\"global_event_summary_work\".\"expires_at\" ASC, \"public\".\"global_event_summary_work\".\"id\" ASC LIMIT $7 OFFSET $8",
+          "calls": 500,
+          "elapsedMs": 253.6176290000094
+        },
+        {
+          "id": "d1a3a1b3f0ad3eca",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_requests\".\"scoring_changed\", \"public\".\"step_sync_requests\".\"completed_at\", \"public\".\"step_sync_requests\".\"canonical_coverage_through\", \"public\".\"step_sync_requests\".\"scoring_input_generation\", \"public\".\"step_sync_requests\".\"created_at\", \"public\".\"step_sync_requests\".\"updated_at\", \"public\".\"step_sync_requests\".\"expires_at\"",
+          "calls": 500,
+          "elapsedMs": 216.39432500000112
+        },
+        {
+          "id": "b5360c12cb0c2bbd",
+          "query": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)",
+          "calls": 500,
+          "elapsedMs": 192.25304200003666
+        }
+      ]
+    },
+    {
+      "role": "resolution",
+      "admissionRejected": 0,
+      "calls": 7,
+      "elapsedMs": 25.74525000000176,
+      "appCpuUserMs": 32.087,
+      "appCpuSystemMs": 11.271,
+      "sampleRangeReads": 0,
+      "newUniqueSampleRanges": 0,
+      "shapes": [
+        {
+          "id": "0d4359106b56f35f",
+          "query": "SELECT race_id AS \"raceId\" FROM race_umbrella_interceptions WHERE status = 'PENDING' AND resolves_at <= $1::timestamp GROUP BY race_id ORDER BY MIN(resolves_at), race_id LIMIT $2",
+          "calls": 1,
+          "elapsedMs": 3.9451669999998558
+        },
+        {
+          "id": "ca8d087e1bd60d31",
+          "query": "WITH candidate AS ( SELECT id FROM race_admin_commands WHERE (status = 'PENDING' AND available_at <= $1) OR (status = 'RUNNING' AND lease_expires_at < $2) ORDER BY available_at ASC, created_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 1 ) UPDATE race_admin_commands command SET status = 'RUNNING', lease_token = $3, lease_expires_at = $4, attempts = attempts + 1, updated_at = $5 FROM candidate WHERE command.id = candidate.id RETURNING command.*",
+          "calls": 1,
+          "elapsedMs": 0.2975830000013957
+        },
+        {
+          "id": "59032b06d6f51117",
+          "query": "SELECT effect_id,race_id FROM race_effect_deadlines WHERE dispatched_revision IS NULL AND deadline_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND NOT(race_id=ANY($2::text[])) ORDER BY deadline_at,race_id,effect_id LIMIT $1",
+          "calls": 1,
+          "elapsedMs": 4.537292000000889
+        },
+        {
+          "id": "79663c1d3b43ceaf",
+          "query": "COMMIT",
+          "calls": 1,
+          "elapsedMs": 0.12058299999989686
+        },
+        {
+          "id": "9a1da891bdc0b672",
+          "query": "SELECT race_id FROM race_progress_refresh_intents WHERE available_at<=(statement_timestamp() AT TIME ZONE 'UTC') ORDER BY available_at,race_id LIMIT 100",
+          "calls": 1,
+          "elapsedMs": 5.979332999999315
+        },
+        {
+          "id": "62f5ce21560ce777",
+          "query": "WITH due AS (SELECT task_id FROM race_snapshot_repair_intents WHERE terminal_at IS NULL AND available_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND (lease_expires_at IS NULL OR lease_expires_at<=(statement_timestamp() AT TIME ZONE 'UTC')) ORDER BY available_at,task_id LIMIT 100 FOR UPDATE SKIP LOCKED) UPDATE race_snapshot_repair_intents i SET lease_token=$1::uuid,lease_expires_at=clock_timestamp()+interval '30 seconds',attempt_count=attempt_count+1 FROM due WHERE i.task_id=due.task_id RETURNING i.*",
+          "calls": 1,
+          "elapsedMs": 5.84400000000096
+        },
+        {
+          "id": "6872015875e46326",
+          "query": "SELECT id FROM race_resolution_post_tasks WHERE snapshot_state='pending' AND ((state='queued' AND not_before_at<=$1) OR (state='running' AND lease_expires_at<=$1)) ORDER BY requested_at,id LIMIT 16",
+          "calls": 1,
+          "elapsedMs": 5.021291999999448
+        }
+      ]
+    }
+  ],
+  "generations": [
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    },
+    {
+      "generation": 1,
+      "committed": 1
+    }
+  ]
+}

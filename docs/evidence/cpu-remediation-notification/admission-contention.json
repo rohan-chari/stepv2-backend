@@ -1,0 +1,47 @@
+{
+  "fixture": "40k rows,2000 relevant schedules,alternating gaps,500 row update limit; all updates rolled back",
+  "results": [
+    {
+      "repeat": 0,
+      "version": "baseline",
+      "changed": 500,
+      "updateMs": 71.10079099999999,
+      "waiterReleasedAfterMs": 71.447375
+    },
+    {
+      "repeat": 0,
+      "version": "candidate",
+      "changed": 500,
+      "updateMs": 16.272417000000004,
+      "waiterReleasedAfterMs": 16.502375000000015
+    },
+    {
+      "repeat": 1,
+      "version": "baseline",
+      "changed": 500,
+      "updateMs": 16.631207999999987,
+      "waiterReleasedAfterMs": 16.82849999999999
+    },
+    {
+      "repeat": 1,
+      "version": "candidate",
+      "changed": 500,
+      "updateMs": 8.299209000000019,
+      "waiterReleasedAfterMs": 8.479334000000023
+    },
+    {
+      "repeat": 2,
+      "version": "baseline",
+      "changed": 500,
+      "updateMs": 16.52533299999999,
+      "waiterReleasedAfterMs": 16.735332999999997
+    },
+    {
+      "repeat": 2,
+      "version": "candidate",
+      "changed": 500,
+      "updateMs": 8.38429099999999,
+      "waiterReleasedAfterMs": 8.511750000000006
+    }
+  ]
+}
