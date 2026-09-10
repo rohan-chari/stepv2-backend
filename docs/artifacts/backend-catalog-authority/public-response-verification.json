@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-09-10T20:13:36.323Z",
+  "results": [
+    {
+      "path": "/races/:raceId/progress",
+      "status": 200,
+      "reelPreviewAvailable": true,
+      "probabilityCount": 20
+    },
+    {
+      "path": "/races/:raceId/inventory",
+      "status": 200
+    },
+    {
+      "path": "/shop/powerups",
+      "status": 200,
+      "decoyPriceCoins": 150
+    },
+    {
+      "path": "/powerups/catalog",
+      "status": 200,
+      "availabilityVersion": 2,
+      "emptyUpgradeTierRows": 15
+    }
+  ]
+}
