@@ -455,6 +455,7 @@ function isCleansableDebuff(effect, userId) {
 // decision 2026-07-24). Server-side effect, so old clients apply the new value
 // too. Drop odds (balanceConfig RED_CARD) are intentionally left unchanged.
 const RED_CARD_PERCENT = 0.10;
+const RED_CARD_MAX_PENALTY = 10000;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;
@@ -3760,7 +3761,9 @@ function buildUsePowerup(dependencies = {}) {
         const penalty = await applyImmediatePenalty(
           participantModel,
           targetParticipant,
-          Math.round(leaderSteps * RED_CARD_PERCENT),
+          // Target is already resolved through Mirror/Decoy. Cap only new
+          // activations; historical replay keeps the actual recorded penalty.
+          Math.min(RED_CARD_MAX_PENALTY, Math.max(0, Math.round(leaderSteps * RED_CARD_PERCENT))),
         );
 
         result.penalty = penalty;

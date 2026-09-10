@@ -4,7 +4,7 @@ import SiteFooter from "@/components/SiteFooter.vue";
 
 // Billing disclosure is updated alongside the real purchase integration.
 // Effective date changes when the policy changes.
-const EFFECTIVE_DATE = "September 7, 2026";
+const EFFECTIVE_DATE = "September 10, 2026";
 
 const collected = [
   {
@@ -73,8 +73,8 @@ const collected = [
         <p>
           Bara ("we," "our," or "the app") is a step-tracking challenge app for
           iOS and Android. This policy explains what data we collect, how we use
-          it, and your rights. We believe in collecting only what's necessary to
-          make the app work.
+          it, and your rights. We limit collection to operating the app and the
+          advertising and app measurement described below.
         </p>
 
         <h2>Health Data</h2>
@@ -129,14 +129,15 @@ const collected = [
 
         <h2>How We Use Your Data</h2>
         <p>
-          All data we collect is used to operate the app: to show your daily
+          We use data to operate the app: to show your daily
           step count and goal progress, to run weekly challenges and display
           head-to-head results, to let friends find and challenge you by the
           discoverable name and race name you submit, and to
           send you notifications about challenge activity when you've opted in.
-          Aside from the advertising described in the "Advertising" section
-          below, we do not use your data for advertising, analytics profiling,
-          or any purpose unrelated to the app's core functionality.
+          We also use limited app and device information for advertising and to
+          understand app engagement and advertising effectiveness, as described
+          in "Advertising" and "App Measurement on iOS" below. We do not use
+          health data or step counts for these purposes.
         </p>
 
         <h2>Data Sharing</h2>
@@ -148,10 +149,10 @@ const collected = [
           necessary for the challenge feature. If
           you're in a head-to-head challenge, your opponent can see your step
           progress for that week. We do not sell or rent your personal data, and
-          outside of the advertising partner described in the "Advertising"
-          section below, RevenueCat processing billing as described below, and Google
-          Workspace processing feedback email for Bara Support, we do not share your personal data with any third parties for
-          their own use. We do not use third-party analytics SDKs.
+          outside of the partners described in "Advertising" and "App Measurement
+          on iOS" below, RevenueCat processing billing as described below, and
+          Google Workspace processing feedback email for Bara Support, we do not
+          share your personal data with any third parties for their own use.
         </p>
 
         <h2>Purchases and Subscriptions</h2>
@@ -193,8 +194,55 @@ const collected = [
           the correct account. The Android app currently shows no ads.
         </p>
         <p class="callout">
-          Your health data, step counts, friends, and race activity are never
-          shared with AdMob or any other advertising partner.
+          Your health data, step counts, friends list, race names and race
+          identifiers are not shared with advertising or measurement partners.
+          Meta may receive a generic event indicating that you joined a race,
+          as described below.
+        </p>
+
+        <h2>App Measurement on iOS</h2>
+        <p>
+          Supported versions of Bara for iOS use <strong>Meta App Events</strong>
+          to understand app engagement and the effectiveness of ads for Bara.
+          This is separate from the ads displayed inside the app. Meta may
+          receive installs, app activation and session information, along with
+          events for completing onboarding, joining a race, viewing the Shop,
+          viewing Bara+ membership details, viewing coin offers and starting a purchase.
+          An event for starting a purchase does not mean a purchase was completed.
+          We do not send completed purchases, purchase amounts, receipts,
+          subscription status or renewals to Meta through this integration.
+        </p>
+        <p>
+          The action events Bara supplies contain only the action name. We do
+          not include your Bara account identifier, email, username, profile,
+          health data, step counts, friends list, race names or race identifiers.
+          The Meta SDK may add technical app and device information and permitted
+          identifiers, so this measurement is not anonymous. See
+          <a href="https://www.facebook.com/privacy/policy">Meta's privacy policy</a>.
+        </p>
+        <p>
+          Bara waits until it has successfully updated your privacy choices for
+          the current app session before enabling Meta measurement. Where
+          consent is required, measurement requires consent for Meta. Where a
+          consent message is not required, we still honor applicable opt-outs,
+          including US state privacy choices. Allowing an ad to load does not
+          by itself authorize Meta measurement.
+        </p>
+        <p>
+          Apple's App Tracking Transparency permission is separate from those
+          privacy choices. Meta may collect the advertising identifier only when
+          both your Meta privacy choices and Apple's tracking permission allow
+          it. Declining Apple's tracking permission prevents advertising-identifier
+          collection; it does not by itself disable all app measurement.
+        </p>
+        <p>
+          You can review the available privacy choices in Bara's Settings and
+          change Apple's tracking permission in iOS Settings. If you withdraw
+          permission for Meta measurement, we stop sending new Bara action events
+          and disable advertising-identifier collection and ordinary automatic
+          event sending. This does not erase events already sent or cancel a
+          transfer already in progress. The Meta SDK may retain queued data or
+          continue some SDK-managed activity after it has been initialized.
         </p>
 
         <h2>Storage &amp; Security</h2>

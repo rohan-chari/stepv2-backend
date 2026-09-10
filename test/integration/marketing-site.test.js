@@ -134,6 +134,43 @@ describe("marketing site + static routes still serve", () => {
     }
   });
 
+  for (const path of ["/privacy", "/privacy.html"]) {
+    it(`${path} discloses scoped iOS Meta measurement and user controls in readable HTML`, async () => {
+      const response = await fetch(`${server.baseUrl}${path}`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type"), /text\/html/);
+      const html = await response.text();
+      const prose = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+      assert.match(prose, /App Measurement on iOS/);
+      assert.match(prose, /Meta App Events/);
+      assert.match(prose, /installs, app activation and session information/);
+      for (const action of [
+        "completing onboarding", "joining a race", "viewing the Shop",
+        "viewing Bara+ membership details", "viewing coin offers", "starting a purchase",
+      ]) assert.ok(prose.includes(action), `${path} must disclose ${action}`);
+      assert.match(prose, /starting a purchase does not mean a purchase was completed/);
+      assert.match(prose, /do not send completed purchases, purchase amounts, receipts, subscription status or renewals to Meta/);
+      assert.match(prose, /only the action name/);
+      assert.match(prose, /Bara account identifier, email, username, profile, health data, step counts, friends list, race names or race identifiers/);
+      assert.match(prose, /technical app and device information and permitted identifiers/);
+      assert.match(prose, /not anonymous/);
+      assert.match(prose, /successfully updated your privacy choices for the current app session/);
+      assert.match(prose, /consent for Meta/);
+      assert.match(prose, /applicable opt-outs, including US state privacy choices/);
+      assert.match(prose, /App Tracking Transparency permission is separate/);
+      assert.match(prose, /advertising identifier only when both your Meta privacy choices and Apple/);
+      assert.match(prose, /stop sending new Bara action events and disable advertising-identifier collection/);
+      assert.match(prose, /does not erase events already sent or cancel a transfer already in progress/);
+      assert.match(prose, /SDK may retain queued data or continue some SDK-managed activity/);
+      assert.match(html, /href="https:\/\/www\.facebook\.com\/privacy\/policy"/);
+      assert.doesNotMatch(prose, /We do not use third-party analytics SDKs/);
+      assert.doesNotMatch(prose, /friends, and race activity are never shared/);
+      assert.match(prose, /health data .* is never used for advertising/);
+      assert.match(prose, /not send your health data or step counts to RevenueCat/);
+      assert.doesNotMatch(html, /<div id="app"><\/div>/);
+    });
+  }
+
   // A 200 with an HTML document is NOT enough: if Vite's asset directory ever
   // collides with the /assets CDN mount (fallthrough:false => hard 404), every
   // page still returns 200 while shipping no CSS and no JS. Fetch each bundle

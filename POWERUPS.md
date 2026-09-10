@@ -34,7 +34,7 @@ coins, never rolled.
 
 | Powerup | Target | Duration | Effect |
 |---|---|---|---|
-| **Red Card** | Auto (leader) | Instant | Deducts 10% of the current leader's steps from their total. Cannot be used while you are in the lead |
+| **Red Card** | Auto (leader) | Instant | Deducts 10% of the final recipient's steps from their total, capped at 10,000 per use after Mirror/Decoy targeting. Cannot be used while you are in the lead |
 | **Second Wind** | Self | Instant | Bonus steps based on your gap to the leader: 25% of the gap, clamped to 500-5,000 |
 | **Compression Socks** | Self | Until consumed | Shield that blocks the next offensive powerup used against you. Lasts indefinitely until triggered |
 | **Fanny Pack** | Self | 24 hours | Unlocks an extra powerup slot |
@@ -204,7 +204,7 @@ finalSteps = baseSteps - frozenSteps + buffedSteps + bonusSteps
 - **baseSteps**: Steps from daily records + step samples (the normal race total)
 - **frozenSteps**: Sum of steps walked during all Leg Cramp windows (subtracted)
 - **buffedSteps**: Sum of steps walked during all Runner's High windows (added again, effectively 2x)
-- **bonusSteps**: Net from Protein Shake (+1,500), Banana Peel (+/-1,000), Red Card (-10% of leader), Second Wind (+500-5,000)
+- **bonusSteps**: Net from Protein Shake (+1,500), Banana Peel (+/-1,000), Red Card (-10% of final recipient, max 10,000 per use), Second Wind (+500-5,000)
 
 For timed effects (Leg Cramp, Runner's High), the system uses StepSample data for precision when available, falling back to snapshots recorded at effect start/expiry.
 
@@ -236,7 +236,8 @@ STEALTH_MODE_DURATION   = 4 hours
 
 PROTEIN_SHAKE_BONUS     = 1,500 steps
 BANANA_PEEL_STEAL       = 1,000 steps
-RED_CARD_PERCENT        = 10% of leader's steps
+RED_CARD_PERCENT        = 10% of final recipient's steps
+RED_CARD_MAX_PENALTY    = 10,000 per activation (historical penalties unchanged)
 SECOND_WIND_FACTOR      = 25% of gap to leader
 SECOND_WIND_MIN         = 500 steps
 SECOND_WIND_MAX         = 5,000 steps
