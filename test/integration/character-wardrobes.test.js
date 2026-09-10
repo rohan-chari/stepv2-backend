@@ -145,6 +145,26 @@ describe("character wardrobe public contract", () => {
     assert.equal(await prisma.shopPurchaseRequest.count(), 0);
     assert.equal((await wardrobe(c.id)).body.outfit.slots.HEAD, h.id);
   });
+  it("switches back and forth using catalog revisions while preserving the default outfit", async () => {
+    const c = await item("CHARACTER");
+    const h = await item("HEAD");
+    await fit(h);
+    assert.equal((await save("default", 0, { HEAD: h.id })).status, 200);
+    for (const key of [c.id, "default", c.id, "default"]) {
+      const catalog = await call("GET", "/shop/characters");
+      assert.equal(catalog.status, 200);
+      const row = catalog.body.characters.find((r) => r.characterKey === key);
+      const switched = await activate(
+        key, catalog.body.appearanceRevision, row.outfit.revision,
+      );
+      assert.equal(switched.status, 200, JSON.stringify(switched.body));
+      assert.equal(switched.body.activeCharacterKey, key);
+      if (key === "default") {
+        assert.equal(row.outfit.slots.HEAD, h.id);
+        assert.equal(switched.body.equipped.HEAD.id, h.id);
+      }
+    }
+  });
   it("legacy switches carry accessories, null CHARACTER checkpoints default, and unrelated row timestamps survive", async () => {
     const c = await item("CHARACTER");
     const h = await item("HEAD");

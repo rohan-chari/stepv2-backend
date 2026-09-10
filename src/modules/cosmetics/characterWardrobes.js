@@ -176,7 +176,8 @@ async function getCharacters(opts, db = prisma) {
     const state = await readState(
       tx,
       opts.userId,
-      items.map((i) => i.id),
+      // The first page includes default even when another character is active.
+      [...(!page.last ? ["default"] : []), ...items.map((i) => i.id)],
     );
     return {
       state,
