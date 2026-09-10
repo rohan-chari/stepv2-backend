@@ -1,3 +1,34 @@
+# Production completion — 2026-09-10
+
+User explicitly authorized this deployment after independent review verified the
+full-suite failures unrelated. Backend `3a60332` deployed from main with no
+migration/dependency/config change. Read-only migration census:256 applied,
+zero unfinished/missing. Guarded reload passed2HTTP/1resolution/1cron, pool32;
+staging remained stopped and old PIDs exited. `.env` and the pre-existing server
+lockfile modification were preserved and byte-compared. Referral audit/apply/audit
+allzero. Public health/privacy200 and authenticated RedisPONG verified.
+
+Copy preview showed only RED_CARD.description; applied using
+`npm run powerups:copy:sync -- --apply`, the audited production maintenance command.
+Current/legacy HTTP catalogs both returned the cap description. Direct node
+invocation in the original preparation notes below is superseded by this npm form.
+
+Both immutable artwork files were hash-verified live before existing admin PATCH
+calls updated only their assetVersion. Turtle `a87ad177f0a0` mirrored successfully;
+Hitchhike `6fbfe79192cf`. Exact before/after row comparisons preserved all other
+columns; public manifest confirmed both URLs and Turtle eight frames.
+
+Soch's exact previously verified account received +500 via existing grant CLI.
+The one-off CLI used explicit process-local `STEPS_PROCESS_ROLE=all` and
+`DATABASE_POOL_MAX_ALL=1`; server and PM2 configuration were unchanged. Preview
+and ledger preflight preceded apply. Exactly one +500 admin_grant row exists for
+`red-card-goodwill-2026-09-10`; no correspondence or step reversal. Identity and
+ledger details remain restricted under `/root/backups/meta-shop-red-card-20260910/`.
+
+The original preparation and diagnostic evidence follows for provenance.
+
+---
+
 # Red Card cap and Soch goodwill operation
 
 Status: prepared for production approval. An exact SELECT-only production
