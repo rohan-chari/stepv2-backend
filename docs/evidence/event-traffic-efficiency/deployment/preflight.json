@@ -1,0 +1,53 @@
+{
+  "at": "2026-09-10T03:55:32.546Z",
+  "applied": 256,
+  "missing": [],
+  "unfinished": 0,
+  "max": [
+    {
+      "max_connections": "50"
+    }
+  ],
+  "activity": [
+    {
+      "application_name": "",
+      "state": "active",
+      "count": 1
+    },
+    {
+      "application_name": "steps-cron-0",
+      "state": "active",
+      "count": 4
+    },
+    {
+      "application_name": "steps-cron-0",
+      "state": "idle",
+      "count": 1
+    },
+    {
+      "application_name": "steps-http-0",
+      "state": "active",
+      "count": 3
+    },
+    {
+      "application_name": "steps-http-0",
+      "state": "idle",
+      "count": 8
+    },
+    {
+      "application_name": "steps-http-1",
+      "state": "active",
+      "count": 1
+    },
+    {
+      "application_name": "steps-http-1",
+      "state": "idle",
+      "count": 7
+    },
+    {
+      "application_name": "steps-resolution-0",
+      "state": "idle",
+      "count": 3
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-10T03:58:22.959Z",
+  "results": [
+    {
+      "view": "legacy",
+      "status": 200,
+      "contract": null,
+      "state": "FRIEND_RACING",
+      "durationMs": 244
+    },
+    {
+      "view": "shell-v1",
+      "status": 200,
+      "contract": "home-shell-v1",
+      "state": "FRIEND_RACING",
+      "durationMs": 100
+    },
+    {
+      "view": "sync-refresh-v1",
+      "status": 200,
+      "contract": "home-sync-refresh-v1",
+      "state": "FRIEND_RACING",
+      "durationMs": 96
+    }
+  ]
+}

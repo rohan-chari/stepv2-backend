@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-09-10T04:00:24.890358+00:00",
+  "commit": "9e99fcbd6799cd944ddbbe7e0f0589c5016a4a38",
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "pid": 0,
+      "status": "stopped",
+      "restarts": 0,
+      "role": "staging_all",
+      "poolMax": {}
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "pid": 1506420,
+      "status": "online",
+      "restarts": 89,
+      "role": "resolution",
+      "poolMax": {
+        "DATABASE_POOL_MAX_RESOLUTION": "8"
+      }
+    },
+    {
+      "name": "steps-tracker-cron",
+      "pid": 1506438,
+      "status": "online",
+      "restarts": 1901,
+      "role": "cron",
+      "poolMax": {
+        "DATABASE_POOL_MAX_CRON": "4"
+      }
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1506258,
+      "status": "online",
+      "restarts": 436,
+      "role": "http",
+      "poolMax": {
+        "DATABASE_POOL_MAX_HTTP": "10"
+      }
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1506270,
+      "status": "online",
+      "restarts": 403,
+      "role": "http",
+      "poolMax": {
+        "DATABASE_POOL_MAX_HTTP": "10"
+      }
+    }
+  ],
+  "freshLogCodeCounts": {
+    "steps-tracker-staging-out-2.log": {},
+    "steps-tracker-staging-error-2.log": {},
+    "steps-tracker-resolution-out-3.log": {},
+    "steps-tracker-resolution-error-3.log": {},
+    "steps-tracker-cron-out-4.log": {},
+    "steps-tracker-cron-error-4.log": {},
+    "steps-tracker-out-5.log": {},
+    "steps-tracker-error-5.log": {},
+    "steps-tracker-out-6.log": {},
+    "steps-tracker-error-6.log": {}
+  },
+  "configurationPreserved": {
+    ".env": true,
+    "package-lock.json": true
+  },
+  "oldProcessPidsExited": true
+}
