@@ -1,6 +1,6 @@
 # Redis cache efficiency validation and release evidence
 
-Status: implementation, targeted verification, measurements and code review complete. Six pre-existing failures in broader regression suites remain documented below; they are not silently waived. Application deployment is not authorized.
+Status: deployed following explicit user authorization on September10,2026. The user accepted the six broader failures after they were reproduced on the original code. See redis-cache-efficiency-production-deploy-2026-09-10.md for the two-stage cutover and production checks.
 
 ## Release artifacts and order
 

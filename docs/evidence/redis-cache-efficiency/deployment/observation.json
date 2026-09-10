@@ -1,0 +1,138 @@
+{
+  "startedAt": "2026-09-10T09:05:28.124Z",
+  "endedAt": "2026-09-10T09:06:37.006Z",
+  "logs": [
+    {
+      "name": "steps-tracker-resolution-error-3.log",
+      "bytes": 7712,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-resolution-out-3.log",
+      "bytes": 157595,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-cron-error-4.log",
+      "bytes": 1380,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-cron-out-4.log",
+      "bytes": 6807,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-error-5.log",
+      "bytes": 0,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-out-5.log",
+      "bytes": 8656,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-error-6.log",
+      "bytes": 0,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    },
+    {
+      "name": "steps-tracker-out-6.log",
+      "bytes": 8385,
+      "truncated": false,
+      "counts": {
+        "transactionTimeout": 0,
+        "uniqueViolation": 0,
+        "poolTimeout": 0,
+        "connectionLimit": 0,
+        "deadlock": 0,
+        "unhandled": 0,
+        "typeError": 0,
+        "referenceError": 0
+      }
+    }
+  ],
+  "cacheKeyTypes": {
+    "g": 160,
+    "list": 9,
+    "slots": 2,
+    "race-members": 2,
+    "milestones": 2,
+    "summary": 1,
+    "race-meta": 1,
+    "invites": 2
+  },
+  "scanComplete": true,
+  "scans": 11
+}

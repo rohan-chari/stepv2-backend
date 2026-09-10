@@ -1,0 +1,101 @@
+{
+  "at": "2026-09-10T09:05:27.316Z",
+  "head": "488f8b1480ed33d370fca118eaca36946b17466b",
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "pid": 0,
+      "status": "stopped",
+      "role": "staging_all",
+      "uptime": 1788373079797
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "pid": 1519555,
+      "status": "online",
+      "role": "resolution",
+      "uptime": 1789031109792
+    },
+    {
+      "name": "steps-tracker-cron",
+      "pid": 1519573,
+      "status": "online",
+      "role": "cron",
+      "uptime": 1789031110146
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1519440,
+      "status": "online",
+      "role": "http",
+      "uptime": 1789031073202
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1519452,
+      "status": "online",
+      "role": "http",
+      "uptime": 1789031074912
+    }
+  ],
+  "releaseAPidsStillAlive": [],
+  "preAPidsStillAlive": [],
+  "migrations": 256,
+  "missing": [],
+  "queue": [
+    {
+      "state": "queued",
+      "count": 3
+    },
+    {
+      "state": "succeeded",
+      "count": 1623
+    }
+  ],
+  "postTasks": [
+    {
+      "pending": 0
+    }
+  ],
+  "activity": [
+    {
+      "application_name": "",
+      "state": "active",
+      "count": 1
+    },
+    {
+      "application_name": "steps-http-0",
+      "state": "idle",
+      "count": 2
+    },
+    {
+      "application_name": "steps-http-1",
+      "state": "idle",
+      "count": 5
+    },
+    {
+      "application_name": "steps-resolution-0",
+      "state": "idle",
+      "count": 3
+    },
+    {
+      "application_name": "steps-resolution-0",
+      "state": "idle in transaction",
+      "count": 1
+    }
+  ],
+  "redis": {
+    "ping": "PONG",
+    "config": [
+      "maxmemory-policy",
+      "allkeys-lru",
+      "maxmemory",
+      "209715200"
+    ],
+    "memory": [
+      "used_memory:15149632",
+      "used_memory_peak:21158608",
+      "maxmemory:209715200"
+    ]
+  }
+}
