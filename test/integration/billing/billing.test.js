@@ -43,7 +43,7 @@ it('authenticates billing and creates a stable opaque account identity without m
   assert.equal(first.available,true); assert.equal(first.contract,'bara-billing-v1');
   assert.match(first.identity.appUserId,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.equal(first.identity.appUserId,again.identity.appUserId); assert.notEqual(first.identity.appUserId,user.id);
-  assert.deepEqual(first.products.map(p=>p.coins),[500,2800,6000,500,500]);
+  assert.deepEqual(first.products.map(p=>p.coins),[500,3000,7500,500,500]);
   assert.equal(first.coins,350); assert.equal(first.membership.status,'free');
   assert.deepEqual(first.credits,{paid:0,trial:0,trialExpiresAt:null});
   assert.equal(first.termsUrl,config.termsUrl);
@@ -277,3 +277,55 @@ it('acknowledges a past zero-price initial period after conversion while grantin
  const result=await sync(token,'past-free-period');assert.equal(result.status,200);assert.equal(result.body.coins,500);assert.equal(result.body.credits.paid,10);assert.equal(result.body.credits.trial,0);
  assert.equal(await prisma.billingCreditLot.count({where:{kind:'trial'}}),0);assert.equal(await prisma.coinTransaction.count({where:{reason:'billing_purchase'}}),1);
 });
+
+// Amounts change independently of the legacy product IDs and client version.
+for (const platform of ['ios', 'android']) {
+ it(`serves and fulfills revised coin packs once for legacy ${platform} clients`, async () => {
+  const {token} = await createTestUser({coins:20});
+  const response = await request(server.baseUrl, 'GET', `/billing/bootstrap?platform=${platform}`, {
+   token, headers:{'X-Client-Features':'powerups5'},
+  });
+  assert.equal(response.status,200);
+  const state = await response.json();
+  const packs = state.products.filter(p=>p.kind==='coins');
+  assert.deepEqual(packs.map(p=>[p.id,p.storeProductId,p.coins]),[
+   ['coins_500','bara_coins_500_v1',500],
+   ['coins_2800','bara_coins_2800_v1',3000],
+   ['coins_6000','bara_coins_6000_v1',7500],
+  ]);
+  let balance=20;
+  for(const pack of packs){
+   const transactionId=`revised-${platform}-${pack.id}`;
+   history.purchases.push(purchase({transactionId,productId:pack.id,
+    appId:config[`${platform}AppId`],store:platform==='ios'?'app_store':'play_store'}));
+   balance+=pack.coins;
+   for(let replay=0;replay<2;replay++){
+    const result=await sync(token,transactionId);
+    assert.equal(result.status,200);assert.equal(result.body.coins,balance);
+   }
+  }
+  history.purchases[2].refunded=true;
+  assert.equal((await sync(token)).body.coins,3520);
+  assert.equal((await sync(token)).body.coins,3520);
+ });
+}
+for(const [productId,oldCoins] of [['coins_2800',2800],['coins_6000',6000]]){
+ it(`preserves the historical ${oldCoins}-coin receipt through replay and refund`,async()=>{
+  const {token}=await createTestUser({coins:oldCoins+20});
+  const state=await bootstrap(token),p=purchase({productId});
+  // Fixture represents an already-fulfilled receipt from the old deployment.
+  await prisma.billingPurchase.create({data:{
+   identityId:state.identity.appUserId,
+   canonicalKey:JSON.stringify([config.projectId,p.appId,p.store,p.environment,p.transactionId]),
+   projectId:config.projectId,appId:p.appId,store:p.store,environment:p.environment,
+   transactionId:p.transactionId,providerId:p.providerId,productId,
+   purchasedAt:new Date(p.purchasedAt),quantity:1,grantedCoins:oldCoins,
+   fulfillmentStatus:'fulfilled',benefitKind:'paid',
+  }});
+  history.purchases=[p];
+  assert.equal((await sync(token,p.transactionId)).body.coins,oldCoins+20);
+  history.purchases[0].refunded=true;
+  assert.equal((await sync(token)).body.coins,20);
+  assert.equal((await sync(token)).body.coins,20);
+ });
+}

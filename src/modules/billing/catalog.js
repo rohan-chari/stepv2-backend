@@ -1,7 +1,7 @@
 const PRODUCTS = Object.freeze([
   { id:'coins_500',kind:'coins',coins:500,credits:0,plan:null,ios:'bara_coins_500_v1',android:'bara_coins_500_v1' },
-  { id:'coins_2800',kind:'coins',coins:2800,credits:0,plan:null,ios:'bara_coins_2800_v1',android:'bara_coins_2800_v1' },
-  { id:'coins_6000',kind:'coins',coins:6000,credits:0,plan:null,ios:'bara_coins_6000_v1',android:'bara_coins_6000_v1' },
+  { id:'coins_2800',kind:'coins',coins:3000,credits:0,plan:null,ios:'bara_coins_2800_v1',android:'bara_coins_2800_v1' },
+  { id:'coins_6000',kind:'coins',coins:7500,credits:0,plan:null,ios:'bara_coins_6000_v1',android:'bara_coins_6000_v1' },
   { id:'plus_monthly',kind:'subscription',coins:500,credits:10,plan:'monthly',ios:'bara_plus_monthly_v1',android:'bara_plus_v1:monthly' },
   { id:'plus_permanent',kind:'non_consumable',coins:500,credits:10,plan:'permanent',ios:'bara_plus_permanent_v1',android:'bara_plus_permanent_v1' },
   { id:'plus_annual',kind:'subscription',coins:6000,credits:120,plan:'annual',ios:'bara_plus_annual_v1',android:'bara_plus_v1:annual' },
