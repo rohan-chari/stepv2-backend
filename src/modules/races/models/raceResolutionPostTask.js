@@ -37,6 +37,9 @@ function validatePostTaskPayload({ snapshotCommand, intents }) {
       ? Object.keys(snapshotCommand).sort()
       : [];
   const allowedSnapshotKeys = [
+    ...(snapshotCommand?.displayBoundaryInput != null
+      ? ["displayBoundaryInput"]
+      : []),
     ...(snapshotCommand?.allowSupersededComplete === true
       ? ["allowSupersededComplete"]
       : []),
@@ -58,6 +61,10 @@ function validatePostTaskPayload({ snapshotCommand, intents }) {
     snapshotCommand.timeZone.length === 0
   ) {
     throw new TypeError("invalid snapshot command");
+  }
+  if (snapshotCommand.displayBoundaryInput != null &&
+      !require('../services/raceDisplayBoundaryProof').validInput(snapshotCommand.displayBoundaryInput)) {
+    throw new TypeError('invalid display boundary input');
   }
   if (snapshotCommand.effectExpiryParticipantSteps != null) {
     const entries = Object.entries(snapshotCommand.effectExpiryParticipantSteps);

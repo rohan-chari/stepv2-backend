@@ -10,6 +10,7 @@ const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
 const { compareParticipantsForPlacement } = require("../placementOrder");
 const crypto = require("node:crypto");
+const efficiencyMetrics = require("../../../shared/observability/cacheEfficiencyMetrics");
 
 const SCHEMA_VERSION = 2;
 const CHUNK_SIZE = 50;
@@ -28,6 +29,9 @@ const TTL_SECONDS = 15 * 60;
 const counters = { chunkReads: 0, requesterReads: 0 };
 
 const INSTALL_IF_NOT_OLDER = `
+for i = 2, #KEYS do
+  if redis.call('GET', KEYS[i]) ~= ARGV[i + 2] then return 0 end
+end
 local current = redis.call("get", KEYS[1])
 if current then
   local decoded = cjson.decode(current)
@@ -111,6 +115,7 @@ function buildRaceProgressPageProjection({
   scoringTimeZone,
   asOf,
   nextEffectBoundaryAt = null,
+  boundaryProof = null,
   race,
   participants = [],
   sourceParticipants = [],
@@ -150,6 +155,7 @@ function buildRaceProgressPageProjection({
     asOf: new Date(asOf).toISOString(),
     scoringTimeZone,
     nextEffectBoundaryAt,
+    ...(boundaryProof ? { boundaryProof } : {}),
     raceId,
     race: race || {},
     totalCount: rows.length,
@@ -186,6 +192,10 @@ async function publishRaceProgressPageProjectionUnlocked({
 }) {
   const safeGeneration = finiteGeneration(generation);
   if (!safeGeneration || !snapshot || snapshot.index?.raceId !== raceId) return false;
+  const proof = require('./raceDisplayBoundaryProof');
+  const boundary = snapshot.index.boundaryProof;
+  const fence = boundary ? proof.fenceFor(raceId, boundary.tokens) : null;
+  if (boundary && !(await proof.current(raceId, boundary, snapshot.index.asOf))) return false;
   if (!redisCache.isEnabled()) return false;
   if (
     !allowSupersededComplete &&
@@ -236,8 +246,8 @@ async function publishRaceProgressPageProjectionUnlocked({
   }
   const installed = await redisCache.evalLua(
     INSTALL_IF_NOT_OLDER,
-    [cacheKeys.raceProgressIndex(raceId)],
-    [safeGeneration, JSON.stringify(installedIndex), ttlSeconds],
+    [cacheKeys.raceProgressIndex(raceId), ...(fence?.keys || [])],
+    [safeGeneration, JSON.stringify(installedIndex), ttlSeconds, ...(fence?.tokens || [])],
   );
   if (!installed.ok || Number(installed.result) !== 1) return false;
   if (existing) {
@@ -282,11 +292,15 @@ async function readRaceProgressPageProjection({
   limit = 15,
   requesterUserId = null,
   scoringTimeZone = null,
+  requireBoundaryProof = false,
 }) {
-  if (!raceId || !redisCache.isEnabled()) return null;
-  if (derivedCache.isBypassed(cacheKeys.PREFIX.RACE_PROGRESS)) return null;
+  const miss = (reason) => { if (requireBoundaryProof) efficiencyMetrics.read("standings", reason); return null; };
+  if (!raceId || !redisCache.isEnabled()) return miss("bypass");
+  if (derivedCache.isBypassed(cacheKeys.PREFIX.RACE_PROGRESS)) return miss("bypass");
   const index = await redisCache.getJSON(cacheKeys.raceProgressIndex(raceId));
   const generation = finiteGeneration(index?.generation);
+  if (!index) return miss("missing");
+  if (scoringTimeZone && index.scoringTimeZone !== scoringTimeZone) return miss("timezone");
   if (
     !index ||
     index.v !== SCHEMA_VERSION ||
@@ -294,9 +308,11 @@ async function readRaceProgressPageProjection({
     typeof index.asOf !== "string" ||
     !Number.isSafeInteger(index.totalCount) ||
     index.chunkSize !== CHUNK_SIZE ||
-    index.requesterBucketCount !== REQUESTER_BUCKET_COUNT ||
-    (scoringTimeZone && index.scoringTimeZone !== scoringTimeZone)
-  ) return null;
+    index.requesterBucketCount !== REQUESTER_BUCKET_COUNT
+  ) return miss("malformed");
+
+  const proof = require('./raceDisplayBoundaryProof');
+  if (requireBoundaryProof && !(await proof.current(raceId, index.boundaryProof, index.asOf))) return null;
 
   const total = index.totalCount;
   const start = Math.max(0, Math.floor(Number(offset) || 0));
@@ -313,14 +329,14 @@ async function readRaceProgressPageProjection({
     : cacheKeys.raceProgressPageBankSlot(raceId, bank, chunk));
   const chunkResult = await redisCache.getManyJSON(chunkKeys);
   counters.chunkReads = chunkKeys.length;
-  if (!chunkResult.ok) return null;
+  if (!chunkResult.ok) return miss("error");
   const chunks = chunkResult.values;
-  if (chunks.some((chunk) => !validChunk(chunk, generation, index.asOf))) return null;
+  if (chunks.some((chunk) => !validChunk(chunk, generation, index.asOf))) return miss("generation");
 
   const allRows = chunks.flatMap((chunk) => chunk.rows);
   const rows = allRows.slice(start - firstChunk * CHUNK_SIZE, end - firstChunk * CHUNK_SIZE);
-  if (rows.length !== end - start) return null;
-  if (rows.some((row) => !normalizeRow(row))) return null;
+  if (rows.length !== end - start) return miss("malformed");
+  if (rows.some((row) => !normalizeRow(row))) return miss("malformed");
 
   let requesterRow = null;
   if (requesterUserId && !rows.some((row) => row.userId === requesterUserId)) {
@@ -335,9 +351,13 @@ async function readRaceProgressPageProjection({
     const row = bucket?.rowsByUserId?.[requesterUserId];
     if (!bucket || bucket.v !== SCHEMA_VERSION ||
         finiteGeneration(bucket.generation) !== generation ||
-        bucket.asOf !== index.asOf || !normalizeRow(row)) return null;
+        bucket.asOf !== index.asOf || !normalizeRow(row)) return miss("generation");
     requesterRow = row;
   }
+  // A mutation or time boundary during the bounded chunk reads wins over the
+  // previously validated index. Soft age alone never rejects a valid page.
+  if (requireBoundaryProof && !(await proof.current(raceId, index.boundaryProof, index.asOf))) return null;
+  if (requireBoundaryProof) efficiencyMetrics.standingsHit(index.asOf);
   return {
     index,
     generation,

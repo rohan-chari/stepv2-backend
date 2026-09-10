@@ -1,3 +1,4 @@
+const efficiencyMetrics = require("../../shared/observability/cacheEfficiencyMetrics");
 const { prisma: defaultPrisma } = require("../../db");
 const { characterPresentation } = require("../cosmetics");
 const { compareParticipantsForPlacement } = require("../races/placementOrder");
@@ -176,6 +177,7 @@ async function readBoundedHomeProjection({
     limit: 15,
     requesterUserId: userId,
     scoringTimeZone: raceTimeZone(race, timeZone),
+    requireBoundaryProof: true,
   });
   if (!page || !page.index?.race) return null;
   const participants = [...page.rows];
@@ -185,6 +187,7 @@ async function readBoundedHomeProjection({
   return {
     v: 3,
     asOf: page.asOf,
+    boundaryProof: page.index.boundaryProof,
     scoringTimeZone: page.index.scoringTimeZone,
     source: "page-projection",
     race: page.index.race,
@@ -302,6 +305,10 @@ function serializeUser(
 }
 
 async function getAcceptedFriendIds(prisma, userId) {
+  if (prisma === defaultPrisma) {
+    const topology = await require("../social/services/friendsTopologyCache").get(userId);
+    return [...new Set(topology.accepted.map((row) => row.userId))];
+  }
   const friendships = await prisma.friendship.findMany({
     where: {
       status: "ACCEPTED",
@@ -352,7 +359,9 @@ async function checkPendingInvite(
         },
       },
     };
-  const invitationRows = launchReadBatch
+  const invitationRows = prisma === defaultPrisma
+    ? await require("./services/pendingInviteCandidates").read(userId, now)
+    : launchReadBatch
     ? await launchReadBatch.loadPendingInvites({ prisma, userId, now, select })
     : await prisma.raceParticipant.findMany({
         where,
@@ -831,13 +840,13 @@ function snapshotMatchesCompletedGeneration({
 
 async function readHomeSnapshot(store, raceId) {
   try {
-    if (typeof store.readSupportedSnapshot === "function") {
-      return await store.readSupportedSnapshot(raceId);
-    }
-    return (
-      (await store.readSnapshot(raceId, store.LEAN_SCHEMA_VERSION)) ||
-      (await store.readSnapshot(raceId, store.SCHEMA_VERSION))
-    );
+    const snapshot = typeof store.readSupportedSnapshot === "function"
+      ? await store.readSupportedSnapshot(raceId)
+      : (await store.readSnapshot(raceId, store.LEAN_SCHEMA_VERSION)) ||
+        (await store.readSnapshot(raceId, store.SCHEMA_VERSION));
+    if (typeof store.boundaryIsCurrent === "function" &&
+        !(await store.boundaryIsCurrent(snapshot, raceId))) return null;
+    return snapshot;
   } catch {
     return null;
   }
@@ -856,10 +865,11 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
     snapshotStore = defaultRaceProgressSnapshot,
     pageProjection = defaultRaceProgressPageProjection,
     raceResolutionJobModel = defaultRaceResolutionJobV2,
-    fallback,
+    fallback: loadFallback,
     includeLegacyProjection = false,
     launchReadBatch = null,
   } = options;
+  const fallback = () => { efficiencyMetrics.read("standings", "fallback"); return loadFallback(); };
 
   // A failed invalidation opens this process-local breaker because Redis may
   // still contain pre-mutation standings. Honor it before reading any key.
@@ -974,13 +984,14 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
       ) {
         return fallback();
       }
+      if (!snapshot.pageRowCount) efficiencyMetrics.standingsHit(snapshot.asOf, now.getTime(), !usePersistedTotals);
       if (usePersistedTotals) {
         // sync-v2 has already made the viewer's persisted row current. Keep the
         // shared race snapshot for every rival, overlay only that one bounded
         // row, then recompute deterministic placement in memory. This avoids a
         // 10,000-row hydration per app open while keeping the number the user
         // just synced immediately truthful; rivals converge with the worker's
-        // next snapshot (soft TTL <= 15 seconds).
+        // next snapshot (shared display freshness <= 30 seconds).
         const adjusted = snapshot.participants.map((participant) =>
           participant.userId === userId
             ? {

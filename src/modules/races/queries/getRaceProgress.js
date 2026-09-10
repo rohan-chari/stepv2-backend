@@ -1,3 +1,5 @@
+const efficiencyMetrics = require("../../../shared/observability/cacheEfficiencyMetrics");
+const raceSlotDisplayCache = require('../services/raceSlotDisplayCache');
 const { assertLargeTeamSupport } = require("../teamRaces");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
@@ -928,8 +930,10 @@ function buildGetRaceProgress(deps = {}) {
     raceId,
     scoringTimeZone,
     baseAdjustedByParticipantId = null,
+    scoredAt = null,
   }) {
     snapshotStore.__bump("persistedFallbacks");
+    if (!scoredAt) efficiencyMetrics.read("standings", "fallback");
     const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
     const leanSnapshot = race._leanProgressProjection === true;
     let presentations = new Map(
@@ -962,7 +966,7 @@ function buildGetRaceProgress(deps = {}) {
       ? await raceActiveEffectModel.findActiveForRace(raceId)
       : [];
 
-    const nowTime = now();
+    const nowTime = scoredAt ? new Date(scoredAt) : now();
     const nowMs = nowTime.getTime();
     let eventsByUserId;
     if (typeof globalStepEventModel.findEligibleByRace === "function") {
@@ -1375,7 +1379,13 @@ function buildGetRaceProgress(deps = {}) {
       }
 
       // Unified inventory: both HELD and MYSTERY_BOX powerups in slots
-      const slotPowerups = await racePowerupModel.findSlotPowerups(myParticipant.id);
+      const cachedSlots = racePowerupModel === RacePowerup
+        ? (await raceSlotDisplayCache.readMany({ participantRows: [{
+            id: myParticipant.id, raceId: race.id, userId,
+          }] })).get(myParticipant.id)
+        : null;
+      const slotPowerups = cachedSlots?.slotPowerups ??
+        await racePowerupModel.findSlotPowerups(myParticipant.id);
       powerupData.inventory = slotPowerups.map((p) => ({
         id: p.id,
         type: p.type,
@@ -1434,7 +1444,7 @@ function buildGetRaceProgress(deps = {}) {
 
       // Queued box count for frontend indicator
       const queuedCount =
-        syncResult.queuedBoxCount ??
+        syncResult.queuedBoxCount ?? cachedSlots?.queuedBoxCount ??
         await racePowerupModel.countQueuedByParticipant(myParticipant.id);
       powerupData.queuedBoxCount = queuedCount;
 
@@ -1686,7 +1696,15 @@ function buildGetRaceProgress(deps = {}) {
 
     let viewerGlobalEvent = null;
     let viewerLookupFailed = false;
-    if (typeof globalStepEventModel.findViewerActive === "function") {
+    if (globalStepEventModel === GlobalStepEvent) {
+      try {
+        viewerGlobalEvent = await require("../../steps/services/viewerEventDisplayCache").read({
+          userId, raceId, timeZone: userTimeZone || scoringTimeZone, now: nowTime,
+          eligibleLocal: race.status === "ACTIVE" && myParticipant?.status === "ACCEPTED" &&
+            !myParticipant.forfeitedAt && !myParticipant.finishedAt,
+        });
+      } catch { viewerLookupFailed = true; }
+    } else if (typeof globalStepEventModel.findViewerActive === "function") {
       try {
         const local = await globalStepEventModel.findViewerActive({
           userId, raceId, now: nowTime,
@@ -1707,7 +1725,7 @@ function buildGetRaceProgress(deps = {}) {
     // still assembled after authentication so a shared Redis snapshot never
     // carries one viewer's local entitlement. This preserves the exact old
     // response shape while the local lookup returns no eligible event.
-    if (!viewerGlobalEvent && !viewerLookupFailed &&
+    if (globalStepEventModel !== GlobalStepEvent && !viewerGlobalEvent && !viewerLookupFailed &&
         typeof globalStepEventModel.findActiveAt === "function") {
       try {
         const legacy = await globalStepEventModel.findActiveAt(nowTime);
@@ -2091,6 +2109,7 @@ function buildGetRaceProgress(deps = {}) {
       const cachedProjection = cacheOn
         ? await pageProjection.readRaceProgressPageProjection({
             raceId,
+          requireBoundaryProof: true,
           offset: participantsOffset,
           limit: participantsLimit,
           requesterUserId: myParticipant ? userId : null,
@@ -2104,11 +2123,14 @@ function buildGetRaceProgress(deps = {}) {
         v: snapshotStore.SCHEMA_VERSION,
         asOf: cachedProjection.asOf,
         nextEffectBoundaryAt: cachedProjection.index?.nextEffectBoundaryAt,
+        race: cachedProjection.index?.race,
+        boundaryProof: cachedProjection.index?.boundaryProof,
       }, now().getTime()) ? "stale-fallback" : "authoritative";
       let projectionTotal = cachedProjection?.total || null;
       let projectionRace = cachedProjection?.index?.race || null;
 
       if (!projectionRows) {
+        efficiencyMetrics.read("standings", "fallback");
         projectionSource = "stale-fallback";
         const persistedRows = typeof participantModel.findPersistedProgressPage === "function"
           ? await participantModel.findPersistedProgressPage(raceId, {
@@ -2261,8 +2283,11 @@ function buildGetRaceProgress(deps = {}) {
           raceId,
           snapshotSchemaVersion
         );
-        if (cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone)) {
+        if (cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone) &&
+            (typeof snapshotStore.boundaryIsCurrent !== "function" ||
+             await snapshotStore.boundaryIsCurrent(cached, raceId, now().getTime()))) {
           usable = cached;
+          efficiencyMetrics.standingsHit(cached.asOf, now().getTime());
           snapshotStore.__bump("snapshotHits");
         }
       }
@@ -2303,14 +2328,18 @@ function buildGetRaceProgress(deps = {}) {
         snapshotSchemaVersion
       );
       const usable =
-        cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone)
+        cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone) &&
+        (typeof snapshotStore.boundaryIsCurrent !== "function" ||
+         await snapshotStore.boundaryIsCurrent(cached, raceId, now().getTime()))
           ? cached
           : null;
 
       if (usable && snapshotStore.isFresh(usable, now().getTime())) {
+        efficiencyMetrics.standingsHit(usable.asOf, now().getTime(), true);
         snapshotStore.__bump("snapshotHits");
         snapshot = usable;
       } else if (workerOwnedRefresh) {
+        if (usable) efficiencyMetrics.read("standings", "expired");
         // A display miss/expiry is not a scoring input. Return committed rows;
         // step intake and mutation/boundary queues own calculation/publication.
         snapshot = await loadPersistedState({
@@ -2477,7 +2506,8 @@ function buildGetRaceProgress(deps = {}) {
                 snapshotSchemaVersion
               );
             }
-            if (waited) {
+            if (waited && (typeof snapshotStore.boundaryIsCurrent !== "function" ||
+                await snapshotStore.boundaryIsCurrent(waited, raceId, now().getTime()))) {
               snapshotStore.__bump("staleServes");
               snapshot = waited;
             } else {
@@ -2596,6 +2626,7 @@ function buildGetRaceProgress(deps = {}) {
     raceId,
     timeZone = "UTC",
     baseAdjustedByParticipantId = null,
+    scoredAt = null,
   }) => {
     const race =
       typeof raceModel.findProgressScoringContext === "function"
@@ -2613,6 +2644,7 @@ function buildGetRaceProgress(deps = {}) {
       raceId,
       scoringTimeZone: raceTimeZone(race, timeZone),
       baseAdjustedByParticipantId,
+      scoredAt,
     });
     snapshot.source = "worker-persisted";
     return snapshot;

@@ -13,28 +13,11 @@
 // one). `assertAllowlisted` + the two-viewer isolation test are the guard.
 //
 // ── Lifecycle (§3 key table) ───────────────────────────────────────────────
-// SOFT 15s / PHYSICAL 5m. A reader treats `asOf` older than
-// 15s as STALE — serve it AND trigger a rebuild. A physical 15s TTL would
-// delete the value the moment it went stale, and "losers serve the stale
-// snapshot" would have nothing to serve. Five minutes also keeps the complete
-// baseline alive through a synchronized app-open wave while the dedicated
-// worker coalesces newer generations; each successful publish still replaces
-// it immediately.
-//
-// ── Who writes it ──────────────────────────────────────────────────────────
-//   * the `/progress` request that WINS `v1:lock:progress:{raceId}` (SET), and
-//   * the race-keyed v2 worker, from its post-commit hook (SET, never DEL —
-//     the worker's value is the freshest there is; a DEL after it would throw
-//     away the authoritative publish).
-// Losers NEVER run the replay. They serve the stale snapshot if there is one,
-// else wait ≤1s on REDIS ONLY (zero pooled PG connections held — the
-// 2026-07-18 advisory-lock pool drain is exactly what that rule prevents), else
-// the cheap persisted-columns read.
-//
-// ── Redis down / flag off ──────────────────────────────────────────────────
-// `withLock` returns null when Redis is unavailable, so EVERY request takes the
-// loser path and ends at the persisted read. The expensive replay never runs in
-// the request path under any Redis state (§5 Phase D step 7, test 5e).
+// SOFT 30s / PHYSICAL 5m. Production readers accept only worker-stamped
+// boundary proofs. Soft expiry falls back to committed rows; paged/Home
+// persisted views may retain an older complete baseline until a hard boundary.
+// The worker owns refresh. Reads never score or enqueue display work.
+// Redis loss, missing proofs, and failed fences all use persisted fallback.
 
 const redisCache = require("../../../shared/cache/redisCache");
 const derivedCache = require("../../../shared/cache/derivedCache");
@@ -48,7 +31,7 @@ const SCHEMA_VERSION = 2;
 // by the permanent lean projection. A mixed-version v2 process rejects it
 // instead of accepting a presentation-free roster it cannot hydrate.
 const LEAN_SCHEMA_VERSION = 3;
-const SOFT_TTL_MS = 15_000;
+const SOFT_TTL_MS = 30_000;
 const PHYSICAL_TTL_SECONDS = 300;
 const LOCK_TTL_MS = 10_000;
 // Deliberately shorter than the measured recompute p99 (1.76s): some losers are
@@ -75,6 +58,7 @@ function clearLocalRace(raceId) {
 // Top-level envelope.
 const SNAPSHOT_FIELDS = [
   "v", // schema version
+  "boundaryProof",
   "nextEffectBoundaryAt",
   "generation",
   "asOf", // ISO instant the shared state was computed
@@ -279,18 +263,27 @@ function isFresh(snapshot, nowMs = Date.now()) {
   )
     return false;
   const asOf = new Date(snapshot.asOf).getTime();
-  if (!Number.isFinite(asOf)) return false;
+  if (!Number.isFinite(asOf) || asOf > nowMs) return false;
   const boundary =
     snapshot.nextEffectBoundaryAt || nextEffectBoundary(snapshot.activeEffects);
   return (
     nowMs - asOf <= SOFT_TTL_MS &&
+    (!snapshot.boundaryProof || require('./raceDisplayBoundaryProof').timeIsCurrent(snapshot.boundaryProof, snapshot.asOf, nowMs)) &&
     (!boundary || nowMs < new Date(boundary).getTime())
   );
 }
 
+async function boundaryIsCurrent(snapshot, raceId, nowMs = Date.now()) {
+  if (!snapshot) { require('../../../shared/observability/cacheEfficiencyMetrics').read('standings', 'missing'); return false; }
+  return await require('./raceDisplayBoundaryProof').current(
+    raceId, snapshot.boundaryProof, snapshot.asOf, nowMs);
+}
+
 /** A snapshot computed in a different scoring tz is not valid for this viewer. */
 function matchesTimeZone(snapshot, scoringTimeZone) {
-  return Boolean(snapshot) && snapshot.scoringTimeZone === scoringTimeZone;
+  const matches = Boolean(snapshot) && snapshot.scoringTimeZone === scoringTimeZone;
+  if (snapshot && !matches) require('../../../shared/observability/cacheEfficiencyMetrics').read('standings', 'timezone');
+  return matches;
 }
 
 async function readSnapshot(raceId, schemaVersion = SCHEMA_VERSION) {
@@ -326,23 +319,29 @@ async function readSupportedSnapshot(raceId) {
 
 /**
  * SET (never DEL). A failed publish is logged and IGNORED: the older snapshot
- * ages out of freshness within 15s and the next reader rebuilds (§5 Phase D
- * step 9 / spec item 4).
+ * ages out of display freshness within 30s; readers use committed fallback
+ * until a subsequent authoritative worker publishes.
  */
 async function writeSnapshot(raceId, snapshot) {
   const key = cacheKeys.raceProgress(raceId, snapshot?.v);
+  const proof = require('./raceDisplayBoundaryProof');
+  const fence = snapshot?.boundaryProof ? proof.fenceFor(raceId, snapshot.boundaryProof.tokens) : null;
+  if (fence && !(await boundaryIsCurrent(snapshot, raceId))) return false;
   let ok;
   if (Number.isSafeInteger(snapshot?.generation) && snapshot.generation > 0) {
     const result = await redisCache.evalLua(
       `
+      for i = 2, #KEYS do
+        if redis.call('GET', KEYS[i]) ~= ARGV[i + 2] then return 0 end
+      end
       local value=redis.call('GET',KEYS[1])
       if value then
         local current=cjson.decode(value)
         if tonumber(current.generation or 0)>tonumber(ARGV[1]) then return 0 end
       end
       redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]);return 1`,
-      [key],
-      [snapshot.generation, JSON.stringify(snapshot), PHYSICAL_TTL_SECONDS],
+      [key, ...(fence?.keys || [])],
+      [snapshot.generation, JSON.stringify(snapshot), PHYSICAL_TTL_SECONDS, ...(fence?.tokens || [])],
     );
     ok = result?.ok && Number(result.result) === 1;
   } else {
@@ -454,6 +453,7 @@ module.exports = {
   buildSnapshot,
   assertAllowlisted,
   isFresh,
+  boundaryIsCurrent,
   nextEffectBoundary,
   matchesTimeZone,
   readSnapshot,

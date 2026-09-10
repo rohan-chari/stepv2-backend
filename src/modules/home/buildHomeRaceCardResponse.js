@@ -204,6 +204,7 @@ function buildHomeRaceCardResponse(dependencies) {
             }
             return getCachedGlobalEventSummary({
               key: cacheKeys.homeImpactSummary(user.id),
+            userId: user.id,
               enabled: await isStrictFlagEnabled(
                 appSettings,
                 "redisCacheHomeImpactSummaryEnabled"

@@ -437,8 +437,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                FROM race_resolution_full_triggers trigger
                JOIN race_resolution_jobs_v2 job ON job.race_id=trigger.race_id
                JOIN races race ON race.id=trigger.race_id
-              WHERE job.full_trigger_seed_only
-                AND race.status='active'
+              WHERE race.status='active'
                 AND (
                   job.full_trigger_seed_only
                   OR NOT (job.dirty_reasons ? 'STEP_INPUT_CHANGED')

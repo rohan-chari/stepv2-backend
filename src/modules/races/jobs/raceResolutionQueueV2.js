@@ -1482,6 +1482,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       }
     }
 
+    // Capture before the closure planner reads any reusable scoring inputs,
+    // after preparation has committed its own membership/effect invalidations.
+    const displayProof = require('../services/raceDisplayBoundaryProof');
+    let displayInputCapture = await displayProof.captureInputs(job.raceId, now());
+
     // Dependency closure is permanent. Ineligible or failed plans still fall
     // back to FULL through the existing correctness path.
     const closureShadow = NULL_CLOSURE_SHADOW_FIELDS;
@@ -1677,6 +1682,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       let committedPostTaskId = null;
 
       for (;;) {
+        // A forced FULL retry reloads inputs; never refresh tokens merely to
+        // bless an already-computed result or reused display artifact.
+        if (forceFull) displayInputCapture = await displayProof.captureInputs(job.raceId, now());
         // A newer boundary/display envelope can be adopted after computation.
         // Upgrade its durable handoff before preparing the next fenced attempt.
         postTasksEnabled ||= job.processingDirtyReasons?.some(reason =>
@@ -1955,6 +1963,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
         }
 
+        if (result && !artifactPayload) {
+          result.displayBoundaryInput = displayProof.scoredInput(displayInputCapture, result);
+        }
         const stopPrepareWrites = phaseTimer.start("prepareWrites");
         let sideWrites = [];
         try {

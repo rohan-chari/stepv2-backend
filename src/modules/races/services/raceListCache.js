@@ -519,7 +519,7 @@ module.exports = {
   buildRaceListInvalidator,
   registerRaceListCacheInvalidation,
   isEnabled: () => defaultRedisCache.isEnabled(),
-  getStableMembership: defaultCache.getStableMembership,
+  getStableMembership: (...args) => require("./efficientRaceListCache").getStableMembership(...args),
   invalidateUser: defaultInvalidator.invalidateUser,
   invalidateUsers,
   invalidateRaces,

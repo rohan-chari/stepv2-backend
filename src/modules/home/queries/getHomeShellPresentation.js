@@ -27,7 +27,9 @@ function buildGetHomeShellPresentation(dependencies = {}) {
             where: { id: userId },
             select: { coins: true },
           }),
-      launchBatch
+      prisma === defaultPrisma
+        ? require("../../social/services/userPresentationCache").equipmentForUser(userId)
+        : launchBatch
         ? launchBatch.loadEquipment({ prisma, userId })
         : prisma.userEquippedAccessory.findMany({
             where: { userId },

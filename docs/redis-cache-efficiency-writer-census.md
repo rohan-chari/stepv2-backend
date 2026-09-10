@@ -1,6 +1,6 @@
 # Redis efficiency writer census
 
-Source census baseline: backend 7a4683c, September 10, 2026. This is a source-map aid for release-A invalidation coverage, not evidence that hooks have already been implemented. Every source writer must be reconciled with implementation and tested before release B. PostgreSQL transactions must commit before external cache invalidation; wrappers receiving tx must register/return affected identities to the owning transaction, not invalidate uncommitted state.
+Source census baseline: backend 7a4683c, September 10, 2026. Release-A invalidation hooks are committed in cb790cd8b67ed4fb630c715f2c906191070f40e1. The tables retain the source audit requirements; the reconciliation below distinguishes inspected coverage from HTTP/worker evidence. PostgreSQL transactions must commit before external cache invalidation; wrappers receiving tx must register/return affected identities to the owning transaction, not invalidate uncommitted state.
 
 ## Steps and milestone display
 
@@ -56,3 +56,16 @@ Negative race-event results may be cached only with known next eligibility/time 
 `src/modules/loadTesting/*`, `scripts/perf/*` and `scripts/diagnostics/*` contain direct fixture writes. They are not production application writers when their local/disposable guards are enforced. Every measurement must reset or appropriately invalidate its own isolated Redis before measuring fixture state; otherwise it can produce a falsely warm or stale candidate. Do not introduce cache mutations into prod as a way of verifying these fixtures.
 
 Source search covered direct ORM writes and SQL DML strings under src/scripts for steps, step_milestone_claims, race_powerups and global_step_event_entitlements. It does not itself prove generated SQL, delete cascades, indirect model callers or administrative scripts have complete hooks. Final implementation audit must enumerate covered seams and link their HTTP/worker integration evidence.
+
+
+## Release-A reconciliation and B public-path evidence
+
+The following source seams have post-commit hooks in release A: daily Steps.create/update (including both old and new user/date identities), raw intake daily storage changes, durable milestone claim insertion, model inventory create/update/discard/expire/steal, direct use/roll/reroll/purchase mutations, queue promotion, welcome boxes and initial enrollment boxes, entitlement admission/materialization/boundary transitions, event enrollment and timezone reconciliation. The common Prisma transaction callback coalesces domain identities and only advances them after successful commit. The inventory protocol uses both participant and race tokens, so race-wide expiry does not require per-participant fan-out. Effect invalidation advances race-effects before deleting score/page snapshots; B publication includes that token.
+
+`cache-efficiency-domain-writers.test.js` exercises daily writes/corrections/claims, discarded inventory and timezone entitlement changes over real HTTP. `cache-efficiency-personal-readers.test.js` exercises a separate actual release-A writer against B readers, including daily writes and claims, discarded and stolen inventory, a transaction rollback after hook registration, failed Redis invalidation with subsequent repair, and a real resolution worker minting and promoting boxes. These tests prove the named representative paths; they are not a claim that every individual billing/open/reroll endpoint is independently tested by this file.
+
+The raw review SQL scripts now require their managed JavaScript transaction runner. It captures the affected closure, persists a recovery manifest before commit and confirms invalidation before normal exit. Replay validates a credential-free database/Redis target fingerprint. `cache-efficiency-review-maintenance.test.js` covers successful seed/reset, committed write plus Redis failure/replay, wrong-target refusal and raw unmanaged SQL rejection. The reset preserves the reviewer login identity but clears its claims and removed friendships. This removes the operational bypass found during the census.
+
+Shared catalog rows can be changed by peer writers without this repository's Redis configuration. Release B therefore caches equipment references and identity fields but hydrates mutable catalog fields using a bounded source query. It does not rely on a nonexistent cross-repository catalog invalidation contract.
+
+Retention-only deletion of already-ended event entitlements is safe only because the B event display and score proof enforce absolute event boundaries. A missing or invalid proof is a source fallback, never evidence of no boundary. Final endpoint and delayed-worker proof verification is recorded in the release validation document.

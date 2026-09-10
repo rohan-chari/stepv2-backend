@@ -350,6 +350,7 @@ function createHomeRouter(dependencies = {}) {
         try {
           const summary = await getCachedGlobalEventSummary({
             key: cacheKeys.homeImpactSummary(req.user.id),
+            userId: req.user.id,
             enabled: await isStrictFlagEnabled(settings, "redisCacheHomeImpactSummaryEnabled"),
             load: () => getEligibleGlobalEventSummary({ prisma, userId: req.user.id }),
           });

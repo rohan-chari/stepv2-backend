@@ -59,6 +59,7 @@ async function createActiveRace(size, { timezone = "UTC" } = {}) {
       appleId: `page-projection-${++nextId}-${i}`,
       email: `page-projection-${nextId}-${i}@example.com`,
       displayName: `Runner ${i}`,
+      timezone: "UTC",
     }));
   }
   const startedAt = new Date(Date.now() - 60 * 60 * 1000);
@@ -92,6 +93,15 @@ async function createActiveRace(size, { timezone = "UTC" } = {}) {
 }
 
 async function projectionFixture(raceId, users, generation = 1) {
+  // Finish the auth-time timezone/entitlement reconciliation before taking
+  // the fixture's scoring fence, just as a real worker follows step intake.
+  for (const user of new Set([users[0], users[users.length - 1]])) {
+    const response = await request(server.baseUrl, "GET", "/auth/me", {
+      token: user.token, headers: { "X-Client-Features": FEATURES, "X-Timezone": "UTC" },
+    });
+    assert.equal(response.status, 200);
+    await response.json();
+  }
   const sourceParticipants = users.map((user, index) => ({
     id: `participant-${index}`,
     userId: user.user.id,
@@ -104,15 +114,28 @@ async function projectionFixture(raceId, users, generation = 1) {
     placement: index + 1,
     team: null,
   }));
+  // This fixture is an already-computed generation. Supply the additive B
+  // proof that production workers now attach; endpoint assertions stay exact.
+  const asOf = new Date().toISOString();
+  const nextBoundaryAt = new Date(Date.now() + 60_000).toISOString();
+  const identities = [["event", "global"], ["event", raceId],
+    ["race-members", raceId], ["race-meta", raceId], ["race-effects", raceId]];
+  const tokens = [];
+  for (const [domain, identity] of identities) {
+    const key = `t:ce:v1:g:${domain}:${identity}`;
+    await probe.set(key, require("node:crypto").randomUUID(), "EX", 3600, "NX");
+    tokens.push(await probe.get(key));
+  }
   const snapshot = buildRaceProgressPageProjection({
     raceId,
     generation,
     scoringTimeZone: "UTC",
-    asOf: new Date().toISOString(),
+    asOf,
+    boundaryProof: { v: 1, scoredAt: asOf, tokens, nextBoundaryAt },
     race: {
       raceId,
       status: "ACTIVE",
-      endsAt: new Date(Date.now() + 60_000).toISOString(),
+      endsAt: nextBoundaryAt,
       maxDurationDays: 7,
       targetSteps: 50_000,
       isTeamRace: false,

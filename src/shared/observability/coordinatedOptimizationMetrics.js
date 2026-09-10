@@ -1,7 +1,8 @@
 const APPROVED_METRICS = new Set([
-  "cache_efficiency_read_total", "cache_efficiency_postgres_total",
+  "cache_efficiency_read_total", "cache_efficiency_source_loads_total",
   "cache_efficiency_redis_total", "cache_efficiency_bytes_total",
   "cache_efficiency_invalidations_total", "cache_efficiency_age_total",
+  "cache_efficiency_counterfactual_total",
   "race_effect_expiry_stage_seconds",
   "global_summary_capture_lookup_total",
   "global_summary_capture_lookup_per_sync",

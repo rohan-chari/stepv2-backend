@@ -334,7 +334,7 @@ const Race = {
   },
 
   async findBootstrapAccessContext(id, userId) {
-    const race = await prisma.race.findUnique({
+    const race = await require("../services/raceDisplayFragments").loadCore(id, {
       where: { id },
       include: {
         ...detailsRelationInclude,
@@ -473,7 +473,7 @@ const Race = {
   // Race scalars + the four display relations, with NO participants. See the
   // "Paged race-detail read plan" note above.
   async findDetailsCore(id) {
-    return prisma.race.findUnique({
+    return require("../services/raceDisplayFragments").loadCore(id, {
       where: { id },
       include: detailsRelationInclude,
     });
@@ -848,6 +848,28 @@ const Race = {
   // scoped by user in SQL; only the resulting race metadata is eligible for
   // Redis. The viewer participant and all live roster state are loaded by the
   // summary query after this projection is read.
+  async findRaceListStableFragmentForUser(userId, kind) {
+    const status = kind === "pending" ? "PENDING" : kind === "completed" ? "COMPLETED" : { notIn: ["COMPLETED", "PENDING"] };
+    return prisma.race.findMany({
+      where: { status, participants: { some: { userId, status: { not: "DECLINED" } } } },
+      select: raceListStableSelect,
+      orderBy: kind === "completed" ? { completedAt: "desc" } : { updatedAt: "desc" },
+      take: kind === "completed" ? 10 : 129,
+    });
+  },
+
+  async validateRaceListSourceVersions(userId, rows) {
+    if (!rows.length) return true;
+    const current = await prisma.race.findMany({
+      where: { id: { in: rows.map((row) => row.id) }, participants: { some: { userId, status: { not: "DECLINED" } } } },
+      select: { id: true, status: true, updatedAt: true },
+      take: 129,
+    });
+    const byId = new Map(current.map((row) => [row.id, row]));
+    return rows.every((row) => byId.get(row.id)?.status === row.status &&
+      new Date(byId.get(row.id)?.updatedAt).getTime() === new Date(row.updatedAt).getTime());
+  },
+
   async findRaceListStableForUser(userId, extraCompletedRaceIds = []) {
     const participantFilter = {
       participants: { some: { userId, status: { not: "DECLINED" } } },

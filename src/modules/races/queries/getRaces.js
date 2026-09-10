@@ -1,3 +1,4 @@
+const efficiencyMetrics = require("../../../shared/observability/cacheEfficiencyMetrics");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { characterPresentation } = require("../../cosmetics/shopCosmetics");
@@ -157,6 +158,11 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       userId,
       variant: options.raceListVariant || "legacy",
       evidenceDimensions: options.cacheEvidenceDimensions,
+      loadFragment: typeof Race.findRaceListStableFragmentForUser === "function"
+        ? (kind) => Race.findRaceListStableFragmentForUser(userId, kind) : null,
+      validateSources: typeof Race.validateRaceListSourceVersions === "function"
+        ? (rows) => Race.validateRaceListSourceVersions(userId, rows) : null,
+      hydrate: (rows) => require("../models/race").hydrateRaceListPeople(rows),
       load: () => boundedLaunch
         ? Race.findBoundedRaceListForUser(
             userId, options.extraCompletedRaceIds || [])
@@ -186,6 +192,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       const pages = await Promise.all(boundedCandidates.map((race) =>
         pageProjection.readRaceProgressPageProjection({
           raceId: race.id, offset: 0, limit: 1, requesterUserId: userId,
+          requireBoundaryProof: true,
           scoringTimeZone: race.timezone || "UTC",
         }).catch(() => null)));
       const projectedByRaceId = new Map();
@@ -220,7 +227,9 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       if (projectedByRaceId.size > 0) {
         const residualRaces = stable.races.filter((race) =>
           !projectedByRaceId.has(race.id));
-        const residual = residualRaces.length
+        const needsResidual = residualRaces.length > 0 || (options.extraCompletedRaceIds || []).length > 0;
+        if (needsResidual) efficiencyMetrics.read("standings", "fallback");
+        const residual = needsResidual
           ? await Race.findSqlSummariesForUser(
               userId,
               options.extraCompletedRaceIds || [],
@@ -237,14 +246,19 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
           );
           sqlResult = {
             ambiguousFinisherOrder: false,
-            races: stable.races.map((race) =>
-              projectedByRaceId.get(race.id) || residualByRaceId.get(race.id))
-              .filter(Boolean),
+            // The authoritative residual loader can return payout-offer races
+            // beyond the ten cached completed memberships. Retain that union.
+            races: [...new Map([
+              ...stable.races.map((race) => projectedByRaceId.get(race.id) || residualByRaceId.get(race.id)),
+              ...residual.races,
+            ].filter(Boolean).map(race => [race.id, race])).values()]
+              .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
           };
         }
       }
     }
     if (!sqlResult) {
+      efficiencyMetrics.read("standings", "fallback");
       sqlResult = await Race.findSqlSummariesForUser(
         userId,
         options.extraCompletedRaceIds || [],
@@ -357,6 +371,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   const effectsByParticipant = new Map();
   const effectsByRace = new Map();
   const inventoryByParticipant = new Map();
+  const queuedByParticipant = new Map();
   // Prefer the all-types bulk effect query (production + full fakes); fall back
   // to the per-type Detour bulk query so the query-count fake that only pins the
   // Detour shape still runs the bulk path (myActiveEffects is empty there).
@@ -370,15 +385,18 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
 
   if (viewerParticipantIds.length > 0 && canBulk) {
     // Production path: exactly two queries, independent of race count.
-    const [effectRows, inventoryRows] = await Promise.all([
+    const [effectRows, cachedInventory] = await Promise.all([
       hasBulkAllEffects
         ? RaceActiveEffect.findActiveForParticipants(effectParticipantIds)
         : RaceActiveEffect.findActiveByTypeForParticipants(viewerParticipantIds, "DETOUR_SIGN"),
-      RacePowerup.findInventoryForParticipants(viewerParticipantIds, [
-        "HELD",
-        "MYSTERY_BOX",
-        "QUEUED",
-      ]),
+      require("../services/raceSlotDisplayCache").readMany({
+        participantRows: visible.map((race) => {
+          const mine = myParticipantByRace.get(race.id);
+          return mine && viewerParticipantIds.includes(mine.id)
+            ? { id: mine.id, raceId: race.id, userId } : null;
+        }).filter(Boolean),
+        powerupModel: RacePowerup,
+      }),
     ]);
     for (const e of effectRows) {
       if (e.type === "DETOUR_SIGN") detourParticipantIds.add(e.targetParticipantId);
@@ -391,10 +409,9 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         raceList.push(e);
       }
     }
-    for (const row of inventoryRows) {
-      let list = inventoryByParticipant.get(row.participantId);
-      if (!list) inventoryByParticipant.set(row.participantId, (list = []));
-      list.push(row);
+    for (const [participantId, value] of cachedInventory) {
+      inventoryByParticipant.set(participantId, value.slotPowerups);
+      queuedByParticipant.set(participantId, value.queuedBoxCount);
     }
   } else if (viewerParticipantIds.length > 0) {
     // Fallback for injected minimal fakes (test-only; production always has the
@@ -545,7 +562,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     const inventory = powerupContext
       ? inventoryByParticipant.get(myParticipant.id) || []
       : [];
-    const queuedBoxCount = inventory.filter((p) => p.status === "QUEUED").length;
+    const queuedBoxCount = queuedByParticipant.get(myParticipant?.id) ?? inventory.filter((p) => p.status === "QUEUED").length;
     // Slot inventory (HELD powerups + unopened MYSTERY_BOX) so the races list
     // can render each occupied slot precisely — a powerup sprite for HELD, a
     // crate for MYSTERY_BOX — without opening the race. Same item shape as the

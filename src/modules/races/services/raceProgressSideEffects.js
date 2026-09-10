@@ -231,8 +231,14 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     result,
     sourceGeneration = null,
     allowSupersededComplete = false,
+    displayBoundaryInput = null,
   }) {
     try {
+      const boundaryProof = require('./raceDisplayBoundaryProof');
+      // Old durable commands/artifacts remain executable, but cannot certify a
+      // new display snapshot without their original scoring-input fence.
+      const input = displayBoundaryInput || result?.displayBoundaryInput;
+      if (!boundaryProof.validInput(input)) return { status: 'failed', errorCode: 'DISPLAY_PROOF_MISSING' };
       if (
         !allowSupersededComplete &&
         sourceGeneration != null &&
@@ -257,10 +263,15 @@ function buildRaceProgressPostCommit(dependencies = {}) {
       const snapshot = await getRaceProgress.computePersistedSnapshot({
         raceId,
         timeZone: timeZone || "UTC",
+        scoredAt: input.scoredAt,
         baseAdjustedByParticipantId:
           result?.baseAdjustedByParticipantId || null,
       });
       if (!snapshot) return {status:"failed"};
+      const proof = await boundaryProof.build({ raceId, input, race: snapshot.race,
+        prisma: dependencies.prisma || require('../../../db').prisma });
+      if (!proof) return { status: 'failed', errorCode: 'DISPLAY_PROOF_INVALID' };
+      snapshot.boundaryProof = proof;
       snapshot.source = "worker";
       snapshot.generation = sourceGeneration;
       if (sourceGeneration != null) {
@@ -270,6 +281,7 @@ function buildRaceProgressPostCommit(dependencies = {}) {
           scoringTimeZone: snapshot.scoringTimeZone || timeZone || "UTC",
           asOf: snapshot.asOf,
           nextEffectBoundaryAt: snapshot.nextEffectBoundaryAt,
+          boundaryProof: proof,
           race: snapshot.race,
           participants: snapshot.participants,
           sourceParticipants: result?.race?.participants || [],
@@ -355,6 +367,7 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     const snapshotCommand = {
       raceId,
       timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
+      ...(result?.displayBoundaryInput ? { displayBoundaryInput: result.displayBoundaryInput } : {}),
       ...(recoverEffectExpiry
         ? { effectExpiryParticipantSteps: result?.baseAdjustedByParticipantId || {} }
         : {}),

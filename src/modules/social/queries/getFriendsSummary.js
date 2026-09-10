@@ -39,7 +39,17 @@ function buildGetFriendsSummary(dependencies = {}) {
       requester: { select: summaryUserSelect },
       addressee: { select: summaryUserSelect },
     };
-    const relationships = launchBatch
+    const topology = prisma === defaultPrisma
+      ? await require("../services/friendsTopologyCache").get(userId) : null;
+    const people = topology ? await require("../services/userPresentationCache").getManyExtended(
+      [...topology.accepted, ...topology.incoming, ...topology.outgoing].map((row) => row.userId),
+      { kind: "friends" }
+    ) : null;
+    const relationships = topology ? [
+      ...topology.accepted.map((row) => ({ id: row.friendshipId, status: "ACCEPTED", requesterId: userId, addressee: people.get(row.userId) })),
+      ...topology.incoming.map((row) => ({ id: row.friendshipId, status: "PENDING", addresseeId: userId, requester: people.get(row.userId) })),
+      ...topology.outgoing.map((row) => ({ id: row.friendshipId, status: "PENDING", requesterId: userId, addressee: people.get(row.userId) })),
+    ].filter((row) => row.requester || row.addressee) : launchBatch
       ? await launchBatch.loadFriendships({ prisma, userId, select })
       : await prisma.friendship.findMany({
         where: {

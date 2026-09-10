@@ -395,6 +395,8 @@ function buildUserPresentationCache(dependencies = {}) {
 const service = buildUserPresentationCache();
 module.exports = {
   ...service,
+  getManyExtended: (...args) => require("./userPresentationFragments").getMany(...args),
+  equipmentForUser: (...args) => require("./userPresentationFragments").equipmentForUser(...args),
   buildUserPresentationCache,
   TTL_SECONDS,
   GENERATION_TTL_SECONDS,

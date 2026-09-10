@@ -1,3 +1,4 @@
+const milestoneDisplayCache = require('../services/milestoneDisplayCache');
 const { prisma } = require("../../../db");
 const {
   STEP_MILESTONE_THRESHOLDS,
@@ -18,20 +19,26 @@ function buildGetStepMilestonesToday(deps = {}) {
       throw err;
     }
 
-    const { stepRecord, claims } = launchBatch
-      ? await launchBatch.loadMilestones({ prisma: db, userId, localDate })
-      : await Promise.all([
-          db.step.findUnique({
-            where: { userId_date: { userId, date: new Date(localDate) } },
-          }),
-          db.stepMilestoneClaim.findMany({
-            where: { userId, claimedDate: localDate },
-            select: { threshold: true },
-          }),
-        ]).then(([record, rows]) => ({ stepRecord: record, claims: rows }));
-
-    const currentSteps = stepRecord?.steps ?? 0;
-    const claimedSet = new Set(claims.map((c) => c.threshold));
+    const load = async () => {
+      const { stepRecord, claims } = launchBatch
+        ? await launchBatch.loadMilestones({ prisma: db, userId, localDate })
+        : await Promise.all([
+            db.step.findUnique({
+              where: { userId_date: { userId, date: new Date(localDate) } },
+            }),
+            db.stepMilestoneClaim.findMany({
+              where: { userId, claimedDate: localDate },
+              select: { threshold: true },
+            }),
+          ]).then(([record, rows]) => ({ stepRecord: record, claims: rows }));
+      return { currentSteps: stepRecord?.steps ?? 0, claimedThresholds: claims.map(row => row.threshold) };
+    };
+    // Cache display inputs only. Claim authorization and rewards retain their
+    // authoritative command reads, and reward configuration is applied below.
+    const { currentSteps, claimedThresholds } = db === prisma
+      ? await milestoneDisplayCache.read({ userId, localDate, load })
+      : await load();
+    const claimedSet = new Set(claimedThresholds);
 
     const milestones = STEP_MILESTONE_THRESHOLDS.map((m) => {
       const claimed = claimedSet.has(m.steps);

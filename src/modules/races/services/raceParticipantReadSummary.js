@@ -4,6 +4,8 @@ const { prisma } = require("../../../db");
 // aggregate, not a transferred participant roster. The all-member ID array is
 // deliberately retained for frozen invitation clients, including declined rows.
 async function loadRaceParticipantReadSummary(raceId) {
+  const fragments = require("./raceDisplayFragments");
+  const fence = await fragments.captureCounts(raceId);
   const [summary] = await prisma.$queryRawUnsafe(`
     SELECT count(*)::int AS "totalCount",
       count(*) FILTER (WHERE status='accepted')::int AS "acceptedCount",
@@ -23,6 +25,7 @@ async function loadRaceParticipantReadSummary(raceId) {
       COALESCE(jsonb_agg(payout_coins ORDER BY placement,joined_at,id) FILTER (WHERE placement IS NOT NULL AND payout_coins>0),'[]'::jsonb) AS "completedV1Payouts",
       COALESCE(jsonb_agg(user_id ORDER BY joined_at,id),'[]'::jsonb) AS "participantUserIds"
     FROM race_participants WHERE race_id=$1`, raceId);
+  await fragments.publishCounts(raceId, summary, fence);
   return summary;
 }
 
