@@ -1,0 +1,63 @@
+{
+  "checkedAt": "2026-09-10T19:38:25.649Z",
+  "decoy": [
+    {
+      "sku": "POWERUP_DECOY",
+      "price_coins": 150,
+      "active": true,
+      "test_only": false,
+      "daily_reward_eligible": false
+    }
+  ],
+  "migrations": [
+    {
+      "migration_name": "20260910120000_restore_decoy_shop_cooldown",
+      "checksum": "9660bf88ff02d340d3156fada5e044966361a4216bc4f34555b4b98ae6040f37",
+      "finished_at": "2026-09-10T19:37:13.101Z"
+    },
+    {
+      "migration_name": "20260910120100_decoy_cooldown_index",
+      "checksum": "7b2492ee8f627e36608c3a791ece52f9dc7ca5e97ad1a5c51aa405ddd4f81fe4",
+      "finished_at": "2026-09-10T19:37:14.875Z"
+    }
+  ],
+  "indexes": [
+    {
+      "indisvalid": true,
+      "indisready": true
+    }
+  ],
+  "results": [
+    {
+      "client": "legacy",
+      "path": "/shop/powerups",
+      "status": 200,
+      "itemCount": 1,
+      "decoy": null
+    },
+    {
+      "client": "legacy",
+      "path": "/shop/catalog",
+      "status": 200,
+      "itemCount": 18,
+      "decoy": null
+    },
+    {
+      "client": "current",
+      "path": "/shop/powerups",
+      "status": 200,
+      "itemCount": 7,
+      "decoy": {
+        "priceCoins": 150,
+        "description": "The next single-target attack aimed at you is redirected to a random rival. Lasts until it triggers or 24 hours. Wait 1 hour after it pops before using another Decoy in this race"
+      }
+    },
+    {
+      "client": "current",
+      "path": "/shop/catalog",
+      "status": 200,
+      "itemCount": 20,
+      "decoy": null
+    }
+  ]
+}

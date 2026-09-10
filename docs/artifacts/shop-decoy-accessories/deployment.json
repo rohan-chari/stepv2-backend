@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-09-10T19:38:55.370Z",
+  "commit": "6a0f6c39df749f0abbabe59e935d1341d1347379",
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "pid": 0,
+      "status": "stopped",
+      "started": 1788373079797
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "pid": 1556193,
+      "status": "online",
+      "started": 1789069084622
+    },
+    {
+      "name": "steps-tracker-cron",
+      "pid": 1556211,
+      "status": "online",
+      "started": 1789069084990
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1556081,
+      "status": "online",
+      "started": 1789069046319
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1556093,
+      "status": "online",
+      "started": 1789069048500
+    }
+  ],
+  "migrationChecksums": {
+    "20260910120000_restore_decoy_shop_cooldown": "9660bf88ff02d340d3156fada5e044966361a4216bc4f34555b4b98ae6040f37",
+    "20260910120100_decoy_cooldown_index": "7b2492ee8f627e36608c3a791ece52f9dc7ca5e97ad1a5c51aa405ddd4f81fe4"
+  },
+  "environmentAndLockfilePreserved": true
+}
