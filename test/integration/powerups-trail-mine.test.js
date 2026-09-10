@@ -231,6 +231,14 @@ describe("trail mine targeting", () => {
     const useResponse = await usePowerup(alice.token, raceId, mine.id);
     assert.equal(useResponse.status, 200);
 
+    const ownerProgress = await getProgress(alice.token, raceId);
+    const ownerMine = ownerProgress.powerupData.activeEffects.find((e) => e.type === "TRAIL_MINE");
+    assert.ok(ownerMine, "owner sees placed mine");
+    assert.deepEqual(ownerMine.trailMine, { positionSteps: 10000 });
+    assert.equal(ownerMine.expiresAt, null);
+    const rivalProgress = await getProgress(bob.token, raceId);
+    assert.ok(!rivalProgress.powerupData.activeEffects.some((e) => e.type === "TRAIL_MINE"));
+
     const systemMessages = await getMessages(alice.token, raceId, "SYSTEM");
     const mergedMessages = await getMessages(alice.token, raceId);
     const legacyFeed = await getFeed(alice.token, raceId);
@@ -342,6 +350,7 @@ describe("trail mine targeting", () => {
     assert.equal(after1.status, "EXPIRED", "mine is consumed");
 
     const progress = await getProgress(alice.token, raceId);
+    assert.ok(!progress.powerupData.activeEffects.some((e) => e.type === "TRAIL_MINE"), "triggered mine leaves owner Active Effects");
     assert.equal(findUser(progress, bob.userId).totalSteps, 13000 - 390);
     assert.equal(findUser(progress, alice.userId).totalSteps, 10000, "owner unaffected");
 
@@ -354,6 +363,28 @@ describe("trail mine targeting", () => {
       1,
       "a later worker tick must not re-detonate a consumed mine"
     );
+  });
+
+  it("shield-blocked mine disappears from owner Active Effects after detonation", async () => {
+    const alice = await createUser("AliceMineBlocked");
+    const bob = await createUser("BobMineBlocked");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await recordSamples(alice.token, [sample(6, 5, 10000)]);
+    await recordSamples(bob.token, [sample(6, 5.5, 1000)]);
+    const mine = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MINE", 99901);
+    const shield = await giveHeldPowerup(raceId, bob.userId, "COMPRESSION_SOCKS", 99902);
+    assert.equal((await usePowerup(bob.token, raceId, shield.id)).status, 200);
+    assert.equal((await usePowerup(alice.token, raceId, mine.id)).status, 200);
+    assert.ok((await getProgress(alice.token, raceId)).powerupData.activeEffects.some((e) => e.type === "TRAIL_MINE"));
+    await recordSamples(bob.token, [sample(4, 3, 12000)]);
+    await runWorker();
+    assert.equal((await getMine(raceId)).status, "EXPIRED");
+    assert.ok(!((await getProgress(alice.token, raceId)).powerupData.activeEffects.some((e) => e.type === "TRAIL_MINE")));
+    const events = await mineTriggerEvents(raceId);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].metadata.blocked, true);
+    assert.equal(events[0].metadata.penalty, 0);
   });
 
   it("a runner who stays behind the mine point is NOT hit", async () => {

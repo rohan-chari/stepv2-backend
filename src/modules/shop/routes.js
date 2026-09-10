@@ -42,6 +42,15 @@ function createShopBootstrapRouter(dependencies = {}) {
     supportsRemoteAssets: req.clientFeatures?.has("remote_assets") || false,
   });
   router.get(
+    "/items/:itemId/preview",
+    asyncHandler(async (req, res) => {
+      res.set("Cache-Control", "private, no-store");
+      res.json(await reads.buildGetAccessoryPreview(dependencies)({
+        ...wardrobeOptions(req), itemId: req.params.itemId,
+      }));
+    }),
+  );
+  router.get(
     "/characters",
     asyncHandler(async (req, res) =>
       res.json(

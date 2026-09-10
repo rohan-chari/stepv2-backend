@@ -1490,6 +1490,10 @@ function buildGetRaceProgress(deps = {}) {
             targetUserId: e.targetUserId,
             sourceUserId: e.sourceUserId,
           };
+          if (e.type === "TRAIL_MINE" && e.targetUserId === userId &&
+              Number.isFinite(e.metadata?.positionSteps) && e.metadata.positionSteps >= 0) {
+            entry.trailMine = { positionSteps: e.metadata.positionSteps };
+          }
           if (e.type === "GHOST_PEPPER") {
             const startsAt = new Date(e.startsAt);
             const boostMs = Number(e.metadata?.boostMs);
