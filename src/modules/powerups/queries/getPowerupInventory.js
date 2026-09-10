@@ -1,3 +1,4 @@
+const { isVisiblePowerupInventoryRow } = require("../powerupRetirement");
 const { UserPowerupItem } = require("../models/userPowerupItem");
 const powerupInventoryCache = require("../services/powerupInventoryCache");
 const { appSettings } = require("../../../shared/config/appSettings");
@@ -44,7 +45,7 @@ function buildGetPowerupInventory(deps = {}) {
     return {
       items: items.filter(
         (item) =>
-          item.powerupType !== "IMPOSTER" &&
+          isVisiblePowerupInventoryRow(item) &&
           (supportsPowerups4 || item.powerupType !== "QUICKSAND")
       ),
     };

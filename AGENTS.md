@@ -27,6 +27,25 @@ version-stamped compatibility are insufficient, obtain the user's explicit
 approval, and document the control's owner, default, rollout plan, and concrete
 deadline or removal condition.
 
+## Backend owns product policy
+
+The backend is the sole authority for powerup, accessory, and character
+availability, retirement, prices, purchase/upgrade eligibility, and reward
+pools. Apply policy consistently to every outgoing catalog, inventory, race
+projection, guide, and reward response, including cached paths. Do not rely on
+an app binary to hide or retire an item.
+
+Use existing response fields or additive metadata to describe policy. Explicit
+valid false, zero, and empty values must remain distinguishable from missing
+or malformed data. Keep actual reward selection and purchase validation on the
+server, with compatible responses for frozen clients. Client capability/channel
+filtering also belongs here; the app retains truthful capability declarations
+and safe renderers rather than item-specific merchant rules.
+
+Tests must prove consistent policy through real public endpoints and warm-cache
+paths. Content activation, retirement, and pricing changes must not require a
+binary change when the installed renderer already supports that content.
+
 ## Backend scalability and performance guidelines
 
 These principles apply to all future backend work. The goal is to support

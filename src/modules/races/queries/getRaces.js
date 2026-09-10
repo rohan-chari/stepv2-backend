@@ -1,3 +1,4 @@
+const { isVisiblePowerupInventoryRow } = require("../../powerups/powerupRetirement");
 const efficiencyMetrics = require("../../../shared/observability/cacheEfficiencyMetrics");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
@@ -571,7 +572,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     const slotPowerups = inventory.filter(
       (p) => p.status === "HELD" || p.status === "MYSTERY_BOX"
     );
-    const slotItems = slotPowerups.map((p) => ({
+    const slotItems = slotPowerups.filter(isVisiblePowerupInventoryRow).map((p) => ({
       id: p.id,
       type: p.type,
       rarity: p.rarity,
@@ -580,7 +581,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     // Held/openable mystery boxes (0..powerupSlots) so the races list can show
     // how many boxes the user has waiting without opening the race. Additive
     // field: older app builds ignore it.
-    const mysteryBoxCount = slotItems.filter(
+    const mysteryBoxCount = slotPowerups.filter(
       (p) => p.status === "MYSTERY_BOX",
     ).length;
 

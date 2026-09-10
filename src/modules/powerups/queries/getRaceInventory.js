@@ -1,3 +1,4 @@
+const { isVisiblePowerupInventoryRow } = require("../powerupRetirement");
 const { Race } = require("../../races/models/race");
 const { RacePowerup } = require("../models/racePowerup");
 
@@ -20,7 +21,7 @@ async function getRaceInventory(userId, raceId, supportsPowerups4 = false) {
   const mysteryBoxes = await RacePowerup.findMysteryBoxesByParticipant(myParticipant.id);
 
   return {
-    inventory: held.filter((p) => supportsPowerups4 || p.type !== "QUICKSAND").map((p) => ({
+    inventory: held.filter((p) => isVisiblePowerupInventoryRow(p) && (supportsPowerups4 || p.type !== "QUICKSAND")).map((p) => ({
       id: p.id,
       type: p.type,
       rarity: p.rarity,

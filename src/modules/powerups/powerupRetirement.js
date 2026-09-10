@@ -4,6 +4,12 @@ function isRetiredPowerupType(powerupType) {
   return RETIRED_POWERUP_TYPES.has(powerupType);
 }
 
+// Presentation policy only: apply after cache reads, without changing the
+// canonical inventory used for slot capacity, ownership, or mutation checks.
+function isVisiblePowerupInventoryRow(row) {
+  return !isRetiredPowerupType(row?.type ?? row?.powerupType);
+}
+
 function isRetiredPowerupRequest({ sku, powerupType } = {}) {
   return (
     isRetiredPowerupType(powerupType) ||
@@ -30,6 +36,7 @@ function markRetiredPowerupError(error, powerupType = "IMPOSTER") {
 module.exports = {
   RETIRED_POWERUP_TYPES,
   isRetiredPowerupType,
+  isVisiblePowerupInventoryRow,
   isRetiredPowerupRequest,
   retiredPowerupBody,
   markRetiredPowerupError,

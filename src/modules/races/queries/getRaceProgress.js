@@ -1,3 +1,5 @@
+const { isVisiblePowerupInventoryRow } = require("../../powerups/powerupRetirement");
+const { reelPreviewAvailable } = require("../../powerups/services/reelPreviewAvailability");
 const efficiencyMetrics = require("../../../shared/observability/cacheEfficiencyMetrics");
 const raceSlotDisplayCache = require('../services/raceSlotDisplayCache');
 const { assertLargeTeamSupport } = require("../teamRaces");
@@ -1386,7 +1388,7 @@ function buildGetRaceProgress(deps = {}) {
         : null;
       const slotPowerups = cachedSlots?.slotPowerups ??
         await racePowerupModel.findSlotPowerups(myParticipant.id);
-      powerupData.inventory = slotPowerups.map((p) => ({
+      powerupData.inventory = slotPowerups.filter(isVisiblePowerupInventoryRow).map((p) => ({
         id: p.id,
         type: p.type,
         rarity: p.rarity,
@@ -1427,7 +1429,7 @@ function buildGetRaceProgress(deps = {}) {
       // entirely in the overlay — stated so it stays that way.
       //
       // Additive: an integer >= 0, ignored by every frozen client.
-      if (powerupData.inventory.some((p) => p.status === "HELD")) {
+      if (slotPowerups.some((p) => p.status === "HELD")) {
         try {
           powerupData.discardCapRemaining = await discardCapCache.getDiscardCapRemaining({
             userId,
@@ -1687,7 +1689,19 @@ function buildGetRaceProgress(deps = {}) {
         snapshot: balanceConfigSnapshot,
         supportsPowerups5,
       });
-      if (dropOdds) powerupData.dropOdds = dropOdds;
+      if (dropOdds) {
+        powerupData.dropOdds = {
+          ...dropOdds,
+          // Request-derived decoration metadata belongs to the viewer overlay,
+          // never the shared snapshot. Reuse raw effects before privacy filters;
+          // absence is unknown, not proof that a one-shot guarantee is absent.
+          reelPreviewAvailable: reelPreviewAvailable({
+            byType: dropOdds.byType,
+            effects: snapshot.activeEffects,
+            participantId: myParticipant?.id,
+          }),
+        };
+      }
     }
 
     if (powerupData) {
