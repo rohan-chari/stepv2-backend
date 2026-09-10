@@ -13,7 +13,11 @@ function buildGetCharacterWardrobe(dependencies = {}) {
       dependencies.wardrobePrisma,
     );
 }
+function buildGetAccessoryPreview(dependencies = {}) {
+  return (opts) => (dependencies.getAccessoryPreview || cosmetics.getAccessoryPreview)(opts, dependencies.wardrobePrisma);
+}
 module.exports = {
+  buildGetAccessoryPreview,
   buildGetCharacters,
   buildGetCharacterWardrobe,
   getCharacters: buildGetCharacters(),

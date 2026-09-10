@@ -6,7 +6,7 @@ const {
   serializeEquippedAccessory,
   buildEquipmentMap,
 } = require("./shopCosmetics");
-const { findConflictingEquipment } = require("./accessoryCompatibility");
+const { findConflictingEquipment, itemsConflict } = require("./accessoryCompatibility");
 const {
   memberDiscount,
   priceFields,
@@ -283,6 +283,90 @@ async function getCharacterWardrobe(opts, db = prisma) {
       rows.length > page.limit ? page.cursor(rows[page.limit - 1]) : null,
   };
 }
+// Read-only mannequin projection. Every collection is bounded by one chosen
+// character or the five outfit slots; never fetch the user's full catalog.
+async function getAccessoryPreview(opts, db = prisma) {
+  return readSnapshot(async (tx) => {
+    const candidates = await tx.$queryRaw`
+      SELECT i.*, EXISTS(SELECT 1 FROM user_shop_items o
+        WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id) AS owned
+      FROM shop_items i WHERE i.id=${opts.itemId} LIMIT 1`;
+    const candidate = itemFromDb(candidates[0]);
+    if (!visible(candidate, opts) || !SLOTS.includes(candidate.slot) ||
+        (candidate.earnOnly && !candidate.owned)) {
+      throw new AppError("Shop item not found", "ITEM_NOT_FOUND", 404);
+    }
+    const unavailable = (reason) => ({
+      itemId: candidate.id, canPreview: false, unavailableReason: reason,
+      usedFallbackCharacter: false, character: null, accessories: [],
+    });
+    if (!candidate.active) return unavailable("inactive");
+
+    // The existing composite fit indexes support candidate/character lookups.
+    // Rank eligible rows in SQL and return only the chosen mannequin.
+    const characters = await tx.$queryRaw`
+      WITH current_character AS (
+        SELECT COALESCE((SELECT e.shop_item_id FROM user_equipped_accessories e
+          WHERE e.user_id=${opts.userId} AND e.slot='CHARACTER'), 'default') AS key
+      ), eligible AS (
+        SELECT 'default' AS key, 'Capybara' AS name, true AS owned,
+          NULL::jsonb AS item, 0 AS sort_order
+        WHERE EXISTS(SELECT 1 FROM shop_item_character_fits f
+          WHERE f.accessory_shop_item_id=${candidate.id} AND f.character_key='default')
+        UNION ALL
+        SELECT i.id AS key, i.name, EXISTS(SELECT 1 FROM user_shop_items o
+          WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id) AS owned,
+          to_jsonb(i) AS item, i.sort_order
+        FROM shop_items i
+        WHERE i.slot='CHARACTER' AND i.active AND ${!!opts.supportsCharacters}
+          AND (${opts.channel === "testflight"} OR NOT i.test_only)
+          AND (${!!opts.supportsRemoteAssets} OR NOT i.remote_only)
+          AND (NOT i.earn_only OR EXISTS(SELECT 1 FROM user_shop_items o
+            WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id))
+          AND EXISTS(SELECT 1 FROM shop_item_character_fits f
+            WHERE f.accessory_shop_item_id=${candidate.id} AND f.character_key=i.id)
+      )
+      SELECT e.*, c.key AS "activeCharacterKey" FROM eligible e CROSS JOIN current_character c
+      ORDER BY CASE WHEN e.key=c.key THEN 0 WHEN e.key='default' THEN 1 ELSE 2 END,
+        e.sort_order,e.key LIMIT 1`;
+    const chosen = characters[0];
+    if (!chosen) return unavailable("no_compatible_character");
+
+    let savedItems = [];
+    if (chosen.owned) {
+      const state = await readState(tx, opts.userId, [chosen.key]);
+      const ids = outfitState(state, chosen.key).items
+        .filter((r) => SLOTS.includes(r.slot)).map((r) => r.shopItemId);
+      if (ids.length) {
+        const rows = await tx.$queryRaw`
+          SELECT i.* FROM shop_items i WHERE i.id=ANY(${ids}::text[])
+            AND i.active AND EXISTS(SELECT 1 FROM user_shop_items o
+              WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id)
+            AND EXISTS(SELECT 1 FROM shop_item_character_fits f
+              WHERE f.accessory_shop_item_id=i.id AND f.character_key=${chosen.key})`;
+        savedItems = rows.map(itemFromDb).filter((i) => visible(i, opts));
+      }
+    }
+    // Candidate wins its slot and every tag conflict. Remaining legacy
+    // conflicts resolve in the established bounded slot order, without repair.
+    const outfit = [candidate];
+    for (const slot of SLOTS) {
+      if (slot === candidate.slot) continue;
+      const i = savedItems.find((row) => row.slot === slot);
+      if (i && !outfit.some((kept) => itemsConflict(i, kept))) outfit.push(i);
+    }
+    outfit.sort((a, b) => SLOTS.indexOf(a.slot) - SLOTS.indexOf(b.slot));
+    return {
+      itemId: candidate.id, canPreview: true, unavailableReason: null,
+      usedFallbackCharacter: chosen.key !== chosen.activeCharacterKey,
+      character: {
+        characterKey: chosen.key, name: chosen.name,
+        item: chosen.item ? serializeEquippedAccessory({ shopItem: itemFromDb(chosen.item) }) : null,
+      },
+      accessories: outfit.map((shopItem) => serializeEquippedAccessory({ shopItem })),
+    };
+  }, db);
+}
 function conflict(state, key, opts, code) {
   fail(code, 409, {
     current: {
@@ -427,6 +511,7 @@ async function mutate(opts, activation) {
 const saveCharacterOutfit = (opts) => mutate(opts, false);
 const activateCharacter = (opts) => mutate(opts, true);
 module.exports = {
+  getAccessoryPreview,
   getCharacters,
   getCharacterWardrobe,
   saveCharacterOutfit,
