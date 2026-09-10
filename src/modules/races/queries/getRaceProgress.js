@@ -211,6 +211,7 @@ function buildDropOdds({
   persistedParticipants,
   snapshot,
   supportsPowerups5 = false,
+  persistedPreviewContext = null,
 }) {
   const { version, config } = snapshot;
 
@@ -223,7 +224,7 @@ function buildDropOdds({
   // can lead the persisted column by a replay cycle, which would make the
   // quoted odds disagree with the real roll in exactly the manipulated case
   // this feature exists to fix (the invariant at powerupOdds.js:161-163).
-  const { position, totalParticipants, myTeamValid } = rawPositionFor({
+  const { position, totalParticipants, myTeamValid } = persistedPreviewContext || rawPositionFor({
     participants: persistedParticipants,
     race,
     userId,
@@ -246,9 +247,12 @@ function buildDropOdds({
   // the shipped odds sheet hides itself entirely if that block stops summing
   // to 1.0 ± 0.01.
   const myTotalSteps =
+    persistedPreviewContext?.myTotalSteps ??
     stepTotals.find(({ participant }) => participant.userId === userId)?.totalSteps ?? 0;
   const ctx = buildRollContext({
-    stepTotals: stepTotals.map(({ totalSteps }) => totalSteps || 0),
+    stepTotals: persistedPreviewContext
+      ? [persistedPreviewContext.minTotalSteps, persistedPreviewContext.maxTotalSteps]
+      : stepTotals.map(({ totalSteps }) => totalSteps || 0),
     myTotalSteps,
     position,
     totalParticipants,
@@ -1672,35 +1676,44 @@ function buildGetRaceProgress(deps = {}) {
 
     // §5.3 — additive `dropOdds`, derived from the SAME helpers the roll uses
     // and the SAME true step totals openMysteryBox ranks on.
-    if (powerupData && balanceConfigSnapshot && !race._pageProjection) {
-      const dropOdds = buildDropOdds({
-        race,
-        userId,
-        // ctx inputs: the SAME true (never illusion-masked) effective totals the
-        // roll builds its exclusion predicates from.
-        stepTotals: viewerEntries.map((e) => ({
-          participant: { userId: e.userId, team: e.team ?? null },
-          totalSteps: Math.max(0, Number(e.totalSteps) || 0),
-        })),
-        // Position input: the PERSISTED rows, which is what the roll ranks on.
-        persistedParticipants: (race._projectionParticipants || race.participants).filter(
-          (p) => p.status === "ACCEPTED"
-        ),
-        snapshot: balanceConfigSnapshot,
-        supportsPowerups5,
-      });
-      if (dropOdds) {
-        powerupData.dropOdds = {
-          ...dropOdds,
-          // Request-derived decoration metadata belongs to the viewer overlay,
-          // never the shared snapshot. Reuse raw effects before privacy filters;
-          // absence is unknown, not proof that a one-shot guarantee is absent.
-          reelPreviewAvailable: reelPreviewAvailable({
-            byType: dropOdds.byType,
-            effects: snapshot.activeEffects,
-            participantId: myParticipant?.id,
-          }),
-        };
+    if (powerupData && balanceConfigSnapshot) {
+      // A visible page cannot determine whole-race reward eligibility. Read a
+      // single persisted summary instead of hydrating/replaying the roster.
+      const persistedPreviewContext = race._pageProjection &&
+        typeof participantModel.findMysteryBoxPreviewContext === "function"
+        ? await participantModel.findMysteryBoxPreviewContext(race.id, userId)
+        : null;
+      if (!race._pageProjection || persistedPreviewContext) {
+        const dropOdds = buildDropOdds({
+          race,
+          userId,
+          // ctx inputs: the SAME true (never illusion-masked) effective totals the
+          // roll builds its exclusion predicates from.
+          stepTotals: viewerEntries.map((e) => ({
+            participant: { userId: e.userId, team: e.team ?? null },
+            totalSteps: Math.max(0, Number(e.totalSteps) || 0),
+          })),
+          // Position input: the PERSISTED rows, which is what the roll ranks on.
+          persistedParticipants: (race._projectionParticipants || race.participants).filter(
+            (p) => p.status === "ACCEPTED"
+          ),
+          snapshot: balanceConfigSnapshot,
+          supportsPowerups5,
+          persistedPreviewContext,
+        });
+        if (dropOdds) {
+          powerupData.dropOdds = {
+            ...dropOdds,
+            // Request-derived decoration metadata belongs to the viewer overlay,
+            // never the shared snapshot. Reuse raw effects before privacy filters;
+            // absence is unknown, not proof that a one-shot guarantee is absent.
+            reelPreviewAvailable: reelPreviewAvailable({
+              byType: dropOdds.byType,
+              effects: snapshot.activeEffects,
+              participantId: myParticipant?.id,
+            }),
+          };
+        }
       }
     }
 

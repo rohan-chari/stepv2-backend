@@ -146,4 +146,57 @@ describe('backend catalog authority — real HTTP, Postgres and Redis', () => {
     await lucky(f, f.alice, 'EXPIRED');
     assert.equal((await get(f.alice, `/races/${f.race.id}/progress`)).progress.powerupData.dropOdds.reelPreviewAvailable, true);
   });
+
+  for (const rawFallback of [false, true]) {
+    it(`paged preview covers the whole roster, including an off-page viewer (raw fallback ${rawFallback})`, async () => {
+      const f = await fixture();
+      await prisma.race.update({ where: { id: f.race.id }, data: { timezone: 'UTC' } });
+      await prisma.raceParticipant.update({ where: { id: f.participants[0].id }, data: { rawSteps: 3000, totalSteps: 1000 } });
+      await prisma.raceParticipant.update({ where: { id: f.participants[1].id }, data: { rawSteps: rawFallback ? null : 1000, totalSteps: 3000 } });
+      await prisma.stepSample.createMany({ data: [f.alice, f.bob].map((owner, index) => ({
+        userId: owner.user.id, periodStart: new Date(f.race.startedAt.getTime() + 1000),
+        periodEnd: new Date(f.race.startedAt.getTime() + 600000), steps: index === 0 ? 1000 : 3000,
+      })) });
+      const path = `/races/${f.race.id}/progress?view=participants-v1&offset=0&limit=1`;
+      for (const headers of [CURRENT, LEGACY]) {
+        const full = (await get(f.alice, `/races/${f.race.id}/progress`, headers)).progress.powerupData.dropOdds;
+        for (const pass of ['cold', 'warm']) {
+          const paged = (await get(f.alice, path, headers)).progress;
+          assert.ok(paged.powerupData.dropOdds, `${pass}: paged odds must be present`);
+          assert.equal(paged.powerupData.dropOdds.reelPreviewAvailable, true);
+          assert.deepEqual(paged.powerupData.dropOdds, full);
+        }
+      }
+      await lucky(f, f.alice);
+      assert.equal((await get(f.alice, path)).progress.powerupData.dropOdds.reelPreviewAvailable, false);
+      assert.equal((await get(f.bob, path)).progress.powerupData.dropOdds.reelPreviewAvailable, true);
+    });
+  }
+
+  it('paged fallback ranks frozen finish totals but eligibility uses persisted totals', async () => {
+    const f = await fixture();
+    await prisma.race.update({ where: { id: f.race.id }, data: { timezone: 'UTC' } });
+    await prisma.raceParticipant.update({ where: { id: f.participants[0].id }, data: { rawSteps: null, totalSteps: 2000 } });
+    await prisma.raceParticipant.update({ where: { id: f.participants[1].id }, data: {
+      rawSteps: 1000, totalSteps: 1000, finishTotalSteps: 3000, finishedAt: new Date(), placement: 1,
+    } });
+    const odds = (await get(f.alice, `/races/${f.race.id}/progress?view=participants-v1&offset=0&limit=1`)).progress.powerupData.dropOdds;
+    assert.equal(odds.position, 2);
+    assert.equal(odds.totalParticipants, 2);
+    assert.equal(odds.reelPreviewAvailable, true);
+    assert.equal(odds.byType.RED_CARD, 0, 'viewer is persisted-total leader despite ranking behind frozen finisher');
+    assert.equal(odds.byType.SECOND_WIND, 0);
+  });
+
+  it('paged tied totals preserve ordinal join order and tied-leader exclusions', async () => {
+    const f = await fixture();
+    await prisma.race.update({ where: { id: f.race.id }, data: { timezone: 'UTC' } });
+    await prisma.raceParticipant.update({ where: { id: f.participants[0].id }, data: { rawSteps: 1000, totalSteps: 1000, joinedAt: f.race.startedAt } });
+    await prisma.raceParticipant.update({ where: { id: f.participants[1].id }, data: { rawSteps: 1000, totalSteps: 1000, joinedAt: new Date(f.race.startedAt.getTime() + 1) } });
+    const odds = (await get(f.bob, `/races/${f.race.id}/progress?view=participants-v1&offset=0&limit=1`)).progress.powerupData.dropOdds;
+    assert.equal(odds.position, 2);
+    assert.equal(odds.byType.RED_CARD, 0);
+    assert.equal(odds.byType.SECOND_WIND, 0);
+    assert.equal(odds.reelPreviewAvailable, true);
+  });
 });

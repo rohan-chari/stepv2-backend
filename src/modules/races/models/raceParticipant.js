@@ -266,6 +266,36 @@ const RaceParticipant = {
     );
   },
 
+  // One-row solo box disclosure context. Match rawPositionFor's whole-race
+  // fallback and stable joinedAt tie order, plus the roll's persisted totals.
+  // Window aggregates scan only this race's accepted rows; no roster hydration.
+  async findMysteryBoxPreviewContext(raceId, userId) {
+    const rows = await prisma.$queryRaw`
+      WITH accepted AS (
+        SELECT user_id, joined_at, raw_steps, total_steps,
+          CASE WHEN finished_at IS NOT NULL
+            THEN COALESCE(finish_total_steps, total_steps, 0)
+            ELSE COALESCE(total_steps, 0) END AS fallback_steps,
+          BOOL_AND(raw_steps IS NOT NULL) OVER () AS use_raw,
+          COUNT(*) OVER ()::int AS "totalParticipants",
+          MIN(COALESCE(total_steps, 0)) OVER () AS "minTotalSteps",
+          MAX(COALESCE(total_steps, 0)) OVER () AS "maxTotalSteps"
+        FROM race_participants
+        WHERE race_id = ${raceId} AND status = 'accepted'::"RaceParticipantStatus"
+      ), ranked AS (
+        SELECT *, ROW_NUMBER() OVER (
+          ORDER BY CASE WHEN use_raw THEN raw_steps ELSE fallback_steps END DESC,
+            joined_at ASC
+        )::int AS position
+        FROM accepted
+      )
+      SELECT position, "totalParticipants", "minTotalSteps", "maxTotalSteps",
+        COALESCE(total_steps, 0) AS "myTotalSteps"
+      FROM ranked WHERE user_id = ${userId} LIMIT 1
+    `;
+    return rows[0] || null;
+  },
+
   // Bounded rank context for viewer-private paged projections. The window
   // function ranks the complete accepted roster before filtering to the small
   // set of Stealth candidates, so later pages do not restart at #1.
