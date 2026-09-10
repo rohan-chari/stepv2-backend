@@ -134,6 +134,26 @@ const RaceActiveEffect = {
     }
   },
 
+  // Historical effects are retained for the race lifetime. Keep this evidence
+  // for at least one hour if a future cleanup begins deleting terminal rows.
+  async findDecoyConsumedAfter(participantId, after) {
+    return prisma.raceActiveEffect.findFirst({
+      where: { targetParticipantId: participantId, type: "DECOY", decoyConsumedAt: { gt: after } },
+      orderBy: { decoyConsumedAt: "desc" },
+      select: { decoyConsumedAt: true },
+    });
+  },
+
+  // Power Outage resolves all defenses first and commits this one bulk write.
+  // Never stamp participant rows: AoE keeps its existing single-writer policy.
+  async consumeDecoys(ids, consumedAt) {
+    if (ids.length === 0) return;
+    return prisma.raceActiveEffect.updateMany({
+      where: { id: { in: ids }, type: "DECOY" },
+      data: { status: "EXPIRED", decoyConsumedAt: consumedAt },
+    });
+  },
+
   async updateManyStatus(ids, status) {
     if (ids.length === 0) return;
     return prisma.raceActiveEffect.updateMany({ where: { id: { in: ids } }, data: { status } });

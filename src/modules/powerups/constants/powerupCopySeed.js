@@ -366,7 +366,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "DECOY",
     name: "Decoy",
     description:
-      "The next single-target attack aimed at you is redirected to a random rival. Lasts until it triggers or 24 hours",
+      "The next single-target attack aimed at you is redirected to a random rival. Lasts until it triggers or 24 hours. Wait 1 hour after it pops before using another Decoy in this race",
     shortDescription: "Redirects next attack",
     upgradeTierLabels: [],
   },

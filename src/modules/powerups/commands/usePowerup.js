@@ -219,6 +219,7 @@ const GHOST_PEPPER_FREEZE_MS = 30 * 60 * 1000;
 const GHOST_PEPPER_MULTIPLIER = 3;
 const COIN_FLIP_DURATION_MS = 60 * 60 * 1000;
 const DECOY_DURATION_MS = 24 * 60 * 60 * 1000;
+const DECOY_POST_POP_COOLDOWN_MS = 60 * 60 * 1000;
 const POWER_OUTAGE_DURATION_MS = 30 * 60 * 1000;
 const UMBRELLA_DURATION_MS = 12 * 60 * 60 * 1000;
 const RALLY_FLAG_DURATION_MS = 60 * 60 * 1000;
@@ -1125,7 +1126,7 @@ function buildUsePowerup(dependencies = {}) {
     attackerUserId,
     raceId,
   }) {
-    await effectModel.update(decoy.id, { status: "EXPIRED" });
+    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: now() });
     await appendDomainEvent(db, decoyConsumptionEvent({
       decoy, ownerParticipant, attackPowerupType, outcome, attackerUserId, raceId,
     }));
@@ -1830,6 +1831,25 @@ function buildUsePowerup(dependencies = {}) {
           { retainHeld: true },
         );
       }
+      // The participant id also scopes this history to one race. Consumption
+      // and activation share the existing race/participant serialization, so
+      // a concurrent attack cannot let a new Decoy slip past the pop boundary.
+      // Natural expiration never stamps decoyConsumedAt. Strict greater-than
+      // permits reuse at exactly one hour, with no speculative old-row backfill.
+      const recentPop = typeof effectModel.findDecoyConsumedAfter === "function"
+        ? await effectModel.findDecoyConsumedAfter(
+          myParticipant.id,
+          new Date(decoyCheckAt.getTime() - DECOY_POST_POP_COOLDOWN_MS),
+        )
+        : null;
+      if (recentPop) {
+        throw new PowerupUseError(
+          "Wait 1 hour after your Decoy pops before using another in this race",
+          409,
+          "DECOY_COOLDOWN",
+          { retainHeld: true },
+        );
+      }
     }
 
     // Imposter is permanently retired. Reject the use with a stable response
@@ -2359,7 +2379,7 @@ function buildUsePowerup(dependencies = {}) {
       // All destinations/defenses are now decided in memory. Writes retain the
       // same atomic commit as item consumption, with no per-recipient SQL.
       if (!hasInjectedDeps) {
-        await effectModel.updateManyStatus(consumedDecoyIds, "EXPIRED");
+        await effectModel.consumeDecoys(consumedDecoyIds, currentTime);
         await bulkAppendDomainEvents(db, decoyEvents);
       }
       if (typeof effectModel.updateManyStatus === "function") {

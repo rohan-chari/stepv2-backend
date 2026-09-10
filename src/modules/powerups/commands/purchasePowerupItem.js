@@ -91,14 +91,6 @@ function buildPurchasePowerupItem(dependencies = {}) {
         });
         if (existing) return idempotentResultFromRequest(existing);
 
-        if (powerupType === "DECOY" || String(sku || "").toUpperCase() === "POWERUP_DECOY") {
-          throw new PowerupPurchaseError(
-            "Decoy is no longer for sale.",
-            409,
-            "POWERUP_NOT_FOR_SALE",
-          );
-        }
-
         // Find the active catalog item (by sku, else by powerupType). The
         // testOnly filter blocks a prod-channel client from buying a hidden
         // powerup even if it somehow learned the sku/type.

@@ -55,7 +55,7 @@ const POWERUP_STACKING_GUIDE = Object.freeze({
   GHOST_PEPPER: blockedBuff("Ghost Pepper"),
   COIN_FLIP: rule("ALLOWED", "CONDITIONAL", "Repeated wins add (2x + 2x = 4x). Losses clamp at M-0.5, and a mixed win/loss is also M-0.5; freeze and Wrong Turn take precedence."),
   MYSTERY_POTION: instant("Mystery Potion resolves into its rolled mechanic immediately; stacking follows the rolled powerup's own rule."),
-  DECOY: rule("BLOCKED", "CONDITIONAL", "Only one Decoy can be active. Defense resolves Mirror before Decoy, then Compression Socks; the next eligible targeted attack redirects or is absorbed."),
+  DECOY: rule("BLOCKED", "CONDITIONAL", "One active Decoy per race. After it pops, wait 1 hour; natural expiry has no cooldown. Defenses resolve Mirror, Decoy, then Compression Socks. The next eligible attack redirects or is absorbed."),
   POWER_OUTAGE: rule("LIMITED", "CONDITIONAL", "Repeated casts are accepted and consumed while already-outaged recipients are skipped. It can coexist with Signal Jammer; Umbrella and Compression Socks can prevent it."),
   UMBRELLA: rule("BLOCKED", "CONDITIONAL", "Duplicate Umbrellas add no benefit. Umbrella separately blocks eligible area attacks such as Rainstorm and Power Outage, but not targeted attacks."),
   RALLY_FLAG: rule("BLOCKED", "CONDITIONAL", "A team with a live Rally Flag cannot raise another until the active window ends. Freeze, Rainstorm, Coin Flip, and Wrong Turn precedence still applies."),

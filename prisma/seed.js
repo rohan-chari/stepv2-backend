@@ -374,11 +374,12 @@ async function seed() {
       sku: "POWERUP_DECOY",
       name: "Decoy",
       description:
-        "Set a trap: the next single-target attack aimed at you is redirected to a random rival instead. Lasts until it triggers or 24 hours.",
+        "The next single-target attack aimed at you is redirected to a random rival. Lasts until it triggers or 24 hours. Wait 1 hour after it pops before using another Decoy in this race",
       priceCoins: 150,
       powerupType: "DECOY",
       active: true,
-      testOnly: true,
+      dailyRewardEligible: false,
+      testOnly: false,
       sortOrder: 13,
     },
     {
@@ -468,7 +469,7 @@ async function seed() {
       sortOrder: 20,
     },
   ].map((item) => ({
-    // Fresh databases state the daily-pool policy for every row. Hitchhike's
+    // Fresh databases state the daily-pool policy for every row. Hitchhike and Decoy's
     // explicit false above wins; all other currently eligible store items are
     // true even if a future Prisma default changes.
     dailyRewardEligible: true,

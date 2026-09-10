@@ -109,8 +109,6 @@ function createShopRouter(dependencies = {}) {
       // never learn these skus (the catalog filters them), but a stale/replayed
       // request must not slip a wave-5 item into an unsupported client.
       if (
-        req.body?.powerupType !== "DECOY" &&
-        req.body?.sku !== "POWERUP_DECOY" &&
         (POWERUPS5_GATED_TYPES.includes(req.body?.powerupType) ||
           POWERUPS5_SKUS.includes(req.body?.sku)) &&
         !req.clientFeatures.has("powerups5")

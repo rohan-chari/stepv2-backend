@@ -450,35 +450,34 @@ describe("2026-09-06 backend feature batch", () => {
     }), 1);
   });
 
-  it("keeps Decoy out of sale surfaces while preserving existing inventory", async () => {
+  it("restores Decoy sale while preserving inventory and ordinary ad gates", async () => {
     const user = await createTestUser({ displayName: "DecoyOwner", coins: 1_000 });
-    const catalog = await request(server.baseUrl, "GET", "/shop/powerups", {
-      token: user.token,
-      headers: { "X-Client-Features": "powerups5" },
+    await prisma.powerupShopItem.upsert({
+      where: { sku: "POWERUP_DECOY" },
+      update: { active: true, testOnly: false, priceCoins: 150 },
+      create: { sku: "POWERUP_DECOY", powerupType: "DECOY", name: "Decoy", priceCoins: 150, active: true, testOnly: false },
     });
+    const headers = { "X-Client-Features": "powerups5" };
+    const catalog = await request(server.baseUrl, "GET", "/shop/powerups", { token: user.token, headers });
     assert.equal(catalog.status, 200);
-    assert.equal((await catalog.json()).items.some((row) => row.powerupType === "DECOY"), false);
-
+    assert.equal((await catalog.json()).items.find((row) => row.powerupType === "DECOY").priceCoins, 150);
     const purchase = await request(server.baseUrl, "POST", "/shop/powerups/purchase", {
-      token: user.token,
-      headers: { "Idempotency-Key": "decoy-coin-denial" },
+      token: user.token, headers: { ...headers, "Idempotency-Key": "decoy-coin-restored" },
       body: { sku: "POWERUP_DECOY", powerupType: "DECOY" },
     });
-    assert.equal(purchase.status, 409);
-    assert.equal((await purchase.json()).code, "POWERUP_NOT_FOR_SALE");
-
+    assert.equal(purchase.status, 200);
+    assert.equal((await purchase.json()).inventory.quantity, 1);
     const unlock = await request(server.baseUrl, "POST", "/shop/powerups/unlock-with-ads", {
-      token: user.token,
-      headers: { "Idempotency-Key": "decoy-ad-denial" },
+      token: user.token, headers: { ...headers, "Idempotency-Key": "decoy-ad-affordable" },
       body: { sku: "POWERUP_DECOY" },
     });
-    assert.equal(unlock.status, 409);
-    assert.equal((await unlock.json()).code, "POWERUP_NOT_FOR_SALE");
-    assert.equal(await prisma.powerupPurchaseRequest.count({ where: { userId: user.user.id } }), 0);
-    assert.equal((await prisma.user.findUnique({ where: { id: user.user.id } })).coins, 1_000);
+    assert.equal(unlock.status, 400);
+    assert.equal((await unlock.json()).code, "ALREADY_AFFORDABLE");
+    assert.equal(await prisma.powerupPurchaseRequest.count({ where: { userId: user.user.id } }), 1);
+    assert.equal((await prisma.user.findUnique({ where: { id: user.user.id } })).coins, 850);
   });
 
-  it("honors one grandfathered verified Decoy ad grant but accepts no new purchase", async () => {
+  it("honors a grandfathered verified Decoy ad grant and retains inactive-item gating", async () => {
     const user = await createTestUser({ displayName: "GrandfatheredDecoy", coins: 140 });
     await prisma.powerupShopItem.upsert({
       where: { sku: "POWERUP_DECOY" },
@@ -553,8 +552,8 @@ describe("2026-09-06 backend feature batch", () => {
         body: { sku: "POWERUP_DECOY" },
       },
     );
-    assert.equal(blocked.status, 409);
-    assert.equal((await blocked.json()).code, "POWERUP_NOT_FOR_SALE");
+    assert.equal(blocked.status, 404);
+    assert.deepEqual(await blocked.json(), { error: "Powerup not found" });
     assert.equal(await prisma.powerupPurchaseRequest.count({
       where: { userId: user.user.id },
     }), 1);

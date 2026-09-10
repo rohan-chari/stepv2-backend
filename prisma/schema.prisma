@@ -2543,6 +2543,7 @@ model RaceActiveEffect {
   status              ActiveEffectStatus @default(ACTIVE)
   startsAt            DateTime           @map("starts_at")
   expiresAt           DateTime?          @map("expires_at")
+  decoyConsumedAt     DateTime?          @map("decoy_consumed_at")
   metadata            Json?
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
@@ -2558,6 +2559,7 @@ model RaceActiveEffect {
   @@unique([powerupId, targetParticipantId])
   @@index([targetParticipantId, status])
   @@index([raceId, status])
+  @@index([targetParticipantId, type, decoyConsumedAt], map: "race_active_effects_decoy_cooldown_idx")
   @@map("race_active_effects")
 }
 

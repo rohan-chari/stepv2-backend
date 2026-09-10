@@ -106,17 +106,12 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
               select: { id: true },
             })
           : null;
-        if (decoyRequest && !grandfatheredGrant) {
-          throw new UnlockWithAdsError(
-            "Decoy is no longer for sale.",
-            409,
-            "POWERUP_NOT_FOR_SALE",
-          );
-        }
         let item = await tx.powerupShopItem.findFirst({
           where: {
             sku,
-            ...(decoyRequest ? {} : { active: true }),
+            // Preserve previously verified grants for an inactive historical row.
+            // New Decoy watches follow the same active-sale rule as other items.
+            ...(grandfatheredGrant ? {} : { active: true }),
             ...testOnlyFilter(channel),
           },
         });
