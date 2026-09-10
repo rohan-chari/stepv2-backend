@@ -69,6 +69,8 @@ function buildSeededChallengeMaterialization() {
       }
     }
     await tx.seededChallengePreparationGroup.update({where:{id:group.id},data:{state:'MATERIALIZED',materializedAt:now}});
+    await require('./raceCacheInvalidation').raceChanged(raceId);
+    await require('./raceCacheInvalidation').membershipChanged(rows);
     return {changed:rows.length>0,userIds:rows.map(r=>r.userId)};
   }
   return {processRace};

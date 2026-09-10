@@ -6,6 +6,14 @@
 
 BEGIN;
 
+-- Invocation guard: the managed wrapper retains an invalidation manifest.
+DO $$ BEGIN
+  IF current_setting('app.cache_efficiency_managed', true) IS DISTINCT FROM '1' THEN
+    RAISE EXCEPTION 'Run scripts/reset-app-review.js; direct SQL would bypass cache invalidation';
+  END IF;
+END $$;
+
+
 CREATE TEMP TABLE review_user_ids ON COMMIT DROP AS
 SELECT id
 FROM users
@@ -31,6 +39,7 @@ DELETE FROM race_participants
 WHERE user_id IN (SELECT id FROM review_user_ids);
 
 -- User-owned data without ON DELETE CASCADE from users.
+DELETE FROM step_milestone_claims WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM steps WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM step_samples WHERE user_id IN (SELECT id FROM review_user_ids);
 DELETE FROM friendships
@@ -49,6 +58,6 @@ DELETE FROM shop_purchase_requests WHERE user_id IN (SELECT id FROM review_user_
 DELETE FROM race_messages WHERE sender_id IN (SELECT id FROM review_user_ids);
 
 -- Drop the flagged supporting cast (re-created by the seed). Reviewer stays.
-DELETE FROM users WHERE is_review_account = true;
+DELETE FROM users WHERE is_review_account = true AND apple_id IS DISTINCT FROM 'review-account-v1';
 
 COMMIT;

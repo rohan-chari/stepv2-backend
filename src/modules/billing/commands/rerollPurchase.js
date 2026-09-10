@@ -1,3 +1,4 @@
+const { slotsChanged } = require('../../powerups/services/raceSlotCacheInvalidation');
 const {createHash}=require('node:crypto');
 const {AppError}=require('../../../shared/errors/AppError');
 const {deductCoinsAtomic}=require('../../../shared/economy/deductCoinsAtomic');
@@ -63,6 +64,7 @@ async function rerollPurchase({db,userId,raceId,requestKey,body,supportsPowerups
    for(let attempt=0;rolled.type==='FANNY_PACK'&&maxSlots>DEFAULT_POWERUP_SLOTS&&attempt<10;attempt++)rolled=rollPowerup(position,totalParticipants,Math.random,{ctx,config});
    rolled=resolveNullRoll(rolled,config,ctx);const rarity=canonicalRarityFor(rolled.type,rolled.rarity,config,null);
    const changed=await tx.racePowerup.updateMany({where:{id,status:'HELD',usedAt:null,rerolledAt:null,upgradeLevel:0},data:{type:rolled.type,rarity,configVersion,rerolledAt:now}});
+   if(changed.count) await slotsChanged({ participantId: participant.id });
    if(changed.count!==1)throw error('Item already rerolled','ALREADY_REROLLED');
    await tx.racePowerupEvent.create({data:{raceId,actorUserId:userId,eventType:'POWERUP_REROLLED',powerupType:rolled.type,description:`A runner rerolled a mystery box: ${POWERUP_NAMES[rolled.type]||rolled.type}!`}});
    results.push({powerupId:id,type:rolled.type,rarity,rerolled:true,rerolledAt:now.toISOString(),configVersion});

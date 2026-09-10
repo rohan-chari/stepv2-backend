@@ -70,6 +70,7 @@ function buildSwitchRaceTeam(dependencies = {}) {
       ? await tx.raceParticipant.update({ where: { id: participant.id }, data: { team } })
       : await participantModel.update(participant.id, { team });
 
+    await require("../services/raceCacheInvalidation").membershipChanged([{ raceId, userId }]);
     await deferUntilAfterCommit(() => events.emit("RACE_TEAM_SWITCHED", {
       raceId,
       userId,

@@ -1,3 +1,4 @@
+const { slotsChanged } = require('../services/raceSlotCacheInvalidation');
 const { RacePowerup } = require("../models/racePowerup");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
@@ -1069,6 +1070,7 @@ async function refundRedeemedOnRejection({
       },
       data: { status: "DISCARDED" },
     });
+    if (discarded.count) await slotsChanged({ participantId: powerup.participantId });
     if (discarded.count !== 1) return;
     await tx.userPowerupItem.upsert({
       where: { userId_powerupType: { userId, powerupType: powerup.type } },
@@ -1513,6 +1515,7 @@ function buildUsePowerup(dependencies = {}) {
         where: { id: powerupId, userId, raceId, status: "HELD" },
         data: fields,
       });
+      if (consumed.count) await slotsChanged({ participantId: powerup.participantId });
       if (consumed.count !== 1) {
         throw new PowerupUseError(
           "This powerup has already been used or discarded",
@@ -1961,6 +1964,7 @@ function buildUsePowerup(dependencies = {}) {
           where: { id: powerupId, userId, raceId, status: "HELD", type: "QUICKSAND" },
           data: { status: "USED", usedAt: currentTime, targetUserId: null, upgradeLevel: 0 },
         });
+        if (claimed.count) await slotsChanged({ participantId: lockedMe.id });
         if (claimed.count !== 1) {
           throw new PowerupUseError("This Quicksand has already been used", 409, "POWERUP_ALREADY_USED");
         }

@@ -34,10 +34,12 @@ function buildMarkRaceResultsSeen(dependencies = {}) {
       throw new MarkRaceResultsSeenError("raceIds must be an array of strings", 400);
     }
     if (!racePayoutDoubleCapability) {
-      return db.raceParticipant.updateMany({
+      const result = await db.raceParticipant.updateMany({
         where: { userId, raceId: { in: raceIds } },
         data: { resultsSeenAt: new Date() },
       });
+      if (result.count) await require('../services/raceListCache').invalidateUser(userId);
+      return result;
     }
 
     const user = await db.user.findUnique({
@@ -97,6 +99,8 @@ function buildMarkRaceResultsSeen(dependencies = {}) {
           data: { status: "FORFEITED", forfeitedAt: new Date() },
         });
       }
+      if (seen.count) await require('../../../db').deferUntilAfterCommit(() =>
+        require('../services/raceListCache').invalidateUser(userId));
       return seen;
     }, { ...dependencies, prisma: db });
   };

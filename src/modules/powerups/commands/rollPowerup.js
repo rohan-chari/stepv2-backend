@@ -1,3 +1,4 @@
+const { slotsChanged } = require('../services/raceSlotCacheInvalidation');
 const { Prisma } = require("@prisma/client");
 const crypto = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
@@ -206,6 +207,7 @@ function buildRollPowerup(dependencies = {}) {
         }
         if (boxesToCreate.length > 0) {
           await tx.racePowerup.createMany({ data: boxesToCreate });
+          await slotsChanged({ participantId });
         }
         if (eventsToCreate.length > 0) {
           await tx.racePowerupEvent.createMany({ data: eventsToCreate });
@@ -310,6 +312,7 @@ function buildRollPowerup(dependencies = {}) {
                 earnedAtSteps: currentThreshold,
               },
             });
+            await slotsChanged({ participantId });
           } catch (e) {
             // Belt-and-suspenders: the pre-check above should prevent this, but
             // if a duplicate still slips through, do NOT keep using the aborted

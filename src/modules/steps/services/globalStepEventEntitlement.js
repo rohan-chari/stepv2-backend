@@ -1,3 +1,4 @@
+const { entitlementsChanged } = require('./eventDisplayCacheInvalidation');
 const {
   FALLBACK_EVENT_TIMEZONE,
   LOCAL_ENTITLEMENTS,
@@ -41,12 +42,7 @@ async function invalidateHomeActiveGlobalEvent(userIds) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   if (ids.length === 0) return false;
   try {
-    const derivedCache = require("../../../shared/cache/derivedCache");
-    const cacheKeys = require("../../../shared/cache/cacheKeys");
-    await derivedCache.invalidate({
-      keys: ids.map((userId) => cacheKeys.homeActiveGlobalEvent(userId)),
-      prefix: cacheKeys.PREFIX.HOME_ACTIVE_GLOBAL_EVENT,
-    });
+    await entitlementsChanged(ids);
     return true;
   } catch {
     return false;
@@ -333,6 +329,7 @@ async function materializePreparedEntitlementsSetBased(tx, {
     await deferUntilAfterCommit(() =>
       redisCache.publishDurableQueueWakeup("domain-event"));
   }
+  if (counts.created > 0) await entitlementsChanged(rows.map(row => row.userId));
   return counts;
 }
 
@@ -430,6 +427,7 @@ async function ensureEntitlementForUser(tx, {
       ...(window.startsAt <= current ? { lateEntitlementsCreated: 1 } : {}),
     });
   } catch {}
+  await entitlementsChanged([user.id]);
   return entitlement;
 }
 
@@ -561,6 +559,7 @@ SELECT person.id, person.timezone,
           fallbackEntitlementsCreated: prepared.filter((row) => row.fallback).length,
         });
       } catch {}
+      if (insert.count) await entitlementsChanged(prepared.map(row => row.userId));
       return insert.count || 0;
     }, { timeout: 15_000, maxWait: 10_000 });
     if (!returnPage) return created;
@@ -729,6 +728,7 @@ async function processDueEntitlementBoundaries({
             where: { id: entitlement.id, startProcessedAt: null },
             data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
           });
+          await entitlementsChanged([entitlement.userId]);
           return { id: entitlement.id, userId: entitlement.userId, stale: true };
         }
 
@@ -801,6 +801,7 @@ async function processDueEntitlementBoundaries({
             startProcessedAt: current,
           },
         });
+        await entitlementsChanged([entitlement.userId]);
         return { id: entitlement.id, userId: entitlement.userId };
       }, transactionOptions);
     } catch (error) {
@@ -844,6 +845,7 @@ async function processDueEntitlementBoundaries({
           where: { id: entitlement.id, endProcessedAt: null },
           data: { endProcessedAt: current },
         });
+        await entitlementsChanged([entitlement.userId]);
         return { id: entitlement.id, userId: entitlement.userId };
       }, transactionOptions);
     } catch (error) {
@@ -1001,6 +1003,7 @@ async function processDueEndMicroBatch({ prisma = defaultPrisma, now = new Date(
     await tx.globalStepEventEntitlement.updateMany({
       where: { id: { in: claimedIds }, endProcessedAt: null }, data: { endProcessedAt: now },
     });
+    await entitlementsChanged(entitlements.map(row => row.userId));
     return entitlements;
   }, bounded ? { timeout: 1500, maxWait: 100 } : { timeout: 15_000, maxWait: 10_000 });
 }
@@ -1174,6 +1177,7 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
       where: { id: { in: staleIds }, startProcessedAt: null },
       data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current, startNextAttemptAt: null },
     });
+    await entitlementsChanged(ordered.map(row => row.userId));
     return {
       starts: activeIds.length + noRaceIds.length + staleIds.length,
       stale: staleIds.length,
@@ -1257,6 +1261,7 @@ async function ensureRaceGlobalEventEligibility({
           where: { id: entitlement.id },
           data: { startOutcome: outcome, startProcessedAt: entitlement.startProcessedAt || current },
         });
+        await entitlementsChanged([entitlement.userId]);
         if (outcome === START_OUTCOMES.ACTIVATED_LATE_JOIN) {
           await appendLateActivationEvent(tx, {
             event: entitlement.event,

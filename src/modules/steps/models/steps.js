@@ -1,3 +1,4 @@
+const { milestonesChanged } = require('../services/milestoneCacheInvalidation');
 const { prisma } = require("../../../db");
 const {
   bumpScoringInputVersion,
@@ -27,6 +28,7 @@ const Steps = {
       const row = await tx.step.create({
         data: { userId, steps, date: new Date(date), stepGoal },
       });
+      await milestonesChanged(row.userId, row.date);
       if (!noopSuppression) {
         await bumpScoringInputVersion(tx, userId);
         return row;
@@ -39,13 +41,19 @@ const Steps = {
 
   async update(id, fields, { noopSuppression = false } = {}) {
     return prisma.$transaction(async (tx) => {
-      const before = noopSuppression
+      const before = (noopSuppression || fields.date != null || fields.userId != null)
         ? await tx.step.findUnique({ where: { id } })
         : null;
       const state = noopSuppression
         ? await lockScoringInputState(tx, before?.userId)
         : null;
       const row = await tx.step.update({ where: { id }, data: fields });
+      if (!before || Number(before.steps) !== Number(row.steps) || fields.date != null || fields.userId != null) {
+        await milestonesChanged(row.userId, row.date);
+        if (before && (fields.date != null || fields.userId != null)) {
+          await milestonesChanged(before.userId, before.date);
+        }
+      }
       if (!noopSuppression) {
         await bumpScoringInputVersion(tx, row.userId);
         return row;

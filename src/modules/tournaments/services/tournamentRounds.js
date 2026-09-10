@@ -114,6 +114,9 @@ async function createRoundRaces({
       at: startedAt,
     });
 
+    await require('../../races/services/raceCacheInvalidation').membershipChanged(
+      [userA, userB].map((userId) => ({ raceId: race.id, userId })),
+    );
     created.push({
       raceId: race.id,
       round,

@@ -496,6 +496,8 @@ function buildRespondToRaceInvite(dependencies = {}) {
       );
     }
 
+    await require("../services/raceCacheInvalidation").membershipChanged([{ raceId, userId }, { raceId, userId: race.creatorId }]);
+
     if (accept && buyInAmount > 0) {
       await reserveRaceBuyIn({
         awardCoinsFn: holdCoinsFn,

@@ -1,3 +1,4 @@
+const { entitlementsChanged, raceEventDisplayChanged } = require('./eventDisplayCacheInvalidation');
 // Durable lifecycle entries for a global event's race impact. These helpers
 // only establish membership; settlement remains the sole score authority.
 const {
@@ -48,6 +49,7 @@ async function createPendingEnrollments(tx, {
     data: rows,
     skipDuplicates: true,
   });
+  if (result.count) await raceEventDisplayChanged(rows.map(row => row.raceId));
   const duplicates = unique.length - (result.count || 0);
   if (duplicates > 0) {
     try {
@@ -75,6 +77,7 @@ async function createPendingEnrollmentsBatch(tx, { raceId, enrollments }) {
     data: rows,
     skipDuplicates: true,
   });
+  if (result.count) await raceEventDisplayChanged(rows.map(row => row.raceId));
   const duplicates = rows.length - (result.count || 0);
   if (duplicates > 0) {
     try {
@@ -104,6 +107,7 @@ async function createPendingEnrollmentsForRaces(tx, {
     data: rows,
     skipDuplicates: true,
   });
+  if (result.count) await raceEventDisplayChanged(rows.map(row => row.raceId));
   const duplicates = uniqueRaceIds.length - (result.count || 0);
   if (duplicates > 0) {
     try {
@@ -185,6 +189,7 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
           where: { id: entitlement.id },
           data: { startOutcome: outcome, startProcessedAt: entitlement.startProcessedAt || current },
         });
+        await entitlementsChanged([userId]);
         if (outcome === START_OUTCOMES.ACTIVATED_LATE_JOIN) {
           const { appendLateActivationEvent } = require("./globalStepEventEntitlement");
           await appendLateActivationEvent(tx, {

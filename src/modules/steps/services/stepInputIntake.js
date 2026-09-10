@@ -1,3 +1,4 @@
+const { milestonesChanged } = require('./milestoneCacheInvalidation');
 const { prisma: defaultPrisma } = require("../../../db");
 const { StepSample: defaultStepSampleModel } = require("../models/stepSample");
 const {
@@ -156,6 +157,7 @@ function buildStepInputIntake(dependencies = {}) {
       record = persistedDaily.record;
       dailyExisted = persistedDaily.existed;
       dailyStorageChanged = persistedDaily.storageChanged;
+      if (dailyStorageChanged) await milestonesChanged(userId, record.date);
     }
 
     let samplePersistence = { storageChanged: false, scoringChanged: false };

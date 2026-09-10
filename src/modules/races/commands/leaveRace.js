@@ -175,6 +175,7 @@ function buildLeaveRace(dependencies = {}) {
       await participantModel.delete(participant.id);
     }
 
+    await require("../services/raceCacheInvalidation").membershipChanged([{ raceId, userId }]);
     events.emit("RACE_PARTICIPANT_LEFT", {
       raceId,
       userId,

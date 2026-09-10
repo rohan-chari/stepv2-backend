@@ -1,3 +1,4 @@
+const { slotsChanged } = require('../services/raceSlotCacheInvalidation');
 const {
   prisma,
   runInPrismaTransaction,
@@ -378,6 +379,7 @@ function buildRerollMysteryBox(dependencies = {}) {
         rerolledAt: new Date(),
       },
     });
+    if (claimed.count) await slotsChanged({ participantId: powerup.participantId });
     if (!claimed || claimed.count === 0) {
       throw new PowerupRerollError(
         "This powerup has already been rerolled",

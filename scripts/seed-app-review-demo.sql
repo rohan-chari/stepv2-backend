@@ -6,6 +6,14 @@
 
 BEGIN;
 
+-- Invocation guard: the managed wrapper retains an invalidation manifest.
+DO $$ BEGIN
+  IF current_setting('app.cache_efficiency_managed', true) IS DISTINCT FROM '1' THEN
+    RAISE EXCEPTION 'Run scripts/seed-app-review-demo.js; direct SQL would bypass cache invalidation';
+  END IF;
+END $$;
+
+
 DO $$
 DECLARE
   demo_user_id text;

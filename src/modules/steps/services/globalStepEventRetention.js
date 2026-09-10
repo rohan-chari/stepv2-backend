@@ -83,6 +83,9 @@ async function cleanupExpiredEntitlements({
     let deletedImpacts = 0;
     let deletedEntitlements = 0;
     if (pairs.length > 0) {
+      await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit(
+        pairs.flatMap(({ userId }) => [{ domain: "summary", identity: userId }, { domain: "entitlement", identity: userId }]),
+      );
       const workRows = tx.globalEventSummaryWork
         ? await tx.globalEventSummaryWork.findMany({
           where: { OR: pairs },

@@ -1,3 +1,4 @@
+const { entitlementsChanged } = require('./eventDisplayCacheInvalidation');
 const {
   prisma: defaultPrisma,
   deferUntilAfterCommit,
@@ -382,6 +383,8 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
           ORDER BY entitlement.starts_at,entitlement.id LIMIT 100`,
           user.id,canonicalTimezone,now(),new Date(cursor.startsAt),cursor.id);
       }
+      // Fence all race/timezone variants only after this transaction commits.
+      if (updatedUser !== lockedUser || relocated.length) await entitlementsChanged([user.id]);
       return {
         timezone: updatedUser.timezone,
         user: updatedUser,

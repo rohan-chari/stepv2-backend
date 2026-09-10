@@ -58,6 +58,7 @@ const { asyncHandler } = require("../../shared/http/asyncHandler");
 // build editing an item must still bust the prod-channel copy.
 // Invalidate-only — the new row is never written into Redis here (§3).
 async function invalidateShopCaches() {
+  await require("../../shared/cache/cacheEfficiencyInvalidation").afterCommit([{ domain: "presentation", identity: "catalog" }]);
   await derivedCache.invalidate({
     keys: cacheKeys.shopCatalogVariants(),
     prefix: cacheKeys.PREFIX.SHOP_CATALOG,

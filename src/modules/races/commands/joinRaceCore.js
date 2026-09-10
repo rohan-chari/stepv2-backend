@@ -1,3 +1,5 @@
+const { membershipChanged } = require('../services/raceCacheInvalidation');
+const { slotsChanged } = require('../../powerups/services/raceSlotCacheInvalidation');
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { User } = require("../../users");
@@ -175,6 +177,7 @@ function buildJoinRaceCore(dependencies = {}) {
               earnedAtSteps: i,
             },
           });
+          await slotsChanged({ participantId: participant.id });
 
           earnedEvents.push({
             raceId: race.id,
@@ -423,6 +426,7 @@ function buildJoinRaceCore(dependencies = {}) {
                 }
               : {}),
           });
+      if (client) await membershipChanged([{ raceId, userId }]);
       if (race.status === "ACTIVE" && client) {
         await enrollIfGlobalEventActive(client, { raceId, userIds: [userId], at: new Date() });
       }

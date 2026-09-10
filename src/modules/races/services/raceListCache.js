@@ -362,6 +362,60 @@ function buildRaceListInvalidator({
   return { invalidateUser };
 }
 
+// Compatibility release A invalidates legacy keys in bounded sets. A shared
+// race edit needs one membership scan, never an unbounded Promise per member.
+const pendingLegacyUsers = new Map();
+let legacyDrainTail = Promise.resolve();
+function drainLegacyUsers() {
+  const work = legacyDrainTail.then(async () => {
+    while (pendingLegacyUsers.size) {
+      const batch = [...pendingLegacyUsers.entries()].slice(0, 256);
+      const keys = batch.flatMap(([id]) => [cacheKeys.raceListGeneration(id), cacheKeys.raceListMembership(id)]);
+      const result = await defaultRedisCache.evalLua(`
+        for i = 1, #KEYS, 2 do
+          redis.call('incr', KEYS[i])
+          redis.call('del', KEYS[i + 1])
+        end
+        return #KEYS / 2
+      `, keys);
+      if (!result.ok) return result;
+      for (const [id, revision] of batch) {
+        if (pendingLegacyUsers.get(id) === revision) pendingLegacyUsers.delete(id);
+      }
+    }
+    return { ok: true, disabled: false };
+  });
+  legacyDrainTail = work.catch(() => {});
+  return work;
+}
+async function invalidateUsers(userIds, { advanceEfficiency = true } = {}) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!defaultRedisCache.isEnabled()) return true;
+  if (advanceEfficiency) await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit(
+    ids.flatMap((identity) => [
+      { domain: "list", identity }, { domain: "invites", identity },
+    ]),
+  );
+  for (const id of ids) pendingLegacyUsers.set(id, Symbol());
+  return defaultDerivedCache.invalidate({ prefix: cacheKeys.PREFIX.RACE_LIST, run: drainLegacyUsers });
+}
+async function invalidateRaces(raceIds) {
+  if (!defaultRedisCache.isEnabled()) return;
+  const { prisma } = require("../../../db");
+  let cursor;
+  do {
+    const rows = await prisma.raceParticipant.findMany({
+      where: { raceId: { in: raceIds } },
+      select: { id: true, userId: true },
+      orderBy: { id: "asc" }, take: 256,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    if (!rows.length) break;
+    await invalidateUsers(rows.map((row) => row.userId), { advanceEfficiency: false });
+    cursor = rows.length === 256 ? rows.at(-1).id : null;
+  } while (cursor);
+}
+
 const registeredEventBuses = new WeakSet();
 const RACE_LIST_INVALIDATION_EVENTS = Object.freeze([
   "RACE_CREATED",
@@ -447,7 +501,7 @@ function registerRaceListCacheInvalidation({
 }
 
 const defaultCache = buildRaceListCache({ readRecorder: recordRead });
-const defaultInvalidator = buildRaceListInvalidator();
+const defaultInvalidator = { invalidateUser: (id) => invalidateUsers([id]) };
 
 module.exports = {
   CACHE_VERSION,
@@ -467,4 +521,6 @@ module.exports = {
   isEnabled: () => defaultRedisCache.isEnabled(),
   getStableMembership: defaultCache.getStableMembership,
   invalidateUser: defaultInvalidator.invalidateUser,
+  invalidateUsers,
+  invalidateRaces,
 };

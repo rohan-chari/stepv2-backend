@@ -15,6 +15,7 @@ const {
 const { appendDomainEvent } = require("../../domainEvents");
 
 async function invalidateGlobalEventCache() {
+  await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([{ domain: "event", identity: "global" }]);
   const derivedCache = require("../../../shared/cache/derivedCache");
   const cacheKeys = require("../../../shared/cache/cacheKeys");
   await derivedCache.invalidate({

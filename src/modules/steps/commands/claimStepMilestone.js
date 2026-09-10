@@ -1,3 +1,4 @@
+const { milestonesChanged } = require('../services/milestoneCacheInvalidation');
 const { prisma } = require("../../../db");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
 const {
@@ -98,6 +99,8 @@ function buildClaimStepMilestone(deps = {}) {
       throw error;
     }
 
+    // The claim is already durable even if the subsequent coin award fails.
+    await milestonesChanged(userId, localDate);
     const result = await awardCoinsFn({
       userId,
       amount: milestone.coins,

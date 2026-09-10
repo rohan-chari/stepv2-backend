@@ -30,6 +30,7 @@ const V1_IDLE_DELAY_MS = 60_000;
 const EMPTY_TICK_LOG_INTERVAL_MS = 60_000;
 
 async function invalidateUser(userId) {
+  await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([{ domain: "summary", identity: userId }]);
   await invalidate({
     keys: [cacheKeys.homeImpactSummary(userId)],
     prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,

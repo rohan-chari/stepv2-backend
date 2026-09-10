@@ -1,3 +1,4 @@
+const { participantsChanged } = require('../../powerups/services/raceSlotCacheInvalidation');
 const { randomUUID } = require('node:crypto');
 const { acquireGlobalEnrollmentLock } = require('../../steps/services/globalEventEnrollment');
 const { lockFundedExposureUsers } = require('./fundedExposure');
@@ -58,6 +59,7 @@ function buildSeededChallengeWelcome() {
     })));
     if (boxes.length) {
       await tx.racePowerup.createMany({ data: boxes });
+      await participantsChanged(boxes.map(row => row.participantId));
       await tx.$executeRawUnsafe(`
         UPDATE onboarding_box_grant g SET granted_box_count=g.granted_box_count+d.count
           FROM jsonb_to_recordset($1::jsonb) AS d(hash text,count int)

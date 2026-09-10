@@ -1,88 +1,25 @@
 #!/usr/bin/env node
-//
-// Seed the App Review demo state: provision the dedicated reviewer user
-// + supporting cast (Alex/Maya/Jordan). All of them (reviewer included) are
-// flagged is_review_account = true so they're hidden from real users in
-// search, leaderboards, and public race browsing — the reviewer still sees
-// their own rank/data via self-aware queries. Idempotent — safe to re-run.
-//
-// Usage:
-//   node scripts/seed-app-review-demo.js
-//
-// Reads from .env:
-//   DATABASE_URL          — target database
-//   APP_REVIEW_EMAIL      — reviewer's email (must be set)
-
-const { spawnSync } = require("node:child_process");
-const path = require("node:path");
-require("dotenv").config();
-
-// Reuse the configured Prisma client from src/db.js so we get the same
-// pg-pool + adapter setup the app uses (Prisma 7 requires the adapter,
-// and constructing a bare PrismaClient here would skip that).
-const { prisma } = require("../src/db");
-
-const REVIEWER_APPLE_ID = "review-account-v1";
-const REVIEWER_DISPLAY_NAME = "AppReviewer";
-
-const databaseUrl =
-  process.env.DATABASE_URL || "postgresql://rohan@localhost:5432/steps_tracker";
-const reviewerEmail = process.env.APP_REVIEW_EMAIL;
-
-if (!reviewerEmail) {
-  console.error(
-    "APP_REVIEW_EMAIL is required in .env so the reviewer account has a stable email to log in with."
-  );
-  process.exit(1);
+// Idempotent review seed. Matching DATABASE_URL, REDIS_URL, CACHE_ENV_PREFIX
+// and APP_REVIEW_EMAIL are required. Raw SQL runs only through this wrapper.
+const path = require('node:path');
+require('dotenv').config();
+const { runPhase, runSqlPhase } = require('./review-cache-maintenance');
+async function seedReviewDemo() {
+  const email = process.env.APP_REVIEW_EMAIL;
+  if (!email) throw new Error('APP_REVIEW_EMAIL is required');
+  await runPhase('review-provision', client => client.query(`
+    INSERT INTO users (id,apple_id,email,name,display_name,is_review_account,billing_realm,created_at)
+    VALUES (gen_random_uuid()::text,'review-account-v1',$1,'AppReviewer','AppReviewer',true,'sandbox',CURRENT_TIMESTAMP)
+    ON CONFLICT (apple_id) DO UPDATE SET email=EXCLUDED.email,is_review_account=true`, [email]));
+  await runSqlPhase('review-seed', path.join(__dirname, 'seed-app-review-demo.sql'));
 }
-
-async function provisionReviewerUser() {
-  const existing = await prisma.user.findUnique({
-    where: { appleId: REVIEWER_APPLE_ID },
-  });
-  if (existing) {
-    await prisma.user.update({
-      where: { appleId: REVIEWER_APPLE_ID },
-      data: { email: reviewerEmail, isReviewAccount: true },
+module.exports = { seedReviewDemo };
+if (require.main === module) {
+  seedReviewDemo().then(() => console.log('Review demo seed and cache invalidation complete.'))
+    .catch(error => { console.error(error.message); process.exitCode = 1; })
+    .finally(async () => {
+      await require('../src/shared/cache/redisCache').close();
+      await require('../src/db').prisma.$disconnect();
+      process.exit(process.exitCode || 0);
     });
-    console.log(`Reviewer user already exists (id=${existing.id}); email refreshed.`);
-    return;
-  }
-  const created = await prisma.user.create({
-    data: {
-      appleId: REVIEWER_APPLE_ID,
-      email: reviewerEmail,
-      name: REVIEWER_DISPLAY_NAME,
-      displayName: REVIEWER_DISPLAY_NAME,
-      isReviewAccount: true,
-      billingRealm: 'sandbox',
-    },
-  });
-  console.log(`Provisioned reviewer user (id=${created.id}).`);
 }
-
-async function main() {
-  try {
-    await provisionReviewerUser();
-  } finally {
-    await prisma.$disconnect();
-  }
-
-  const sqlPath = path.join(__dirname, "seed-app-review-demo.sql");
-  const result = spawnSync(
-    "psql",
-    [databaseUrl, "-v", "ON_ERROR_STOP=1", "-f", sqlPath],
-    { stdio: "inherit" }
-  );
-
-  if (result.error) {
-    console.error(result.error.message);
-    process.exit(1);
-  }
-  process.exit(result.status ?? 1);
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

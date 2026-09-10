@@ -150,6 +150,7 @@ function buildKickRaceParticipant(dependencies = {}) {
       await removeTarget();
     }
 
+    await require("../services/raceCacheInvalidation").membershipChanged([{ raceId, userId: targetUserId }, { raceId, userId }]);
     events.emit("RACE_PARTICIPANT_KICKED", {
       raceId,
       kickedUserId: targetUserId,

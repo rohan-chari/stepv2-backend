@@ -76,14 +76,18 @@ function buildCompleteRace(dependencies = {}) {
   const touchCompletedResult = dependencies.touchCompletedResult ||
     ((usesDefaultPersistence || dependencies.prisma) &&
      typeof db?.$executeRaw === "function"
-      ? async (raceId) => db.$executeRaw`
+      ? async (raceId) => {
+        const result = await db.$executeRaw`
           UPDATE races
           SET updated_at = GREATEST(
             CURRENT_TIMESTAMP,
             updated_at + INTERVAL '1 millisecond'
           )
           WHERE id = ${raceId}
-        `
+        `;
+        await require("../services/raceCacheInvalidation").raceChanged(raceId);
+        return result;
+      }
       : typeof raceModel.update === "function"
         ? async (raceId) => raceModel.update(raceId, { updatedAt: now() })
         : async () => null);

@@ -318,6 +318,22 @@ function deferUntilAfterCommit(task) {
   return Promise.resolve();
 }
 
+// Coalesce domain invalidations inside the existing transaction boundary. The
+// callback runs only after commit and is awaited before the command returns.
+function deferUntilAfterCommitBatch(key, items, run) {
+  const scope = prismaScope.getStore();
+  if (!scope) return Promise.resolve().then(() => run(items));
+  scope.afterCommitBatches ||= new Map();
+  let batch = scope.afterCommitBatches.get(key);
+  if (!batch) {
+    batch = [];
+    scope.afterCommitBatches.set(key, batch);
+    scope.afterCommit.push(() => run(batch));
+  }
+  batch.push(...items);
+  return Promise.resolve();
+}
+
 function deferUntilAfterRollback(task) {
   const scope = prismaScope.getStore();
   if (!scope) return Promise.resolve();
@@ -375,6 +391,7 @@ module.exports = {
   databasePoolTelemetry,
   runInPrismaTransaction,
   deferUntilAfterCommit,
+  deferUntilAfterCommitBatch,
   deferUntilAfterRollback,
   isInPrismaTransactionScope,
   runAfterCommitTasks,

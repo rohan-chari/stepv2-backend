@@ -565,6 +565,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
         return false;
       }
       await tx.raceParticipant.delete({ where: { id: participant.id } });
+      await require('./raceCacheInvalidation').membershipChanged([{ raceId: participant.raceId, userId }]);
       await tx.seededRaceWindowMembership.update({
         where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
         data: { stream: "BUCKET", raceId: null },
@@ -909,6 +910,10 @@ function buildSeededRaceBuckets(dependencies = {}) {
           };
         }, FINALIZATION_TRANSACTION_OPTIONS);
         const finalizedRows = outcome.rows;
+        for (const row of finalizedRows) {
+          await require('./raceCacheInvalidation').raceChanged(row.raceId);
+          await require('./raceCacheInvalidation').membershipChanged([{ raceId: row.raceId }]);
+        }
         // This worker writes race and participant rows inside its own
         // transaction, so no command event is emitted for the new members.
         // Invalidate only after commit to prevent a cache refresh from racing

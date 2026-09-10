@@ -376,8 +376,16 @@ async function writeSnapshot(raceId, snapshot) {
  */
 async function invalidateRaceProgress(raceId) {
   if (!raceId) return true;
+  const db = require("../../../db");
+  if (db.isInPrismaTransactionScope()) {
+    return db.deferUntilAfterCommit(() => invalidateRaceProgress(raceId));
+  }
   clearLocalRace(raceId);
   try {
+    // Release A fences late B publishers before deleting their payloads.
+    await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([
+      { domain: "race-effects", identity: raceId },
+    ]);
     // The page projection shares this prefix but has generation-specific chunk
     // keys. Invalidate its known generation before deleting the legacy C3
     // snapshot so a mutation cannot leave a paged reader on old standings.

@@ -137,6 +137,9 @@ function buildAppendDomainEvent(dependencies = {}) {
   return async function appendDomainEvent(tx, input) {
     if (!tx || typeof tx !== "object") throw new TypeError("transaction client is required");
     const event = normalizeDomainEvent(input);
+    if (!dependencies.repository && isInPrismaTransactionScope()) {
+      await require("../../races/services/raceEventCacheInvalidation").invalidateEvent(event);
+    }
     const replaySourceType = input.replaySourceType || event.aggregateType;
     const replaySourceId = input.replaySourceId || event.aggregateId;
     const receiptsAvailable = Boolean(receiptModel && tx.domainEventReceipt);
@@ -230,6 +233,11 @@ function buildBulkAppendDomainEvents(dependencies = {}) {
     // All envelopes are normalized before the first SQL write. A malformed
     // event can therefore never leave an earlier event/baseline committed.
     const events = inputs.map(normalizeDomainEvent);
+    if (!dependencies.repository && isInPrismaTransactionScope()) {
+      for (const event of events) {
+        await require("../../races/services/raceEventCacheInvalidation").invalidateEvent(event);
+      }
+    }
     const replaySourceByEventKey = new Map(inputs.map((input, index) => [
       events[index].eventKey,
       {

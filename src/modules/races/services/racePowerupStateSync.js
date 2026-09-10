@@ -1,3 +1,4 @@
+const { slotsChanged } = require('../../powerups/services/raceSlotCacheInvalidation');
 const { Race } = require("../models/race");
 const { RacePowerup } = require("../../powerups/models/racePowerup");
 const { RaceParticipant } = require("../models/raceParticipant");
@@ -226,6 +227,7 @@ function buildSyncRacePowerupState(dependencies = {}) {
           where: { id: { in: toPromote.map((box) => box.id) } },
           data: { status: "MYSTERY_BOX" },
         });
+        await slotsChanged({ participantId: participant.id });
         if (preloadedState) {
           const promoted = new Set(toPromote.map((box) => box.id));
           for (const box of preloadedState.inventory) {

@@ -232,6 +232,10 @@ function buildDeleteUserAccount(dependencies = {}) {
 
       // 1) Race participations: forfeit any held buy-ins into the pot, then
       //    detach the user from each race depending on race lifecycle.
+      await require('../../races/services/raceCacheInvalidation').membershipChanged(participations);
+      for (const raceId of new Set(participations.map((row) => row.raceId))) {
+        await require('../../races/services/raceCacheInvalidation').raceChanged(raceId);
+      }
       for (const participant of participations) {
         if (
           participant.buyInStatus === "HELD" &&

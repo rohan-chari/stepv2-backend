@@ -1,3 +1,4 @@
+const { slotsChanged } = require('../services/raceSlotCacheInvalidation');
 const { prisma } = require("../../../db");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
@@ -312,6 +313,7 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
           rerolledAt: new Date(),
         },
       });
+      if (claimed?.count) await slotsChanged({ participantId: participant.id });
       if (!claimed || claimed.count === 0) {
         entry.skipped = "ALREADY_REROLLED";
         continue;

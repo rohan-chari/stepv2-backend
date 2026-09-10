@@ -79,7 +79,7 @@ function buildDiscardPowerup(dependencies = {}) {
       await lockFundedExposureUsers(tx, [userId]);
       await lockCompetitionRows(tx, { raceIds: [raceId] });
       const result = await powerupModel.claimForDiscard(powerupId, {
-        transactionClient: tx, raceId, userId,
+        transactionClient: tx, raceId, userId, participantId: powerup.participantId,
       });
       if (result.count === 1) await enqueueRaceResolution({
         raceId, userId, now: requestedAt, reason: 'POWERUP_MUTATION',

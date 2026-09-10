@@ -422,6 +422,10 @@ function buildRaceAdminCommandWorker(dependencies = {}) {
         return { outcome, raceId: command.race_id, commandId: command.id };
       }, { timeout: 30_000, maxWait: 10_000 });
       if (execution.outcome?.mutated) {
+        await require('../services/raceCacheInvalidation').raceChanged(execution.raceId);
+        await require('../services/raceCacheInvalidation').membershipChanged(
+          execution.outcome.participantUserIds.map((userId) => ({ raceId: execution.raceId, userId })),
+        );
         const invalidateWithRetry = async (surface, run) => {
           let lastError = null;
           for (let attempt = 1; attempt <= 3; attempt += 1) {

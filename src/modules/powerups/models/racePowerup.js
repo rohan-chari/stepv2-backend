@@ -1,3 +1,4 @@
+const { slotsChanged, participantsChanged } = require('../services/raceSlotCacheInvalidation');
 const { prisma } = require("../../../db");
 
 const RacePowerup = {
@@ -11,7 +12,7 @@ const RacePowerup = {
     earnedAtSteps,
     redeemedFromInventory = false,
   }) {
-    return prisma.racePowerup.create({
+    const row = await prisma.racePowerup.create({
       data: {
         raceId,
         participantId,
@@ -23,6 +24,8 @@ const RacePowerup = {
         redeemedFromInventory,
       },
     });
+    await slotsChanged(row);
+    return row;
   },
 
   async findById(id) {
@@ -43,10 +46,10 @@ const RacePowerup = {
   },
 
   async update(id, fields) {
-    return prisma.racePowerup.update({
-      where: { id },
-      data: fields,
-    });
+    const before = fields.participantId ? await prisma.racePowerup.findUnique({ where: { id } }) : null;
+    const row = await prisma.racePowerup.update({ where: { id }, data: fields });
+    await participantsChanged([before?.participantId, row.participantId]);
+    return row;
   },
 
   // Conditional claim of the discard transition (batch 2026-08-08 item 1).
@@ -57,11 +60,13 @@ const RacePowerup = {
   // Only the caller whose updateMany matches a still-discardable row
   // (count === 1) may proceed. Mirrors `updateIfPending` on the Race model and
   // the conditional claim in stealRandomHeldPowerup below.
-  async claimForDiscard(id, { transactionClient = null, raceId = null, userId = null } = {}) {
-    return (transactionClient || prisma).racePowerup.updateMany({
+  async claimForDiscard(id, { transactionClient = null, raceId = null, userId = null, participantId = null } = {}) {
+    const changed = await (transactionClient || prisma).racePowerup.updateMany({
       where: { id, ...(raceId ? { raceId } : {}), ...(userId ? { userId } : {}), status: { in: ["HELD", "MYSTERY_BOX"] } },
       data: { status: "DISCARDED" },
     });
+    if (changed.count) await slotsChanged({ raceId, participantId });
+    return changed;
   },
 
   async findMysteryBoxesByParticipant(participantId) {
@@ -179,6 +184,7 @@ const RacePowerup = {
           },
         });
         if (claimed.count === 1) {
+          await participantsChanged([fromParticipantId, toParticipantId]);
           return tx.racePowerup.findUnique({ where: { id: chosen.id } });
         }
       }
@@ -188,10 +194,12 @@ const RacePowerup = {
   },
 
   async expireAllForRace(raceId) {
-    return prisma.racePowerup.updateMany({
+    const changed = await prisma.racePowerup.updateMany({
       where: { raceId, status: { in: ["HELD", "MYSTERY_BOX", "QUEUED"] } },
       data: { status: "EXPIRED" },
     });
+    if (changed.count) await slotsChanged({ raceId });
+    return changed;
   },
 };
 

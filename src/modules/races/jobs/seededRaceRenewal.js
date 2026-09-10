@@ -282,6 +282,7 @@ function buildRenewSeededRaces(dependencies = {}) {
         const protectedIds = new Set(manual.map(row => row.userId));
         const pruneIds = inactiveIds.filter(id => !protectedIds.has(id));
         if (!pruneIds.length) return 0;
+        await require('../services/raceCacheInvalidation').membershipChanged(pruneIds.map((userId) => ({ raceId: race.id, userId })));
         const participantWhere = {
           raceId: race.id,
           status: "ACCEPTED",
@@ -410,6 +411,7 @@ function buildRenewSeededRaces(dependencies = {}) {
           for (const row of manual) entangled.add(row.userId);
           const doomed = remaining.filter((id) => !entangled.has(id));
           if (doomed.length === 0) return 0;
+          await require('../services/raceCacheInvalidation').membershipChanged(doomed.map((userId) => ({ raceId: race.id, userId })));
           const participantWhere = {
             raceId: race.id,
             status: "ACCEPTED",

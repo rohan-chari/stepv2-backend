@@ -1,3 +1,4 @@
+const { entitlementsChanged } = require('../services/eventDisplayCacheInvalidation');
 const { prisma: defaultPrisma } = require("../../../db");
 const {
   discoverDueStartIds,
@@ -48,6 +49,7 @@ function buildGlobalEventBoundaryDrain(dependencies = {}) {
           startNextAttemptAt: startRetryAt(current, attempts, random),
         },
       });
+      if (terminal) await entitlementsChanged([row.userId]);
     });
   }
 

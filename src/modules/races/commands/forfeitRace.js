@@ -558,6 +558,7 @@ function buildForfeitRace(dependencies = {}) {
       });
     }
 
+    await require("../services/raceCacheInvalidation").membershipChanged([{ raceId, userId }]);
     events.emit("RACE_PARTICIPANT_FORFEITED", {
       raceId,
       userId,

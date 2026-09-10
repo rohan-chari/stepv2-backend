@@ -153,6 +153,10 @@ const User = {
         })
       : await prisma.user.update({ where: { id }, data: fields });
     await invalidateAuthMe(id);
+    if (["displayName", "firstName", "lastName", "nameSetupCompletedAt", "profilePhotoUrl", "clientFeatures", "isReviewAccount", "hiddenFromLeaderboard"].some((field) => Object.hasOwn(fields, field))) {
+      await require("../../../db").deferUntilAfterCommit(() =>
+        require("../../social/services/userPresentationCache").invalidate(id));
+    }
     return updated;
   },
 

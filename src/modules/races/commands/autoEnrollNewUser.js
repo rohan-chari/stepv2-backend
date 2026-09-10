@@ -1,3 +1,5 @@
+const { membershipChanged, raceChanged } = require('../services/raceCacheInvalidation');
+const { slotsChanged } = require('../../powerups/services/raceSlotCacheInvalidation');
 const { randomUUID } = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
@@ -136,6 +138,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
             : {}),
         },
       });
+      await membershipChanged([{ raceId: participant.raceId, userId }]);
       if (lockedRace.seededBucket) {
         await tx.seededRaceWindowMembership.create({
           data: {
@@ -322,6 +325,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
           status: "ACTIVE",
         },
       });
+      await raceChanged(raceId);
       await tx.race.update({
         where: { id: raceId },
         data: { seededBucketId: bucketId },
@@ -340,6 +344,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
             : {}),
         },
       });
+      await membershipChanged([{ raceId: participant.raceId, userId }]);
       await tx.seededRaceWindowMembership.create({
         data: {
           seedId: sourceRace.seedId,
@@ -435,6 +440,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
               earnedAtSteps: i,
             },
           });
+          await slotsChanged({ participantId: participant.id });
           earnedEvents.push({
             raceId: race.id,
             userId: user.id,

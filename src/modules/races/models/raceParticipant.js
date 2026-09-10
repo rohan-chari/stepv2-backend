@@ -1,3 +1,4 @@
+const { membershipChanged } = require("../services/raceCacheInvalidation");
 const { prisma } = require("../../../db");
 const {
   raceParticipantPresentationRead,
@@ -95,7 +96,7 @@ const RaceParticipant = {
     fundedExposureMillicoins = null,
     fundedExposureRateMillicoinsPerDay = null,
   }) {
-    return prisma.raceParticipant.create({
+    const result = await prisma.raceParticipant.create({
       data: {
         raceId,
         userId,
@@ -111,23 +112,29 @@ const RaceParticipant = {
         user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
+    await membershipChanged([result]);
+    return result;
   },
 
   async createMany(records) {
-    return prisma.raceParticipant.createMany({
+    const result = await prisma.raceParticipant.createMany({
       data: records,
       skipDuplicates: true,
     });
+    await membershipChanged(records);
+    return result;
   },
 
   async update(id, fields) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: fields,
       include: {
         user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
+    await membershipChanged([result], fields);
+    return result;
   },
 
   async compareAndSetPlacementBaseline(id, expected, next) {
@@ -172,12 +179,14 @@ const RaceParticipant = {
       data: fields,
     });
     if (updated.count !== 1) return null;
-    return prisma.raceParticipant.findUnique({
+    const row = await prisma.raceParticipant.findUnique({
       where: { id },
       include: {
         user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
+    if (row) await membershipChanged([row], fields);
+    return row;
   },
 
   async findByRace(raceId) {
@@ -553,7 +562,9 @@ const RaceParticipant = {
   },
 
   async delete(id) {
-    return prisma.raceParticipant.delete({ where: { id } });
+    const result = await prisma.raceParticipant.delete({ where: { id } });
+    await membershipChanged([result]);
+    return result;
   },
 
   async incrementPayoutCoins(id, amount) {

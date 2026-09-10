@@ -1,3 +1,4 @@
+const { raceChanged } = require("../services/raceCacheInvalidation");
 const { Prisma } = require("@prisma/client");
 const {
   raceSqlSummaryReadBatch,
@@ -712,7 +713,7 @@ const Race = {
     creationSource = null,
     startPolicy = null,
   }) {
-    return prisma.race.create({
+    const result = await prisma.race.create({
       data: {
         creatorId,
         name,
@@ -750,10 +751,12 @@ const Race = {
         ...participantInclude,
       },
     });
+    await raceChanged(result.id);
+    return result;
   },
 
   async update(id, fields) {
-    return prisma.race.update({
+    const result = await prisma.race.update({
       where: { id },
       data: fields,
       include: {
@@ -762,10 +765,12 @@ const Race = {
         ...participantInclude,
       },
     });
+    await raceChanged(id, fields);
+    return result;
   },
 
   async addToPot(id, amount) {
-    return prisma.race.update({
+    const result = await prisma.race.update({
       where: { id },
       data: { potCoins: { increment: amount } },
       include: {
@@ -774,13 +779,17 @@ const Race = {
         ...participantInclude,
       },
     });
+    await raceChanged(id, { potCoins: true });
+    return result;
   },
 
   async updateIfActive(id, fields) {
-    return prisma.race.updateMany({
+    const result = await prisma.race.updateMany({
       where: { id, status: "ACTIVE" },
       data: fields,
     });
+    if (result.count > 0) await raceChanged(id, fields);
+    return result;
   },
 
   // Conditional PENDING -> (ACTIVE/...) transition. Returns { count } so a caller
@@ -789,10 +798,12 @@ const Race = {
   // PENDING, but only one updateMany matches; the loser sees count === 0 and must
   // not re-emit RACE_STARTED. Mirrors updateIfActive used by completeRace.
   async updateIfPending(id, fields) {
-    return prisma.race.updateMany({
+    const result = await prisma.race.updateMany({
       where: { id, status: "PENDING" },
       data: fields,
     });
+    if (result.count > 0) await raceChanged(id, fields);
+    return result;
   },
 
   async findForUser(userId) {

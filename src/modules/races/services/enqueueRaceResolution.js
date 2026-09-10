@@ -147,6 +147,12 @@ async function enqueueRaceResolution(
   tx = null
 ) {
   if (!raceId) return null;
+  if (["MEMBERSHIP_CHANGED", "RACE_START"].includes(reason)) {
+    const { raceChanged, membershipChanged } = require("./raceCacheInvalidation");
+    await raceChanged(raceId);
+    await membershipChanged([{ raceId }, ...dirtyUserIds.map((id) => ({ raceId, userId: id }))]);
+  }
+
   // Gate repair is read-origin viewer convergence. The display plan retains
   // triggered users, so their gate repair runs after covered expiry commits.
   if (reason === "POWERUP_GATE_REPAIR") reason = "DISPLAY_REFRESH";

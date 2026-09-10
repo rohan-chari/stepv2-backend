@@ -460,6 +460,7 @@ function createHomeRouter(dependencies = {}) {
       where: { id: existing.id, userId: req.user.id, acknowledgedAt: null }, data: { acknowledgedAt: new Date() },
     });
     if (updated.count !== 1) return res.status(409).json({ error: "Summary already acknowledged", code: "ALREADY_ACKNOWLEDGED" });
+    await require("../../shared/cache/cacheEfficiencyInvalidation").afterCommit([{ domain: "summary", identity: req.user.id }]);
     await derivedCache.invalidate({ keys: [cacheKeys.homeImpactSummary(req.user.id)], prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY });
     return res.json({ acknowledged: true });
   }));

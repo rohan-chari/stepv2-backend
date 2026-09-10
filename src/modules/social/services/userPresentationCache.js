@@ -19,7 +19,7 @@ const DATABASE_BATCH_SIZE = 256;
 const ADVANCE_AND_DELETE_LUA = `
 local generation = redis.call('incr', KEYS[1])
 redis.call('expire', KEYS[1], ARGV[1])
-redis.call('del', KEYS[2])
+redis.call('del', KEYS[2], KEYS[2] .. ':ce:v1')
 return generation
 `;
 
@@ -362,11 +362,20 @@ function buildUserPresentationCache(dependencies = {}) {
 
   async function invalidate(userId) {
     if (!userId || !redisCache.isEnabled()) return true;
+    return require("../../../db").deferUntilAfterCommit(() => invalidateCommitted(userId));
+  }
+
+  async function invalidateCommitted(userId) {
+    if (!userId || !redisCache.isEnabled()) return true;
+    await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([
+      { domain: "presentation", identity: userId },
+    ]);
     const payloadKey = cacheKeys.userCosmetics(userId);
+    const extendedKey = `${payloadKey}:ce:v1`;
     if (!(await guardEnabled())) {
       return derivedCache.invalidate({
         prefix: payloadKey,
-        run: () => redisCache.del(payloadKey),
+        run: async () => ({ ok: await redisCache.del([payloadKey, extendedKey]), disabled: false }),
       });
     }
     const generationKey = cacheKeys.userCosmeticsVersion(userId);
