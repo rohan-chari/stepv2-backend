@@ -1,0 +1,40 @@
+{
+  "release_integration": {
+    "tests": 19,
+    "pass": 19,
+    "fail": 0,
+    "skipped": 0
+  },
+  "broader_integration": {
+    "tests": 32,
+    "pass": 31,
+    "fail": 1,
+    "skipped": 0
+  },
+  "unit": {
+    "tests": 3399,
+    "pass": 3391,
+    "fail": 8,
+    "skipped": 0
+  },
+  "baseline_unit": {
+    "tests": 3399,
+    "pass": 3389,
+    "fail": 10,
+    "skipped": 0
+  },
+  "baseline_odds": {
+    "tests": 13,
+    "pass": 12,
+    "fail": 1,
+    "skipped": 0
+  },
+  "baseline": "aa14b99",
+  "release": "28a7e70e5253cd44154d6f641503e74007cbe8cc",
+  "notes": [
+    "All eight unit failures reproduce on unchanged baseline; baseline has two extra capacity artifact/path failures in temporary worktree.",
+    "The broader integration failure is an existing exact-key assertion rejecting reelPreviewAvailable, reproduced on baseline.",
+    "An early suite run had concurrent local database cleanup interference; final release suite was isolated and passed.",
+    "Existing inventory test also exhibited equal-timestamp ordering flake in an early run; no assertions modified."
+  ]
+}

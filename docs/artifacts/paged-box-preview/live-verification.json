@@ -1,0 +1,38 @@
+[
+  {
+    "missingMigrations": [],
+    "unfinishedMigrations": 0
+  },
+  {
+    "view": "participants-v1",
+    "pass": "cold",
+    "status": 200,
+    "preview": true,
+    "types": 20
+  },
+  {
+    "view": "participants-v1",
+    "pass": "warm",
+    "status": 200,
+    "preview": true,
+    "types": 20
+  },
+  {
+    "view": "compact-v1",
+    "pass": "cold",
+    "status": 200,
+    "preview": true,
+    "types": 20
+  },
+  {
+    "view": "compact-v1",
+    "pass": "warm",
+    "status": 200,
+    "preview": true,
+    "types": 20
+  },
+  {
+    "status": "ok",
+    "redis": "ok"
+  }
+]
