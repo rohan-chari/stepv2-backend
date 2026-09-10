@@ -83,14 +83,21 @@ async function upsertDailyStep(tx, { userId, date, steps }) {
                  date,created_at AS "createdAt"
      )
      SELECT persisted.*,prior.existed,TRUE AS "storageChanged"
-       FROM persisted CROSS JOIN prior`,
+       FROM persisted CROSS JOIN prior
+     UNION ALL
+     SELECT id,user_id AS "userId",steps,step_goal AS "stepGoal",date,
+            created_at AS "createdAt",TRUE AS existed,FALSE AS "storageChanged"
+       FROM steps WHERE user_id=$1 AND date=$2::date
+         AND steps IS NOT DISTINCT FROM $3
+         AND NOT EXISTS (SELECT 1 FROM persisted)`,
     userId,
     new Date(date),
     Number(steps),
   );
-  // PostgreSQL returns no row when the conflict value is identical. That is
-  // the uncommon no-op path and can afford its own read; changed launch-wave
-  // writes retain the single short UPSERT statement.
+  // The locked normal path returns even an unchanged row from this statement.
+  // Keep READ COMMITTED's next-snapshot fallback for a legacy writer inserting
+  // a conflict row after the statement snapshot (legacy Steps.create can write
+  // before it takes the scoring fence). Never force a dummy UPDATE to return it.
   if (rows.length === 0) {
     rows = await tx.$queryRawUnsafe(
       `SELECT id,user_id AS "userId",steps,step_goal AS "stepGoal",

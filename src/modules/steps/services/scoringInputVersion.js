@@ -202,6 +202,18 @@ async function persistScoringInputState(
   scoringChanged,
   { sourceQueueSemanticsGeneration = null } = {},
 ) {
+  // All callers hold this user's scoring fence. updated_at is a revision
+  // timestamp, not the successful-upload heartbeat (users.last_step_sync_at).
+  const sameNullableTime = (left, right) => left == null || right == null
+    ? left == null && right == null
+    : new Date(left).getTime() === new Date(right).getTime();
+  const queueGenerationUnchanged = sourceQueueSemanticsGeneration == null ||
+    (state.sourceQueueSemanticsGeneration != null &&
+      BigInt(sourceQueueSemanticsGeneration) === BigInt(state.sourceQueueSemanticsGeneration));
+  if (!state.inserted && state.generation != null && !scoringChanged &&
+      state.scoringWatermark === next.scoringWatermark &&
+      sameNullableTime(state.nextSampleBoundaryAt, next.nextSampleBoundaryAt) &&
+      queueGenerationUnchanged) return;
   await client.$executeRawUnsafe(
     `UPDATE user_scoring_input_versions
      SET generation = generation + $2::bigint,

@@ -125,6 +125,7 @@ function createHomeRouter(dependencies = {}) {
 
   router.get("/race-card", async (req, res) => {
     try {
+      const syncRefresh = req.query.view === "sync-refresh-v1";
       const compact =
         req.query.view === "shell-v1" &&
         (await isStrictFlagEnabled(settings, "apiHomeShellV1Enabled"));
@@ -148,7 +149,7 @@ function createHomeRouter(dependencies = {}) {
       ]);
       const current = nowFn();
       if (
-        await isStrictFlagEnabled(
+        syncRefresh || await isStrictFlagEnabled(
           settings,
           "homeRaceCardParallelOptionalV1Enabled"
         )
@@ -183,7 +184,11 @@ function createHomeRouter(dependencies = {}) {
           snapshotReuseEnabled,
           now: current,
         });
-        return res.json(result);
+        return res.json(syncRefresh ? {
+          contract: "home-sync-refresh-v1",
+          home: result,
+          retainedSections: ["presentation", "friends"],
+        } : result);
       }
       const optionalShellPromises = compact
         ? [

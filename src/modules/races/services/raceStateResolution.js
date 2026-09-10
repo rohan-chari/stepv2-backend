@@ -1493,6 +1493,7 @@ function buildResolveRaceState(dependencies = {}) {
             ...(useProcessScoringInputCache
               ? {
                   scoringInputCache: processScoringInputCache,
+                  sourceReadsOutsideTransaction: true,
                   scoringInputVersionModel,
                 }
               : {}),

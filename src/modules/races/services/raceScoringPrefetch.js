@@ -24,6 +24,20 @@ function createScoringInputCache({
   metrics = null,
 } = {}) {
   const entries = new Map();
+  const pending = new Map();
+  const identities = new WeakMap();
+  let nextIdentity = 0;
+  const identity = (value) => {
+    if (!identities.has(value)) identities.set(value, ++nextIdentity);
+    return identities.get(value);
+  };
+  function keyFor({ userId, sourceModels = [], loadingBudget = [] }) {
+    return JSON.stringify([sourceModels.map(identity), loadingBudget, userId]);
+  }
+  function pendingKeyFor(params) {
+    return JSON.stringify([keyFor(params), String(params.generation),
+      params.sampleStartMs, params.sampleEndMs, params.dailyStartMs, params.dailyEndMs]);
+  }
   let retainedSampleRows = 0;
   function remove(key) {
     const entry = entries.get(key);
@@ -42,8 +56,10 @@ function createScoringInputCache({
     metrics?.observe("race_scoring_input_cache_sample_rows", retainedSampleRows);
   }
   return {
-    get({ userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs }) {
-      const entry = entries.get(userId);
+    get(params) {
+      const { generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs } = params;
+      const key = keyFor(params);
+      const entry = entries.get(key);
       if (!entry) {
         metrics?.increment("race_scoring_input_cache_total", { outcome: "miss_absent" });
         return null;
@@ -51,36 +67,57 @@ function createScoringInputCache({
       if (entry.expiresAt <= now() || entry.generation !== String(generation) ||
           entry.sampleStartMs > sampleStartMs || entry.sampleEndMs < sampleEndMs ||
           entry.dailyStartMs > dailyStartMs || entry.dailyEndMs < dailyEndMs) {
-        remove(userId);
+        remove(key);
         metrics?.increment("race_scoring_input_cache_total", { outcome: "miss_invalid" });
         observeSize();
         return null;
       }
-      entries.delete(userId);
-      entries.set(userId, entry);
+      entries.delete(key);
+      entries.set(key, entry);
       metrics?.increment("race_scoring_input_cache_total", { outcome: "hit" });
       return entry;
     },
-    set({ userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs,
-      timeline, dailyRows }) {
+    set(params) {
+      const { userId, generation, sampleStartMs, sampleEndMs, dailyStartMs, dailyEndMs,
+        timeline, dailyRows } = params;
+      const key = keyFor(params);
       if (!userId || generation == null || timeline?.isPaged) return false;
       const sampleRows = Number(timeline?.length) || 0;
       if (sampleRows > maxSampleRows) return false;
-      remove(userId);
+      remove(key);
       const entry = {
         generation: String(generation), sampleStartMs, sampleEndMs,
         dailyStartMs, dailyEndMs, timeline, dailyRows: [...(dailyRows || [])],
         sampleRows, expiresAt: now() + ttlMs,
       };
-      entries.set(userId, entry);
+      entries.set(key, entry);
       retainedSampleRows += sampleRows;
       evict();
-      const retained = entries.get(userId) === entry;
+      const retained = entries.get(key) === entry;
       if (retained) metrics?.increment("race_scoring_input_cache_total", { outcome: "store" });
       observeSize();
       return retained;
     },
-    clear() { entries.clear(); retainedSampleRows = 0; observeSize(); },
+    claimPending(params) {
+      const key = pendingKeyFor(params);
+      const existing = pending.get(key);
+      if (existing) return { promise: existing.promise, leader: false };
+      if (pending.size >= maxUsers) return null;
+      let resolve, reject;
+      const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+      // A leader may have no waiters; its own load still throws normally.
+      promise.catch(() => {});
+      const entry = { promise };
+      pending.set(key, entry);
+      const finish = (settle, value) => {
+        if (pending.get(key) === entry) pending.delete(key);
+        settle(value);
+      };
+      return { promise, leader: true,
+        resolve: value => finish(resolve, value),
+        reject: error => finish(reject, error) };
+    },
+    clear() { entries.clear(); pending.clear(); retainedSampleRows = 0; observeSize(); },
     snapshot() { return { users: entries.size, sampleRows: retainedSampleRows }; },
   };
 }
@@ -488,7 +525,14 @@ async function prefetchRaceScoringModelsImpl({
   createScoringScratchDirectory,
   scoringInputCache = null,
   scoringInputVersionModel = null,
+  sourceReadsOutsideTransaction = false,
 }) {
+  // Only the worker's source-read phase opts in. Transaction-scoped adapters
+  // cannot share even if a caller supplies the process cache by mistake.
+  if (!sourceReadsOutsideTransaction) scoringInputCache = null;
+  const sourceModels = [stepsModel, stepSampleModel, memoryUsage];
+  const loadingBudget = [maxUsersPerChunk, maxSampleRowsPerChunk,
+    maxRetainedSampleRowsPerUser, maxHeapGrowthBytes];
   const started = (races || []).filter((race) => race?.startedAt);
   if (started.length === 0) return null;
   if (
@@ -577,6 +621,7 @@ async function prefetchRaceScoringModelsImpl({
     const generation = versionsByUser.get(bound.userId);
     if (generation == null) continue;
     const cached = scoringInputCache?.get({
+      sourceModels, loadingBudget,
       userId: bound.userId, generation,
       sampleStartMs: bound.rangeStart.getTime(),
       sampleEndMs: sampleRangeEnd.getTime(),
@@ -589,6 +634,13 @@ async function prefetchRaceScoringModelsImpl({
     [...cachedByUser].map(([userId, entry]) => [userId, entry.timeline])
   );
   const preparedSampleUsers = new Set(cachedByUser.keys());
+  let released = false;
+  const releaseLoadedSources = () => {
+    for (const timeline of ownedTransientTimelines) timeline?.dispose?.();
+    ownedTransientTimelines.clear();
+    samplesByUser.clear();
+    preparedSampleUsers.clear();
+  };
   const sampleBoundByUser = new Map(exactSampleBounds.map((bound) => [bound.userId, bound]));
   let dailyByUser = null;
   const cachePreparedUser = (userId) => {
@@ -599,6 +651,7 @@ async function prefetchRaceScoringModelsImpl({
     if (generation == null || !bound || !timeline) return;
     const dailyRows = dailyByUser.get(userId) || [];
     if (scoringInputCache?.set({
+      sourceModels, loadingBudget,
       userId, generation,
       sampleStartMs: bound.rangeStart.getTime(),
       sampleEndMs: sampleRangeEnd.getTime(),
@@ -761,6 +814,7 @@ async function prefetchRaceScoringModelsImpl({
     return timelines;
   };
   const prepareSampleUsers = async (requestedUserIds) => {
+    if (released) return;
     const requested = [...new Set(requestedUserIds || [])];
     for (const userId of requested) {
       const cached = cachedByUser.get(userId);
@@ -774,15 +828,66 @@ async function prefetchRaceScoringModelsImpl({
       .map((userId) => sampleBoundByUser.get(userId))
       .filter(Boolean);
     if (!bounds.length) return;
-    mergeSampleTimelines(samplesByUser, await loadSampleBounds(bounds));
+    const claims = new Map();
+    const ownedBounds = [];
+    const waitingBounds = [];
     for (const bound of bounds) {
-      // A successful empty read proves coverage too. Keep it under the same
-      // input-generation, time-range, TTL, and capacity guards as nonempty data.
-      if (!samplesByUser.has(bound.userId)) {
-        samplesByUser.set(bound.userId, new CompactSampleTimeline());
-      }
-      cachePreparedUser(bound.userId);
+      const generation = versionsByUser.get(bound.userId);
+      const claim = generation == null ? null : scoringInputCache?.claimPending?.({
+        sourceModels, loadingBudget, userId: bound.userId, generation,
+        sampleStartMs: bound.rangeStart.getTime(), sampleEndMs: sampleRangeEnd.getTime(),
+        dailyStartMs: dailyRangeStart.getTime(), dailyEndMs: dailyRangeEnd.getTime(),
+      });
+      if (claim) claims.set(bound.userId, claim);
+      (claim && !claim.leader ? waitingBounds : ownedBounds).push(bound);
     }
+    // Reserve before awaiting, but retain the existing bounded bulk loader for
+    // unrelated leaders. Only fully loaded, immutable in-memory timelines cross
+    // owners. Paged results remain private and signal an independent reload.
+    const loadOwned = async () => {
+      try {
+        if (ownedBounds.length) {
+          const loaded = await loadSampleBounds(ownedBounds);
+          for (const bound of ownedBounds) {
+            const timeline = loaded.get(bound.userId) || new CompactSampleTimeline();
+            if (!timeline.isPaged) {
+              Object.freeze(timeline.segments);
+              Object.freeze(timeline);
+            }
+            samplesByUser.set(bound.userId, timeline);
+            preparedSampleUsers.add(bound.userId);
+            const claim = claims.get(bound.userId);
+            if (claim?.leader) claim.resolve(timeline.isPaged ? null : timeline);
+          }
+        }
+      } catch (error) {
+        for (const claim of claims.values()) if (claim.leader) claim.reject(error);
+        throw error;
+      }
+    };
+    const loadWaiting = async () => {
+      const privateBounds = [];
+      const waited = await Promise.allSettled(waitingBounds.map(async bound => {
+        const timeline = await claims.get(bound.userId).promise;
+        if (released) return;
+        if (timeline) {
+          samplesByUser.set(bound.userId, timeline);
+          preparedSampleUsers.add(bound.userId);
+        } else privateBounds.push(bound);
+      }));
+      const failedWait = waited.find(result => result.status === "rejected");
+      if (failedWait) throw failedWait.reason;
+      if (privateBounds.length) {
+        mergeSampleTimelines(samplesByUser, await loadSampleBounds(privateBounds));
+      }
+    };
+    // Settle both branches before releasing construction ownership on failure.
+    const results = await Promise.allSettled([loadOwned(), loadWaiting()]);
+    const failed = results.find(result => result.status === "rejected");
+    if (released) releaseLoadedSources();
+    if (failed) throw failed.reason;
+    if (released) return;
+    for (const bound of bounds) cachePreparedUser(bound.userId);
   };
   const sampleRowsPromise = deferredSampleLoading
     ? Promise.resolve(samplesByUser)
@@ -791,7 +896,9 @@ async function prefetchRaceScoringModelsImpl({
   const uncachedUserIds = userIds.filter((userId) => !cachedByUser.has(userId));
   const completeEffectSnapshot = participantIds.length > 0 &&
     typeof raceActiveEffectModel.findResolutionEffectsForRaces === "function";
-  const [, dailyRows, prefetchedEffects, powerupEvents] = await Promise.all([
+  // Do not abandon an outstanding source owner if another parallel input
+  // fails: it may still create a private spool that construction must dispose.
+  const inputResults = await Promise.allSettled([
     sampleRowsPromise,
     uncachedUserIds.length > 0
       ? stepsModel.findByUserIdsAndDateRange(
@@ -813,6 +920,9 @@ async function prefetchRaceScoringModelsImpl({
       ? Promise.all(started.map((race) => powerupEventModel.findByRaceAsc(race.id)))
       : Promise.resolve([]),
   ]);
+  const failedInput = inputResults.find(result => result.status === "rejected");
+  if (failedInput) throw failedInput.reason;
+  const [, dailyRows, prefetchedEffects, powerupEvents] = inputResults.map(result => result.value);
 
   dailyByUser = new Map(
     [...cachedByUser].map(([userId, entry]) => [userId, entry.dailyRows])
@@ -864,10 +974,8 @@ async function prefetchRaceScoringModelsImpl({
       }
     },
     releaseAll() {
-      for (const timeline of ownedTransientTimelines) timeline?.dispose?.();
-      ownedTransientTimelines.clear();
-      samplesByUser.clear();
-      preparedSampleUsers.clear();
+      released = true;
+      releaseLoadedSources();
     },
     retainedUserCount() {
       return samplesByUser.size;
