@@ -1,0 +1,186 @@
+{
+  "startedAt": "2026-09-10T03:16:40Z",
+  "concurrentHeavyChecks": false,
+  "runs": [
+    {
+      "name": "baseline-same-1-r1",
+      "exitCode": 0,
+      "wallSeconds": 30.96122694015503
+    },
+    {
+      "name": "baseline-same-3-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.114792108535767
+    },
+    {
+      "name": "baseline-same-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.51602792739868
+    },
+    {
+      "name": "baseline-disjoint-1-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.33079195022583
+    },
+    {
+      "name": "baseline-disjoint-3-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.593946933746338
+    },
+    {
+      "name": "baseline-disjoint-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.582895755767822
+    },
+    {
+      "name": "baseline-same-1-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.003337860107422
+    },
+    {
+      "name": "baseline-same-3-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.06124210357666
+    },
+    {
+      "name": "baseline-same-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.1683611869812
+    },
+    {
+      "name": "baseline-disjoint-1-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.210220098495483
+    },
+    {
+      "name": "baseline-disjoint-3-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.55306124687195
+    },
+    {
+      "name": "baseline-disjoint-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.590415000915527
+    },
+    {
+      "name": "baseline-same-1-r3",
+      "exitCode": 0,
+      "wallSeconds": 30.994515895843506
+    },
+    {
+      "name": "baseline-same-3-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.087504148483276
+    },
+    {
+      "name": "baseline-same-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.227216243743896
+    },
+    {
+      "name": "baseline-disjoint-1-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.39596390724182
+    },
+    {
+      "name": "baseline-disjoint-3-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.324549913406372
+    },
+    {
+      "name": "baseline-disjoint-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 32.018797874450684
+    },
+    {
+      "name": "candidate-same-1-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.233020305633545
+    },
+    {
+      "name": "candidate-same-3-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.14731478691101
+    },
+    {
+      "name": "candidate-same-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.386080741882324
+    },
+    {
+      "name": "candidate-disjoint-1-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.313053846359253
+    },
+    {
+      "name": "candidate-disjoint-3-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.59129810333252
+    },
+    {
+      "name": "candidate-disjoint-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.574328899383545
+    },
+    {
+      "name": "candidate-same-1-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.00565004348755
+    },
+    {
+      "name": "candidate-same-3-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.155331134796143
+    },
+    {
+      "name": "candidate-same-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.070271968841553
+    },
+    {
+      "name": "candidate-disjoint-1-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.303162097930908
+    },
+    {
+      "name": "candidate-disjoint-3-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.429660081863403
+    },
+    {
+      "name": "candidate-disjoint-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.598991870880127
+    },
+    {
+      "name": "candidate-same-1-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.24228286743164
+    },
+    {
+      "name": "candidate-same-3-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.18654489517212
+    },
+    {
+      "name": "candidate-same-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.153273820877075
+    },
+    {
+      "name": "candidate-disjoint-1-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.331416130065918
+    },
+    {
+      "name": "candidate-disjoint-3-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.382680892944336
+    },
+    {
+      "name": "candidate-disjoint-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 32.12210464477539
+    }
+  ]
+}

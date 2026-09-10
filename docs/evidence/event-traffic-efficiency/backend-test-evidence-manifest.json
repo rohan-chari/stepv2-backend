@@ -1,0 +1,14 @@
+{
+  "bara-event-release-unit-final.log": {
+    "sha256": "bbad73dc6a610e5bd3345f4fc7eff8725b2730185701e459fe285f858f93a2a3",
+    "uncompressedBytes": 367042
+  },
+  "bara-event-release-integration-final.log": {
+    "sha256": "d8e60480dfdaee1386cfb2d99aadc0b1b5fa3e3f167fe255aa6426d1d779dfa9",
+    "uncompressedBytes": 824004
+  },
+  "bara-source-production-baseline.log": {
+    "sha256": "7c93101b30b28419d37db00317f7ddcba9de7879be1ec8417b15cbfd1dbf6f9c",
+    "uncompressedBytes": 604
+  }
+}

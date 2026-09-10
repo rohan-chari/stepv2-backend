@@ -57,6 +57,7 @@ test("version-identical scoring inputs reuse samples and daily rows exactly", as
   const start = new Date("2026-08-10T00:00:00Z");
   const models = {
     scoringInputCache: cache,
+    sourceReadsOutsideTransaction: true,
     scoringInputVersionModel: {
       async findMany() {
         calls.versions += 1;

@@ -1442,7 +1442,9 @@ describe("global-event reliability v2 contract", () => {
     }), 1);
   });
 
-  it("merges a concurrent STEP_SYNC queue reason and scopes with global-event activation", async () => {
+  // Start microbatches deliberately coalesce. An urgent concurrent producer
+  // must still promote the merged envelope; two coalesced producers must not.
+  for (const syncPriority of ["IMMEDIATE", "COALESCE"]) it(`merges a concurrent ${syncPriority} STEP_SYNC queue reason and scopes with global-event activation`, async () => {
     const current = new Date("2098-08-26T10:32:00.000Z");
     const account = await createTestUser();
     const race = await prisma.race.create({ data: {
@@ -1491,7 +1493,7 @@ describe("global-event reliability v2 contract", () => {
           dirtyUserIds: [account.user.id],
           dirtyParticipantIds: [participant.id],
           powerupTypes: [],
-          priority: "COALESCE",
+          priority: syncPriority,
         }]]),
       }),
       drain.runUntilIdle(),
@@ -1500,7 +1502,11 @@ describe("global-event reliability v2 contract", () => {
     assert.deepEqual(new Set(job.dirtyReasons), new Set(["STEP_SYNC", "GLOBAL_EVENT_BOUNDARY"]));
     assert.ok(job.triggeredByUserIds.includes(account.user.id));
     assert.ok(job.dirtyParticipantIds.includes(participant.id));
-    assert.equal(job.dirtyPriority, "IMMEDIATE");
+    if (syncPriority === "IMMEDIATE") {
+      assert.equal(job.dirtyPriority, "IMMEDIATE");
+    } else {
+      assert.equal(job.dirtyPriority, "COALESCE");
+    }
   });
 
   it("repairs each durable handoff from the owning side of the domain-event boundary", async () => {

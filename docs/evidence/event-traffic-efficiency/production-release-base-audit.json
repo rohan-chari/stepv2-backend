@@ -1,0 +1,21 @@
+{
+  "productionCommit": "2f021c2698f41071e526308127ddaf2b6050c35e",
+  "productionGitStatus": [
+    " M package-lock.json"
+  ],
+  "productionModifiedLockfilePreserved": true,
+  "sourceVersionTriggerAudit": {
+    "at": "2026-09-10T02:56:25.948Z",
+    "table": "public.user_scoring_input_versions",
+    "userTriggers": [],
+    "transaction": "READ ONLY",
+    "statementTimeout": "2s"
+  },
+  "baselineFixtureAppSettings": {
+    "apiRaceBootstrapV1Enabled": true,
+    "leaderboardEligibilityEpoch": 3,
+    "raceQueueV2ClaimingDisabled": false,
+    "stepSampleBucketMinutes": 60
+  },
+  "productionMutations": false
+}

@@ -1,0 +1,69 @@
+{
+  "startedAt": "2026-09-10T03:41:45Z",
+  "purpose": "Diagnostic attribution only; does not replace failed fixed36-run report",
+  "schedule": [
+    [
+      "baseline",
+      "candidate",
+      "without-sharing"
+    ],
+    [
+      "candidate",
+      "without-sharing",
+      "baseline"
+    ],
+    [
+      "without-sharing",
+      "baseline",
+      "candidate"
+    ]
+  ],
+  "concurrentHeavyChecks": false,
+  "runs": [
+    {
+      "name": "baseline-same-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.187283039093018
+    },
+    {
+      "name": "candidate-same-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.27471089363098
+    },
+    {
+      "name": "without-sharing-same-5-r1",
+      "exitCode": 0,
+      "wallSeconds": 31.362030029296875
+    },
+    {
+      "name": "candidate-same-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.282262086868286
+    },
+    {
+      "name": "without-sharing-same-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.257533311843872
+    },
+    {
+      "name": "baseline-same-5-r2",
+      "exitCode": 0,
+      "wallSeconds": 31.312028884887695
+    },
+    {
+      "name": "without-sharing-same-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.29725980758667
+    },
+    {
+      "name": "baseline-same-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.31537103652954
+    },
+    {
+      "name": "candidate-same-5-r3",
+      "exitCode": 0,
+      "wallSeconds": 31.34513807296753
+    }
+  ]
+}

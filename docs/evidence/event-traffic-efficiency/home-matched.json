@@ -1,0 +1,1568 @@
+[
+  {
+    "view": "shell-v1",
+    "elapsedMs": 22,
+    "queries": 22,
+    "sql": [
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2",
+        "durationMs": 0.23674999999997226,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatus\"),CAST($6::text AS \"public\".\"FriendshipStatus\")))) OFFSET $7",
+        "durationMs": 0.3499999999999659,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ACCEPTED",
+          "PENDING",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ACCEPTED",
+          "PENDING",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"shop_items\".\"asset_version\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"created_at\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.28991700000000264,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($3::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL)) AND (\"public\".\"race_participants\".\"invite_expires_at\" IS NULL OR \"public\".\"race_participants\".\"invite_expires_at\" > $4)) ORDER BY \"public\".\"race_participants\".\"invite_expires_at\" ASC, \"public\".\"race_participants\".\"joined_at\" ASC OFFSET $5",
+        "durationMs": 0.7346250000000509,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "invited",
+          "pending",
+          "2026-09-10T03:41:09.780Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.2517080000000078,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.26237500000002,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participants\" WHERE 1=1 GROUP BY \"public\".\"race_participants\".\"race_id\") AS \"aggr_selection_0_RaceParticipant\" ON (\"public\".\"races\".\"id\" = \"aggr_selection_0_RaceParticipant\".\"race_id\") WHERE \"public\".\"races\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.23729199999996808,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.12037499999996726,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.17220900000000938,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.13383399999997891,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4",
+        "durationMs": 0.16637500000001637,
+        "params": [
+          "ACCEPTED",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "\n    WITH candidates AS MATERIALIZED (\n      SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at\n      FROM races r\n      JOIN users creator ON creator.id = r.creator_id\n      WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE\n        AND creator.is_review_account = FALSE\n        AND NOT EXISTS (\n          SELECT 1 FROM race_participants mine\n          WHERE mine.race_id = r.id AND mine.user_id = $1\n            AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\")\n        )\n      ORDER BY r.started_at ASC\n      LIMIT 25\n    )\n    SELECT c.id, c.name, c.ends_at AS \"endsAt\", c.max_participants AS \"maxParticipants\",\n      seed.kind AS \"seedKind\", COALESCE(parts.accepted_count, 0)::int AS \"participantCount\"\n    FROM candidates c\n    LEFT JOIN race_seeds seed ON seed.id = c.seed_id\n    LEFT JOIN LATERAL (\n      SELECT COUNT(*)::int AS accepted_count FROM race_participants rp\n      WHERE rp.race_id = c.id AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n    ) parts ON TRUE\n    ORDER BY c.started_at ASC\n  ",
+        "durationMs": 0.6364590000000021,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"steps\", \"public\".\"steps\".\"step_goal\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"created_at\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.21566699999999628,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10T00:00:00.000Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"step_milestone_claims\".\"id\", \"public\".\"step_milestone_claims\".\"user_id\", \"public\".\"step_milestone_claims\".\"claimed_date\", \"public\".\"step_milestone_claims\".\"threshold\" FROM \"public\".\"step_milestone_claims\" WHERE (\"public\".\"step_milestone_claims\".\"user_id\" IN ($1) AND \"public\".\"step_milestone_claims\".\"claimed_date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.42808299999995825,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10",
+          "0"
+        ]
+      },
+      {
+        "query": "\n          WITH authoritative_time AS (\n            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load\n          ), ranked AS (\n            SELECT\n              s.user_id AS \"userId\",\n              s.id,\n              s.event_id AS \"eventId\",\n              s.extra_race_steps AS \"extraRaceSteps\",\n              s.race_count AS \"raceCount\",\n              s.settled_at AS \"settledAt\",\n              s.expires_at AS \"expiresAt\",\n              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM\n                (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\",\n              ROW_NUMBER() OVER (\n                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC\n              )::int AS row_number\n            FROM global_event_user_summaries s\n            CROSS JOIN authoritative_time t\n            WHERE s.user_id IN ($1)\n              AND s.acknowledged_at IS NULL\n              AND s.attribution_version=2\n              AND s.expires_at>t.now_at_load\n              AND EXISTS (\n                SELECT 1 FROM global_event_race_impacts i\n                WHERE i.event_id=s.event_id AND i.user_id=s.user_id\n                  AND i.status='FINAL' AND i.attribution_version=2\n                  AND i.delta_steps<>0\n              )\n          )\n          SELECT * FROM ranked WHERE row_number=1\n        ",
+        "durationMs": 2.5492499999999723,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5,$6,$7)) OFFSET $8",
+        "durationMs": 3.512875000000008,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_participants\".\"user_id\" IN ($6) AND \"public\".\"race_participants\".\"status\" <> CAST($7::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $8",
+        "durationMs": 0.5170830000000137,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      WITH accepted AS (\n        SELECT\n          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY rp.race_id\n            ORDER BY\n              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL\n                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,\n              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,\n              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,\n              rp.user_id COLLATE \"C\" ASC\n          ) AS persisted_position,\n          COUNT(*) OVER (\n            PARTITION BY rp.race_id, rp.placement, rp.finished_at\n          ) AS finish_key_count,\n          race_scope.powerups_enabled\n        FROM race_participants rp\n        JOIN races race_scope ON race_scope.id = rp.race_id\n        WHERE rp.race_id IN ($1,$2,$3,$4,$5)\n          AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n      ), aggregates AS (\n        SELECT\n          race_id,\n          COUNT(*)::int AS accepted_count,\n          COUNT(*) FILTER (WHERE team = 'team_a'::\"RaceTeam\")::int AS team_a_count,\n          COUNT(*) FILTER (WHERE team = 'team_b'::\"RaceTeam\")::int AS team_b_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_a'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_a_payout_recipient_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_b'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_b_payout_recipient_count,\n          COALESCE(\n            ARRAY_AGG(\n              payout_coins\n              ORDER BY payout_coins DESC, user_id COLLATE \"C\" ASC\n            ) FILTER (WHERE payout_coins > 0),\n            ARRAY[]::integer[]\n          ) AS completed_payouts,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::\"RaceTeam\"), 0)::bigint AS team_a_steps,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::\"RaceTeam\"), 0)::bigint AS team_b_steps,\n          MAX(totals_updated_at) AS totals_as_of,\n          COALESCE(\n            JSONB_AGG(\n              JSONB_BUILD_OBJECT(\n                'id', id,\n                'userId', user_id,\n                'finishedAt', finished_at,\n                'placement', persisted_position\n              )\n              ORDER BY persisted_position\n            ) FILTER (WHERE powerups_enabled = TRUE),\n            '[]'::jsonb\n          ) AS rank_roster,\n          COALESCE(\n            JSONB_OBJECT_AGG(user_id, persisted_position)\n              FILTER (WHERE user_id IN ($6)),\n            '{}'::jsonb\n          ) AS viewer_positions,\n          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order\n        FROM accepted\n        GROUP BY race_id, powerups_enabled\n      )\n      SELECT\n        r.id AS \"raceId\",\n        COALESCE(a.accepted_count, 0)::int AS \"acceptedCount\",\n        COALESCE(a.team_a_count, 0)::int AS \"teamACount\",\n        COALESCE(a.team_b_count, 0)::int AS \"teamBCount\",\n        COALESCE(a.team_a_payout_recipient_count, 0)::int AS \"teamAPayoutRecipientCount\",\n        COALESCE(a.team_b_payout_recipient_count, 0)::int AS \"teamBPayoutRecipientCount\",\n        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS \"completedPayouts\",\n        COALESCE(a.team_a_steps, 0)::text AS \"teamASteps\",\n        COALESCE(a.team_b_steps, 0)::text AS \"teamBSteps\",\n        a.totals_as_of AS \"totalsAsOf\",\n        COALESCE(a.rank_roster, '[]'::jsonb) AS \"rankRoster\",\n        COALESCE(a.viewer_positions, '{}'::jsonb) AS \"viewerPositions\",\n        COALESCE(a.ambiguous_finisher_order, FALSE) AS \"ambiguousFinisherOrder\",\n        leader.id AS \"leaderParticipantId\",\n        leader.user_id AS \"leaderUserId\",\n        leader.total_steps AS \"leaderTotalSteps\",\n        leader.placement AS \"leaderPlacement\",\n        leader.finished_at AS \"leaderFinishedAt\",\n        leader.joined_at AS \"leaderJoinedAt\"\n      FROM races r\n      LEFT JOIN aggregates a ON a.race_id = r.id\n      LEFT JOIN accepted leader\n        ON leader.race_id = r.id AND leader.persisted_position = 1\n      WHERE r.id IN ($7,$8,$9,$10,$11)\n    ",
+        "durationMs": 4.190457999999978,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\".\"race_powerups\".\"config_version\", \"public\".\"race_powerups\".\"rerolled_at\", \"public\".\"race_powerups\".\"created_at\", \"public\".\"race_powerups\".\"updated_at\" FROM \"public\".\"race_powerups\" WHERE (\"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_powerups\".\"status\" IN (CAST($6::text AS \"public\".\"PowerupStatus\"),CAST($7::text AS \"public\".\"PowerupStatus\"),CAST($8::text AS \"public\".\"PowerupStatus\"))) ORDER BY \"public\".\"race_powerups\".\"created_at\" ASC OFFSET $9",
+        "durationMs": 0.4567079999999919,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "held",
+          "mystery_box",
+          "queued",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"target_participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_active_effects\".\"status\" = CAST($6::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $7",
+        "durationMs": 1.0039999999999623,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "active_effect",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      SELECT r.id,\n             r.creator_id AS \"creatorId\",\n             r.seed_id AS \"seedId\",\n             r.tournament_id AS \"tournamentId\",\n             r.creation_source AS \"creationSource\",\n             r.start_policy AS \"startPolicy\",\n             r.status::text AS status,\n             r.rematch_root_race_id AS \"rematchRootRaceId\",\n             r.series_id AS \"seriesId\",\n             COALESCE(rs.enabled, false) AS \"seriesEnabled\",\n             EXISTS (\n               SELECT 1 FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.user_id = $1\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"viewerAccepted\",\n             (\n               SELECT COUNT(*) FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"acceptedCount\",\n             EXISTS (\n               SELECT 1 FROM races successor\n                WHERE successor.series_predecessor_race_id = r.id\n             ) AS \"hasSeriesSuccessor\",\n             EXISTS (\n               SELECT 1 FROM races descendant\n                WHERE descendant.rematch_root_race_id = COALESCE(r.rematch_root_race_id, r.id)\n                  AND descendant.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\")\n             ) AS \"hasLiveRematch\",\n             EXISTS (\n               SELECT 1 FROM races child\n                WHERE child.rematch_source_race_id = r.id\n                  AND child.status = 'completed'::\"RaceStatus\"\n             ) AS \"hasCompletedRematchChild\",\n             EXISTS (\n               SELECT 1 FROM race_series_subscriptions subscription\n                WHERE subscription.series_id = r.series_id\n                  AND subscription.user_id = $2\n                  AND subscription.active = true\n             ) AS subscribed\n        FROM races r\n        LEFT JOIN race_series rs ON rs.id = r.series_id\n       WHERE r.id IN ($3,$4,$5,$6,$7)\n    ",
+        "durationMs": 2.2309999999999945,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+        "durationMs": 0.37616700000000947,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "1",
+          "0"
+        ]
+      }
+    ],
+    "home": {
+      "state": "EMPTY",
+      "data": {},
+      "characterPowersEnabled": false,
+      "stepMilestones": {
+        "localDate": "2026-09-10",
+        "currentSteps": 241,
+        "milestones": [
+          {
+            "threshold": 5000,
+            "coins": 10,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 10000,
+            "coins": 20,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 15000,
+            "coins": 30,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 20000,
+            "coins": 50,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          }
+        ],
+        "totalCoinsClaimed": 0
+      },
+      "dailyReward": {
+        "claimedToday": false,
+        "localDate": "2026-09-10"
+      },
+      "contract": "home-shell-v1",
+      "resolved": {
+        "presentation": true,
+        "friends": true
+      },
+      "presentation": {
+        "coins": 0,
+        "equipped": {},
+        "cape": null
+      },
+      "friends": {
+        "contract": "friends-summary-v1",
+        "incomingFriendRequests": 0,
+        "friends": [],
+        "pending": {
+          "incoming": [],
+          "outgoing": []
+        }
+      }
+    }
+  },
+  {
+    "view": "sync-refresh-v1",
+    "elapsedMs": 17,
+    "queries": 17,
+    "sql": [
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($3::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL)) AND (\"public\".\"race_participants\".\"invite_expires_at\" IS NULL OR \"public\".\"race_participants\".\"invite_expires_at\" > $4)) ORDER BY \"public\".\"race_participants\".\"invite_expires_at\" ASC, \"public\".\"race_participants\".\"joined_at\" ASC OFFSET $5",
+        "durationMs": 1.032291999999984,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "invited",
+          "pending",
+          "2026-09-10T03:41:09.802Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participants\" WHERE 1=1 GROUP BY \"public\".\"race_participants\".\"race_id\") AS \"aggr_selection_0_RaceParticipant\" ON (\"public\".\"races\".\"id\" = \"aggr_selection_0_RaceParticipant\".\"race_id\") WHERE \"public\".\"races\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.5974160000000097,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.2342909999999847,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.6686249999999632,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.283333999999968,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4",
+        "durationMs": 0.8033330000000092,
+        "params": [
+          "ACCEPTED",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "\n    WITH candidates AS MATERIALIZED (\n      SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at\n      FROM races r\n      JOIN users creator ON creator.id = r.creator_id\n      WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE\n        AND creator.is_review_account = FALSE\n        AND NOT EXISTS (\n          SELECT 1 FROM race_participants mine\n          WHERE mine.race_id = r.id AND mine.user_id = $1\n            AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\")\n        )\n      ORDER BY r.started_at ASC\n      LIMIT 25\n    )\n    SELECT c.id, c.name, c.ends_at AS \"endsAt\", c.max_participants AS \"maxParticipants\",\n      seed.kind AS \"seedKind\", COALESCE(parts.accepted_count, 0)::int AS \"participantCount\"\n    FROM candidates c\n    LEFT JOIN race_seeds seed ON seed.id = c.seed_id\n    LEFT JOIN LATERAL (\n      SELECT COUNT(*)::int AS accepted_count FROM race_participants rp\n      WHERE rp.race_id = c.id AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n    ) parts ON TRUE\n    ORDER BY c.started_at ASC\n  ",
+        "durationMs": 0.9427080000000387,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"step_milestone_claims\".\"id\", \"public\".\"step_milestone_claims\".\"user_id\", \"public\".\"step_milestone_claims\".\"claimed_date\", \"public\".\"step_milestone_claims\".\"threshold\" FROM \"public\".\"step_milestone_claims\" WHERE (\"public\".\"step_milestone_claims\".\"user_id\" IN ($1) AND \"public\".\"step_milestone_claims\".\"claimed_date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.5343750000000114,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"steps\", \"public\".\"steps\".\"step_goal\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"created_at\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.5978339999999776,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10T00:00:00.000Z",
+          "0"
+        ]
+      },
+      {
+        "query": "\n          WITH authoritative_time AS (\n            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load\n          ), ranked AS (\n            SELECT\n              s.user_id AS \"userId\",\n              s.id,\n              s.event_id AS \"eventId\",\n              s.extra_race_steps AS \"extraRaceSteps\",\n              s.race_count AS \"raceCount\",\n              s.settled_at AS \"settledAt\",\n              s.expires_at AS \"expiresAt\",\n              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM\n                (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\",\n              ROW_NUMBER() OVER (\n                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC\n              )::int AS row_number\n            FROM global_event_user_summaries s\n            CROSS JOIN authoritative_time t\n            WHERE s.user_id IN ($1)\n              AND s.acknowledged_at IS NULL\n              AND s.attribution_version=2\n              AND s.expires_at>t.now_at_load\n              AND EXISTS (\n                SELECT 1 FROM global_event_race_impacts i\n                WHERE i.event_id=s.event_id AND i.user_id=s.user_id\n                  AND i.status='FINAL' AND i.attribution_version=2\n                  AND i.delta_steps<>0\n              )\n          )\n          SELECT * FROM ranked WHERE row_number=1\n        ",
+        "durationMs": 0.6503749999999968,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5,$6,$7)) OFFSET $8",
+        "durationMs": 0.38066700000001674,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_participants\".\"user_id\" IN ($6) AND \"public\".\"race_participants\".\"status\" <> CAST($7::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $8",
+        "durationMs": 0.4459590000000162,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      WITH accepted AS (\n        SELECT\n          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY rp.race_id\n            ORDER BY\n              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL\n                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,\n              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,\n              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,\n              rp.user_id COLLATE \"C\" ASC\n          ) AS persisted_position,\n          COUNT(*) OVER (\n            PARTITION BY rp.race_id, rp.placement, rp.finished_at\n          ) AS finish_key_count,\n          race_scope.powerups_enabled\n        FROM race_participants rp\n        JOIN races race_scope ON race_scope.id = rp.race_id\n        WHERE rp.race_id IN ($1,$2,$3,$4,$5)\n          AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n      ), aggregates AS (\n        SELECT\n          race_id,\n          COUNT(*)::int AS accepted_count,\n          COUNT(*) FILTER (WHERE team = 'team_a'::\"RaceTeam\")::int AS team_a_count,\n          COUNT(*) FILTER (WHERE team = 'team_b'::\"RaceTeam\")::int AS team_b_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_a'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_a_payout_recipient_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_b'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_b_payout_recipient_count,\n          COALESCE(\n            ARRAY_AGG(\n              payout_coins\n              ORDER BY payout_coins DESC, user_id COLLATE \"C\" ASC\n            ) FILTER (WHERE payout_coins > 0),\n            ARRAY[]::integer[]\n          ) AS completed_payouts,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::\"RaceTeam\"), 0)::bigint AS team_a_steps,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::\"RaceTeam\"), 0)::bigint AS team_b_steps,\n          MAX(totals_updated_at) AS totals_as_of,\n          COALESCE(\n            JSONB_AGG(\n              JSONB_BUILD_OBJECT(\n                'id', id,\n                'userId', user_id,\n                'finishedAt', finished_at,\n                'placement', persisted_position\n              )\n              ORDER BY persisted_position\n            ) FILTER (WHERE powerups_enabled = TRUE),\n            '[]'::jsonb\n          ) AS rank_roster,\n          COALESCE(\n            JSONB_OBJECT_AGG(user_id, persisted_position)\n              FILTER (WHERE user_id IN ($6)),\n            '{}'::jsonb\n          ) AS viewer_positions,\n          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order\n        FROM accepted\n        GROUP BY race_id, powerups_enabled\n      )\n      SELECT\n        r.id AS \"raceId\",\n        COALESCE(a.accepted_count, 0)::int AS \"acceptedCount\",\n        COALESCE(a.team_a_count, 0)::int AS \"teamACount\",\n        COALESCE(a.team_b_count, 0)::int AS \"teamBCount\",\n        COALESCE(a.team_a_payout_recipient_count, 0)::int AS \"teamAPayoutRecipientCount\",\n        COALESCE(a.team_b_payout_recipient_count, 0)::int AS \"teamBPayoutRecipientCount\",\n        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS \"completedPayouts\",\n        COALESCE(a.team_a_steps, 0)::text AS \"teamASteps\",\n        COALESCE(a.team_b_steps, 0)::text AS \"teamBSteps\",\n        a.totals_as_of AS \"totalsAsOf\",\n        COALESCE(a.rank_roster, '[]'::jsonb) AS \"rankRoster\",\n        COALESCE(a.viewer_positions, '{}'::jsonb) AS \"viewerPositions\",\n        COALESCE(a.ambiguous_finisher_order, FALSE) AS \"ambiguousFinisherOrder\",\n        leader.id AS \"leaderParticipantId\",\n        leader.user_id AS \"leaderUserId\",\n        leader.total_steps AS \"leaderTotalSteps\",\n        leader.placement AS \"leaderPlacement\",\n        leader.finished_at AS \"leaderFinishedAt\",\n        leader.joined_at AS \"leaderJoinedAt\"\n      FROM races r\n      LEFT JOIN aggregates a ON a.race_id = r.id\n      LEFT JOIN accepted leader\n        ON leader.race_id = r.id AND leader.persisted_position = 1\n      WHERE r.id IN ($7,$8,$9,$10,$11)\n    ",
+        "durationMs": 1.366624999999999,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"target_participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_active_effects\".\"status\" = CAST($6::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $7",
+        "durationMs": 0.25441699999998946,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "active_effect",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\".\"race_powerups\".\"config_version\", \"public\".\"race_powerups\".\"rerolled_at\", \"public\".\"race_powerups\".\"created_at\", \"public\".\"race_powerups\".\"updated_at\" FROM \"public\".\"race_powerups\" WHERE (\"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_powerups\".\"status\" IN (CAST($6::text AS \"public\".\"PowerupStatus\"),CAST($7::text AS \"public\".\"PowerupStatus\"),CAST($8::text AS \"public\".\"PowerupStatus\"))) ORDER BY \"public\".\"race_powerups\".\"created_at\" ASC OFFSET $9",
+        "durationMs": 0.2563339999999812,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "held",
+          "mystery_box",
+          "queued",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      SELECT r.id,\n             r.creator_id AS \"creatorId\",\n             r.seed_id AS \"seedId\",\n             r.tournament_id AS \"tournamentId\",\n             r.creation_source AS \"creationSource\",\n             r.start_policy AS \"startPolicy\",\n             r.status::text AS status,\n             r.rematch_root_race_id AS \"rematchRootRaceId\",\n             r.series_id AS \"seriesId\",\n             COALESCE(rs.enabled, false) AS \"seriesEnabled\",\n             EXISTS (\n               SELECT 1 FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.user_id = $1\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"viewerAccepted\",\n             (\n               SELECT COUNT(*) FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"acceptedCount\",\n             EXISTS (\n               SELECT 1 FROM races successor\n                WHERE successor.series_predecessor_race_id = r.id\n             ) AS \"hasSeriesSuccessor\",\n             EXISTS (\n               SELECT 1 FROM races descendant\n                WHERE descendant.rematch_root_race_id = COALESCE(r.rematch_root_race_id, r.id)\n                  AND descendant.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\")\n             ) AS \"hasLiveRematch\",\n             EXISTS (\n               SELECT 1 FROM races child\n                WHERE child.rematch_source_race_id = r.id\n                  AND child.status = 'completed'::\"RaceStatus\"\n             ) AS \"hasCompletedRematchChild\",\n             EXISTS (\n               SELECT 1 FROM race_series_subscriptions subscription\n                WHERE subscription.series_id = r.series_id\n                  AND subscription.user_id = $2\n                  AND subscription.active = true\n             ) AS subscribed\n        FROM races r\n        LEFT JOIN race_series rs ON rs.id = r.series_id\n       WHERE r.id IN ($3,$4,$5,$6,$7)\n    ",
+        "durationMs": 1.2199590000000171,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+        "durationMs": 0.3309590000000071,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "1",
+          "0"
+        ]
+      }
+    ],
+    "home": {
+      "contract": "home-sync-refresh-v1",
+      "home": {
+        "state": "EMPTY",
+        "data": {},
+        "characterPowersEnabled": false,
+        "stepMilestones": {
+          "localDate": "2026-09-10",
+          "currentSteps": 241,
+          "milestones": [
+            {
+              "threshold": 5000,
+              "coins": 10,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 10000,
+              "coins": 20,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 15000,
+              "coins": 30,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 20000,
+              "coins": 50,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            }
+          ],
+          "totalCoinsClaimed": 0
+        },
+        "dailyReward": {
+          "claimedToday": false,
+          "localDate": "2026-09-10"
+        }
+      },
+      "retainedSections": [
+        "presentation",
+        "friends"
+      ]
+    }
+  },
+  {
+    "view": "shell-v1",
+    "elapsedMs": 10,
+    "queries": 22,
+    "sql": [
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2",
+        "durationMs": 0.25216599999998834,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatus\"),CAST($6::text AS \"public\".\"FriendshipStatus\")))) OFFSET $7",
+        "durationMs": 0.23354199999999992,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ACCEPTED",
+          "PENDING",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ACCEPTED",
+          "PENDING",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"shop_items\".\"asset_version\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"created_at\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.19137499999999363,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($3::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL)) AND (\"public\".\"race_participants\".\"invite_expires_at\" IS NULL OR \"public\".\"race_participants\".\"invite_expires_at\" > $4)) ORDER BY \"public\".\"race_participants\".\"invite_expires_at\" ASC, \"public\".\"race_participants\".\"joined_at\" ASC OFFSET $5",
+        "durationMs": 0.5938749999999686,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "invited",
+          "pending",
+          "2026-09-10T03:41:09.818Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.21187500000002046,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.2220829999999978,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participants\" WHERE 1=1 GROUP BY \"public\".\"race_participants\".\"race_id\") AS \"aggr_selection_0_RaceParticipant\" ON (\"public\".\"races\".\"id\" = \"aggr_selection_0_RaceParticipant\".\"race_id\") WHERE \"public\".\"races\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.24345800000003237,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.11349999999998772,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.10066699999998718,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.10983299999998053,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4",
+        "durationMs": 0.16212500000000318,
+        "params": [
+          "ACCEPTED",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "\n    WITH candidates AS MATERIALIZED (\n      SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at\n      FROM races r\n      JOIN users creator ON creator.id = r.creator_id\n      WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE\n        AND creator.is_review_account = FALSE\n        AND NOT EXISTS (\n          SELECT 1 FROM race_participants mine\n          WHERE mine.race_id = r.id AND mine.user_id = $1\n            AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\")\n        )\n      ORDER BY r.started_at ASC\n      LIMIT 25\n    )\n    SELECT c.id, c.name, c.ends_at AS \"endsAt\", c.max_participants AS \"maxParticipants\",\n      seed.kind AS \"seedKind\", COALESCE(parts.accepted_count, 0)::int AS \"participantCount\"\n    FROM candidates c\n    LEFT JOIN race_seeds seed ON seed.id = c.seed_id\n    LEFT JOIN LATERAL (\n      SELECT COUNT(*)::int AS accepted_count FROM race_participants rp\n      WHERE rp.race_id = c.id AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n    ) parts ON TRUE\n    ORDER BY c.started_at ASC\n  ",
+        "durationMs": 0.7475000000000023,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"steps\", \"public\".\"steps\".\"step_goal\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"created_at\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.19608299999998735,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10T00:00:00.000Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"step_milestone_claims\".\"id\", \"public\".\"step_milestone_claims\".\"user_id\", \"public\".\"step_milestone_claims\".\"claimed_date\", \"public\".\"step_milestone_claims\".\"threshold\" FROM \"public\".\"step_milestone_claims\" WHERE (\"public\".\"step_milestone_claims\".\"user_id\" IN ($1) AND \"public\".\"step_milestone_claims\".\"claimed_date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.19829199999998082,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10",
+          "0"
+        ]
+      },
+      {
+        "query": "\n          WITH authoritative_time AS (\n            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load\n          ), ranked AS (\n            SELECT\n              s.user_id AS \"userId\",\n              s.id,\n              s.event_id AS \"eventId\",\n              s.extra_race_steps AS \"extraRaceSteps\",\n              s.race_count AS \"raceCount\",\n              s.settled_at AS \"settledAt\",\n              s.expires_at AS \"expiresAt\",\n              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM\n                (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\",\n              ROW_NUMBER() OVER (\n                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC\n              )::int AS row_number\n            FROM global_event_user_summaries s\n            CROSS JOIN authoritative_time t\n            WHERE s.user_id IN ($1)\n              AND s.acknowledged_at IS NULL\n              AND s.attribution_version=2\n              AND s.expires_at>t.now_at_load\n              AND EXISTS (\n                SELECT 1 FROM global_event_race_impacts i\n                WHERE i.event_id=s.event_id AND i.user_id=s.user_id\n                  AND i.status='FINAL' AND i.attribution_version=2\n                  AND i.delta_steps<>0\n              )\n          )\n          SELECT * FROM ranked WHERE row_number=1\n        ",
+        "durationMs": 0.4804579999999987,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5,$6,$7)) OFFSET $8",
+        "durationMs": 0.4241670000000113,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_participants\".\"user_id\" IN ($6) AND \"public\".\"race_participants\".\"status\" <> CAST($7::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $8",
+        "durationMs": 0.2698750000000132,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      WITH accepted AS (\n        SELECT\n          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY rp.race_id\n            ORDER BY\n              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL\n                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,\n              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,\n              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,\n              rp.user_id COLLATE \"C\" ASC\n          ) AS persisted_position,\n          COUNT(*) OVER (\n            PARTITION BY rp.race_id, rp.placement, rp.finished_at\n          ) AS finish_key_count,\n          race_scope.powerups_enabled\n        FROM race_participants rp\n        JOIN races race_scope ON race_scope.id = rp.race_id\n        WHERE rp.race_id IN ($1,$2,$3,$4,$5)\n          AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n      ), aggregates AS (\n        SELECT\n          race_id,\n          COUNT(*)::int AS accepted_count,\n          COUNT(*) FILTER (WHERE team = 'team_a'::\"RaceTeam\")::int AS team_a_count,\n          COUNT(*) FILTER (WHERE team = 'team_b'::\"RaceTeam\")::int AS team_b_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_a'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_a_payout_recipient_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_b'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_b_payout_recipient_count,\n          COALESCE(\n            ARRAY_AGG(\n              payout_coins\n              ORDER BY payout_coins DESC, user_id COLLATE \"C\" ASC\n            ) FILTER (WHERE payout_coins > 0),\n            ARRAY[]::integer[]\n          ) AS completed_payouts,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::\"RaceTeam\"), 0)::bigint AS team_a_steps,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::\"RaceTeam\"), 0)::bigint AS team_b_steps,\n          MAX(totals_updated_at) AS totals_as_of,\n          COALESCE(\n            JSONB_AGG(\n              JSONB_BUILD_OBJECT(\n                'id', id,\n                'userId', user_id,\n                'finishedAt', finished_at,\n                'placement', persisted_position\n              )\n              ORDER BY persisted_position\n            ) FILTER (WHERE powerups_enabled = TRUE),\n            '[]'::jsonb\n          ) AS rank_roster,\n          COALESCE(\n            JSONB_OBJECT_AGG(user_id, persisted_position)\n              FILTER (WHERE user_id IN ($6)),\n            '{}'::jsonb\n          ) AS viewer_positions,\n          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order\n        FROM accepted\n        GROUP BY race_id, powerups_enabled\n      )\n      SELECT\n        r.id AS \"raceId\",\n        COALESCE(a.accepted_count, 0)::int AS \"acceptedCount\",\n        COALESCE(a.team_a_count, 0)::int AS \"teamACount\",\n        COALESCE(a.team_b_count, 0)::int AS \"teamBCount\",\n        COALESCE(a.team_a_payout_recipient_count, 0)::int AS \"teamAPayoutRecipientCount\",\n        COALESCE(a.team_b_payout_recipient_count, 0)::int AS \"teamBPayoutRecipientCount\",\n        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS \"completedPayouts\",\n        COALESCE(a.team_a_steps, 0)::text AS \"teamASteps\",\n        COALESCE(a.team_b_steps, 0)::text AS \"teamBSteps\",\n        a.totals_as_of AS \"totalsAsOf\",\n        COALESCE(a.rank_roster, '[]'::jsonb) AS \"rankRoster\",\n        COALESCE(a.viewer_positions, '{}'::jsonb) AS \"viewerPositions\",\n        COALESCE(a.ambiguous_finisher_order, FALSE) AS \"ambiguousFinisherOrder\",\n        leader.id AS \"leaderParticipantId\",\n        leader.user_id AS \"leaderUserId\",\n        leader.total_steps AS \"leaderTotalSteps\",\n        leader.placement AS \"leaderPlacement\",\n        leader.finished_at AS \"leaderFinishedAt\",\n        leader.joined_at AS \"leaderJoinedAt\"\n      FROM races r\n      LEFT JOIN aggregates a ON a.race_id = r.id\n      LEFT JOIN accepted leader\n        ON leader.race_id = r.id AND leader.persisted_position = 1\n      WHERE r.id IN ($7,$8,$9,$10,$11)\n    ",
+        "durationMs": 1.156167000000039,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"target_participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_active_effects\".\"status\" = CAST($6::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $7",
+        "durationMs": 0.22945799999996552,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "active_effect",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\".\"race_powerups\".\"config_version\", \"public\".\"race_powerups\".\"rerolled_at\", \"public\".\"race_powerups\".\"created_at\", \"public\".\"race_powerups\".\"updated_at\" FROM \"public\".\"race_powerups\" WHERE (\"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_powerups\".\"status\" IN (CAST($6::text AS \"public\".\"PowerupStatus\"),CAST($7::text AS \"public\".\"PowerupStatus\"),CAST($8::text AS \"public\".\"PowerupStatus\"))) ORDER BY \"public\".\"race_powerups\".\"created_at\" ASC OFFSET $9",
+        "durationMs": 0.23283399999996846,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "held",
+          "mystery_box",
+          "queued",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      SELECT r.id,\n             r.creator_id AS \"creatorId\",\n             r.seed_id AS \"seedId\",\n             r.tournament_id AS \"tournamentId\",\n             r.creation_source AS \"creationSource\",\n             r.start_policy AS \"startPolicy\",\n             r.status::text AS status,\n             r.rematch_root_race_id AS \"rematchRootRaceId\",\n             r.series_id AS \"seriesId\",\n             COALESCE(rs.enabled, false) AS \"seriesEnabled\",\n             EXISTS (\n               SELECT 1 FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.user_id = $1\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"viewerAccepted\",\n             (\n               SELECT COUNT(*) FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"acceptedCount\",\n             EXISTS (\n               SELECT 1 FROM races successor\n                WHERE successor.series_predecessor_race_id = r.id\n             ) AS \"hasSeriesSuccessor\",\n             EXISTS (\n               SELECT 1 FROM races descendant\n                WHERE descendant.rematch_root_race_id = COALESCE(r.rematch_root_race_id, r.id)\n                  AND descendant.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\")\n             ) AS \"hasLiveRematch\",\n             EXISTS (\n               SELECT 1 FROM races child\n                WHERE child.rematch_source_race_id = r.id\n                  AND child.status = 'completed'::\"RaceStatus\"\n             ) AS \"hasCompletedRematchChild\",\n             EXISTS (\n               SELECT 1 FROM race_series_subscriptions subscription\n                WHERE subscription.series_id = r.series_id\n                  AND subscription.user_id = $2\n                  AND subscription.active = true\n             ) AS subscribed\n        FROM races r\n        LEFT JOIN race_series rs ON rs.id = r.series_id\n       WHERE r.id IN ($3,$4,$5,$6,$7)\n    ",
+        "durationMs": 1.0095830000000205,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+        "durationMs": 0.18737499999997453,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "1",
+          "0"
+        ]
+      }
+    ],
+    "home": {
+      "state": "EMPTY",
+      "data": {},
+      "characterPowersEnabled": false,
+      "stepMilestones": {
+        "localDate": "2026-09-10",
+        "currentSteps": 241,
+        "milestones": [
+          {
+            "threshold": 5000,
+            "coins": 10,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 10000,
+            "coins": 20,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 15000,
+            "coins": 30,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 20000,
+            "coins": 50,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          }
+        ],
+        "totalCoinsClaimed": 0
+      },
+      "dailyReward": {
+        "claimedToday": false,
+        "localDate": "2026-09-10"
+      },
+      "contract": "home-shell-v1",
+      "resolved": {
+        "presentation": true,
+        "friends": true
+      },
+      "presentation": {
+        "coins": 0,
+        "equipped": {},
+        "cape": null
+      },
+      "friends": {
+        "contract": "friends-summary-v1",
+        "incomingFriendRequests": 0,
+        "friends": [],
+        "pending": {
+          "incoming": [],
+          "outgoing": []
+        }
+      }
+    }
+  },
+  {
+    "view": "sync-refresh-v1",
+    "elapsedMs": 9,
+    "queries": 17,
+    "sql": [
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($3::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL)) AND (\"public\".\"race_participants\".\"invite_expires_at\" IS NULL OR \"public\".\"race_participants\".\"invite_expires_at\" > $4)) ORDER BY \"public\".\"race_participants\".\"invite_expires_at\" ASC, \"public\".\"race_participants\".\"joined_at\" ASC OFFSET $5",
+        "durationMs": 0.38195799999999736,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "invited",
+          "pending",
+          "2026-09-10T03:41:09.828Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participants\" WHERE 1=1 GROUP BY \"public\".\"race_participants\".\"race_id\") AS \"aggr_selection_0_RaceParticipant\" ON (\"public\".\"races\".\"id\" = \"aggr_selection_0_RaceParticipant\".\"race_id\") WHERE \"public\".\"races\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.2880829999999719,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.13766700000002174,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.15512499999999818,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.1193749999999909,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4",
+        "durationMs": 0.17333299999995688,
+        "params": [
+          "ACCEPTED",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "\n    WITH candidates AS MATERIALIZED (\n      SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at\n      FROM races r\n      JOIN users creator ON creator.id = r.creator_id\n      WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE\n        AND creator.is_review_account = FALSE\n        AND NOT EXISTS (\n          SELECT 1 FROM race_participants mine\n          WHERE mine.race_id = r.id AND mine.user_id = $1\n            AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\")\n        )\n      ORDER BY r.started_at ASC\n      LIMIT 25\n    )\n    SELECT c.id, c.name, c.ends_at AS \"endsAt\", c.max_participants AS \"maxParticipants\",\n      seed.kind AS \"seedKind\", COALESCE(parts.accepted_count, 0)::int AS \"participantCount\"\n    FROM candidates c\n    LEFT JOIN race_seeds seed ON seed.id = c.seed_id\n    LEFT JOIN LATERAL (\n      SELECT COUNT(*)::int AS accepted_count FROM race_participants rp\n      WHERE rp.race_id = c.id AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n    ) parts ON TRUE\n    ORDER BY c.started_at ASC\n  ",
+        "durationMs": 0.8400000000000318,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"steps\", \"public\".\"steps\".\"step_goal\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"created_at\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.17712499999998954,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10T00:00:00.000Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"step_milestone_claims\".\"id\", \"public\".\"step_milestone_claims\".\"user_id\", \"public\".\"step_milestone_claims\".\"claimed_date\", \"public\".\"step_milestone_claims\".\"threshold\" FROM \"public\".\"step_milestone_claims\" WHERE (\"public\".\"step_milestone_claims\".\"user_id\" IN ($1) AND \"public\".\"step_milestone_claims\".\"claimed_date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.17708399999997937,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10",
+          "0"
+        ]
+      },
+      {
+        "query": "\n          WITH authoritative_time AS (\n            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load\n          ), ranked AS (\n            SELECT\n              s.user_id AS \"userId\",\n              s.id,\n              s.event_id AS \"eventId\",\n              s.extra_race_steps AS \"extraRaceSteps\",\n              s.race_count AS \"raceCount\",\n              s.settled_at AS \"settledAt\",\n              s.expires_at AS \"expiresAt\",\n              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM\n                (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\",\n              ROW_NUMBER() OVER (\n                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC\n              )::int AS row_number\n            FROM global_event_user_summaries s\n            CROSS JOIN authoritative_time t\n            WHERE s.user_id IN ($1)\n              AND s.acknowledged_at IS NULL\n              AND s.attribution_version=2\n              AND s.expires_at>t.now_at_load\n              AND EXISTS (\n                SELECT 1 FROM global_event_race_impacts i\n                WHERE i.event_id=s.event_id AND i.user_id=s.user_id\n                  AND i.status='FINAL' AND i.attribution_version=2\n                  AND i.delta_steps<>0\n              )\n          )\n          SELECT * FROM ranked WHERE row_number=1\n        ",
+        "durationMs": 0.4202919999999608,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5,$6,$7)) OFFSET $8",
+        "durationMs": 0.8669160000000034,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_participants\".\"user_id\" IN ($6) AND \"public\".\"race_participants\".\"status\" <> CAST($7::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $8",
+        "durationMs": 0.2317920000000413,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      WITH accepted AS (\n        SELECT\n          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY rp.race_id\n            ORDER BY\n              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL\n                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,\n              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,\n              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,\n              rp.user_id COLLATE \"C\" ASC\n          ) AS persisted_position,\n          COUNT(*) OVER (\n            PARTITION BY rp.race_id, rp.placement, rp.finished_at\n          ) AS finish_key_count,\n          race_scope.powerups_enabled\n        FROM race_participants rp\n        JOIN races race_scope ON race_scope.id = rp.race_id\n        WHERE rp.race_id IN ($1,$2,$3,$4,$5)\n          AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n      ), aggregates AS (\n        SELECT\n          race_id,\n          COUNT(*)::int AS accepted_count,\n          COUNT(*) FILTER (WHERE team = 'team_a'::\"RaceTeam\")::int AS team_a_count,\n          COUNT(*) FILTER (WHERE team = 'team_b'::\"RaceTeam\")::int AS team_b_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_a'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_a_payout_recipient_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_b'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_b_payout_recipient_count,\n          COALESCE(\n            ARRAY_AGG(\n              payout_coins\n              ORDER BY payout_coins DESC, user_id COLLATE \"C\" ASC\n            ) FILTER (WHERE payout_coins > 0),\n            ARRAY[]::integer[]\n          ) AS completed_payouts,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::\"RaceTeam\"), 0)::bigint AS team_a_steps,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::\"RaceTeam\"), 0)::bigint AS team_b_steps,\n          MAX(totals_updated_at) AS totals_as_of,\n          COALESCE(\n            JSONB_AGG(\n              JSONB_BUILD_OBJECT(\n                'id', id,\n                'userId', user_id,\n                'finishedAt', finished_at,\n                'placement', persisted_position\n              )\n              ORDER BY persisted_position\n            ) FILTER (WHERE powerups_enabled = TRUE),\n            '[]'::jsonb\n          ) AS rank_roster,\n          COALESCE(\n            JSONB_OBJECT_AGG(user_id, persisted_position)\n              FILTER (WHERE user_id IN ($6)),\n            '{}'::jsonb\n          ) AS viewer_positions,\n          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order\n        FROM accepted\n        GROUP BY race_id, powerups_enabled\n      )\n      SELECT\n        r.id AS \"raceId\",\n        COALESCE(a.accepted_count, 0)::int AS \"acceptedCount\",\n        COALESCE(a.team_a_count, 0)::int AS \"teamACount\",\n        COALESCE(a.team_b_count, 0)::int AS \"teamBCount\",\n        COALESCE(a.team_a_payout_recipient_count, 0)::int AS \"teamAPayoutRecipientCount\",\n        COALESCE(a.team_b_payout_recipient_count, 0)::int AS \"teamBPayoutRecipientCount\",\n        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS \"completedPayouts\",\n        COALESCE(a.team_a_steps, 0)::text AS \"teamASteps\",\n        COALESCE(a.team_b_steps, 0)::text AS \"teamBSteps\",\n        a.totals_as_of AS \"totalsAsOf\",\n        COALESCE(a.rank_roster, '[]'::jsonb) AS \"rankRoster\",\n        COALESCE(a.viewer_positions, '{}'::jsonb) AS \"viewerPositions\",\n        COALESCE(a.ambiguous_finisher_order, FALSE) AS \"ambiguousFinisherOrder\",\n        leader.id AS \"leaderParticipantId\",\n        leader.user_id AS \"leaderUserId\",\n        leader.total_steps AS \"leaderTotalSteps\",\n        leader.placement AS \"leaderPlacement\",\n        leader.finished_at AS \"leaderFinishedAt\",\n        leader.joined_at AS \"leaderJoinedAt\"\n      FROM races r\n      LEFT JOIN aggregates a ON a.race_id = r.id\n      LEFT JOIN accepted leader\n        ON leader.race_id = r.id AND leader.persisted_position = 1\n      WHERE r.id IN ($7,$8,$9,$10,$11)\n    ",
+        "durationMs": 0.9169170000000122,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"target_participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_active_effects\".\"status\" = CAST($6::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $7",
+        "durationMs": 0.21683400000000574,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "active_effect",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\".\"race_powerups\".\"config_version\", \"public\".\"race_powerups\".\"rerolled_at\", \"public\".\"race_powerups\".\"created_at\", \"public\".\"race_powerups\".\"updated_at\" FROM \"public\".\"race_powerups\" WHERE (\"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_powerups\".\"status\" IN (CAST($6::text AS \"public\".\"PowerupStatus\"),CAST($7::text AS \"public\".\"PowerupStatus\"),CAST($8::text AS \"public\".\"PowerupStatus\"))) ORDER BY \"public\".\"race_powerups\".\"created_at\" ASC OFFSET $9",
+        "durationMs": 0.2153329999999869,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "held",
+          "mystery_box",
+          "queued",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      SELECT r.id,\n             r.creator_id AS \"creatorId\",\n             r.seed_id AS \"seedId\",\n             r.tournament_id AS \"tournamentId\",\n             r.creation_source AS \"creationSource\",\n             r.start_policy AS \"startPolicy\",\n             r.status::text AS status,\n             r.rematch_root_race_id AS \"rematchRootRaceId\",\n             r.series_id AS \"seriesId\",\n             COALESCE(rs.enabled, false) AS \"seriesEnabled\",\n             EXISTS (\n               SELECT 1 FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.user_id = $1\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"viewerAccepted\",\n             (\n               SELECT COUNT(*) FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"acceptedCount\",\n             EXISTS (\n               SELECT 1 FROM races successor\n                WHERE successor.series_predecessor_race_id = r.id\n             ) AS \"hasSeriesSuccessor\",\n             EXISTS (\n               SELECT 1 FROM races descendant\n                WHERE descendant.rematch_root_race_id = COALESCE(r.rematch_root_race_id, r.id)\n                  AND descendant.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\")\n             ) AS \"hasLiveRematch\",\n             EXISTS (\n               SELECT 1 FROM races child\n                WHERE child.rematch_source_race_id = r.id\n                  AND child.status = 'completed'::\"RaceStatus\"\n             ) AS \"hasCompletedRematchChild\",\n             EXISTS (\n               SELECT 1 FROM race_series_subscriptions subscription\n                WHERE subscription.series_id = r.series_id\n                  AND subscription.user_id = $2\n                  AND subscription.active = true\n             ) AS subscribed\n        FROM races r\n        LEFT JOIN race_series rs ON rs.id = r.series_id\n       WHERE r.id IN ($3,$4,$5,$6,$7)\n    ",
+        "durationMs": 0.8395840000000021,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+        "durationMs": 0.16108399999995981,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "1",
+          "0"
+        ]
+      }
+    ],
+    "home": {
+      "contract": "home-sync-refresh-v1",
+      "home": {
+        "state": "EMPTY",
+        "data": {},
+        "characterPowersEnabled": false,
+        "stepMilestones": {
+          "localDate": "2026-09-10",
+          "currentSteps": 241,
+          "milestones": [
+            {
+              "threshold": 5000,
+              "coins": 10,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 10000,
+              "coins": 20,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 15000,
+              "coins": 30,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 20000,
+              "coins": 50,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            }
+          ],
+          "totalCoinsClaimed": 0
+        },
+        "dailyReward": {
+          "claimedToday": false,
+          "localDate": "2026-09-10"
+        }
+      },
+      "retainedSections": [
+        "presentation",
+        "friends"
+      ]
+    }
+  },
+  {
+    "view": "shell-v1",
+    "elapsedMs": 17,
+    "queries": 22,
+    "sql": [
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2",
+        "durationMs": 0.17024999999995316,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatus\"),CAST($6::text AS \"public\".\"FriendshipStatus\")))) OFFSET $7",
+        "durationMs": 0.18366600000001654,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ACCEPTED",
+          "PENDING",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ACCEPTED",
+          "PENDING",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($3::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL)) AND (\"public\".\"race_participants\".\"invite_expires_at\" IS NULL OR \"public\".\"race_participants\".\"invite_expires_at\" > $4)) ORDER BY \"public\".\"race_participants\".\"invite_expires_at\" ASC, \"public\".\"race_participants\".\"joined_at\" ASC OFFSET $5",
+        "durationMs": 0.4808330000000183,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "invited",
+          "pending",
+          "2026-09-10T03:41:09.837Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"shop_items\".\"asset_version\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"created_at\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.2624169999999708,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.19087500000000546,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.2153750000000514,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participants\" WHERE 1=1 GROUP BY \"public\".\"race_participants\".\"race_id\") AS \"aggr_selection_0_RaceParticipant\" ON (\"public\".\"races\".\"id\" = \"aggr_selection_0_RaceParticipant\".\"race_id\") WHERE \"public\".\"races\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.21649999999999636,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.318916999999999,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.21795900000000756,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.11858399999999847,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4",
+        "durationMs": 0.13404099999996788,
+        "params": [
+          "ACCEPTED",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "\n    WITH candidates AS MATERIALIZED (\n      SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at\n      FROM races r\n      JOIN users creator ON creator.id = r.creator_id\n      WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE\n        AND creator.is_review_account = FALSE\n        AND NOT EXISTS (\n          SELECT 1 FROM race_participants mine\n          WHERE mine.race_id = r.id AND mine.user_id = $1\n            AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\")\n        )\n      ORDER BY r.started_at ASC\n      LIMIT 25\n    )\n    SELECT c.id, c.name, c.ends_at AS \"endsAt\", c.max_participants AS \"maxParticipants\",\n      seed.kind AS \"seedKind\", COALESCE(parts.accepted_count, 0)::int AS \"participantCount\"\n    FROM candidates c\n    LEFT JOIN race_seeds seed ON seed.id = c.seed_id\n    LEFT JOIN LATERAL (\n      SELECT COUNT(*)::int AS accepted_count FROM race_participants rp\n      WHERE rp.race_id = c.id AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n    ) parts ON TRUE\n    ORDER BY c.started_at ASC\n  ",
+        "durationMs": 0.5643749999999841,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"steps\", \"public\".\"steps\".\"step_goal\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"created_at\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.19225000000000136,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10T00:00:00.000Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"step_milestone_claims\".\"id\", \"public\".\"step_milestone_claims\".\"user_id\", \"public\".\"step_milestone_claims\".\"claimed_date\", \"public\".\"step_milestone_claims\".\"threshold\" FROM \"public\".\"step_milestone_claims\" WHERE (\"public\".\"step_milestone_claims\".\"user_id\" IN ($1) AND \"public\".\"step_milestone_claims\".\"claimed_date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.18425000000002,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10",
+          "0"
+        ]
+      },
+      {
+        "query": "\n          WITH authoritative_time AS (\n            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load\n          ), ranked AS (\n            SELECT\n              s.user_id AS \"userId\",\n              s.id,\n              s.event_id AS \"eventId\",\n              s.extra_race_steps AS \"extraRaceSteps\",\n              s.race_count AS \"raceCount\",\n              s.settled_at AS \"settledAt\",\n              s.expires_at AS \"expiresAt\",\n              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM\n                (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\",\n              ROW_NUMBER() OVER (\n                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC\n              )::int AS row_number\n            FROM global_event_user_summaries s\n            CROSS JOIN authoritative_time t\n            WHERE s.user_id IN ($1)\n              AND s.acknowledged_at IS NULL\n              AND s.attribution_version=2\n              AND s.expires_at>t.now_at_load\n              AND EXISTS (\n                SELECT 1 FROM global_event_race_impacts i\n                WHERE i.event_id=s.event_id AND i.user_id=s.user_id\n                  AND i.status='FINAL' AND i.attribution_version=2\n                  AND i.delta_steps<>0\n              )\n          )\n          SELECT * FROM ranked WHERE row_number=1\n        ",
+        "durationMs": 1.643000000000029,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5,$6,$7)) OFFSET $8",
+        "durationMs": 2.013499999999965,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_participants\".\"user_id\" IN ($6) AND \"public\".\"race_participants\".\"status\" <> CAST($7::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $8",
+        "durationMs": 0.4959999999999809,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      WITH accepted AS (\n        SELECT\n          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY rp.race_id\n            ORDER BY\n              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL\n                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,\n              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,\n              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,\n              rp.user_id COLLATE \"C\" ASC\n          ) AS persisted_position,\n          COUNT(*) OVER (\n            PARTITION BY rp.race_id, rp.placement, rp.finished_at\n          ) AS finish_key_count,\n          race_scope.powerups_enabled\n        FROM race_participants rp\n        JOIN races race_scope ON race_scope.id = rp.race_id\n        WHERE rp.race_id IN ($1,$2,$3,$4,$5)\n          AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n      ), aggregates AS (\n        SELECT\n          race_id,\n          COUNT(*)::int AS accepted_count,\n          COUNT(*) FILTER (WHERE team = 'team_a'::\"RaceTeam\")::int AS team_a_count,\n          COUNT(*) FILTER (WHERE team = 'team_b'::\"RaceTeam\")::int AS team_b_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_a'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_a_payout_recipient_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_b'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_b_payout_recipient_count,\n          COALESCE(\n            ARRAY_AGG(\n              payout_coins\n              ORDER BY payout_coins DESC, user_id COLLATE \"C\" ASC\n            ) FILTER (WHERE payout_coins > 0),\n            ARRAY[]::integer[]\n          ) AS completed_payouts,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::\"RaceTeam\"), 0)::bigint AS team_a_steps,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::\"RaceTeam\"), 0)::bigint AS team_b_steps,\n          MAX(totals_updated_at) AS totals_as_of,\n          COALESCE(\n            JSONB_AGG(\n              JSONB_BUILD_OBJECT(\n                'id', id,\n                'userId', user_id,\n                'finishedAt', finished_at,\n                'placement', persisted_position\n              )\n              ORDER BY persisted_position\n            ) FILTER (WHERE powerups_enabled = TRUE),\n            '[]'::jsonb\n          ) AS rank_roster,\n          COALESCE(\n            JSONB_OBJECT_AGG(user_id, persisted_position)\n              FILTER (WHERE user_id IN ($6)),\n            '{}'::jsonb\n          ) AS viewer_positions,\n          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order\n        FROM accepted\n        GROUP BY race_id, powerups_enabled\n      )\n      SELECT\n        r.id AS \"raceId\",\n        COALESCE(a.accepted_count, 0)::int AS \"acceptedCount\",\n        COALESCE(a.team_a_count, 0)::int AS \"teamACount\",\n        COALESCE(a.team_b_count, 0)::int AS \"teamBCount\",\n        COALESCE(a.team_a_payout_recipient_count, 0)::int AS \"teamAPayoutRecipientCount\",\n        COALESCE(a.team_b_payout_recipient_count, 0)::int AS \"teamBPayoutRecipientCount\",\n        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS \"completedPayouts\",\n        COALESCE(a.team_a_steps, 0)::text AS \"teamASteps\",\n        COALESCE(a.team_b_steps, 0)::text AS \"teamBSteps\",\n        a.totals_as_of AS \"totalsAsOf\",\n        COALESCE(a.rank_roster, '[]'::jsonb) AS \"rankRoster\",\n        COALESCE(a.viewer_positions, '{}'::jsonb) AS \"viewerPositions\",\n        COALESCE(a.ambiguous_finisher_order, FALSE) AS \"ambiguousFinisherOrder\",\n        leader.id AS \"leaderParticipantId\",\n        leader.user_id AS \"leaderUserId\",\n        leader.total_steps AS \"leaderTotalSteps\",\n        leader.placement AS \"leaderPlacement\",\n        leader.finished_at AS \"leaderFinishedAt\",\n        leader.joined_at AS \"leaderJoinedAt\"\n      FROM races r\n      LEFT JOIN aggregates a ON a.race_id = r.id\n      LEFT JOIN accepted leader\n        ON leader.race_id = r.id AND leader.persisted_position = 1\n      WHERE r.id IN ($7,$8,$9,$10,$11)\n    ",
+        "durationMs": 3.324165999999991,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\".\"race_powerups\".\"config_version\", \"public\".\"race_powerups\".\"rerolled_at\", \"public\".\"race_powerups\".\"created_at\", \"public\".\"race_powerups\".\"updated_at\" FROM \"public\".\"race_powerups\" WHERE (\"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_powerups\".\"status\" IN (CAST($6::text AS \"public\".\"PowerupStatus\"),CAST($7::text AS \"public\".\"PowerupStatus\"),CAST($8::text AS \"public\".\"PowerupStatus\"))) ORDER BY \"public\".\"race_powerups\".\"created_at\" ASC OFFSET $9",
+        "durationMs": 0.3741669999999999,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "held",
+          "mystery_box",
+          "queued",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"target_participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_active_effects\".\"status\" = CAST($6::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $7",
+        "durationMs": 0.8532090000000494,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "active_effect",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      SELECT r.id,\n             r.creator_id AS \"creatorId\",\n             r.seed_id AS \"seedId\",\n             r.tournament_id AS \"tournamentId\",\n             r.creation_source AS \"creationSource\",\n             r.start_policy AS \"startPolicy\",\n             r.status::text AS status,\n             r.rematch_root_race_id AS \"rematchRootRaceId\",\n             r.series_id AS \"seriesId\",\n             COALESCE(rs.enabled, false) AS \"seriesEnabled\",\n             EXISTS (\n               SELECT 1 FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.user_id = $1\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"viewerAccepted\",\n             (\n               SELECT COUNT(*) FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"acceptedCount\",\n             EXISTS (\n               SELECT 1 FROM races successor\n                WHERE successor.series_predecessor_race_id = r.id\n             ) AS \"hasSeriesSuccessor\",\n             EXISTS (\n               SELECT 1 FROM races descendant\n                WHERE descendant.rematch_root_race_id = COALESCE(r.rematch_root_race_id, r.id)\n                  AND descendant.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\")\n             ) AS \"hasLiveRematch\",\n             EXISTS (\n               SELECT 1 FROM races child\n                WHERE child.rematch_source_race_id = r.id\n                  AND child.status = 'completed'::\"RaceStatus\"\n             ) AS \"hasCompletedRematchChild\",\n             EXISTS (\n               SELECT 1 FROM race_series_subscriptions subscription\n                WHERE subscription.series_id = r.series_id\n                  AND subscription.user_id = $2\n                  AND subscription.active = true\n             ) AS subscribed\n        FROM races r\n        LEFT JOIN race_series rs ON rs.id = r.series_id\n       WHERE r.id IN ($3,$4,$5,$6,$7)\n    ",
+        "durationMs": 2.6694160000000124,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+        "durationMs": 0.23612499999995862,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "1",
+          "0"
+        ]
+      }
+    ],
+    "home": {
+      "state": "EMPTY",
+      "data": {},
+      "characterPowersEnabled": false,
+      "stepMilestones": {
+        "localDate": "2026-09-10",
+        "currentSteps": 241,
+        "milestones": [
+          {
+            "threshold": 5000,
+            "coins": 10,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 10000,
+            "coins": 20,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 15000,
+            "coins": 30,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          },
+          {
+            "threshold": 20000,
+            "coins": 50,
+            "currentSteps": 241,
+            "claimed": false,
+            "claimable": false
+          }
+        ],
+        "totalCoinsClaimed": 0
+      },
+      "dailyReward": {
+        "claimedToday": false,
+        "localDate": "2026-09-10"
+      },
+      "contract": "home-shell-v1",
+      "resolved": {
+        "presentation": true,
+        "friends": true
+      },
+      "presentation": {
+        "coins": 0,
+        "equipped": {},
+        "cape": null
+      },
+      "friends": {
+        "contract": "friends-summary-v1",
+        "incomingFriendRequests": 0,
+        "friends": [],
+        "pending": {
+          "incoming": [],
+          "outgoing": []
+        }
+      }
+    }
+  },
+  {
+    "view": "sync-refresh-v1",
+    "elapsedMs": 15,
+    "queries": 17,
+    "sql": [
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"status\" = CAST($3::text AS \"public\".\"RaceStatus\") AND (\"j0\".\"id\" IS NOT NULL)) AND (\"public\".\"race_participants\".\"invite_expires_at\" IS NULL OR \"public\".\"race_participants\".\"invite_expires_at\" > $4)) ORDER BY \"public\".\"race_participants\".\"invite_expires_at\" ASC, \"public\".\"race_participants\".\"joined_at\" ASC OFFSET $5",
+        "durationMs": 0.5587090000000217,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "invited",
+          "pending",
+          "2026-09-10T03:41:09.854Z",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participants\" WHERE 1=1 GROUP BY \"public\".\"race_participants\".\"race_id\") AS \"aggr_selection_0_RaceParticipant\" ON (\"public\".\"races\".\"id\" = \"aggr_selection_0_RaceParticipant\".\"race_id\") WHERE \"public\".\"races\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.3037079999999719,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.13816700000000992,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1",
+        "durationMs": 0.6986249999999927,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+        "durationMs": 1.0469999999999686,
+        "params": [
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4",
+        "durationMs": 0.35766700000004903,
+        "params": [
+          "ACCEPTED",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "0"
+        ]
+      },
+      {
+        "query": "\n    WITH candidates AS MATERIALIZED (\n      SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at\n      FROM races r\n      JOIN users creator ON creator.id = r.creator_id\n      WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE\n        AND creator.is_review_account = FALSE\n        AND NOT EXISTS (\n          SELECT 1 FROM race_participants mine\n          WHERE mine.race_id = r.id AND mine.user_id = $1\n            AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\")\n        )\n      ORDER BY r.started_at ASC\n      LIMIT 25\n    )\n    SELECT c.id, c.name, c.ends_at AS \"endsAt\", c.max_participants AS \"maxParticipants\",\n      seed.kind AS \"seedKind\", COALESCE(parts.accepted_count, 0)::int AS \"participantCount\"\n    FROM candidates c\n    LEFT JOIN race_seeds seed ON seed.id = c.seed_id\n    LEFT JOIN LATERAL (\n      SELECT COUNT(*)::int AS accepted_count FROM race_participants rp\n      WHERE rp.race_id = c.id AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n    ) parts ON TRUE\n    ORDER BY c.started_at ASC\n  ",
+        "durationMs": 2.3023340000000303,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"step_milestone_claims\".\"id\", \"public\".\"step_milestone_claims\".\"user_id\", \"public\".\"step_milestone_claims\".\"claimed_date\", \"public\".\"step_milestone_claims\".\"threshold\" FROM \"public\".\"step_milestone_claims\" WHERE (\"public\".\"step_milestone_claims\".\"user_id\" IN ($1) AND \"public\".\"step_milestone_claims\".\"claimed_date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.2842920000000504,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"steps\", \"public\".\"steps\".\"step_goal\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"created_at\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" IN ($2)) OFFSET $3",
+        "durationMs": 0.6768340000000421,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "2026-09-10T00:00:00.000Z",
+          "0"
+        ]
+      },
+      {
+        "query": "\n          WITH authoritative_time AS (\n            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load\n          ), ranked AS (\n            SELECT\n              s.user_id AS \"userId\",\n              s.id,\n              s.event_id AS \"eventId\",\n              s.extra_race_steps AS \"extraRaceSteps\",\n              s.race_count AS \"raceCount\",\n              s.settled_at AS \"settledAt\",\n              s.expires_at AS \"expiresAt\",\n              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM\n                (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\",\n              ROW_NUMBER() OVER (\n                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC\n              )::int AS row_number\n            FROM global_event_user_summaries s\n            CROSS JOIN authoritative_time t\n            WHERE s.user_id IN ($1)\n              AND s.acknowledged_at IS NULL\n              AND s.attribution_version=2\n              AND s.expires_at>t.now_at_load\n              AND EXISTS (\n                SELECT 1 FROM global_event_race_impacts i\n                WHERE i.event_id=s.event_id AND i.user_id=s.user_id\n                  AND i.status='FINAL' AND i.attribution_version=2\n                  AND i.delta_steps<>0\n              )\n          )\n          SELECT * FROM ranked WHERE row_number=1\n        ",
+        "durationMs": 0.428875000000005,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5,$6,$7)) OFFSET $8",
+        "durationMs": 0.5554159999999797,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"forfeited_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_participants\".\"user_id\" IN ($6) AND \"public\".\"race_participants\".\"status\" <> CAST($7::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $8",
+        "durationMs": 0.5783329999999864,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "declined",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      WITH accepted AS (\n        SELECT\n          rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at,\n          ROW_NUMBER() OVER (\n            PARTITION BY rp.race_id\n            ORDER BY\n              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL\n                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,\n              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,\n              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,\n              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,\n              rp.user_id COLLATE \"C\" ASC\n          ) AS persisted_position,\n          COUNT(*) OVER (\n            PARTITION BY rp.race_id, rp.placement, rp.finished_at\n          ) AS finish_key_count,\n          race_scope.powerups_enabled\n        FROM race_participants rp\n        JOIN races race_scope ON race_scope.id = rp.race_id\n        WHERE rp.race_id IN ($1,$2,$3,$4,$5)\n          AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n      ), aggregates AS (\n        SELECT\n          race_id,\n          COUNT(*)::int AS accepted_count,\n          COUNT(*) FILTER (WHERE team = 'team_a'::\"RaceTeam\")::int AS team_a_count,\n          COUNT(*) FILTER (WHERE team = 'team_b'::\"RaceTeam\")::int AS team_b_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_a'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_a_payout_recipient_count,\n          COUNT(*) FILTER (\n            WHERE team = 'team_b'::\"RaceTeam\" AND forfeited_at IS NULL\n          )::int AS team_b_payout_recipient_count,\n          COALESCE(\n            ARRAY_AGG(\n              payout_coins\n              ORDER BY payout_coins DESC, user_id COLLATE \"C\" ASC\n            ) FILTER (WHERE payout_coins > 0),\n            ARRAY[]::integer[]\n          ) AS completed_payouts,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::\"RaceTeam\"), 0)::bigint AS team_a_steps,\n          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::\"RaceTeam\"), 0)::bigint AS team_b_steps,\n          MAX(totals_updated_at) AS totals_as_of,\n          COALESCE(\n            JSONB_AGG(\n              JSONB_BUILD_OBJECT(\n                'id', id,\n                'userId', user_id,\n                'finishedAt', finished_at,\n                'placement', persisted_position\n              )\n              ORDER BY persisted_position\n            ) FILTER (WHERE powerups_enabled = TRUE),\n            '[]'::jsonb\n          ) AS rank_roster,\n          COALESCE(\n            JSONB_OBJECT_AGG(user_id, persisted_position)\n              FILTER (WHERE user_id IN ($6)),\n            '{}'::jsonb\n          ) AS viewer_positions,\n          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order\n        FROM accepted\n        GROUP BY race_id, powerups_enabled\n      )\n      SELECT\n        r.id AS \"raceId\",\n        COALESCE(a.accepted_count, 0)::int AS \"acceptedCount\",\n        COALESCE(a.team_a_count, 0)::int AS \"teamACount\",\n        COALESCE(a.team_b_count, 0)::int AS \"teamBCount\",\n        COALESCE(a.team_a_payout_recipient_count, 0)::int AS \"teamAPayoutRecipientCount\",\n        COALESCE(a.team_b_payout_recipient_count, 0)::int AS \"teamBPayoutRecipientCount\",\n        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS \"completedPayouts\",\n        COALESCE(a.team_a_steps, 0)::text AS \"teamASteps\",\n        COALESCE(a.team_b_steps, 0)::text AS \"teamBSteps\",\n        a.totals_as_of AS \"totalsAsOf\",\n        COALESCE(a.rank_roster, '[]'::jsonb) AS \"rankRoster\",\n        COALESCE(a.viewer_positions, '{}'::jsonb) AS \"viewerPositions\",\n        COALESCE(a.ambiguous_finisher_order, FALSE) AS \"ambiguousFinisherOrder\",\n        leader.id AS \"leaderParticipantId\",\n        leader.user_id AS \"leaderUserId\",\n        leader.total_steps AS \"leaderTotalSteps\",\n        leader.placement AS \"leaderPlacement\",\n        leader.finished_at AS \"leaderFinishedAt\",\n        leader.joined_at AS \"leaderJoinedAt\"\n      FROM races r\n      LEFT JOIN aggregates a ON a.race_id = r.id\n      LEFT JOIN accepted leader\n        ON leader.race_id = r.id AND leader.persisted_position = 1\n      WHERE r.id IN ($7,$8,$9,$10,$11)\n    ",
+        "durationMs": 2.3817920000000186,
+        "params": [
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"metadata\", \"public\".\"race_active_effects\".\"created_at\", \"public\".\"race_active_effects\".\"updated_at\" FROM \"public\".\"race_active_effects\" WHERE (\"public\".\"race_active_effects\".\"target_participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_active_effects\".\"status\" = CAST($6::text AS \"public\".\"ActiveEffectStatus\")) ORDER BY \"public\".\"race_active_effects\".\"created_at\" ASC OFFSET $7",
+        "durationMs": 0.27083399999997937,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "active_effect",
+          "0"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\".\"race_powerups\".\"config_version\", \"public\".\"race_powerups\".\"rerolled_at\", \"public\".\"race_powerups\".\"created_at\", \"public\".\"race_powerups\".\"updated_at\" FROM \"public\".\"race_powerups\" WHERE (\"public\".\"race_powerups\".\"participant_id\" IN ($1,$2,$3,$4,$5) AND \"public\".\"race_powerups\".\"status\" IN (CAST($6::text AS \"public\".\"PowerupStatus\"),CAST($7::text AS \"public\".\"PowerupStatus\"),CAST($8::text AS \"public\".\"PowerupStatus\"))) ORDER BY \"public\".\"race_powerups\".\"created_at\" ASC OFFSET $9",
+        "durationMs": 0.26637499999998226,
+        "params": [
+          "9c8fb4bf-ee49-446f-987d-d9637b95b598",
+          "e8d32384-617f-4a32-b9dc-12740c37f3b5",
+          "17dacb76-8d8c-49f7-a3c6-28de54ba3d8a",
+          "62ac81bb-f12d-4122-9f0e-d38b75e99d6e",
+          "5c9360ff-5e85-4a16-8e5d-07557c2b3400",
+          "held",
+          "mystery_box",
+          "queued",
+          "0"
+        ]
+      },
+      {
+        "query": "\n      SELECT r.id,\n             r.creator_id AS \"creatorId\",\n             r.seed_id AS \"seedId\",\n             r.tournament_id AS \"tournamentId\",\n             r.creation_source AS \"creationSource\",\n             r.start_policy AS \"startPolicy\",\n             r.status::text AS status,\n             r.rematch_root_race_id AS \"rematchRootRaceId\",\n             r.series_id AS \"seriesId\",\n             COALESCE(rs.enabled, false) AS \"seriesEnabled\",\n             EXISTS (\n               SELECT 1 FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.user_id = $1\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"viewerAccepted\",\n             (\n               SELECT COUNT(*) FROM race_participants rp\n                WHERE rp.race_id = r.id\n                  AND rp.status = 'accepted'::\"RaceParticipantStatus\"\n             ) AS \"acceptedCount\",\n             EXISTS (\n               SELECT 1 FROM races successor\n                WHERE successor.series_predecessor_race_id = r.id\n             ) AS \"hasSeriesSuccessor\",\n             EXISTS (\n               SELECT 1 FROM races descendant\n                WHERE descendant.rematch_root_race_id = COALESCE(r.rematch_root_race_id, r.id)\n                  AND descendant.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\")\n             ) AS \"hasLiveRematch\",\n             EXISTS (\n               SELECT 1 FROM races child\n                WHERE child.rematch_source_race_id = r.id\n                  AND child.status = 'completed'::\"RaceStatus\"\n             ) AS \"hasCompletedRematchChild\",\n             EXISTS (\n               SELECT 1 FROM race_series_subscriptions subscription\n                WHERE subscription.series_id = r.series_id\n                  AND subscription.user_id = $2\n                  AND subscription.active = true\n             ) AS subscribed\n        FROM races r\n        LEFT JOIN race_series rs ON rs.id = r.series_id\n       WHERE r.id IN ($3,$4,$5,$6,$7)\n    ",
+        "durationMs": 0.9273749999999836,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "ecff5b9b-5a0f-4fff-b495-0edd61194a97",
+          "61dfbb39-3d07-4548-b3c7-cde8d2bce3c2",
+          "2d414072-7ec1-4481-8bec-e0e34d3b00aa",
+          "ca224caf-2130-4bed-8b08-1919c04f8fa7",
+          "92a1f7c3-40b5-4e73-9a88-0b83774a790d"
+        ]
+      },
+      {
+        "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+        "durationMs": 0.32150000000001455,
+        "params": [
+          "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+          "1",
+          "0"
+        ]
+      }
+    ],
+    "home": {
+      "contract": "home-sync-refresh-v1",
+      "home": {
+        "state": "EMPTY",
+        "data": {},
+        "characterPowersEnabled": false,
+        "stepMilestones": {
+          "localDate": "2026-09-10",
+          "currentSteps": 241,
+          "milestones": [
+            {
+              "threshold": 5000,
+              "coins": 10,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 10000,
+              "coins": 20,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 15000,
+              "coins": 30,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            },
+            {
+              "threshold": 20000,
+              "coins": 50,
+              "currentSteps": 241,
+              "claimed": false,
+              "claimable": false
+            }
+          ],
+          "totalCoinsClaimed": 0
+        },
+        "dailyReward": {
+          "claimedToday": false,
+          "localDate": "2026-09-10"
+        }
+      },
+      "retainedSections": [
+        "presentation",
+        "friends"
+      ]
+    }
+  }
+]

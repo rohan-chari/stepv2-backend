@@ -1,0 +1,1574 @@
+{
+  "scope": "Synthetic real HTTP on isolated local PostgreSQL _test database with dedicated local Redis; no production load test. Prisma query events include observed COMMIT and async bookkeeping but are not a complete physical protocol or trigger-internal statement count. Sequential small fixture; timings are not production capacity claims.",
+  "fixture": {
+    "users": 2,
+    "races": 3,
+    "samples": 24,
+    "changedSamples": 1,
+    "raceTimezone": "UTC",
+    "eventScheduleMode": "LOCAL_ENTITLEMENTS",
+    "summaryAttributionVersion": 2
+  },
+  "measurements": [
+    {
+      "name": "initial_sync_24_samples_3_races",
+      "status": 202,
+      "wallMs": 110,
+      "queries": 28,
+      "queryShapes": [
+        {
+          "sha256": "79663c1d3b43ceaf9ee728e501c64b57ae2e4d6cb36ff5c65eddcda1de27342f",
+          "calls": 3,
+          "sqlExcerpt": "COMMIT"
+        },
+        {
+          "sha256": "6cb3bd72d2d0bde6a60001c9fee6e23aac045c30dddd9fa968cbea489df02d77",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"app_settings\".\"key\", \"public\".\"app_settings\".\"value\", \"public\".\"app_settings\".\"updated_at\" FROM \"public\".\"app_settings\" WHERE 1=1 OFFSET $1"
+        },
+        {
+          "sha256": "9ecf6e0099f1485fd775ec8e7ce2026c5c92400fff6cde051ec2ca9878eb8aa2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users"
+        },
+        {
+          "sha256": "8da323c5ebff045f5d744de387e71a446aac6800b843e05a833e5d383b93718c",
+          "calls": 1,
+          "sqlExcerpt": "WITH input_rows AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS input( \"requestIndex\" integer, id text, features text[] ) ), input AS ( SELECT input_rows.id, array_agg(DISTINCT feature ORDER BY feature) AS features FROM input_rows CROSS JOIN LATERAL unnest(input_rows.features) AS feature GROUP BY input_rows.id ) UPDATE users AS existing SET client_features = ARRAY( SELECT DISTINCT feature FROM unnest(existing.client_features || input.features) feature ORDER BY feature ), client_features_at ="
+        },
+        {
+          "sha256": "37d2ba42804d6ffffe72f96b30f499babf295cbaf39631e34e295ce8188ec20e",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"timezone\", \"public\".\"users\".\"global_event_timezone\", \"public\".\"users\".\"global_event_timezone_candidate\", \"public\".\"users\".\"global_event_timezone_candidate_since\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3"
+        },
+        {
+          "sha256": "be8119065a46e6fdfb0770ec9acae4dd70d6420060884c611e62a8a06fc041c2",
+          "calls": 1,
+          "sqlExcerpt": "WITH live AS ( SELECT logical_owner_id,generation,capabilities FROM global_step_event_cron_owners WHERE expires_at > $2 ), census AS ( SELECT state.ready_since IS NOT NULL AND state.ready_since <= $2 - ($5::int * interval '1 millisecond') AND count(live.*) = cardinality($4::text[]) AND count(DISTINCT live.logical_owner_id) = cardinality($4::text[]) AND array_agg(live.logical_owner_id ORDER BY live.logical_owner_id) = $4::text[] AND bool_and(live.generation >= $3 AND live.capabilities @> $1::json"
+        },
+        {
+          "sha256": "13948abbd4b189e8d782e0774713b78141d23a4f0f4926f2646ed39cd5e2b819",
+          "calls": 1,
+          "sqlExcerpt": "SELECT set_config('lock_timeout','100ms',true), set_config('statement_timeout','400ms',true)"
+        },
+        {
+          "sha256": "86ac15f7d48d4b91cea4903c6ddb74088086bd5f02a1d287c65d22511c8d1cb2",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, state, requested_at, completed_at, last_completed_at, created_at, updated_at ) SELECT gen_random_uuid()::text, race_id, 0, 'succeeded'::\"RaceResolutionJobState\", $2, $2, $2, $2, $2 FROM unnest($1::text[]) AS race_id ON CONFLICT (race_id) DO NOTHING"
+        },
+        {
+          "sha256": "09e98bb9ff86c80d80b332c7a343b94c129f4c4c168f77be0c46cdd9e68a1094",
+          "calls": 1,
+          "sqlExcerpt": "SELECT race_id FROM race_resolution_jobs_v2 WHERE race_id = ANY($1::text[]) ORDER BY race_id FOR UPDATE"
+        },
+        {
+          "sha256": "751f836dc8f78c330387456dd68a8803972c7b3e2b6a2b95c27f15068bed2ca5",
+          "calls": 1,
+          "sqlExcerpt": "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))"
+        },
+        {
+          "sha256": "be9351a174e609c8e1869ac743343127ca687814d7a6a003429bcdc9c146cfe3",
+          "calls": 1,
+          "sqlExcerpt": "WITH global_lock AS MATERIALIZED ( SELECT 1 ), person AS MATERIALIZED ( SELECT users.* FROM users CROSS JOIN global_lock WHERE users.id=$1 FOR UPDATE OF users ) SELECT (SELECT to_jsonb(person) FROM person) AS person, COALESCE((SELECT jsonb_agg(value) FROM ( SELECT entitlement.id,parent.event_day AS \"eventDay\",parent.local_start_minute AS \"localStartMinute\", parent.duration_minutes AS \"durationMinutes\", entitlement.starts_at AS \"startsAt\" FROM global_step_event_entitlements entitlement JOIN globa"
+        },
+        {
+          "sha256": "8406f19025edf62cea613727ccad0b811cac70595307014cfac74e437b4d2266",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"users\" SET \"global_event_timezone\" = $1, \"global_event_timezone_candidate\" = $2, \"global_event_timezone_candidate_since\" = $3 WHERE (\"public\".\"users\".\"id\" = $4 AND 1=1) RETURNING \"public\".\"users\".\"id\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search"
+        },
+        {
+          "sha256": "52da63f5d6f011ccfc2f53313c6f60cbc1756d8b5059cfe6bcf0baaaf8291080",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests"
+        },
+        {
+          "sha256": "0db12ab3aca5754dccaaa37305dfd21b933194c6e8f3065252208f4511d12815",
+          "calls": 1,
+          "sqlExcerpt": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.statu"
+        },
+        {
+          "sha256": "a970a57c793cbdf2950f8dcc93567d01e6b613e28b0389ab0456dcf259f81a80",
+          "calls": 1,
+          "sqlExcerpt": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generati"
+        },
+        {
+          "sha256": "449811372cb73bc8d55a1cf1272be306c9e549b49c22bc2202bcd0875ce69b1f",
+          "calls": 1,
+          "sqlExcerpt": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS"
+        },
+        {
+          "sha256": "95b8738667904f8733c0ec63a73deae2c407f92b1677e9c89f5699e0a1ab6ed3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp"
+        },
+        {
+          "sha256": "736d1d995a1e584a157f9214227c967006fe9b3e11bb436139be966bb077394d",
+          "calls": 1,
+          "sqlExcerpt": "WITH deleted AS (DELETE FROM step_samples stored USING unnest($242::timestamp[], $243::timestamp[]) AS input_window(period_start,period_end) WHERE stored.user_id=$241 AND stored.period_end > input_window.period_start AND stored.period_start < input_window.period_end AND NOT (stored.period_start = ANY($242::timestamp[])) RETURNING stored.id) INSERT INTO step_samples (id,user_id,period_start,period_end,steps,source_name,source_id, source_device_id,device_model,recording_method,metadata,created_at)"
+        },
+        {
+          "sha256": "70df566c2a5927eebcd17db1e51909127b931d1076d5e2a65218aa5b67493340",
+          "calls": 1,
+          "sqlExcerpt": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time"
+        },
+        {
+          "sha256": "80f585342c4594021bb8bd9f3ba667d7d7242b16b3e4562b89d3256b2dd5ea83",
+          "calls": 1,
+          "sqlExcerpt": "SELECT race.id AS \"raceId\",participant.id AS \"participantId\", race.max_participants AS \"maxParticipants\" FROM races race JOIN race_participants participant ON participant.race_id=race.id WHERE race.status='active' AND participant.user_id=$1 AND participant.status='accepted' ORDER BY race.id"
+        },
+        {
+          "sha256": "5c273a300663472b9af20ffff7b2bf5c160729686e421d8ec133938e8b192df7",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, resolution_time_zone, state, attempts, requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids, dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority, queue_priority, display_artifact_id, display_artifact_digest, display_artifact_schema, created_at, updated_at ) SELECT gen_random_uuid()::text, i.\"raceId\", 1, i.\"resolutionTimeZone\", 'queued', 0, $2::timestamp, i.\"notBeforeAt\", i.\"trigge"
+        },
+        {
+          "sha256": "8721f117c021b4093466ae5820db3ae39176895ec04ad667534eb8efb5f815f0",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE user_scoring_input_versions SET generation = generation + $2::bigint, scoring_watermark=$3, next_sample_boundary_at=$4, source_queue_semantics_generation=COALESCE( $5::bigint, source_queue_semantics_generation ), updated_at=CURRENT_TIMESTAMP WHERE user_id=$1"
+        },
+        {
+          "sha256": "ed7212bd11e224ee678fa17954706eb90ee1c45b123d9d615ce095e6ebd0f614",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1"
+        },
+        {
+          "sha256": "e20ddfa776358cedf3457fdabef1737f2369bf1ed75ece8329cb2f890480caa7",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_genera"
+        },
+        {
+          "sha256": "d1a3a1b3f0ad3ecac1d398fa7bb05b0c618df5dd7309cc86c66fff2a7756eec7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\"."
+        },
+        {
+          "sha256": "b5360c12cb0c2bbd56c68e74041391f6addc2e3b72022d9a4fea42082d3ccee7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)"
+        }
+      ]
+    },
+    {
+      "name": "unchanged_sync_new_key",
+      "status": 202,
+      "wallMs": 40,
+      "queries": 15,
+      "queryShapes": [
+        {
+          "sha256": "79663c1d3b43ceaf9ee728e501c64b57ae2e4d6cb36ff5c65eddcda1de27342f",
+          "calls": 2,
+          "sqlExcerpt": "COMMIT"
+        },
+        {
+          "sha256": "9ecf6e0099f1485fd775ec8e7ce2026c5c92400fff6cde051ec2ca9878eb8aa2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users"
+        },
+        {
+          "sha256": "52da63f5d6f011ccfc2f53313c6f60cbc1756d8b5059cfe6bcf0baaaf8291080",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests"
+        },
+        {
+          "sha256": "0db12ab3aca5754dccaaa37305dfd21b933194c6e8f3065252208f4511d12815",
+          "calls": 1,
+          "sqlExcerpt": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.statu"
+        },
+        {
+          "sha256": "a970a57c793cbdf2950f8dcc93567d01e6b613e28b0389ab0456dcf259f81a80",
+          "calls": 1,
+          "sqlExcerpt": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generati"
+        },
+        {
+          "sha256": "449811372cb73bc8d55a1cf1272be306c9e549b49c22bc2202bcd0875ce69b1f",
+          "calls": 1,
+          "sqlExcerpt": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS"
+        },
+        {
+          "sha256": "5f973abfb460a658874ec7e2e57ae89da3127de8ecf9823839f60c2f8853c3a7",
+          "calls": 1,
+          "sqlExcerpt": "SELECT id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\",TRUE AS existed, FALSE AS \"storageChanged\" FROM steps WHERE user_id=$1 AND date=$2::date"
+        },
+        {
+          "sha256": "95b8738667904f8733c0ec63a73deae2c407f92b1677e9c89f5699e0a1ab6ed3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp"
+        },
+        {
+          "sha256": "70df566c2a5927eebcd17db1e51909127b931d1076d5e2a65218aa5b67493340",
+          "calls": 1,
+          "sqlExcerpt": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time"
+        },
+        {
+          "sha256": "8721f117c021b4093466ae5820db3ae39176895ec04ad667534eb8efb5f815f0",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE user_scoring_input_versions SET generation = generation + $2::bigint, scoring_watermark=$3, next_sample_boundary_at=$4, source_queue_semantics_generation=COALESCE( $5::bigint, source_queue_semantics_generation ), updated_at=CURRENT_TIMESTAMP WHERE user_id=$1"
+        },
+        {
+          "sha256": "ed7212bd11e224ee678fa17954706eb90ee1c45b123d9d615ce095e6ebd0f614",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1"
+        },
+        {
+          "sha256": "e20ddfa776358cedf3457fdabef1737f2369bf1ed75ece8329cb2f890480caa7",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_genera"
+        },
+        {
+          "sha256": "d1a3a1b3f0ad3ecac1d398fa7bb05b0c618df5dd7309cc86c66fff2a7756eec7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\"."
+        },
+        {
+          "sha256": "b5360c12cb0c2bbd56c68e74041391f6addc2e3b72022d9a4fea42082d3ccee7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)"
+        }
+      ]
+    },
+    {
+      "name": "changed_sync_one_sample",
+      "status": 202,
+      "wallMs": 42,
+      "queries": 16,
+      "queryShapes": [
+        {
+          "sha256": "79663c1d3b43ceaf9ee728e501c64b57ae2e4d6cb36ff5c65eddcda1de27342f",
+          "calls": 2,
+          "sqlExcerpt": "COMMIT"
+        },
+        {
+          "sha256": "52da63f5d6f011ccfc2f53313c6f60cbc1756d8b5059cfe6bcf0baaaf8291080",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO \"public\".\"step_sync_requests\" (\"id\",\"user_id\",\"idempotency_key\",\"request_hash\",\"resolution_time_zone\",\"state\",\"lease_expires_at\",\"scoring_changed\",\"created_at\",\"updated_at\",\"expires_at\") VALUES ($1,$2,$3,$4,$5,CAST($6::text AS \"public\".\"StepSyncRequestState\"),$7,$8,$9,$10,$11) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests"
+        },
+        {
+          "sha256": "0db12ab3aca5754dccaaa37305dfd21b933194c6e8f3065252208f4511d12815",
+          "calls": 1,
+          "sqlExcerpt": "(SELECT 'active' AS kind, 0 AS \"kindOrder\", work.id, work.event_id AS \"eventId\", work.user_id AS \"userId\", work.status::text AS status, work.expires_at AS \"expiresAt\", NULL::timestamp AS \"eventStartsAt\", NULL::timestamp AS \"eventEndsAt\", NULL::double precision AS \"eventMultiplier\", NULL::text AS \"eventScheduleMode\", NULL::integer AS \"eventSummaryAttributionVersion\" FROM global_event_summary_work work JOIN global_step_events event ON event.id = work.event_id WHERE work.user_id = $1 AND work.statu"
+        },
+        {
+          "sha256": "a970a57c793cbdf2950f8dcc93567d01e6b613e28b0389ab0456dcf259f81a80",
+          "calls": 1,
+          "sqlExcerpt": "WITH locked AS MATERIALIZED ( SELECT generation, source_queue_semantics_generation AS \"sourceQueueSemanticsGeneration\", scoring_watermark AS \"scoringWatermark\", next_sample_boundary_at AS \"nextSampleBoundaryAt\", false AS inserted FROM user_scoring_input_versions WHERE user_id=$1 FOR NO KEY UPDATE ), created AS ( INSERT INTO user_scoring_input_versions (user_id,generation,updated_at) SELECT $1,1,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM locked) ON CONFLICT (user_id) DO UPDATE SET generati"
+        },
+        {
+          "sha256": "449811372cb73bc8d55a1cf1272be306c9e549b49c22bc2202bcd0875ce69b1f",
+          "calls": 1,
+          "sqlExcerpt": "WITH prior AS ( SELECT EXISTS( SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date ) AS existed ), persisted AS ( INSERT INTO steps (id,user_id,date,steps,step_goal,created_at) VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP) ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps RETURNING id,user_id AS \"userId\",steps,step_goal AS \"stepGoal\", date,created_at AS \"createdAt\" ) SELECT persisted.*,prior.existed,TRUE AS"
+        },
+        {
+          "sha256": "95b8738667904f8733c0ec63a73deae2c407f92b1677e9c89f5699e0a1ab6ed3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT period_start AS \"start\", period_end AS \"end\", steps, source_name AS \"sourceName\", source_id AS \"sourceId\", source_device_id AS \"sourceDeviceId\",device_model AS \"deviceModel\", recording_method AS \"recordingMethod\",metadata FROM step_samples WHERE user_id = $1 AND period_end > $2::timestamp AND period_start < $3::timestamp"
+        },
+        {
+          "sha256": "2868df7523f429dac8afdb476bfe5ac85ccdac2f251de12918557ca0f9b9f5ba",
+          "calls": 1,
+          "sqlExcerpt": "WITH deleted AS (DELETE FROM step_samples stored USING unnest($12::timestamp[], $13::timestamp[]) AS input_window(period_start,period_end) WHERE stored.user_id=$11 AND stored.period_end > input_window.period_start AND stored.period_start < input_window.period_end AND NOT (stored.period_start = ANY($12::timestamp[])) RETURNING stored.id) INSERT INTO step_samples (id,user_id,period_start,period_end,steps,source_name,source_id, source_device_id,device_model,recording_method,metadata,created_at) VAL"
+        },
+        {
+          "sha256": "70df566c2a5927eebcd17db1e51909127b931d1076d5e2a65218aa5b67493340",
+          "calls": 1,
+          "sqlExcerpt": "WITH decision_time AS MATERIALIZED ( SELECT clock_timestamp() AS at ) SELECT (EXTRACT(EPOCH FROM decision_time.at)*1000)::float8 AS \"dbNowMs\", (SELECT period_end FROM step_samples WHERE user_id=$1 AND period_end > (decision_time.at AT TIME ZONE 'UTC') ORDER BY period_end LIMIT 1) AS \"nextSampleBoundaryAt\", (SELECT period_end FROM step_samples WHERE user_id=$1 ORDER BY period_end DESC LIMIT 1) AS \"canonicalCoverageThrough\" FROM decision_time"
+        },
+        {
+          "sha256": "80f585342c4594021bb8bd9f3ba667d7d7242b16b3e4562b89d3256b2dd5ea83",
+          "calls": 1,
+          "sqlExcerpt": "SELECT race.id AS \"raceId\",participant.id AS \"participantId\", race.max_participants AS \"maxParticipants\" FROM races race JOIN race_participants participant ON participant.race_id=race.id WHERE race.status='active' AND participant.user_id=$1 AND participant.status='accepted' ORDER BY race.id"
+        },
+        {
+          "sha256": "5c273a300663472b9af20ffff7b2bf5c160729686e421d8ec133938e8b192df7",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, resolution_time_zone, state, attempts, requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids, dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority, queue_priority, display_artifact_id, display_artifact_digest, display_artifact_schema, created_at, updated_at ) SELECT gen_random_uuid()::text, i.\"raceId\", 1, i.\"resolutionTimeZone\", 'queued', 0, $2::timestamp, i.\"notBeforeAt\", i.\"trigge"
+        },
+        {
+          "sha256": "8721f117c021b4093466ae5820db3ae39176895ec04ad667534eb8efb5f815f0",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE user_scoring_input_versions SET generation = generation + $2::bigint, scoring_watermark=$3, next_sample_boundary_at=$4, source_queue_semantics_generation=COALESCE( $5::bigint, source_queue_semantics_generation ), updated_at=CURRENT_TIMESTAMP WHERE user_id=$1"
+        },
+        {
+          "sha256": "ed7212bd11e224ee678fa17954706eb90ee1c45b123d9d615ce095e6ebd0f614",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE users SET last_step_sync_at = GREATEST( COALESCE(last_step_sync_at, '-infinity'::timestamptz), $2::timestamptz ) WHERE id=$1"
+        },
+        {
+          "sha256": "e20ddfa776358cedf3457fdabef1737f2369bf1ed75ece8329cb2f890480caa7",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_event_summary_work\".\"id\", \"public\".\"global_event_summary_work\".\"event_id\", \"public\".\"global_event_summary_work\".\"user_id\", \"public\".\"global_event_summary_work\".\"status\", \"public\".\"global_event_summary_work\".\"expires_at\", \"public\".\"global_event_summary_work\".\"capture_sync_request_id\", \"public\".\"global_event_summary_work\".\"capture_completed_at\", \"public\".\"global_event_summary_work\".\"capture_coverage_through\", \"public\".\"global_event_summary_work\".\"source_scoring_input_genera"
+        },
+        {
+          "sha256": "d1a3a1b3f0ad3ecac1d398fa7bb05b0c618df5dd7309cc86c66fff2a7756eec7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"state\" = CAST($1::text AS \"public\".\"StepSyncRequestState\"), \"response_json\" = $2, \"daily_existed\" = $3, \"completed_at\" = $4, \"canonical_coverage_through\" = $5, \"scoring_input_generation\" = $6, \"lease_expires_at\" = $7, \"updated_at\" = $8 WHERE (\"public\".\"step_sync_requests\".\"id\" = $9 AND 1=1) RETURNING \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\"."
+        },
+        {
+          "sha256": "b5360c12cb0c2bbd56c68e74041391f6addc2e3b72022d9a4fea42082d3ccee7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)"
+        }
+      ]
+    },
+    {
+      "name": "same_key_replay",
+      "status": 202,
+      "wallMs": 38,
+      "queries": 4,
+      "queryShapes": [
+        {
+          "sha256": "587fa628a9fe4642ac0e22825a97e81d388af674f7251a9fb699f96901dcb710",
+          "calls": 1,
+          "sqlExcerpt": "ROLLBACK"
+        },
+        {
+          "sha256": "148c30f41ca07963cf8e7a9620b42a02dad97d0d58aa2ddd59011a85d4776524",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"step_sync_requests\".\"id\", \"public\".\"step_sync_requests\".\"user_id\", \"public\".\"step_sync_requests\".\"idempotency_key\", \"public\".\"step_sync_requests\".\"request_hash\", \"public\".\"step_sync_requests\".\"resolution_time_zone\", \"public\".\"step_sync_requests\".\"state\"::text, \"public\".\"step_sync_requests\".\"response_json\", \"public\".\"step_sync_requests\".\"lease_expires_at\", \"public\".\"step_sync_requests\".\"events_emitted_at\", \"public\".\"step_sync_requests\".\"daily_existed\", \"public\".\"step_sync_request"
+        },
+        {
+          "sha256": "b5360c12cb0c2bbd56c68e74041391f6addc2e3b72022d9a4fea42082d3ccee7",
+          "calls": 1,
+          "sqlExcerpt": "UPDATE \"public\".\"step_sync_requests\" SET \"events_emitted_at\" = $1, \"updated_at\" = $2 WHERE (\"public\".\"step_sync_requests\".\"id\" = $3 AND \"public\".\"step_sync_requests\".\"events_emitted_at\" IS NULL)"
+        },
+        {
+          "sha256": "79663c1d3b43ceaf9ee728e501c64b57ae2e4d6cb36ff5c65eddcda1de27342f",
+          "calls": 1,
+          "sqlExcerpt": "COMMIT"
+        }
+      ]
+    },
+    {
+      "name": "home_shell",
+      "status": 200,
+      "wallMs": 61,
+      "queries": 19,
+      "queryShapes": [
+        {
+          "sha256": "1aac6b6bf3419418d7ca7ea81ef4bc429b203417b3543d5715d412d20792234b",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "a4988bc9fd420dad47744b9c3b41b9c7735819724bd2087c8794c52cb639db58",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"s"
+        },
+        {
+          "sha256": "b0c587b38cc5450757a5448d7468f7d72272b9f2e3d634ab4d7667a5d8d0239f",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\""
+        },
+        {
+          "sha256": "93760775741a2b393b3ca6afa21bfd56e6acc8fd893fd8223f36a09f7841297e",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participan"
+        },
+        {
+          "sha256": "068a67134af1de0372d80a30ccba0cb12c89f49bc3b9156ea56aa78e252ce30b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "a9e538562e6a215b9312682662ae1ba98dcae1c6fc437e628967a450734013fb",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "3608e4f970bef5c9325a85a4a8749d258fd2ac27efbbed719e41efa465cb17d3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "80e6af338f71ec26f4e43e1ec453f5a6c3863999e71edad8dd25d6fd0424cac2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4"
+        },
+        {
+          "sha256": "9fa56fa3bc4b1888e63c4042660f0639eaca6bd2eb79937b6658d8a41a00f6a4",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2"
+        },
+        {
+          "sha256": "ea153d8508d96b3477d525fa5a3fee11c5123d0cf010a81bdc7f534da39548b3",
+          "calls": 1,
+          "sqlExcerpt": "WITH candidates AS MATERIALIZED ( SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at FROM races r JOIN users creator ON creator.id = r.creator_id WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE AND creator.is_review_account = FALSE AND NOT EXISTS ( SELECT 1 FROM race_participants mine WHERE mine.race_id = r.id AND mine.user_id = $1 AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\") ) ORDER BY r.started_at ASC LIMIT"
+        },
+        {
+          "sha256": "eb148812758c80ff9729a9aa1eb91fb8769d578dee2bcb85f449a5691af6b528",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"s"
+        },
+        {
+          "sha256": "f335665f8b0337abf7ba982baaaf085b796f9f456fffdfe52d4a9fd8bcf78613",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatu"
+        },
+        {
+          "sha256": "ec076c26ff8a13b9ab681da96a7aa16259a989a850cec1a0256e1c652a105a19",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"creator_id\" IS NOT NULL AND \"j0\".\"status\" IN (CAST($3::text AS \"public\".\"RaceStatus\"),CAST($4::text AS \"public\".\"RaceStatus\")) AND ("
+        },
+        {
+          "sha256": "894d6222f99c955df13cee111de9f64aa33cd4a506891495f4cbd694e168bf6d",
+          "calls": 1,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS request( \"userId\" text, \"at\" timestamptz ) ) SELECT DISTINCT ON (requested.\"userId\") requested.\"userId\", active.event_id AS \"eventId\", active.multiplier, active.ends_at AS \"endsAt\" FROM requested CROSS JOIN LATERAL ( SELECT entitlement.event_id, event.multiplier, entitlement.ends_at, entitlement.starts_at FROM global_step_event_entitlements entitlement JOIN global_step_events event ON event.id=entitle"
+        },
+        {
+          "sha256": "efbb9ac48dbf954e2130ed451d4dd60a2ecf273454359c0e98ea4cfb2efe9768",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"feedback_threads\".\"id\", \"public\".\"feedback_threads\".\"user_id\", \"public\".\"feedback_threads\".\"expires_at\" FROM \"public\".\"feedback_threads\" WHERE (\"public\".\"feedback_threads\".\"user_id\" IN ($1) AND \"public\".\"feedback_threads\".\"expires_at\" > $2 AND \"public\".\"feedback_threads\".\"user_read_at\" IS NULL) OFFSET $3"
+        },
+        {
+          "sha256": "b02bc6dafc7d6de34e4c7692ab35dbb98386ae5d8410a8d5b807784e865c3d23",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"inbox_alerts\".\"id\", \"public\".\"inbox_alerts\".\"user_id\", \"public\".\"inbox_alerts\".\"expires_at\" FROM \"public\".\"inbox_alerts\" WHERE (\"public\".\"inbox_alerts\".\"user_id\" IN ($1) AND \"public\".\"inbox_alerts\".\"expires_at\" > $2 AND \"public\".\"inbox_alerts\".\"read_at\" IS NULL) OFFSET $3"
+        },
+        {
+          "sha256": "47e2451af8d01465cf965d5725a95a63d11161d4d9fe06c7e12b9af252eaa7bd",
+          "calls": 1,
+          "sqlExcerpt": "WITH authoritative_time AS ( SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load ), ranked AS ( SELECT s.user_id AS \"userId\", s.id, s.event_id AS \"eventId\", s.extra_race_steps AS \"extraRaceSteps\", s.race_count AS \"raceCount\", s.settled_at AS \"settledAt\", s.expires_at AS \"expiresAt\", GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\", ROW_NUMBER() OVER ( PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC )::int AS row_number FR"
+        },
+        {
+          "sha256": "96a0d4d60058bc0b0516ae9b3389a77a3946a6218ac7f8f61d2d7fac77f09b0d",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"giveaway_contests\".\"id\", \"public\".\"giveaway_contests\".\"slug\", \"public\".\"giveaway_contests\".\"title\", \"public\".\"giveaway_contests\".\"lifecycle_status\", \"public\".\"giveaway_contests\".\"starts_at\", \"public\".\"giveaway_contests\".\"ends_at\", \"public\".\"giveaway_contests\".\"coin_prize\", \"public\".\"giveaway_contests\".\"eligibility_mode\", \"public\".\"giveaway_contests\".\"banner_message\" FROM \"public\".\"giveaway_contests\" WHERE (\"public\".\"giveaway_contests\".\"lifecycle_status\" = $1 AND \"public\".\"giveaw"
+        }
+      ]
+    },
+    {
+      "name": "home_shell_warm",
+      "status": 200,
+      "wallMs": 42,
+      "queries": 15,
+      "queryShapes": [
+        {
+          "sha256": "1aac6b6bf3419418d7ca7ea81ef4bc429b203417b3543d5715d412d20792234b",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "9fa56fa3bc4b1888e63c4042660f0639eaca6bd2eb79937b6658d8a41a00f6a4",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2"
+        },
+        {
+          "sha256": "f335665f8b0337abf7ba982baaaf085b796f9f456fffdfe52d4a9fd8bcf78613",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatu"
+        },
+        {
+          "sha256": "eb148812758c80ff9729a9aa1eb91fb8769d578dee2bcb85f449a5691af6b528",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"s"
+        },
+        {
+          "sha256": "b0c587b38cc5450757a5448d7468f7d72272b9f2e3d634ab4d7667a5d8d0239f",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\""
+        },
+        {
+          "sha256": "93760775741a2b393b3ca6afa21bfd56e6acc8fd893fd8223f36a09f7841297e",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participan"
+        },
+        {
+          "sha256": "068a67134af1de0372d80a30ccba0cb12c89f49bc3b9156ea56aa78e252ce30b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "a9e538562e6a215b9312682662ae1ba98dcae1c6fc437e628967a450734013fb",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "3608e4f970bef5c9325a85a4a8749d258fd2ac27efbbed719e41efa465cb17d3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "80e6af338f71ec26f4e43e1ec453f5a6c3863999e71edad8dd25d6fd0424cac2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4"
+        },
+        {
+          "sha256": "ea153d8508d96b3477d525fa5a3fee11c5123d0cf010a81bdc7f534da39548b3",
+          "calls": 1,
+          "sqlExcerpt": "WITH candidates AS MATERIALIZED ( SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at FROM races r JOIN users creator ON creator.id = r.creator_id WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE AND creator.is_review_account = FALSE AND NOT EXISTS ( SELECT 1 FROM race_participants mine WHERE mine.race_id = r.id AND mine.user_id = $1 AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\") ) ORDER BY r.started_at ASC LIMIT"
+        },
+        {
+          "sha256": "ec076c26ff8a13b9ab681da96a7aa16259a989a850cec1a0256e1c652a105a19",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"creator_id\" IS NOT NULL AND \"j0\".\"status\" IN (CAST($3::text AS \"public\".\"RaceStatus\"),CAST($4::text AS \"public\".\"RaceStatus\")) AND ("
+        },
+        {
+          "sha256": "47e2451af8d01465cf965d5725a95a63d11161d4d9fe06c7e12b9af252eaa7bd",
+          "calls": 1,
+          "sqlExcerpt": "WITH authoritative_time AS ( SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load ), ranked AS ( SELECT s.user_id AS \"userId\", s.id, s.event_id AS \"eventId\", s.extra_race_steps AS \"extraRaceSteps\", s.race_count AS \"raceCount\", s.settled_at AS \"settledAt\", s.expires_at AS \"expiresAt\", GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\", ROW_NUMBER() OVER ( PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC )::int AS row_number FR"
+        },
+        {
+          "sha256": "790d931acde0f64f6bfc85d3d93e3b0b4ba3177a65512de0c60ffc9b4a5e8fb4",
+          "calls": 1,
+          "sqlExcerpt": "WITH input_rows AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS input( \"requestIndex\" integer, id text, \"lastSeenAt\" timestamptz, \"lastAppVersion\" text ) ), input AS ( SELECT id, (array_agg(\"lastSeenAt\" ORDER BY \"requestIndex\" DESC))[1] AS \"lastSeenAt\", (array_agg(\"lastAppVersion\" ORDER BY \"requestIndex\" DESC) FILTER (WHERE \"lastAppVersion\" IS NOT NULL))[1] AS \"lastAppVersion\" FROM input_rows GROUP BY id ) UPDATE users AS existing SET last_seen_at = input.\"lastSeenAt\", last_app_version = COA"
+        }
+      ]
+    },
+    {
+      "name": "race_list",
+      "status": 200,
+      "wallMs": 55,
+      "queries": 13,
+      "queryShapes": [
+        {
+          "sha256": "b09d219e1aa6c1e2dba6a243bb1e12040c9c5f35a212b9bfb92be3315387539c",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"economic_realm\", \"public\".\"tournaments\".\"creator_id\", \"public\".\"tournaments\".\"seed_id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"status\"::text, \"public\".\"tournaments\".\"bracket_size\", \"public\".\"tournaments\".\"matchup_duration_days\", \"public\".\"tournaments\".\"buy_in_amount\", \"public\".\"tournaments\".\"pot_coins\", \"public\".\"tournaments\".\"funded_prize\", \"public\".\"tournaments\".\"prize_pool_coins\", \"public\".\"tournaments\".\"prize_coin_un"
+        },
+        {
+          "sha256": "068a67134af1de0372d80a30ccba0cb12c89f49bc3b9156ea56aa78e252ce30b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "0e5b88a1dc11c376a7bba15b7e61cdd96d5745203de0c2b87f725b382cd52ce5",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_seeds\".\"id\", \"public\".\"tournament_seeds\".\"kind\", \"public\".\"tournament_seeds\".\"champion_prize_coins\" FROM \"public\".\"tournament_seeds\" WHERE \"public\".\"tournament_seeds\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "ec02eb84f0b86007efffe68493acf6a327fd3bc0a0d8a3a71dc1e591a90c645c",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coins\", \"public\".\"races\".\"prize_calcula"
+        },
+        {
+          "sha256": "460e915fdea1755951b05da24fd6890a3ad61fa140b67465b69890f6f823f438",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coins\", \"public\".\"races\".\"prize_calcula"
+        },
+        {
+          "sha256": "1ba9883d0a8f859d5347077875dc20dd954a013b11f7db1e46ed77d36047f00b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_participants\".\"id\", \"public\".\"tournament_participants\".\"user_id\", \"public\".\"tournament_participants\".\"status\"::text, \"public\".\"tournament_participants\".\"seed\", \"public\".\"tournament_participants\".\"eliminated_in_round\", \"public\".\"tournament_participants\".\"joined_at\", \"public\".\"tournament_participants\".\"favorited_at\", \"public\".\"tournament_participants\".\"tournament_id\" FROM \"public\".\"tournament_participants\" WHERE \"public\".\"tournament_participants\".\"tournament_id\" IN (NUL"
+        },
+        {
+          "sha256": "a438345b3944daa2aabde15a62e0a76377e8ab562c8f730eb5b5d217fc1faee2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT users.id, users.display_name AS \"displayName\", users.profile_photo_url AS \"profilePhotoUrl\", users.client_features AS \"clientFeatures\", users.is_review_account AS \"isReviewAccount\", users.hidden_from_leaderboard AS \"hiddenFromLeaderboard\", COALESCE( jsonb_agg( jsonb_build_object( 'shopItem', jsonb_build_object( 'id', item.id, 'sku', item.sku, 'name', item.name, 'slot', item.slot, 'assetKey', item.asset_key, 'renderMetadata', item.render_metadata, 'bobble', item.bobble, 'testOnly', item.te"
+        },
+        {
+          "sha256": "3d82244c7b4c102d59a25686b05239d0001898696cff16459b3080c71815a0b8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\""
+        },
+        {
+          "sha256": "f1117ee558674842f60e6dc5f07b1f3de09c6faba9aa4a0c0ea8ea3215756c35",
+          "calls": 1,
+          "sqlExcerpt": "WITH accepted AS ( SELECT rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at, ROW_NUMBER() OVER ( PARTITION BY rp.race_id ORDER BY CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC, CASE WHEN rp.finished_at IS NOT NULL THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC, CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC, CASE WHEN rp.finished_at IS NULL THEN C"
+        },
+        {
+          "sha256": "6dbf38d0f85f085c86a26710b07445ff44a6efcb3fa9bd598b591a82a86afa29",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"me"
+        },
+        {
+          "sha256": "23705018b53b2a2c758700c9720b488bcadbf1f126a0248e131baefb08668524",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\"."
+        },
+        {
+          "sha256": "ec076c26ff8a13b9ab681da96a7aa16259a989a850cec1a0256e1c652a105a19",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"creator_id\" IS NOT NULL AND \"j0\".\"status\" IN (CAST($3::text AS \"public\".\"RaceStatus\"),CAST($4::text AS \"public\".\"RaceStatus\")) AND ("
+        },
+        {
+          "sha256": "78496144def8a65c00914e28166e2532cebfbaeedc1a8a3a75e73475d5ceb558",
+          "calls": 1,
+          "sqlExcerpt": "SELECT r.id, r.creator_id AS \"creatorId\", r.seed_id AS \"seedId\", r.tournament_id AS \"tournamentId\", r.creation_source AS \"creationSource\", r.start_policy AS \"startPolicy\", r.status::text AS status, r.rematch_root_race_id AS \"rematchRootRaceId\", r.series_id AS \"seriesId\", COALESCE(rs.enabled, false) AS \"seriesEnabled\", EXISTS ( SELECT 1 FROM race_participants rp WHERE rp.race_id = r.id AND rp.user_id = $1 AND rp.status = 'accepted'::\"RaceParticipantStatus\" ) AS \"viewerAccepted\", ( SELECT COUNT(*)"
+        }
+      ]
+    },
+    {
+      "name": "suggestions",
+      "status": 200,
+      "wallMs": 38,
+      "queries": 2,
+      "queryShapes": [
+        {
+          "sha256": "fc4f3a473ec58e67afeacc7533ebbd401bceadaa2f971cc5839bb098a678756b",
+          "calls": 1,
+          "sqlExcerpt": "WITH eligible AS ( SELECT t.id, t.name, t.status::text AS status, t.bracket_size AS \"bracketSize\", t.matchup_duration_days AS \"matchupDurationDays\", t.buy_in_amount AS \"buyInAmount\", t.pot_coins AS \"potCoins\", t.funded_prize AS \"fundedPrize\", t.prize_pool_coins AS \"prizePoolCoins\", t.prize_coin_unit AS \"prizeCoinUnit\", t.tournament_champion_max_coins AS \"tournamentChampionMaxCoins\", t.prize_calculation_version AS \"prizeCalculationVersion\", t.powerups_enabled AS \"powerupsEnabled\", t.powerup_step_"
+        },
+        {
+          "sha256": "06c41d741dfe90672440214131da18efc3a697bf106b9f3c71dfe58be070cefe",
+          "calls": 1,
+          "sqlExcerpt": "-- Count eligible races in one pass; materialize rosters only for the -- final page. Capacity filtering must stay before the page limit. WITH eligible AS MATERIALIZED ( SELECT r.* FROM races r LEFT JOIN users creator ON creator.id = r.creator_id WHERE r.is_public = TRUE AND r.status IN ('pending'::\"RaceStatus\", 'active'::\"RaceStatus\") AND r.tournament_id IS NULL AND (r.creator_id IS NULL OR creator.is_review_account = FALSE) AND NOT (r.status = 'pending'::\"RaceStatus\" AND r.seed_id IS NOT NULL) "
+        }
+      ]
+    },
+    {
+      "name": "profile",
+      "status": 200,
+      "wallMs": 39,
+      "queries": 3,
+      "queryShapes": [
+        {
+          "sha256": "f02f154d0f0103103163969abd4f002bf81fba79eccf2ea014eab6f6eb6618ae",
+          "calls": 1,
+          "sqlExcerpt": "SELECT COUNT(*) AS \"_count$_all\" FROM (SELECT \"public\".\"friendships\".\"id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"addressee_id\" = $1 AND \"public\".\"friendships\".\"status\" = CAST($2::text AS \"public\".\"FriendshipStatus\")) OFFSET $3) AS \"sub\""
+        },
+        {
+          "sha256": "4f221be8a63c68761d0b53a2e430fa9b71d9717b89fd6840f4b35da0f347c398",
+          "calls": 1,
+          "sqlExcerpt": "SELECT SUM(\"buy_in_amount\") AS \"_sum$buy_in_amount\" FROM (SELECT \"public\".\"race_participants\".\"buy_in_amount\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"user_id\" = $1 AND \"public\".\"race_participants\".\"buy_in_status\" = CAST($2::text AS \"public\".\"RaceBuyInStatus\")) OFFSET $3) AS \"sub\""
+        },
+        {
+          "sha256": "81700b5e343587ef1a8b1975e0c0447084c9a27f69bc5d3c0da0982978968e8e",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3"
+        }
+      ]
+    },
+    {
+      "name": "worker_drain_3_races_includes_startup",
+      "drained": true,
+      "queries": 293,
+      "queryShapes": [
+        {
+          "sha256": "79663c1d3b43ceaf9ee728e501c64b57ae2e4d6cb36ff5c65eddcda1de27342f",
+          "calls": 33,
+          "sqlExcerpt": "COMMIT"
+        },
+        {
+          "sha256": "d136d6f1676a515acde665ce1bc547948e2ae000e533d743414d8f8ecfbd6e06",
+          "calls": 12,
+          "sqlExcerpt": "INSERT INTO \"public\".\"global_step_event_operational_counters\" (\"metric\",\"value\",\"updated_at\") VALUES ($1,$2,$3) ON CONFLICT (\"metric\") DO UPDATE SET \"value\" = (\"public\".\"global_step_event_operational_counters\".\"value\" + $4), \"updated_at\" = $5 WHERE (\"public\".\"global_step_event_operational_counters\".\"metric\" = $6 AND 1=1) RETURNING \"public\".\"global_step_event_operational_counters\".\"metric\", \"public\".\"global_step_event_operational_counters\".\"value\", \"public\".\"global_step_event_operational_counters"
+        },
+        {
+          "sha256": "1bc5fa9e544a555ac7bd3e61be0612e684c2c131096f618594d6b5bc46160503",
+          "calls": 12,
+          "sqlExcerpt": "SELECT id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_b"
+        },
+        {
+          "sha256": "5c657c3b7b38bb89669210e870ee43036c8c124247f36b056f214f6c448adb3e",
+          "calls": 7,
+          "sqlExcerpt": "/* steps:prepared-query:v1 */ WITH candidate AS ( SELECT p.id FROM race_placement_transition_jobs p JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id WHERE ( (p.state IN ('queued','retry') AND p.not_before_at <= $1 AND (p.retry_at IS NULL OR p.retry_at <= $1)) OR (p.state='running' AND p.lease_expires_at <= clock_timestamp()) ) AND p.requested_generation > COALESCE(p.completed_generation, 0) AND r.state='succeeded' AND r.generation > 0 AND r.processing_generation=r.generation AND r.generatio"
+        },
+        {
+          "sha256": "0d4359106b56f35fd18cb580495487059c383bf4fef763dd357dbf73e0346567",
+          "calls": 6,
+          "sqlExcerpt": "SELECT race_id AS \"raceId\" FROM race_umbrella_interceptions WHERE status = 'PENDING' AND resolves_at <= $1::timestamp GROUP BY race_id ORDER BY MIN(resolves_at), race_id LIMIT $2"
+        },
+        {
+          "sha256": "ca8d087e1bd60d31f005449f0651c220a641fd9ca1a3365f7c286101d9b37655",
+          "calls": 6,
+          "sqlExcerpt": "WITH candidate AS ( SELECT id FROM race_admin_commands WHERE (status = 'PENDING' AND available_at <= $1) OR (status = 'RUNNING' AND lease_expires_at < $2) ORDER BY available_at ASC, created_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 1 ) UPDATE race_admin_commands command SET status = 'RUNNING', lease_token = $3, lease_expires_at = $4, attempts = attempts + 1, updated_at = $5 FROM candidate WHERE command.id = candidate.id RETURNING command.*"
+        },
+        {
+          "sha256": "59032b06d6f5111758f4f55390bd2911549d41d45eb041446a46bf69fa59e6e4",
+          "calls": 6,
+          "sqlExcerpt": "SELECT effect_id,race_id FROM race_effect_deadlines WHERE dispatched_revision IS NULL AND deadline_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND NOT(race_id=ANY($2::text[])) ORDER BY deadline_at,race_id,effect_id LIMIT $1"
+        },
+        {
+          "sha256": "9a1da891bdc0b672305bab29a833c90a20577deed5b81f6c57edd7cbc7d9887e",
+          "calls": 6,
+          "sqlExcerpt": "SELECT race_id FROM race_progress_refresh_intents WHERE available_at<=(statement_timestamp() AT TIME ZONE 'UTC') ORDER BY available_at,race_id LIMIT 100"
+        },
+        {
+          "sha256": "62f5ce21560ce77722cf698475026fa4148c2b076db5cac2884771e2e7b317e6",
+          "calls": 6,
+          "sqlExcerpt": "WITH due AS (SELECT task_id FROM race_snapshot_repair_intents WHERE terminal_at IS NULL AND available_at<=(statement_timestamp() AT TIME ZONE 'UTC') AND (lease_expires_at IS NULL OR lease_expires_at<=(statement_timestamp() AT TIME ZONE 'UTC')) ORDER BY available_at,task_id LIMIT 100 FOR UPDATE SKIP LOCKED) UPDATE race_snapshot_repair_intents i SET lease_token=$1::uuid,lease_expires_at=clock_timestamp()+interval '30 seconds',attempt_count=attempt_count+1 FROM due WHERE i.task_id=due.task_id RETUR"
+        },
+        {
+          "sha256": "32c4ae6ad288022221137516b2d27c33c2989a8d0c58648523ffb7050b9d8477",
+          "calls": 6,
+          "sqlExcerpt": "/* steps:prepared-query:v1 */ WITH candidate AS ( SELECT id FROM race_resolution_jobs_v2 WHERE $4::text IS NULL AND ( ( state = 'queued' AND ($5::boolean OR retry_at IS NULL OR retry_at <= $1) AND ($5::boolean OR not_before_at IS NULL OR not_before_at <= $1) ) OR ( state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1 ) ) ORDER BY CASE queue_priority WHEN 'SETTLEMENT' THEN 0 WHEN 'RECOVERY' THEN 1 WHEN 'LIVE' THEN 2 ELSE 3 END, requested_at ASC, race_id ASC LIMIT 1 FOR UP"
+        },
+        {
+          "sha256": "6e44fa117aeac3fae63b1784b15638ed0d49c055a859da5c4ab40fb738fa7f32",
+          "calls": 6,
+          "sqlExcerpt": "/* steps:prepared-query:v1 */ WITH candidate_ids AS MATERIALIZED ( SELECT id, requested_at FROM ( (SELECT id, requested_at FROM race_resolution_post_tasks WHERE state='queued' AND not_before_at <= $1 ORDER BY not_before_at, requested_at, id LIMIT 16) UNION ALL (SELECT id, requested_at FROM race_resolution_post_tasks WHERE state='running' AND lease_expires_at <= $1 ORDER BY lease_expires_at, requested_at, id LIMIT 16) ) branches ORDER BY requested_at, id LIMIT 16 ), candidate AS ( SELECT task.id "
+        },
+        {
+          "sha256": "96d49c9ff9b49972f7c77662786fed874cb53916c36207b02c8a9075c415b4e6",
+          "calls": 6,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ SELECT id, target_participant_id AS \"targetParticipantId\", target_user_id AS \"targetUserId\", source_user_id AS \"sourceUserId\", powerup_id AS \"powerupId\", UPPER(type::text) AS type, CASE status WHEN 'active_effect' THEN 'ACTIVE' WHEN 'expired_effect' THEN 'EXPIRED' ELSE UPPER(status::text) END AS status, starts_at AS \"startsAt\", expires_at AS \"expiresAt\", metadata, updated_at AS \"updatedAt\", race_id AS \"raceId\", created_at AS \"createdAt\" FROM race_active_effects WHERE"
+        },
+        {
+          "sha256": "cc25e888545ffe73a50226ef2b649151f7f6ea6b2929bb30db0967ded6786b50",
+          "calls": 6,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH members AS ( SELECT DISTINCT participant.user_id FROM race_participants participant WHERE participant.race_id=$1 AND participant.status='accepted' ) SELECT members.user_id AS \"userId\", version.generation::text AS generation, CASE WHEN version.generation IS NULL THEN EXISTS (SELECT 1 FROM steps source WHERE source.user_id=members.user_id) ELSE false END AS \"hasSteps\", CASE WHEN version.generation IS NULL THEN EXISTS (SELECT 1 FROM step_samples source WHERE source"
+        },
+        {
+          "sha256": "f3f01d5547381aea4bd1d7b8c02ef9294ec66da89617e1d6a0ef609cb0351031",
+          "calls": 6,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ SELECT race.id AS \"r_id\", race.name AS \"r_name\", (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS \"r_scheduledStartAt\", race.team_a_name AS \"r_teamAName\", race.team_b_name AS \"r_teamBName\", UPPER(race.status::text) AS \"r_status\", (EXTRACT(EPOCH FROM race.started_at) * 1000)::float8 AS \"r_startedAt\", (EXTRACT(EPOCH FROM race.ends_at) * 1000)::float8 AS \"r_endsAt\", race.timezone AS \"r_timezone\", race.target_steps AS \"r_targetSteps\", race.time_based AS \"r"
+        },
+        {
+          "sha256": "46cebbe151843c5fbba7cc2842c67ad7bb8d99f08b91e4ea143df85455060373",
+          "calls": 6,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH race_window AS ( SELECT started_at FROM races WHERE id=$1 ), schedule AS ( SELECT COALESCE(( SELECT NOT EXISTS ( SELECT 1 FROM ( SELECT source.starts_at AS boundary_at, source.id AS event_id, 'START'::text AS boundary_kind FROM global_step_events source JOIN race_window race ON source.ends_at > race.started_at WHERE source.schedule_mode='LEGACY_GLOBAL' UNION ALL SELECT source.ends_at AS boundary_at, source.id AS event_id, 'END'::text AS boundary_kind FROM global"
+        },
+        {
+          "sha256": "00e5d03d0ed6fbc042a235afd86ff25d1087c6f4811ba46cbbcfb69a316c06e2",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"me"
+        },
+        {
+          "sha256": "2f9fbdcc8ead8a46e4b801cbb69fd720f7507b60fd7293ea4b9c31806ee31ffb",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"summary_at"
+        },
+        {
+          "sha256": "a5f9d35980ff6380493f83898ab866bf689a87b2e73340bded0de0f06bce9f36",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_event_entitlements\".\"id\", \"public\".\"global_step_event_entitlements\".\"event_id\", \"public\".\"global_step_event_entitlements\".\"user_id\", \"public\".\"global_step_event_entitlements\".\"timezone\", \"public\".\"global_step_event_entitlements\".\"local_date\", \"public\".\"global_step_event_entitlements\".\"starts_at\", \"public\".\"global_step_event_entitlements\".\"ends_at\", \"public\".\"global_step_event_entitlements\".\"start_outcome\", \"public\".\"global_step_event_entitlements\".\"start_processed_at"
+        },
+        {
+          "sha256": "08dacee07eafa4a0a400ebd9839f547dc2640c65eaadd17e456a91cac38087bc",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"summary_at"
+        },
+        {
+          "sha256": "ed45d074a0dbf93df36fc3dd99fafd43b72b4cd7eb883ed1931c9b859e6b8f27",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"global_event_race_impacts\".\"id\", \"public\".\"global_event_race_impacts\".\"event_id\", \"public\".\"global_event_race_impacts\".\"user_id\", \"public\".\"global_event_race_impacts\".\"status\" FROM \"public\".\"global_event_race_impacts\" WHERE (\"public\".\"global_event_race_impacts\".\"race_id\" = $1 AND \"public\".\"global_event_race_impacts\".\"user_id\" IN ($2,$3) AND \"public\".\"global_event_race_impacts\".\"event_id\" IN ($4)) OFFSET $5"
+        },
+        {
+          "sha256": "18e0fb062af92d620d667ae2d77bc2dc075e0ac8bc8750fc85ef3d8b95825086",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"joined_at\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" = $1 AND \"public\".\"race_participants\".\"user_id\" IN ($2,$3) AND \"public\".\"race_participants\".\"status\" = CAST($4::text AS \"public\".\"RaceParticipantStatus\")) OFFSET $5"
+        },
+        {
+          "sha256": "76937742fba776a93ab0f07a9332c6eedab7a0025d12992e4e4250f3c339b1ea",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"last_notified_placement\", \"public\".\"race_participants\".\"placement_alerts_muted\", \"public\".\"race_participants\".\"finished_at\", \"public\".\"race_participants\".\"forfeited_at\", \"public\".\"race_participants\".\"joined_at\", \"publ"
+        },
+        {
+          "sha256": "ba0537bef993a5dbec3e212e4f6fba4089615acdf450799cc77f22089693b8bb",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"timezone\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"payout_curve\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_a_name\", \"public\".\"races\".\"team_b_name\" FROM \"public\".\"races\" WHERE (\"public\".\"races\".\"id\" = $"
+        },
+        {
+          "sha256": "6872015875e46326ea95f66250996d7d2d2323fcfd96eba5e446e56e36d68af5",
+          "calls": 5,
+          "sqlExcerpt": "SELECT id FROM race_resolution_post_tasks WHERE snapshot_state='pending' AND ((state='queued' AND not_before_at<=$1) OR (state='running' AND lease_expires_at<=$1)) ORDER BY requested_at,id LIMIT 16"
+        },
+        {
+          "sha256": "f3a06826d936fa0bfacbd95c038f6ba88a3c7d813cfa813ebf1fb5ee360df63e",
+          "calls": 3,
+          "sqlExcerpt": "SELECT 1 FROM race_resolution_jobs WHERE state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at > $1 LIMIT 1"
+        },
+        {
+          "sha256": "698de34778c1876425c1ca6c6f062d1cbf28b892558330c067eb959b59d53d09",
+          "calls": 3,
+          "sqlExcerpt": "/* steps:prepared-query:v1 */ SELECT LEAST( (SELECT MIN(GREATEST(p.not_before_at,COALESCE(p.retry_at,'-infinity'::timestamp))) FROM race_placement_transition_jobs p JOIN race_resolution_jobs_v2 r ON r.race_id=p.race_id WHERE p.state IN ('queued','retry') AND p.requested_generation > COALESCE(p.completed_generation,0) AND r.state='succeeded' AND r.generation > 0 AND r.processing_generation=r.generation AND r.generation=p.requested_generation AND r.last_completed_at IS NOT NULL), (SELECT MIN(p.lea"
+        },
+        {
+          "sha256": "40f2339d0ec46260ac537b8bf15c19fe49c91182d651efb0cfb21bc7f3aa59ca",
+          "calls": 3,
+          "sqlExcerpt": "WITH candidate_races AS ( SELECT trigger.race_id, MIN(trigger.requested_at) AS requested_at, MAX(trigger.resolution_time_zone) AS resolution_time_zone FROM ( SELECT trigger.race_id,trigger.requested_at, trigger.resolution_time_zone FROM race_resolution_full_triggers trigger JOIN races race ON race.id=trigger.race_id WHERE race.status='active' ORDER BY trigger.requested_at,trigger.id LIMIT $1 ) trigger GROUP BY trigger.race_id ) INSERT INTO race_resolution_jobs_v2 ( id,race_id,generation,resoluti"
+        },
+        {
+          "sha256": "8f780932f099f57deabda12b7d2420c7f67566004b2068f9df3f9d00b6bace94",
+          "calls": 3,
+          "sqlExcerpt": "WITH candidates AS MATERIALIZED ( SELECT trigger.id,trigger.race_id,trigger.user_id,trigger.participant_id, trigger.resolution_time_zone,trigger.requested_at FROM race_resolution_full_triggers trigger JOIN race_resolution_jobs_v2 job ON job.race_id=trigger.race_id JOIN races race ON race.id=trigger.race_id WHERE job.full_trigger_seed_only AND race.status='active' AND ( job.full_trigger_seed_only OR NOT (job.dirty_reasons ? 'STEP_INPUT_CHANGED') OR jsonb_array_length(job.dirty_participant_ids) < "
+        },
+        {
+          "sha256": "9dd7acf74f999d6b9dff257a502417718488d2b4e16b25620ac0e48073a895c3",
+          "calls": 3,
+          "sqlExcerpt": "SELECT LEAST( (SELECT MIN(GREATEST(COALESCE(not_before_at,clock_timestamp()), COALESCE(retry_at,clock_timestamp()))) FROM race_resolution_jobs_v2 WHERE state='queued'), (SELECT MIN(lease_expires_at) FROM race_resolution_jobs_v2 WHERE state='running') ) AS \"dueAt\""
+        },
+        {
+          "sha256": "07683a593233be16fbb86250d7a33d23994707bd3d203790377f192264f8c09a",
+          "calls": 3,
+          "sqlExcerpt": "SELECT id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_b"
+        },
+        {
+          "sha256": "772d2352f8e19eb7ab1d789fcfffaf91ec3dcfbdad12bd2c8042a7e53d20c93c",
+          "calls": 3,
+          "sqlExcerpt": "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS \"dbNowMs\""
+        },
+        {
+          "sha256": "7d42e2962689dc581670c07696ffcb7331321482e38dde753f1cd42f36687796",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"powerup_slots\", \"public\".\"race_participants\".\"box_progress_steps\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"race_id\" = $1 AND \"public\".\"race_participants\".\"user_id\" IN ($2) AND \"public\".\"race_participants\".\"status\" ="
+        },
+        {
+          "sha256": "b73acdffd6095a6466e42058a0f8bcedbd4f1ec7b667462cf73e7f22fc023a70",
+          "calls": 3,
+          "sqlExcerpt": "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)"
+        },
+        {
+          "sha256": "eb752934783987e36b916d9e43b891d4ae194727b79683c3649691b819894b21",
+          "calls": 3,
+          "sqlExcerpt": "SELECT id, user_id AS \"userId\", next_box_at_steps AS \"nextBoxAtSteps\", powerup_slots AS \"powerupSlots\", status, forfeited_at AS \"forfeitedAt\" FROM race_participants WHERE id = ANY($1::text[]) ORDER BY user_id, id FOR UPDATE"
+        },
+        {
+          "sha256": "fcf8626c40b9e1ce9ff12b8b9fea4190a689f9b83f5788fd11fc42cd4f5b630c",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"created_at\" FROM \"public\".\"race_powerups\" WHERE \"public\".\"race_powerups\".\"participant_id\" IN ($1) ORDER BY \"public\".\"race_powerups\".\"participant_id\" ASC, \"public\".\"race_powerups\".\"created_at\" ASC, \"public\".\"race_powerups\".\"id\" ASC OFFSET $2"
+        },
+        {
+          "sha256": "397505afcd1da24540f50157477db0d07253aae9f795b595fbcdde850ab13815",
+          "calls": 3,
+          "sqlExcerpt": "UPDATE race_participants participant SET box_progress_steps=changed.\"boxProgressSteps\" FROM jsonb_to_recordset($1::jsonb) AS changed(id text,\"boxProgressSteps\" integer) WHERE participant.id=changed.id AND participant.race_id=$2 AND participant.status='accepted' AND participant.finished_at IS NULL AND participant.forfeited_at IS NULL AND participant.box_progress_steps IS DISTINCT FROM changed.\"boxProgressSteps\""
+        },
+        {
+          "sha256": "ce6bb8c8a75291c545887700fbce7bec48fe1ac843d44d3cd17b16e185359358",
+          "calls": 3,
+          "sqlExcerpt": "SELECT id FROM race_participants WHERE id = ANY($1::text[]) ORDER BY user_id ASC, id ASC FOR UPDATE"
+        },
+        {
+          "sha256": "e61ba1ffdcb2129e61aa46a92aef2dfb1207e28f5936d8e414df00276c06774b",
+          "calls": 3,
+          "sqlExcerpt": "WITH input AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS row( \"participantId\" text, \"totalSteps\" integer, \"hasTotal\" boolean, \"rawSteps\" integer, \"hasRaw\" boolean, \"bonusDecrement\" integer ) ), resolved AS ( SELECT participant.id, input.\"totalSteps\", input.\"hasTotal\", input.\"rawSteps\", input.\"hasRaw\", GREATEST( 0, CASE WHEN input.\"hasTotal\" THEN input.\"totalSteps\" ELSE participant.total_steps END ) AS base_total, GREATEST(0, -participant.total_steps) AS legacy_overkill, LEAST( input.\"bonus"
+        },
+        {
+          "sha256": "b9a821b71c489d54c8a3ed36f12fd69cfc93376e5e79651e60f6310f7c350af2",
+          "calls": 3,
+          "sqlExcerpt": "UPDATE race_resolution_jobs_v2 SET state = CASE WHEN generation = $3 THEN 'succeeded'::\"RaceResolutionJobState\" ELSE 'queued'::\"RaceResolutionJobState\" END, attempts = CASE WHEN generation = $3 THEN attempts ELSE 0 END, completed_at = $4, last_completed_at = $4, retry_at = NULL, not_before_at = $5, lease_expires_at = NULL, lease_token = NULL, last_error_code = NULL, processing_triggered_by_user_ids = '[]'::jsonb, processing_dirty_reasons = '[]'::jsonb, processing_dirty_participant_ids = '[]'::js"
+        },
+        {
+          "sha256": "8056756f1622c952e56246924e357759718c0129b4fdc39b1b8cc38ffd0ef17f",
+          "calls": 3,
+          "sqlExcerpt": "INSERT INTO race_placement_transition_jobs ( id, race_id, requested_generation, state, requested_at, observed_at, not_before_at, attempts, created_at, updated_at ) VALUES ( gen_random_uuid(), $1, $2, 'queued', $4::timestamp, $3::timestamp, $4::timestamp + interval '1 second', 0, $4::timestamp, $4::timestamp ) ON CONFLICT (race_id) DO UPDATE SET requested_generation = EXCLUDED.requested_generation, state = CASE WHEN race_placement_transition_jobs.state = 'running' THEN 'running'::\"RacePlacementTr"
+        },
+        {
+          "sha256": "4a00500cf54473a244fa4ed87d17a38c6639268221f23f6b2c6097e4ef5ff592",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"race_resolution_post_task_receipts\".\"race_id\", \"public\".\"race_resolution_post_task_receipts\".\"source_generation\", \"public\".\"race_resolution_post_task_receipts\".\"dedupe_key\", \"public\".\"race_resolution_post_task_receipts\".\"terminal_state\", \"public\".\"race_resolution_post_task_receipts\".\"completed_at\" FROM \"public\".\"race_resolution_post_task_receipts\" WHERE ((\"public\".\"race_resolution_post_task_receipts\".\"race_id\" = $1 AND \"public\".\"race_resolution_post_task_receipts\".\"source_genera"
+        },
+        {
+          "sha256": "f02f152a4f8c935e8862cd5420fcce7449caba4736a1fa3a6900c58d14bb4cb3",
+          "calls": 3,
+          "sqlExcerpt": "INSERT INTO race_resolution_post_tasks ( id, race_id, source_generation, dedupe_key, state, requested_at, not_before_at, snapshot_state, snapshot_command, payload_bytes, intent_count, created_at, updated_at ) VALUES ($1,$2,$3,$4,'queued',$5,$5,'pending',$6::jsonb,$7,$8,$5,$5) ON CONFLICT (race_id, source_generation) DO NOTHING RETURNING id"
+        },
+        {
+          "sha256": "9561a34f7c80c1764f936c0c9fa6587e4d41bf89314a71e6a6a3304c9766e0fc",
+          "calls": 3,
+          "sqlExcerpt": "UPDATE race_resolution_post_tasks SET snapshot_command=$2::jsonb, payload_bytes=$3, intent_count=$4, updated_at=$5 WHERE id=$1"
+        },
+        {
+          "sha256": "dc37c76d012bf1bb4b929831add11c07cf073d52064980ca20f28588d222e079",
+          "calls": 3,
+          "sqlExcerpt": "SELECT COALESCE(( SELECT EXTRACT(EPOCH FROM ($1 - MIN(requested_at))) * 1000 FROM race_resolution_post_tasks WHERE state IN ('queued','running') ), 0)::float8 AS \"oldestPendingLagMs\", ( (SELECT COUNT(*) FROM race_resolution_delivery_intents intent JOIN race_resolution_post_tasks task ON task.id=intent.task_id WHERE intent.state='attempting' AND task.lease_expires_at IS NOT NULL AND task.lease_expires_at <= $1) + (SELECT COUNT(*) FROM race_resolution_post_tasks task WHERE task.snapshot_state='att"
+        },
+        {
+          "sha256": "9ac15ba9f56d4fefe7901076baf4cc9bbbf224c751e56d1eda1f28177203f381",
+          "calls": 3,
+          "sqlExcerpt": "UPDATE race_resolution_post_tasks SET snapshot_state='attempting', snapshot_attempt_id=$3, snapshot_attempted_at=$4, updated_at=$4 WHERE id=$1 AND lease_token=$2 AND snapshot_state='pending' RETURNING id"
+        },
+        {
+          "sha256": "5bfffaceecdf9deca7354b8571d6c4cb4081e02311899c2ef8991afc705e8142",
+          "calls": 3,
+          "sqlExcerpt": "SELECT 1 FROM race_resolution_post_tasks WHERE race_id=$1 AND source_generation>=$2 AND snapshot_state='succeeded' UNION ALL SELECT 1 FROM race_resolution_post_task_receipts WHERE race_id=$1 AND source_generation>=$2 AND snapshot_state='succeeded' LIMIT 1"
+        },
+        {
+          "sha256": "0bc2658121f466f78c035f8c7cf84505112f580a4f8b5d117ec98b34686f0b90",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"economic_realm\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coin"
+        },
+        {
+          "sha256": "55ba151f80ee59f6773d832754bfa3a9a53f760c4c5155ad6df595b9d6e08adf",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "25a54555f4a6d6fd2898c4f360ceb3e5e30e3d329f5f5421a945d5080457ab4b",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"bracket_size\" FROM \"public\".\"tournaments\" WHERE \"public\".\"tournaments\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "7e4b45e76fbf01bb88f6fe6b0912b9476c2bb639e5d78137b0a9d8f594100931",
+          "calls": 3,
+          "sqlExcerpt": "WITH failures AS ( SELECT COUNT(*)::int AS count FROM race_resolution_delivery_intents WHERE task_id=$1 AND state IN ('rejected_no_retry','ambiguous_at_most_once') ), pending AS ( SELECT COUNT(*)::int AS count FROM race_resolution_delivery_intents WHERE task_id=$1 AND state IN ('pending','attempting') ), finished AS ( UPDATE race_resolution_post_tasks task SET state=CASE WHEN failures.count > 0 OR COALESCE($4::text,task.snapshot_state) IN ('failed_no_retry','ambiguous_at_most_once') THEN 'succee"
+        },
+        {
+          "sha256": "596d9dd3691cf70127ab96ebcc3e6919b8683dd6bb3e0b8650baebd93130cbaa",
+          "calls": 3,
+          "sqlExcerpt": "SELECT race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", state, last_completed_at AS \"lastCompletedAt\" FROM race_resolution_jobs_v2 WHERE race_id=$1 FOR UPDATE"
+        },
+        {
+          "sha256": "8ebe8637aac4633e978377968b2339eed4d39d9323c6b79ace1823a15d8a377e",
+          "calls": 3,
+          "sqlExcerpt": "SELECT p.id, p.race_id AS \"raceId\", p.requested_generation AS \"requestedGeneration\", p.processing_generation AS \"processingGeneration\", p.completed_generation AS \"completedGeneration\", p.state, p.requested_at AS \"requestedAt\", p.observed_at AS \"observedAt\", p.processing_observed_at AS \"processingObservedAt\", p.not_before_at AS \"notBeforeAt\", p.attempts, p.retry_at AS \"retryAt\", p.started_at AS \"startedAt\", p.completed_at AS \"completedAt\", p.last_completed_at AS \"lastCompletedAt\", p.lease_token A"
+        },
+        {
+          "sha256": "74cff254f04ce805cb7ffd2e6e3a1848826945570bf26e4d6294a2fb5b267e0e",
+          "calls": 3,
+          "sqlExcerpt": "WITH proposed AS ( SELECT p.\"participantId\", p.\"expectedPlacement\", p.\"nextPlacement\" FROM jsonb_to_recordset($1::jsonb) AS p( \"participantId\" text, \"expectedPlacement\" integer, \"nextPlacement\" integer ) ) UPDATE race_participants participant SET last_notified_placement=proposed.\"nextPlacement\" FROM proposed WHERE participant.id=proposed.\"participantId\" AND participant.last_notified_placement IS NOT DISTINCT FROM proposed.\"expectedPlacement\" RETURNING participant.id"
+        },
+        {
+          "sha256": "98071f62206846e2df552e952d0884f304a9207372639d6da91bc5a533d0707a",
+          "calls": 3,
+          "sqlExcerpt": "UPDATE race_placement_transition_jobs SET state='succeeded', completed_generation=$3, processing_generation=NULL, processing_observed_at=NULL, completed_at=$4, last_completed_at=$4, lease_token=NULL, lease_expires_at=NULL, retry_at=NULL, last_error_code=NULL, updated_at=$4 WHERE id=$1::uuid AND state='running' AND lease_token=$2 AND processing_generation=$3 AND requested_generation=$3 AND lease_expires_at > clock_timestamp() RETURNING id, race_id AS \"raceId\", requested_generation AS \"requestedGe"
+        },
+        {
+          "sha256": "e196149ab6548c3330b21e44619b0d07127853a70f9da5d0d459cc9953661561",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"app_settings\".\"key\", \"public\".\"app_settings\".\"value\", \"public\".\"app_settings\".\"updated_at\" FROM \"public\".\"app_settings\" WHERE \"public\".\"app_settings\".\"key\" IN ($1,$2,$3) OFFSET $4"
+        },
+        {
+          "sha256": "b478e497c94c1730afaab69292edc74fca41ebe33b9552829b0bd841f7cc92e8",
+          "calls": 2,
+          "sqlExcerpt": "SELECT LEAST( (SELECT MIN(not_before_at) FROM race_resolution_post_tasks WHERE state='queued'), (SELECT MIN(lease_expires_at) FROM race_resolution_post_tasks WHERE state='running') ) AS \"dueAt\""
+        },
+        {
+          "sha256": "00894807d0e1ce77d289340ca002567758e25394373abfe1dfa49e065daf37c2",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"balance_config\".\"id\", \"public\".\"balance_config\".\"version\", \"public\".\"balance_config\".\"config\", \"public\".\"balance_config\".\"note\", \"public\".\"balance_config\".\"created_by\", \"public\".\"balance_config\".\"bound_override\", \"public\".\"balance_config\".\"active\", \"public\".\"balance_config\".\"created_at\" FROM \"public\".\"balance_config\" WHERE \"public\".\"balance_config\".\"active\" = $1 ORDER BY \"public\".\"balance_config\".\"version\" DESC LIMIT $2 OFFSET $3"
+        },
+        {
+          "sha256": "e5aa6e32c2ed30092c67f57fbd3641d7dd7be6d06d39b43357bdc3d27c5726c3",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"steps\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1) AND \"public\".\"steps\".\"date\" >= $2 AND \"public\".\"steps\".\"date\" <= $3) ORDER BY \"public\".\"steps\".\"date\" ASC OFFSET $4"
+        },
+        {
+          "sha256": "b2f16949dec9ca9f8c7b07cf518609f11e23768c78afe0c6d01413501fcf63ac",
+          "calls": 2,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS MATERIALIZED ( SELECT input.user_id, input.range_start, input.range_end, input.ordinal FROM jsonb_to_recordset($1::jsonb) AS input( user_id text, range_start timestamp, range_end timestamp, ordinal integer ) LIMIT 25 ) SELECT requested.ordinal, sample.id, sample.user_id AS \"userId\", sample.period_start AS \"start\", sample.period_end AS \"end\", sample.steps FROM requested JOIN step_samples sample ON sample.user_id = requested.user_id AND sample.period_"
+        },
+        {
+          "sha256": "916dad224904dfa4ad44bd0de0a8e65bac5032c5b0b0f7335bbbc426c069a4f8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT (SELECT deadline_at FROM race_effect_deadlines WHERE dispatched_revision IS NULL ORDER BY deadline_at,race_id,effect_id LIMIT 1) AS pending, (SELECT dispatched_at FROM race_effect_deadlines WHERE dispatched_revision IS NOT NULL ORDER BY dispatched_at,race_id LIMIT 1) AS dispatched"
+        },
+        {
+          "sha256": "9f32feb7ea419e7d08254de520ce0aea180f2a9a8d6994b9c5903fe7259d3047",
+          "calls": 1,
+          "sqlExcerpt": "SELECT id,race_id,source_generation FROM race_resolution_post_tasks WHERE snapshot_state IN ('failed_no_retry','ambiguous_at_most_once') AND id>$1 ORDER BY id LIMIT 100"
+        },
+        {
+          "sha256": "cab22b63e65e601026d49b77bf8478db1fd4e86dade85f8e83a2cbea10cd010a",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO \"public\".\"global_step_event_cron_owners\" (\"owner_id\",\"generation\",\"local_aware\",\"heartbeat_at\",\"expires_at\",\"updated_at\",\"logical_owner_id\",\"boot_id\",\"role\",\"capabilities\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (\"owner_id\") DO UPDATE SET \"logical_owner_id\" = $11, \"boot_id\" = $12, \"role\" = $13, \"generation\" = $14, \"local_aware\" = $15, \"capabilities\" = $16, \"heartbeat_at\" = $17, \"expires_at\" = $18, \"updated_at\" = $19 WHERE (\"public\".\"global_step_event_cron_owners\".\"owner_"
+        },
+        {
+          "sha256": "8df11ac034d6688563d3d3c31073800456bf27397a5c972cd7d57a45a9b38e35",
+          "calls": 1,
+          "sqlExcerpt": "SELECT 'receipt:'||race_id||':'||source_generation::text AS id,race_id,source_generation FROM race_resolution_post_task_receipts WHERE snapshot_state IN ('failed_no_retry','ambiguous_at_most_once') AND (race_id,source_generation)>($1,$2) ORDER BY race_id,source_generation LIMIT 100"
+        },
+        {
+          "sha256": "db79b5e4bf028ca7ccffff78f1d259ab9ea5998e0548ffdddcc90a497c842032",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_event_cron_owners\".\"owner_id\", \"public\".\"global_step_event_cron_owners\".\"logical_owner_id\", \"public\".\"global_step_event_cron_owners\".\"generation\", \"public\".\"global_step_event_cron_owners\".\"capabilities\" FROM \"public\".\"global_step_event_cron_owners\" WHERE \"public\".\"global_step_event_cron_owners\".\"expires_at\" > $1 OFFSET $2"
+        },
+        {
+          "sha256": "32de0d732b5a74a15ceebd423472c4dfeb71dc40c9c439c52c5d453c8b432868",
+          "calls": 1,
+          "sqlExcerpt": "SELECT d.effect_id,d.race_id,d.dispatched_at FROM race_effect_deadlines d WHERE d.dispatched_revision IS NOT NULL AND d.dispatched_at<(statement_timestamp() AT TIME ZONE 'UTC')-interval '30 seconds' AND ($2::timestamp IS NULL OR (d.dispatched_at,d.race_id)>($2::timestamp,$3)) ORDER BY d.dispatched_at,d.race_id LIMIT $1"
+        },
+        {
+          "sha256": "c989c951f2607e3689703da4d4a35a2663b2dcfe881249c2f1d254b81c918627",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO \"public\".\"global_step_event_generation_state\" (\"id\",\"required_generation\",\"ready_since\",\"updated_at\") VALUES ($1,$2,$3,$4) ON CONFLICT (\"id\") DO UPDATE SET \"ready_since\" = $5, \"updated_at\" = $6 WHERE (\"public\".\"global_step_event_generation_state\".\"id\" = $7 AND 1=1) RETURNING \"public\".\"global_step_event_generation_state\".\"id\", \"public\".\"global_step_event_generation_state\".\"required_generation\", \"public\".\"global_step_event_generation_state\".\"ready_since\", \"public\".\"global_step_event_ge"
+        },
+        {
+          "sha256": "39fb6c99a4a81d556e6c74a4e591d80a60d3e5d6ed4cfdfe987e91abea0a43b8",
+          "calls": 1,
+          "sqlExcerpt": "DELETE FROM race_effect_deadlines WHERE effect_id IN (SELECT d.effect_id FROM race_effect_deadlines d JOIN races r ON r.id=d.race_id WHERE r.status<>'active' ORDER BY d.deadline_at LIMIT $1)"
+        },
+        {
+          "sha256": "59cfd20d79e245253971aab1de98214fc4ed355aa77431d8c78c790fd47950a8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"app_settings\".\"key\", \"public\".\"app_settings\".\"value\", \"public\".\"app_settings\".\"updated_at\" FROM \"public\".\"app_settings\" WHERE \"public\".\"app_settings\".\"key\" IN ($1,$2) OFFSET $3"
+        },
+        {
+          "sha256": "6394f039535554905979b35ca5d149f6cbe0163532465fb418d86891d91e88ed",
+          "calls": 1,
+          "sqlExcerpt": "SELECT id FROM race_series_renewal_jobs WHERE ( state IN ('QUEUED'::\"RaceSeriesRenewalJobState\", 'FAILED_RETRYABLE'::\"RaceSeriesRenewalJobState\") AND (retry_at IS NULL OR retry_at <= NOW()) ) OR ( state = 'RUNNING'::\"RaceSeriesRenewalJobState\" AND lease_expires_at <= NOW() ) ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1"
+        }
+      ]
+    },
+    {
+      "name": "home_post_resolution",
+      "status": 200,
+      "wallMs": 46,
+      "queries": 14,
+      "queryShapes": [
+        {
+          "sha256": "1aac6b6bf3419418d7ca7ea81ef4bc429b203417b3543d5715d412d20792234b",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "9fa56fa3bc4b1888e63c4042660f0639eaca6bd2eb79937b6658d8a41a00f6a4",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2"
+        },
+        {
+          "sha256": "f335665f8b0337abf7ba982baaaf085b796f9f456fffdfe52d4a9fd8bcf78613",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatu"
+        },
+        {
+          "sha256": "b0c587b38cc5450757a5448d7468f7d72272b9f2e3d634ab4d7667a5d8d0239f",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"joined_at\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\""
+        },
+        {
+          "sha256": "eb148812758c80ff9729a9aa1eb91fb8769d578dee2bcb85f449a5691af6b528",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"s"
+        },
+        {
+          "sha256": "93760775741a2b393b3ca6afa21bfd56e6acc8fd893fd8223f36a09f7841297e",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"started_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"creator_id\", COALESCE(\"aggr_selection_0_RaceParticipant\".\"_aggr_count_participants\", 0) AS \"_aggr_count_participants\" FROM \"public\".\"races\" LEFT JOIN (SELECT \"public\".\"race_participants\".\"race_id\", COUNT(*) AS \"_aggr_count_participants\" FROM \"public\".\"race_participan"
+        },
+        {
+          "sha256": "068a67134af1de0372d80a30ccba0cb12c89f49bc3b9156ea56aa78e252ce30b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "a9e538562e6a215b9312682662ae1ba98dcae1c6fc437e628967a450734013fb",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"user_id\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "3608e4f970bef5c9325a85a4a8749d258fd2ac27efbbed719e41efa465cb17d3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "80e6af338f71ec26f4e43e1ec453f5a6c3863999e71edad8dd25d6fd0424cac2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE (\"public\".\"friendships\".\"status\" = CAST($1::text AS \"public\".\"FriendshipStatus\") AND (\"public\".\"friendships\".\"requester_id\" = $2 OR \"public\".\"friendships\".\"addressee_id\" = $3)) OFFSET $4"
+        },
+        {
+          "sha256": "ea153d8508d96b3477d525fa5a3fee11c5123d0cf010a81bdc7f534da39548b3",
+          "calls": 1,
+          "sqlExcerpt": "WITH candidates AS MATERIALIZED ( SELECT r.id, r.name, r.ends_at, r.max_participants, r.seed_id, r.started_at FROM races r JOIN users creator ON creator.id = r.creator_id WHERE r.status = 'active'::\"RaceStatus\" AND r.is_public = TRUE AND creator.is_review_account = FALSE AND NOT EXISTS ( SELECT 1 FROM race_participants mine WHERE mine.race_id = r.id AND mine.user_id = $1 AND mine.status IN ('accepted'::\"RaceParticipantStatus\", 'invited'::\"RaceParticipantStatus\") ) ORDER BY r.started_at ASC LIMIT"
+        },
+        {
+          "sha256": "ec076c26ff8a13b9ab681da96a7aa16259a989a850cec1a0256e1c652a105a19",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"creator_id\" IS NOT NULL AND \"j0\".\"status\" IN (CAST($3::text AS \"public\".\"RaceStatus\"),CAST($4::text AS \"public\".\"RaceStatus\")) AND ("
+        },
+        {
+          "sha256": "47e2451af8d01465cf965d5725a95a63d11161d4d9fe06c7e12b9af252eaa7bd",
+          "calls": 1,
+          "sqlExcerpt": "WITH authoritative_time AS ( SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load ), ranked AS ( SELECT s.user_id AS \"userId\", s.id, s.event_id AS \"eventId\", s.extra_race_steps AS \"extraRaceSteps\", s.race_count AS \"raceCount\", s.settled_at AS \"settledAt\", s.expires_at AS \"expiresAt\", GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (s.expires_at-t.now_at_load))*1000))::int AS \"remainingMsAtLoad\", ROW_NUMBER() OVER ( PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC )::int AS row_number FR"
+        }
+      ]
+    },
+    {
+      "name": "races_post_resolution",
+      "status": 200,
+      "wallMs": 44,
+      "queries": 11,
+      "queryShapes": [
+        {
+          "sha256": "b09d219e1aa6c1e2dba6a243bb1e12040c9c5f35a212b9bfb92be3315387539c",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"economic_realm\", \"public\".\"tournaments\".\"creator_id\", \"public\".\"tournaments\".\"seed_id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"status\"::text, \"public\".\"tournaments\".\"bracket_size\", \"public\".\"tournaments\".\"matchup_duration_days\", \"public\".\"tournaments\".\"buy_in_amount\", \"public\".\"tournaments\".\"pot_coins\", \"public\".\"tournaments\".\"funded_prize\", \"public\".\"tournaments\".\"prize_pool_coins\", \"public\".\"tournaments\".\"prize_coin_un"
+        },
+        {
+          "sha256": "068a67134af1de0372d80a30ccba0cb12c89f49bc3b9156ea56aa78e252ce30b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "1ba9883d0a8f859d5347077875dc20dd954a013b11f7db1e46ed77d36047f00b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_participants\".\"id\", \"public\".\"tournament_participants\".\"user_id\", \"public\".\"tournament_participants\".\"status\"::text, \"public\".\"tournament_participants\".\"seed\", \"public\".\"tournament_participants\".\"eliminated_in_round\", \"public\".\"tournament_participants\".\"joined_at\", \"public\".\"tournament_participants\".\"favorited_at\", \"public\".\"tournament_participants\".\"tournament_id\" FROM \"public\".\"tournament_participants\" WHERE \"public\".\"tournament_participants\".\"tournament_id\" IN (NUL"
+        },
+        {
+          "sha256": "0e5b88a1dc11c376a7bba15b7e61cdd96d5745203de0c2b87f725b382cd52ce5",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_seeds\".\"id\", \"public\".\"tournament_seeds\".\"kind\", \"public\".\"tournament_seeds\".\"champion_prize_coins\" FROM \"public\".\"tournament_seeds\" WHERE \"public\".\"tournament_seeds\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "54724220442605c841ea6cb53850d154bc75535d105a9ae7270065327d8fccf0",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"updated_at\" FROM \"public\".\"races\" WHERE (EXISTS(SELECT \"t0\".\"race_id\" FROM \"public\".\"race_participants\" AS \"t0\" WHERE (\"t0\".\"user_id\" = $1 AND \"t0\".\"status\" <> CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"public\".\"races\".\"id\") = (\"t0\".\"race_id\") AND \"t0\".\"race_id\" IS NOT NULL)) AND \"public\".\"races\".\"id\" IN ($3,$4,$5)) OFFSET $6"
+        },
+        {
+          "sha256": "3d82244c7b4c102d59a25686b05239d0001898696cff16459b3080c71815a0b8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"favorited_at\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_participants\".\"payout_coins\", \"public\".\"race_participants\".\"results_seen_at\", \"public\".\"race_participants\".\"invite_expires_at\", \"public\".\"race_participants\".\"team\"::text, \"public\""
+        },
+        {
+          "sha256": "f1117ee558674842f60e6dc5f07b1f3de09c6faba9aa4a0c0ea8ea3215756c35",
+          "calls": 1,
+          "sqlExcerpt": "WITH accepted AS ( SELECT rp.id, rp.race_id, rp.user_id, rp.finished_at, rp.placement, rp.total_steps, rp.joined_at, rp.team, rp.forfeited_at, rp.payout_coins, rp.totals_updated_at, ROW_NUMBER() OVER ( PARTITION BY rp.race_id ORDER BY CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC, CASE WHEN rp.finished_at IS NOT NULL THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC, CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC, CASE WHEN rp.finished_at IS NULL THEN C"
+        },
+        {
+          "sha256": "23705018b53b2a2c758700c9720b488bcadbf1f126a0248e131baefb08668524",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_powerups\".\"id\", \"public\".\"race_powerups\".\"race_id\", \"public\".\"race_powerups\".\"participant_id\", \"public\".\"race_powerups\".\"user_id\", \"public\".\"race_powerups\".\"type\"::text, \"public\".\"race_powerups\".\"rarity\"::text, \"public\".\"race_powerups\".\"status\"::text, \"public\".\"race_powerups\".\"earned_at_steps\", \"public\".\"race_powerups\".\"redeemed_from_inventory\", \"public\".\"race_powerups\".\"used_at\", \"public\".\"race_powerups\".\"target_user_id\", \"public\".\"race_powerups\".\"upgrade_level\", \"public\"."
+        },
+        {
+          "sha256": "6dbf38d0f85f085c86a26710b07445ff44a6efcb3fa9bd598b591a82a86afa29",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"me"
+        },
+        {
+          "sha256": "ec076c26ff8a13b9ab681da96a7aa16259a989a850cec1a0256e1c652a105a19",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\" FROM \"public\".\"race_participants\" LEFT JOIN \"public\".\"races\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"race_participants\".\"race_id\") WHERE (\"public\".\"race_participants\".\"user_id\" IN ($1) AND \"public\".\"race_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\") AND (\"j0\".\"creator_id\" IS NOT NULL AND \"j0\".\"status\" IN (CAST($3::text AS \"public\".\"RaceStatus\"),CAST($4::text AS \"public\".\"RaceStatus\")) AND ("
+        },
+        {
+          "sha256": "78496144def8a65c00914e28166e2532cebfbaeedc1a8a3a75e73475d5ceb558",
+          "calls": 1,
+          "sqlExcerpt": "SELECT r.id, r.creator_id AS \"creatorId\", r.seed_id AS \"seedId\", r.tournament_id AS \"tournamentId\", r.creation_source AS \"creationSource\", r.start_policy AS \"startPolicy\", r.status::text AS status, r.rematch_root_race_id AS \"rematchRootRaceId\", r.series_id AS \"seriesId\", COALESCE(rs.enabled, false) AS \"seriesEnabled\", EXISTS ( SELECT 1 FROM race_participants rp WHERE rp.race_id = r.id AND rp.user_id = $1 AND rp.status = 'accepted'::\"RaceParticipantStatus\" ) AS \"viewerAccepted\", ( SELECT COUNT(*)"
+        }
+      ]
+    },
+    {
+      "name": "profile_post_resolution",
+      "status": 200,
+      "wallMs": 32,
+      "queries": 1,
+      "queryShapes": [
+        {
+          "sha256": "81700b5e343587ef1a8b1975e0c0447084c9a27f69bc5d3c0da0982978968e8e",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3"
+        }
+      ]
+    },
+    {
+      "name": "race_bootstrap",
+      "status": 200,
+      "wallMs": 83,
+      "queries": 49,
+      "queryShapes": [
+        {
+          "sha256": "f02b26c567a18b1487fbc63da04ab38c8396b4968318a5ba88e50a5385e1f02c",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "0bc2658121f466f78c035f8c7cf84505112f580a4f8b5d117ec98b34686f0b90",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"economic_realm\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coin"
+        },
+        {
+          "sha256": "25a54555f4a6d6fd2898c4f360ceb3e5e30e3d329f5f5421a945d5080457ab4b",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"bracket_size\" FROM \"public\".\"tournaments\" WHERE \"public\".\"tournaments\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "e2fe7a0dc7cd5809cf6253c070a369536def31e70074c2ca58270bfaf4c738e2",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"race_seeds\".\"id\", \"public\".\"race_seeds\".\"kind\" FROM \"public\".\"race_seeds\" WHERE \"public\".\"race_seeds\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "96d49c9ff9b49972f7c77662786fed874cb53916c36207b02c8a9075c415b4e6",
+          "calls": 2,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ SELECT id, target_participant_id AS \"targetParticipantId\", target_user_id AS \"targetUserId\", source_user_id AS \"sourceUserId\", powerup_id AS \"powerupId\", UPPER(type::text) AS type, CASE status WHEN 'active_effect' THEN 'ACTIVE' WHEN 'expired_effect' THEN 'EXPIRED' ELSE UPPER(status::text) END AS status, starts_at AS \"startsAt\", expires_at AS \"expiresAt\", metadata, updated_at AS \"updatedAt\", race_id AS \"raceId\", created_at AS \"createdAt\" FROM race_active_effects WHERE"
+        },
+        {
+          "sha256": "cc25e888545ffe73a50226ef2b649151f7f6ea6b2929bb30db0967ded6786b50",
+          "calls": 2,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH members AS ( SELECT DISTINCT participant.user_id FROM race_participants participant WHERE participant.race_id=$1 AND participant.status='accepted' ) SELECT members.user_id AS \"userId\", version.generation::text AS generation, CASE WHEN version.generation IS NULL THEN EXISTS (SELECT 1 FROM steps source WHERE source.user_id=members.user_id) ELSE false END AS \"hasSteps\", CASE WHEN version.generation IS NULL THEN EXISTS (SELECT 1 FROM step_samples source WHERE source"
+        },
+        {
+          "sha256": "46cebbe151843c5fbba7cc2842c67ad7bb8d99f08b91e4ea143df85455060373",
+          "calls": 2,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH race_window AS ( SELECT started_at FROM races WHERE id=$1 ), schedule AS ( SELECT COALESCE(( SELECT NOT EXISTS ( SELECT 1 FROM ( SELECT source.starts_at AS boundary_at, source.id AS event_id, 'START'::text AS boundary_kind FROM global_step_events source JOIN race_window race ON source.ends_at > race.started_at WHERE source.schedule_mode='LEGACY_GLOBAL' UNION ALL SELECT source.ends_at AS boundary_at, source.id AS event_id, 'END'::text AS boundary_kind FROM global"
+        },
+        {
+          "sha256": "f3f01d5547381aea4bd1d7b8c02ef9294ec66da89617e1d6a0ef609cb0351031",
+          "calls": 2,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ SELECT race.id AS \"r_id\", race.name AS \"r_name\", (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS \"r_scheduledStartAt\", race.team_a_name AS \"r_teamAName\", race.team_b_name AS \"r_teamBName\", UPPER(race.status::text) AS \"r_status\", (EXTRACT(EPOCH FROM race.started_at) * 1000)::float8 AS \"r_startedAt\", (EXTRACT(EPOCH FROM race.ends_at) * 1000)::float8 AS \"r_endsAt\", race.timezone AS \"r_timezone\", race.target_steps AS \"r_targetSteps\", race.time_based AS \"r"
+        },
+        {
+          "sha256": "d136d6f1676a515acde665ce1bc547948e2ae000e533d743414d8f8ecfbd6e06",
+          "calls": 2,
+          "sqlExcerpt": "INSERT INTO \"public\".\"global_step_event_operational_counters\" (\"metric\",\"value\",\"updated_at\") VALUES ($1,$2,$3) ON CONFLICT (\"metric\") DO UPDATE SET \"value\" = (\"public\".\"global_step_event_operational_counters\".\"value\" + $4), \"updated_at\" = $5 WHERE (\"public\".\"global_step_event_operational_counters\".\"metric\" = $6 AND 1=1) RETURNING \"public\".\"global_step_event_operational_counters\".\"metric\", \"public\".\"global_step_event_operational_counters\".\"value\", \"public\".\"global_step_event_operational_counters"
+        },
+        {
+          "sha256": "be6b7131eadd2f4dfdfcf677c9ff372b41db75b1a3c2da5d273c8985a5a4e41d",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_participants\".\"id\", \"public\".\"tournament_participants\".\"user_id\", \"public\".\"tournament_participants\".\"tournament_id\" FROM \"public\".\"tournament_participants\" WHERE ((\"public\".\"tournament_participants\".\"user_id\" = $1 AND \"public\".\"tournament_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\")) AND \"public\".\"tournament_participants\".\"tournament_id\" IN (NULL)) ORDER BY \"public\".\"tournament_participants\".\"id\" ASC OFFSET $3"
+        },
+        {
+          "sha256": "819b567262f8b37b3a7e0e679589f88e2d3db10f53bc67287396f582155e2cc9",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "bbafd470360aa14b6b64015704457c6f4deca6e6ec5f38ca7fd754036852e1c8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_powerup_items\".\"id\", \"public\".\"user_powerup_items\".\"user_id\", \"public\".\"user_powerup_items\".\"powerup_type\"::text, \"public\".\"user_powerup_items\".\"quantity\", \"public\".\"user_powerup_items\".\"created_at\", \"public\".\"user_powerup_items\".\"updated_at\" FROM \"public\".\"user_powerup_items\" WHERE \"public\".\"user_powerup_items\".\"user_id\" = $1 ORDER BY \"public\".\"user_powerup_items\".\"powerup_type\" ASC OFFSET $2"
+        },
+        {
+          "sha256": "55ba151f80ee59f6773d832754bfa3a9a53f760c4c5155ad6df595b9d6e08adf",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "3a902ca11f294f2e34d03217d07ddd746850f78ceeab9a4faa06dd5b6a6d1001",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2) OFFSET $3"
+        },
+        {
+          "sha256": "d1a7ff281bf67d7ea6b7e2851675ab016702761e80767cf6d31702381e2b00b3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1,$2) OFFSET $3"
+        },
+        {
+          "sha256": "46bb36f8400c812936b8796c0358e1b134ff8c9b7c523e9182e82d524a5a2775",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "348133fb96ea62f83c73a23236831b5dfff27b005d066c38c62c489ceca5ceb9",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"started_at\", \"public\".\"races\".\"scheduled_start_at\", \"public\".\"races\".\"ends_at\", \"public\".\"races\".\"timezone\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"time_based\", \"public\".\"races\".\"powerups_enabled\", \"public\".\"races\".\"powerup_step_interval\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\", \"public\".\"races\".\"team_a_name\", \"public\".\"races\".\"team_b_name\" FROM \"public\".\"r"
+        },
+        {
+          "sha256": "e4b5c55e64b831f1fdce01506abf626caa9eac325581a6fa44d7ec831fb92ae8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"public\".\"race_participants\".\"max_bonus_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"powerup_slots\", \"public\".\"race_participants\".\"finished_at\", \"public\".\"race_participants\".\"finish_total_steps\", \"pub"
+        },
+        {
+          "sha256": "3ec42f8582a18f87af486f5d8e2c33e83427c0da01ed5f728e56250a682b0222",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2) OFFSET $3"
+        },
+        {
+          "sha256": "acdebe25e2319111c0fb9505bc67cea2a36ac5b0af443e7adbe149fea9c58ddc",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"me"
+        },
+        {
+          "sha256": "b445e5d537fc2b6681a847d5c91289097a91543eaab71300fd37cc162be8c6e0",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"steps\".\"id\", \"public\".\"steps\".\"user_id\", \"public\".\"steps\".\"date\", \"public\".\"steps\".\"steps\" FROM \"public\".\"steps\" WHERE (\"public\".\"steps\".\"user_id\" IN ($1,$2) AND \"public\".\"steps\".\"date\" >= $3 AND \"public\".\"steps\".\"date\" <= $4) ORDER BY \"public\".\"steps\".\"date\" ASC OFFSET $5"
+        },
+        {
+          "sha256": "b2f16949dec9ca9f8c7b07cf518609f11e23768c78afe0c6d01413501fcf63ac",
+          "calls": 1,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS MATERIALIZED ( SELECT input.user_id, input.range_start, input.range_end, input.ordinal FROM jsonb_to_recordset($1::jsonb) AS input( user_id text, range_start timestamp, range_end timestamp, ordinal integer ) LIMIT 25 ) SELECT requested.ordinal, sample.id, sample.user_id AS \"userId\", sample.period_start AS \"start\", sample.period_end AS \"end\", sample.steps FROM requested JOIN step_samples sample ON sample.user_id = requested.user_id AND sample.period_"
+        },
+        {
+          "sha256": "a5f9d35980ff6380493f83898ab866bf689a87b2e73340bded0de0f06bce9f36",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_event_entitlements\".\"id\", \"public\".\"global_step_event_entitlements\".\"event_id\", \"public\".\"global_step_event_entitlements\".\"user_id\", \"public\".\"global_step_event_entitlements\".\"timezone\", \"public\".\"global_step_event_entitlements\".\"local_date\", \"public\".\"global_step_event_entitlements\".\"starts_at\", \"public\".\"global_step_event_entitlements\".\"ends_at\", \"public\".\"global_step_event_entitlements\".\"start_outcome\", \"public\".\"global_step_event_entitlements\".\"start_processed_at"
+        },
+        {
+          "sha256": "2f9fbdcc8ead8a46e4b801cbb69fd720f7507b60fd7293ea4b9c31806ee31ffb",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"summary_at"
+        },
+        {
+          "sha256": "08dacee07eafa4a0a400ebd9839f547dc2640c65eaadd17e456a91cac38087bc",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"summary_at"
+        },
+        {
+          "sha256": "ed45d074a0dbf93df36fc3dd99fafd43b72b4cd7eb883ed1931c9b859e6b8f27",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"global_event_race_impacts\".\"id\", \"public\".\"global_event_race_impacts\".\"event_id\", \"public\".\"global_event_race_impacts\".\"user_id\", \"public\".\"global_event_race_impacts\".\"status\" FROM \"public\".\"global_event_race_impacts\" WHERE (\"public\".\"global_event_race_impacts\".\"race_id\" = $1 AND \"public\".\"global_event_race_impacts\".\"user_id\" IN ($2,$3) AND \"public\".\"global_event_race_impacts\".\"event_id\" IN ($4)) OFFSET $5"
+        },
+        {
+          "sha256": "1d4e655f711d4be9c5aac2cace2e4b1f0e34cf4a8c96ae5ca750561ca93df576",
+          "calls": 1,
+          "sqlExcerpt": "SELECT dispatched_generation FROM race_effect_deadlines WHERE race_id=$1 AND deadline_at<=(statement_timestamp() AT TIME ZONE 'UTC') ORDER BY dispatched_generation DESC NULLS LAST LIMIT 1"
+        },
+        {
+          "sha256": "0f169ebb7278e7acf13f535cffb255164737ebf39695ae07949b9bcb8aeb7d39",
+          "calls": 1,
+          "sqlExcerpt": "SELECT job.id, job.race_id AS \"raceId\", generation, job.processing_generation AS \"processingGeneration\", job.resolution_time_zone AS \"resolutionTimeZone\", job.processing_time_zone AS \"processingTimeZone\", state, attempts, job.requested_at AS \"requestedAt\", job.started_at AS \"startedAt\", job.completed_at AS \"completedAt\", job.last_completed_at AS \"lastCompletedAt\", job.retry_at AS \"retryAt\", job.not_before_at AS \"notBeforeAt\", job.lease_expires_at AS \"leaseExpiresAt\", job.lease_token AS \"leaseTok"
+        },
+        {
+          "sha256": "5c273a300663472b9af20ffff7b2bf5c160729686e421d8ec133938e8b192df7",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, resolution_time_zone, state, attempts, requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids, dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority, queue_priority, display_artifact_id, display_artifact_digest, display_artifact_schema, created_at, updated_at ) SELECT gen_random_uuid()::text, i.\"raceId\", 1, i.\"resolutionTimeZone\", 'queued', 0, $2::timestamp, i.\"notBeforeAt\", i.\"trigge"
+        },
+        {
+          "sha256": "894d6222f99c955df13cee111de9f64aa33cd4a506891495f4cbd694e168bf6d",
+          "calls": 1,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS request( \"userId\" text, \"at\" timestamptz ) ) SELECT DISTINCT ON (requested.\"userId\") requested.\"userId\", active.event_id AS \"eventId\", active.multiplier, active.ends_at AS \"endsAt\" FROM requested CROSS JOIN LATERAL ( SELECT entitlement.event_id, event.multiplier, entitlement.ends_at, entitlement.starts_at FROM global_step_event_entitlements entitlement JOIN global_step_events event ON event.id=entitle"
+        },
+        {
+          "sha256": "f3fe21874b922031d44c2d3ec3459e5ffab97bd5c9312dc37459a2290051ccd3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"finished_at\", \"public\".\"race_participants\".\"forfeited_at\", \"public\".\"race_participants\".\"buy_in_amount\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_"
+        },
+        {
+          "sha256": "a438345b3944daa2aabde15a62e0a76377e8ab562c8f730eb5b5d217fc1faee2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT users.id, users.display_name AS \"displayName\", users.profile_photo_url AS \"profilePhotoUrl\", users.client_features AS \"clientFeatures\", users.is_review_account AS \"isReviewAccount\", users.hidden_from_leaderboard AS \"hiddenFromLeaderboard\", COALESCE( jsonb_agg( jsonb_build_object( 'shopItem', jsonb_build_object( 'id', item.id, 'sku', item.sku, 'name', item.name, 'slot', item.slot, 'assetKey', item.asset_key, 'renderMetadata', item.render_metadata, 'bobble', item.bobble, 'testOnly', item.te"
+        },
+        {
+          "sha256": "cd49af6e677b2c4d3e714f244e3571b36b200fa666ae0dd1a0f4d072f451da94",
+          "calls": 1,
+          "sqlExcerpt": "SELECT r.id, r.creator_id AS \"creatorId\", r.seed_id AS \"seedId\", r.tournament_id AS \"tournamentId\", r.creation_source AS \"creationSource\", r.start_policy AS \"startPolicy\", r.status::text AS status, r.rematch_root_race_id AS \"rematchRootRaceId\", r.series_id AS \"seriesId\", COALESCE(rs.enabled, false) AS \"seriesEnabled\", EXISTS ( SELECT 1 FROM race_participants rp WHERE rp.race_id = r.id AND rp.user_id = $1 AND rp.status = 'accepted'::\"RaceParticipantStatus\" ) AS \"viewerAccepted\", ( SELECT COUNT(*)"
+        }
+      ]
+    },
+    {
+      "name": "race_bootstrap_warm",
+      "status": 200,
+      "wallMs": 43,
+      "queries": 24,
+      "queryShapes": [
+        {
+          "sha256": "f02b26c567a18b1487fbc63da04ab38c8396b4968318a5ba88e50a5385e1f02c",
+          "calls": 6,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "0bc2658121f466f78c035f8c7cf84505112f580a4f8b5d117ec98b34686f0b90",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"economic_realm\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coin"
+        },
+        {
+          "sha256": "25a54555f4a6d6fd2898c4f360ceb3e5e30e3d329f5f5421a945d5080457ab4b",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"bracket_size\" FROM \"public\".\"tournaments\" WHERE \"public\".\"tournaments\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "e2fe7a0dc7cd5809cf6253c070a369536def31e70074c2ca58270bfaf4c738e2",
+          "calls": 3,
+          "sqlExcerpt": "SELECT \"public\".\"race_seeds\".\"id\", \"public\".\"race_seeds\".\"kind\" FROM \"public\".\"race_seeds\" WHERE \"public\".\"race_seeds\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "be6b7131eadd2f4dfdfcf677c9ff372b41db75b1a3c2da5d273c8985a5a4e41d",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_participants\".\"id\", \"public\".\"tournament_participants\".\"user_id\", \"public\".\"tournament_participants\".\"tournament_id\" FROM \"public\".\"tournament_participants\" WHERE ((\"public\".\"tournament_participants\".\"user_id\" = $1 AND \"public\".\"tournament_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\")) AND \"public\".\"tournament_participants\".\"tournament_id\" IN (NULL)) ORDER BY \"public\".\"tournament_participants\".\"id\" ASC OFFSET $3"
+        },
+        {
+          "sha256": "819b567262f8b37b3a7e0e679589f88e2d3db10f53bc67287396f582155e2cc9",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "55ba151f80ee59f6773d832754bfa3a9a53f760c4c5155ad6df595b9d6e08adf",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "3a902ca11f294f2e34d03217d07ddd746850f78ceeab9a4faa06dd5b6a6d1001",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN ($1,$2) OFFSET $3"
+        },
+        {
+          "sha256": "d1a7ff281bf67d7ea6b7e2851675ab016702761e80767cf6d31702381e2b00b3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1,$2) OFFSET $3"
+        },
+        {
+          "sha256": "46bb36f8400c812936b8796c0358e1b134ff8c9b7c523e9182e82d524a5a2775",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"asset_version\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1"
+        },
+        {
+          "sha256": "894d6222f99c955df13cee111de9f64aa33cd4a506891495f4cbd694e168bf6d",
+          "calls": 1,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS request( \"userId\" text, \"at\" timestamptz ) ) SELECT DISTINCT ON (requested.\"userId\") requested.\"userId\", active.event_id AS \"eventId\", active.multiplier, active.ends_at AS \"endsAt\" FROM requested CROSS JOIN LATERAL ( SELECT entitlement.event_id, event.multiplier, entitlement.ends_at, entitlement.starts_at FROM global_step_event_entitlements entitlement JOIN global_step_events event ON event.id=entitle"
+        },
+        {
+          "sha256": "f3fe21874b922031d44c2d3ec3459e5ffab97bd5c9312dc37459a2290051ccd3",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"team\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"placement\", \"public\".\"race_participants\".\"finished_at\", \"public\".\"race_participants\".\"forfeited_at\", \"public\".\"race_participants\".\"buy_in_amount\", \"public\".\"race_participants\".\"buy_in_status\"::text, \"public\".\"race_"
+        },
+        {
+          "sha256": "cd49af6e677b2c4d3e714f244e3571b36b200fa666ae0dd1a0f4d072f451da94",
+          "calls": 1,
+          "sqlExcerpt": "SELECT r.id, r.creator_id AS \"creatorId\", r.seed_id AS \"seedId\", r.tournament_id AS \"tournamentId\", r.creation_source AS \"creationSource\", r.start_policy AS \"startPolicy\", r.status::text AS status, r.rematch_root_race_id AS \"rematchRootRaceId\", r.series_id AS \"seriesId\", COALESCE(rs.enabled, false) AS \"seriesEnabled\", EXISTS ( SELECT 1 FROM race_participants rp WHERE rp.race_id = r.id AND rp.user_id = $1 AND rp.status = 'accepted'::\"RaceParticipantStatus\" ) AS \"viewerAccepted\", ( SELECT COUNT(*)"
+        }
+      ]
+    },
+    {
+      "name": "resolution_status_poll",
+      "status": 200,
+      "wallMs": 33,
+      "queries": 2,
+      "queryShapes": [
+        {
+          "sha256": "7b94ac89c5b45893a8bc404ea0f1bd5d5b241fd11b50a42686bfb3dfe3da7ade",
+          "calls": 1,
+          "sqlExcerpt": "SELECT id, race_id AS \"raceId\", generation, processing_generation AS \"processingGeneration\", resolution_time_zone AS \"resolutionTimeZone\", processing_time_zone AS \"processingTimeZone\", state, attempts, requested_at AS \"requestedAt\", started_at AS \"startedAt\", completed_at AS \"completedAt\", last_completed_at AS \"lastCompletedAt\", retry_at AS \"retryAt\", not_before_at AS \"notBeforeAt\", lease_expires_at AS \"leaseExpiresAt\", lease_token AS \"leaseToken\", last_error_code AS \"lastErrorCode\", triggered_b"
+        },
+        {
+          "sha256": "e2e51a181b0a50e53f708547ae39bc3fff732d9384a1ae45deac7e01392448c4",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\" FROM \"public\".\"race_participants\" WHERE (\"public\".\"race_participants\".\"race_id\" = $1 AND \"public\".\"race_participants\".\"user_id\" = $2 AND \"public\".\"race_participants\".\"status\" = CAST($3::text AS \"public\".\"RaceParticipantStatus\")) LIMIT $4 OFFSET $5"
+        }
+      ]
+    },
+    {
+      "name": "current_bootstrap_cold",
+      "status": 200,
+      "contract": "race-bootstrap-compact-v1",
+      "queries": 18,
+      "queryShapes": [
+        {
+          "sha256": "f02b26c567a18b1487fbc63da04ab38c8396b4968318a5ba88e50a5385e1f02c",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "9ecf6e0099f1485fd775ec8e7ce2026c5c92400fff6cde051ec2ca9878eb8aa2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"billing_realm\", \"public\".\"users\".\"apple_id\", \"public\".\"users\".\"google_sub\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"discoverable_name_search\", \"public\".\"users\".\"name_setup_onboarding_required\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"profile_photo_key\", \"public\".\"users"
+        },
+        {
+          "sha256": "215c21db2d06081a21a1fe8caf3521b673444eba40ac03fd37f637b297fc5dc5",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\" FROM \"public\".\"races\" WHERE (\"public\".\"races\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3"
+        },
+        {
+          "sha256": "0bc2658121f466f78c035f8c7cf84505112f580a4f8b5d117ec98b34686f0b90",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"economic_realm\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coin"
+        },
+        {
+          "sha256": "e2fe7a0dc7cd5809cf6253c070a369536def31e70074c2ca58270bfaf4c738e2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_seeds\".\"id\", \"public\".\"race_seeds\".\"kind\" FROM \"public\".\"race_seeds\" WHERE \"public\".\"race_seeds\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "25a54555f4a6d6fd2898c4f360ceb3e5e30e3d329f5f5421a945d5080457ab4b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"bracket_size\" FROM \"public\".\"tournaments\" WHERE \"public\".\"tournaments\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "819b567262f8b37b3a7e0e679589f88e2d3db10f53bc67287396f582155e2cc9",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "be6b7131eadd2f4dfdfcf677c9ff372b41db75b1a3c2da5d273c8985a5a4e41d",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_participants\".\"id\", \"public\".\"tournament_participants\".\"user_id\", \"public\".\"tournament_participants\".\"tournament_id\" FROM \"public\".\"tournament_participants\" WHERE ((\"public\".\"tournament_participants\".\"user_id\" = $1 AND \"public\".\"tournament_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\")) AND \"public\".\"tournament_participants\".\"tournament_id\" IN (NULL)) ORDER BY \"public\".\"tournament_participants\".\"id\" ASC OFFSET $3"
+        },
+        {
+          "sha256": "bbafd470360aa14b6b64015704457c6f4deca6e6ec5f38ca7fd754036852e1c8",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"user_powerup_items\".\"id\", \"public\".\"user_powerup_items\".\"user_id\", \"public\".\"user_powerup_items\".\"powerup_type\"::text, \"public\".\"user_powerup_items\".\"quantity\", \"public\".\"user_powerup_items\".\"created_at\", \"public\".\"user_powerup_items\".\"updated_at\" FROM \"public\".\"user_powerup_items\" WHERE \"public\".\"user_powerup_items\".\"user_id\" = $1 ORDER BY \"public\".\"user_powerup_items\".\"powerup_type\" ASC OFFSET $2"
+        },
+        {
+          "sha256": "00e5d03d0ed6fbc042a235afd86ff25d1087c6f4811ba46cbbcfb69a316c06e2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"me"
+        },
+        {
+          "sha256": "1d4e655f711d4be9c5aac2cace2e4b1f0e34cf4a8c96ae5ca750561ca93df576",
+          "calls": 1,
+          "sqlExcerpt": "SELECT dispatched_generation FROM race_effect_deadlines WHERE race_id=$1 AND deadline_at<=(statement_timestamp() AT TIME ZONE 'UTC') ORDER BY dispatched_generation DESC NULLS LAST LIMIT 1"
+        },
+        {
+          "sha256": "0f169ebb7278e7acf13f535cffb255164737ebf39695ae07949b9bcb8aeb7d39",
+          "calls": 1,
+          "sqlExcerpt": "SELECT job.id, job.race_id AS \"raceId\", generation, job.processing_generation AS \"processingGeneration\", job.resolution_time_zone AS \"resolutionTimeZone\", job.processing_time_zone AS \"processingTimeZone\", state, attempts, job.requested_at AS \"requestedAt\", job.started_at AS \"startedAt\", job.completed_at AS \"completedAt\", job.last_completed_at AS \"lastCompletedAt\", job.retry_at AS \"retryAt\", job.not_before_at AS \"notBeforeAt\", job.lease_expires_at AS \"leaseExpiresAt\", job.lease_token AS \"leaseTok"
+        },
+        {
+          "sha256": "5c273a300663472b9af20ffff7b2bf5c160729686e421d8ec133938e8b192df7",
+          "calls": 1,
+          "sqlExcerpt": "INSERT INTO race_resolution_jobs_v2 ( id, race_id, generation, resolution_time_zone, state, attempts, requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids, dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority, queue_priority, display_artifact_id, display_artifact_digest, display_artifact_schema, created_at, updated_at ) SELECT gen_random_uuid()::text, i.\"raceId\", 1, i.\"resolutionTimeZone\", 'queued', 0, $2::timestamp, i.\"notBeforeAt\", i.\"trigge"
+        },
+        {
+          "sha256": "87cbb2b1f21187a139857eb9b2d09d8d0a7db22dd3ca653b603de7bd6858b121",
+          "calls": 1,
+          "sqlExcerpt": "SELECT count(*)::int AS \"totalCount\", count(*) FILTER (WHERE status='accepted')::int AS \"acceptedCount\", count(*) FILTER (WHERE status='accepted' AND team='team_a')::int AS \"teamACount\", count(*) FILTER (WHERE status='accepted' AND team='team_b')::int AS \"teamBCount\", count(*) FILTER (WHERE status='accepted' AND team='team_a' AND forfeited_at IS NULL)::int AS \"teamARecipients\", count(*) FILTER (WHERE status='accepted' AND team='team_b' AND forfeited_at IS NULL)::int AS \"teamBRecipients\", COALESC"
+        },
+        {
+          "sha256": "894d6222f99c955df13cee111de9f64aa33cd4a506891495f4cbd694e168bf6d",
+          "calls": 1,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS request( \"userId\" text, \"at\" timestamptz ) ) SELECT DISTINCT ON (requested.\"userId\") requested.\"userId\", active.event_id AS \"eventId\", active.multiplier, active.ends_at AS \"endsAt\" FROM requested CROSS JOIN LATERAL ( SELECT entitlement.event_id, event.multiplier, entitlement.ends_at, entitlement.starts_at FROM global_step_event_entitlements entitlement JOIN global_step_events event ON event.id=entitle"
+        },
+        {
+          "sha256": "a438345b3944daa2aabde15a62e0a76377e8ab562c8f730eb5b5d217fc1faee2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT users.id, users.display_name AS \"displayName\", users.profile_photo_url AS \"profilePhotoUrl\", users.client_features AS \"clientFeatures\", users.is_review_account AS \"isReviewAccount\", users.hidden_from_leaderboard AS \"hiddenFromLeaderboard\", COALESCE( jsonb_agg( jsonb_build_object( 'shopItem', jsonb_build_object( 'id', item.id, 'sku', item.sku, 'name', item.name, 'slot', item.slot, 'assetKey', item.asset_key, 'renderMetadata', item.render_metadata, 'bobble', item.bobble, 'testOnly', item.te"
+        },
+        {
+          "sha256": "cd49af6e677b2c4d3e714f244e3571b36b200fa666ae0dd1a0f4d072f451da94",
+          "calls": 1,
+          "sqlExcerpt": "SELECT r.id, r.creator_id AS \"creatorId\", r.seed_id AS \"seedId\", r.tournament_id AS \"tournamentId\", r.creation_source AS \"creationSource\", r.start_policy AS \"startPolicy\", r.status::text AS status, r.rematch_root_race_id AS \"rematchRootRaceId\", r.series_id AS \"seriesId\", COALESCE(rs.enabled, false) AS \"seriesEnabled\", EXISTS ( SELECT 1 FROM race_participants rp WHERE rp.race_id = r.id AND rp.user_id = $1 AND rp.status = 'accepted'::\"RaceParticipantStatus\" ) AS \"viewerAccepted\", ( SELECT COUNT(*)"
+        }
+      ]
+    },
+    {
+      "name": "current_bootstrap_warm",
+      "status": 200,
+      "contract": "race-bootstrap-compact-v1",
+      "queries": 14,
+      "queryShapes": [
+        {
+          "sha256": "f02b26c567a18b1487fbc63da04ab38c8396b4968318a5ba88e50a5385e1f02c",
+          "calls": 2,
+          "sqlExcerpt": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "215c21db2d06081a21a1fe8caf3521b673444eba40ac03fd37f637b297fc5dc5",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"is_team_race\", \"public\".\"races\".\"team_size\" FROM \"public\".\"races\" WHERE (\"public\".\"races\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3"
+        },
+        {
+          "sha256": "0bc2658121f466f78c035f8c7cf84505112f580a4f8b5d117ec98b34686f0b90",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"races\".\"id\", \"public\".\"races\".\"economic_realm\", \"public\".\"races\".\"creator_id\", \"public\".\"races\".\"seed_id\", \"public\".\"races\".\"name\", \"public\".\"races\".\"target_steps\", \"public\".\"races\".\"status\"::text, \"public\".\"races\".\"max_duration_days\", \"public\".\"races\".\"buy_in_amount\", \"public\".\"races\".\"payout_preset\"::text, \"public\".\"races\".\"pot_coins\", \"public\".\"races\".\"funded_prize\", \"public\".\"races\".\"prize_pool_coins\", \"public\".\"races\".\"prize_coin_unit\", \"public\".\"races\".\"prize_pool_max_coin"
+        },
+        {
+          "sha256": "e2fe7a0dc7cd5809cf6253c070a369536def31e70074c2ca58270bfaf4c738e2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_seeds\".\"id\", \"public\".\"race_seeds\".\"kind\" FROM \"public\".\"race_seeds\" WHERE \"public\".\"race_seeds\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "25a54555f4a6d6fd2898c4f360ceb3e5e30e3d329f5f5421a945d5080457ab4b",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournaments\".\"id\", \"public\".\"tournaments\".\"name\", \"public\".\"tournaments\".\"bracket_size\" FROM \"public\".\"tournaments\" WHERE \"public\".\"tournaments\".\"id\" = $1 OFFSET $2"
+        },
+        {
+          "sha256": "819b567262f8b37b3a7e0e679589f88e2d3db10f53bc67287396f582155e2cc9",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_participants\".\"id\", \"public\".\"race_participants\".\"race_id\", \"public\".\"race_participants\".\"user_id\", \"public\".\"race_participants\".\"status\"::text, \"public\".\"race_participants\".\"total_steps\", \"public\".\"race_participants\".\"totals_updated_at\", \"public\".\"race_participants\".\"raw_steps\", \"public\".\"race_participants\".\"baseline_steps\", \"public\".\"race_participants\".\"box_progress_steps\", \"public\".\"race_participants\".\"next_box_at_steps\", \"public\".\"race_participants\".\"bonus_steps\", \"publ"
+        },
+        {
+          "sha256": "be6b7131eadd2f4dfdfcf677c9ff372b41db75b1a3c2da5d273c8985a5a4e41d",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"tournament_participants\".\"id\", \"public\".\"tournament_participants\".\"user_id\", \"public\".\"tournament_participants\".\"tournament_id\" FROM \"public\".\"tournament_participants\" WHERE ((\"public\".\"tournament_participants\".\"user_id\" = $1 AND \"public\".\"tournament_participants\".\"status\" = CAST($2::text AS \"public\".\"RaceParticipantStatus\")) AND \"public\".\"tournament_participants\".\"tournament_id\" IN (NULL)) ORDER BY \"public\".\"tournament_participants\".\"id\" ASC OFFSET $3"
+        },
+        {
+          "sha256": "00e5d03d0ed6fbc042a235afd86ff25d1087c6f4811ba46cbbcfb69a316c06e2",
+          "calls": 1,
+          "sqlExcerpt": "SELECT \"public\".\"race_active_effects\".\"id\", \"public\".\"race_active_effects\".\"race_id\", \"public\".\"race_active_effects\".\"target_participant_id\", \"public\".\"race_active_effects\".\"target_user_id\", \"public\".\"race_active_effects\".\"source_user_id\", \"public\".\"race_active_effects\".\"powerup_id\", \"public\".\"race_active_effects\".\"type\"::text, \"public\".\"race_active_effects\".\"status\"::text, \"public\".\"race_active_effects\".\"starts_at\", \"public\".\"race_active_effects\".\"expires_at\", \"public\".\"race_active_effects\".\"me"
+        },
+        {
+          "sha256": "1d4e655f711d4be9c5aac2cace2e4b1f0e34cf4a8c96ae5ca750561ca93df576",
+          "calls": 1,
+          "sqlExcerpt": "SELECT dispatched_generation FROM race_effect_deadlines WHERE race_id=$1 AND deadline_at<=(statement_timestamp() AT TIME ZONE 'UTC') ORDER BY dispatched_generation DESC NULLS LAST LIMIT 1"
+        },
+        {
+          "sha256": "0f169ebb7278e7acf13f535cffb255164737ebf39695ae07949b9bcb8aeb7d39",
+          "calls": 1,
+          "sqlExcerpt": "SELECT job.id, job.race_id AS \"raceId\", generation, job.processing_generation AS \"processingGeneration\", job.resolution_time_zone AS \"resolutionTimeZone\", job.processing_time_zone AS \"processingTimeZone\", state, attempts, job.requested_at AS \"requestedAt\", job.started_at AS \"startedAt\", job.completed_at AS \"completedAt\", job.last_completed_at AS \"lastCompletedAt\", job.retry_at AS \"retryAt\", job.not_before_at AS \"notBeforeAt\", job.lease_expires_at AS \"leaseExpiresAt\", job.lease_token AS \"leaseTok"
+        },
+        {
+          "sha256": "87cbb2b1f21187a139857eb9b2d09d8d0a7db22dd3ca653b603de7bd6858b121",
+          "calls": 1,
+          "sqlExcerpt": "SELECT count(*)::int AS \"totalCount\", count(*) FILTER (WHERE status='accepted')::int AS \"acceptedCount\", count(*) FILTER (WHERE status='accepted' AND team='team_a')::int AS \"teamACount\", count(*) FILTER (WHERE status='accepted' AND team='team_b')::int AS \"teamBCount\", count(*) FILTER (WHERE status='accepted' AND team='team_a' AND forfeited_at IS NULL)::int AS \"teamARecipients\", count(*) FILTER (WHERE status='accepted' AND team='team_b' AND forfeited_at IS NULL)::int AS \"teamBRecipients\", COALESC"
+        },
+        {
+          "sha256": "894d6222f99c955df13cee111de9f64aa33cd4a506891495f4cbd694e168bf6d",
+          "calls": 1,
+          "sqlExcerpt": "/* steps:prepared-read:v1 */ WITH requested AS ( SELECT * FROM jsonb_to_recordset($1::jsonb) AS request( \"userId\" text, \"at\" timestamptz ) ) SELECT DISTINCT ON (requested.\"userId\") requested.\"userId\", active.event_id AS \"eventId\", active.multiplier, active.ends_at AS \"endsAt\" FROM requested CROSS JOIN LATERAL ( SELECT entitlement.event_id, event.multiplier, entitlement.ends_at, entitlement.starts_at FROM global_step_event_entitlements entitlement JOIN global_step_events event ON event.id=entitle"
+        },
+        {
+          "sha256": "cd49af6e677b2c4d3e714f244e3571b36b200fa666ae0dd1a0f4d072f451da94",
+          "calls": 1,
+          "sqlExcerpt": "SELECT r.id, r.creator_id AS \"creatorId\", r.seed_id AS \"seedId\", r.tournament_id AS \"tournamentId\", r.creation_source AS \"creationSource\", r.start_policy AS \"startPolicy\", r.status::text AS status, r.rematch_root_race_id AS \"rematchRootRaceId\", r.series_id AS \"seriesId\", COALESCE(rs.enabled, false) AS \"seriesEnabled\", EXISTS ( SELECT 1 FROM race_participants rp WHERE rp.race_id = r.id AND rp.user_id = $1 AND rp.status = 'accepted'::\"RaceParticipantStatus\" ) AS \"viewerAccepted\", ( SELECT COUNT(*)"
+        }
+      ]
+    }
+  ],
+  "productionMemberships": {
+    "observedAt": "2026-09-09T19:25:32Z",
+    "activeRaces": 155,
+    "activeRacesMissingTimezone": 0,
+    "usersByUnfinishedActiveMembershipCount": {
+      "1": 51,
+      "2": 528,
+      "3": 254,
+      "4": 63,
+      "5+": 50
+    }
+  }
+}

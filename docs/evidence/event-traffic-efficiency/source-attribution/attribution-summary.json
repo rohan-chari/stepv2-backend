@@ -1,0 +1,519 @@
+{
+  "purpose": "Supplementary causal investigation; original36-run diagnostic remains failed and unchanged.",
+  "runs": [
+    {
+      "file": "baseline-same-5-r1.json",
+      "label": "baseline",
+      "revision": "2f021c2698f41071e526308127ddaf2b6050c35e",
+      "sqlEvents": 1828,
+      "httpSql": 913,
+      "workerSql": 915,
+      "requestP95Ms": 41,
+      "requestP99Ms": 46,
+      "visibleP95Ms": 9878,
+      "progressMeanMs": 16.033333333333335,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {},
+      "fenceAcquireMaxMs": 0.768917,
+      "transactionMaxMs": 23.301416,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "baseline-same-5-r2.json",
+      "label": "baseline",
+      "revision": "2f021c2698f41071e526308127ddaf2b6050c35e",
+      "sqlEvents": 1831,
+      "httpSql": 915,
+      "workerSql": 916,
+      "requestP95Ms": 47,
+      "requestP99Ms": 57,
+      "visibleP95Ms": 9871,
+      "progressMeanMs": 14.133333333333333,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {},
+      "fenceAcquireMaxMs": 1.637833,
+      "transactionMaxMs": 32.23025,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "baseline-same-5-r3.json",
+      "label": "baseline",
+      "revision": "2f021c2698f41071e526308127ddaf2b6050c35e",
+      "sqlEvents": 1851,
+      "httpSql": 916,
+      "workerSql": 935,
+      "requestP95Ms": 42,
+      "requestP99Ms": 48,
+      "visibleP95Ms": 9860,
+      "progressMeanMs": 14.566666666666666,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {
+        "fence_mismatch": 1
+      },
+      "fenceAcquireMaxMs": 1.083375,
+      "transactionMaxMs": 25.554875,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "candidate-same-5-r1.json",
+      "label": "candidate",
+      "revision": "f264099c77e9938489c6ccfa47ad6726231c0676",
+      "sqlEvents": 1833,
+      "httpSql": 884,
+      "workerSql": 949,
+      "requestP95Ms": 33,
+      "requestP99Ms": 54,
+      "visibleP95Ms": 9873,
+      "progressMeanMs": 17.833333333333332,
+      "sampleSelects": 56,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 1,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {
+        "fence_mismatch": 1
+      },
+      "fenceAcquireMaxMs": 1.194708,
+      "transactionMaxMs": 27.64475,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "candidate-same-5-r2.json",
+      "label": "candidate",
+      "revision": "f264099c77e9938489c6ccfa47ad6726231c0676",
+      "sqlEvents": 1802,
+      "httpSql": 890,
+      "workerSql": 912,
+      "requestP95Ms": 37,
+      "requestP99Ms": 58,
+      "visibleP95Ms": 9876,
+      "progressMeanMs": 15.7,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {},
+      "fenceAcquireMaxMs": 1.469875,
+      "transactionMaxMs": 29.158666,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "candidate-same-5-r3.json",
+      "label": "candidate",
+      "revision": "f264099c77e9938489c6ccfa47ad6726231c0676",
+      "sqlEvents": 1828,
+      "httpSql": 891,
+      "workerSql": 937,
+      "requestP95Ms": 40,
+      "requestP99Ms": 49,
+      "visibleP95Ms": 9895,
+      "progressMeanMs": 18.533333333333335,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {
+        "fence_mismatch": 1
+      },
+      "fenceAcquireMaxMs": 1.165541,
+      "transactionMaxMs": 23.194708,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "without-sharing-same-5-r1.json",
+      "label": "without-sharing",
+      "revision": "15b1341e6ac250fd812c174d97b5f445eee47279",
+      "sqlEvents": 1818,
+      "httpSql": 894,
+      "workerSql": 924,
+      "requestP95Ms": 38,
+      "requestP99Ms": 59,
+      "visibleP95Ms": 9863,
+      "progressMeanMs": 14.366666666666667,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {},
+      "fenceAcquireMaxMs": 2.054667,
+      "transactionMaxMs": 30.207084,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "without-sharing-same-5-r2.json",
+      "label": "without-sharing",
+      "revision": "15b1341e6ac250fd812c174d97b5f445eee47279",
+      "sqlEvents": 1792,
+      "httpSql": 889,
+      "workerSql": 903,
+      "requestP95Ms": 33,
+      "requestP99Ms": 60,
+      "visibleP95Ms": 9880,
+      "progressMeanMs": 16.7,
+      "sampleSelects": 52,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {
+        "input_or_config_mismatch": 2
+      },
+      "fenceAcquireMaxMs": 1.846791,
+      "transactionMaxMs": 24.47675,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    },
+    {
+      "file": "without-sharing-same-5-r3.json",
+      "label": "without-sharing",
+      "revision": "15b1341e6ac250fd812c174d97b5f445eee47279",
+      "sqlEvents": 1845,
+      "httpSql": 890,
+      "workerSql": 955,
+      "requestP95Ms": 50,
+      "requestP99Ms": 67,
+      "visibleP95Ms": 9886,
+      "progressMeanMs": 18.566666666666666,
+      "sampleSelects": 54,
+      "outcomes": {
+        "commit": 10
+      },
+      "closureFenceRejections": 0,
+      "sourceInputFenceRejections": 0,
+      "artifactFallbacks": {
+        "fence_mismatch": 2
+      },
+      "fenceAcquireMaxMs": 1.4155,
+      "transactionMaxMs": 20.292041,
+      "success": true,
+      "acceptedUploads": 12,
+      "errors": 0,
+      "allVisibleCorrect": true
+    }
+  ],
+  "groups": {
+    "baseline": {
+      "sqlEvents": {
+        "runs": [
+          1828,
+          1831,
+          1851
+        ],
+        "mean": 1836.6666666666667
+      },
+      "httpSql": {
+        "runs": [
+          913,
+          915,
+          916
+        ],
+        "mean": 914.6666666666666
+      },
+      "workerSql": {
+        "runs": [
+          915,
+          916,
+          935
+        ],
+        "mean": 922
+      },
+      "requestP95Ms": {
+        "runs": [
+          41,
+          47,
+          42
+        ],
+        "mean": 43.333333333333336
+      },
+      "requestP99Ms": {
+        "runs": [
+          46,
+          57,
+          48
+        ],
+        "mean": 50.333333333333336
+      },
+      "visibleP95Ms": {
+        "runs": [
+          9878,
+          9871,
+          9860
+        ],
+        "mean": 9869.666666666666
+      },
+      "progressMeanMs": {
+        "runs": [
+          16.033333333333335,
+          14.133333333333333,
+          14.566666666666666
+        ],
+        "mean": 14.911111111111111
+      },
+      "closureFenceRejections": {
+        "runs": [
+          0,
+          0,
+          0
+        ],
+        "mean": 0
+      },
+      "sourceInputFenceRejections": {
+        "runs": [
+          0,
+          0,
+          0
+        ],
+        "mean": 0
+      },
+      "fenceAcquireMaxMs": {
+        "runs": [
+          0.768917,
+          1.637833,
+          1.083375
+        ],
+        "mean": 1.163375
+      },
+      "transactionMaxMs": {
+        "runs": [
+          23.301416,
+          32.23025,
+          25.554875
+        ],
+        "mean": 27.028847
+      }
+    },
+    "candidate": {
+      "sqlEvents": {
+        "runs": [
+          1833,
+          1802,
+          1828
+        ],
+        "mean": 1821
+      },
+      "httpSql": {
+        "runs": [
+          884,
+          890,
+          891
+        ],
+        "mean": 888.3333333333334
+      },
+      "workerSql": {
+        "runs": [
+          949,
+          912,
+          937
+        ],
+        "mean": 932.6666666666666
+      },
+      "requestP95Ms": {
+        "runs": [
+          33,
+          37,
+          40
+        ],
+        "mean": 36.666666666666664
+      },
+      "requestP99Ms": {
+        "runs": [
+          54,
+          58,
+          49
+        ],
+        "mean": 53.666666666666664
+      },
+      "visibleP95Ms": {
+        "runs": [
+          9873,
+          9876,
+          9895
+        ],
+        "mean": 9881.333333333334
+      },
+      "progressMeanMs": {
+        "runs": [
+          17.833333333333332,
+          15.7,
+          18.533333333333335
+        ],
+        "mean": 17.355555555555554
+      },
+      "closureFenceRejections": {
+        "runs": [
+          1,
+          0,
+          0
+        ],
+        "mean": 0.3333333333333333
+      },
+      "sourceInputFenceRejections": {
+        "runs": [
+          0,
+          0,
+          0
+        ],
+        "mean": 0
+      },
+      "fenceAcquireMaxMs": {
+        "runs": [
+          1.194708,
+          1.469875,
+          1.165541
+        ],
+        "mean": 1.276708
+      },
+      "transactionMaxMs": {
+        "runs": [
+          27.64475,
+          29.158666,
+          23.194708
+        ],
+        "mean": 26.666041333333332
+      }
+    },
+    "without-sharing": {
+      "sqlEvents": {
+        "runs": [
+          1818,
+          1792,
+          1845
+        ],
+        "mean": 1818.3333333333333
+      },
+      "httpSql": {
+        "runs": [
+          894,
+          889,
+          890
+        ],
+        "mean": 891
+      },
+      "workerSql": {
+        "runs": [
+          924,
+          903,
+          955
+        ],
+        "mean": 927.3333333333334
+      },
+      "requestP95Ms": {
+        "runs": [
+          38,
+          33,
+          50
+        ],
+        "mean": 40.333333333333336
+      },
+      "requestP99Ms": {
+        "runs": [
+          59,
+          60,
+          67
+        ],
+        "mean": 62
+      },
+      "visibleP95Ms": {
+        "runs": [
+          9863,
+          9880,
+          9886
+        ],
+        "mean": 9876.333333333334
+      },
+      "progressMeanMs": {
+        "runs": [
+          14.366666666666667,
+          16.7,
+          18.566666666666666
+        ],
+        "mean": 16.544444444444444
+      },
+      "closureFenceRejections": {
+        "runs": [
+          0,
+          0,
+          0
+        ],
+        "mean": 0
+      },
+      "sourceInputFenceRejections": {
+        "runs": [
+          0,
+          0,
+          0
+        ],
+        "mean": 0
+      },
+      "fenceAcquireMaxMs": {
+        "runs": [
+          2.054667,
+          1.846791,
+          1.4155
+        ],
+        "mean": 1.7723193333333334
+      },
+      "transactionMaxMs": {
+        "runs": [
+          30.207084,
+          24.47675,
+          20.292041
+        ],
+        "mean": 24.991958333333333
+      }
+    }
+  },
+  "limitations": [
+    "Only three repetitions per variant; cannot prove absence of all performance regressions.",
+    "Worker outcomes attributed using measured SQL timestamp window with10ms allowance for final log emission.",
+    "This diagnostic does not alter original acceptance thresholds or discard failures."
+  ],
+  "allNineOutcomesIdentical": true,
+  "all54SessionsReceiptsAnd270MembershipsVerified": true
+}

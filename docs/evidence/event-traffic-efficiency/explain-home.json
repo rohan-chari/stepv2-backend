@@ -1,0 +1,263 @@
+{
+  "queryLevelOnly": true,
+  "eliminatedFullShellQueries": [
+    {
+      "query": "SELECT \"public\".\"user_equipped_accessories\".\"id\", \"public\".\"user_equipped_accessories\".\"user_id\", \"public\".\"user_equipped_accessories\".\"slot\"::text, \"public\".\"user_equipped_accessories\".\"shop_item_id\", \"public\".\"user_equipped_accessories\".\"updated_at\" FROM \"public\".\"user_equipped_accessories\" WHERE \"public\".\"user_equipped_accessories\".\"user_id\" IN ($1) OFFSET $2",
+      "parameters": [
+        "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+        "0"
+      ],
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Seq Scan",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Relation Name": "user_equipped_accessories",
+            "Alias": "user_equipped_accessories",
+            "Startup Cost": 0,
+            "Total Cost": 0.01,
+            "Plan Rows": 1,
+            "Plan Width": 136,
+            "Actual Startup Time": 0.005,
+            "Actual Total Time": 0.005,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            "Filter": "(user_id = '24cce60e-7fc9-4642-a1a3-8104c7b19b50'::text)",
+            "Rows Removed by Filter": 0,
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning": {
+            "Shared Hit Blocks": 116,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning Time": 0.83,
+          "Triggers": [],
+          "Execution Time": 0.056
+        }
+      ]
+    },
+    {
+      "query": "SELECT \"public\".\"friendships\".\"id\", \"public\".\"friendships\".\"status\"::text, \"public\".\"friendships\".\"requester_id\", \"public\".\"friendships\".\"addressee_id\" FROM \"public\".\"friendships\" WHERE ((\"public\".\"friendships\".\"requester_id\" IN ($1) AND \"public\".\"friendships\".\"status\" IN (CAST($2::text AS \"public\".\"FriendshipStatus\"),CAST($3::text AS \"public\".\"FriendshipStatus\"))) OR (\"public\".\"friendships\".\"addressee_id\" IN ($4) AND \"public\".\"friendships\".\"status\" IN (CAST($5::text AS \"public\".\"FriendshipStatus\"),CAST($6::text AS \"public\".\"FriendshipStatus\")))) OFFSET $7",
+      "parameters": [
+        "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+        "ACCEPTED",
+        "PENDING",
+        "24cce60e-7fc9-4642-a1a3-8104c7b19b50",
+        "ACCEPTED",
+        "PENDING",
+        "0"
+      ],
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Seq Scan",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Relation Name": "friendships",
+            "Alias": "friendships",
+            "Startup Cost": 0,
+            "Total Cost": 2.38,
+            "Plan Rows": 1,
+            "Plan Width": 143,
+            "Actual Startup Time": 0.017,
+            "Actual Total Time": 0.018,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            "Filter": "(((requester_id = '24cce60e-7fc9-4642-a1a3-8104c7b19b50'::text) OR (addressee_id = '24cce60e-7fc9-4642-a1a3-8104c7b19b50'::text)) AND (status = ANY (ARRAY[('ACCEPTED'::cstring)::\"FriendshipStatus\", ('PENDING'::cstring)::\"FriendshipStatus\"])))",
+            "Rows Removed by Filter": 0,
+            "Shared Hit Blocks": 1,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning": {
+            "Shared Hit Blocks": 139,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning Time": 1.09,
+          "Triggers": [],
+          "Execution Time": 0.037
+        }
+      ]
+    },
+    {
+      "query": "SELECT \"public\".\"shop_items\".\"id\", \"public\".\"shop_items\".\"sku\", \"public\".\"shop_items\".\"name\", \"public\".\"shop_items\".\"description\", \"public\".\"shop_items\".\"slot\"::text, \"public\".\"shop_items\".\"price_coins\", \"public\".\"shop_items\".\"asset_key\", \"public\".\"shop_items\".\"render_metadata\", \"public\".\"shop_items\".\"compatibility\", \"public\".\"shop_items\".\"active\", \"public\".\"shop_items\".\"test_only\", \"public\".\"shop_items\".\"earn_only\", \"public\".\"shop_items\".\"bobble\", \"public\".\"shop_items\".\"sort_order\", \"public\".\"shop_items\".\"asset_version\", \"public\".\"shop_items\".\"remote_only\", \"public\".\"shop_items\".\"created_at\" FROM \"public\".\"shop_items\" WHERE \"public\".\"shop_items\".\"id\" IN (NULL) OFFSET $1",
+      "parameters": [
+        "0"
+      ],
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Result",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0,
+            "Total Cost": 0,
+            "Plan Rows": 0,
+            "Plan Width": 250,
+            "Actual Startup Time": 0.001,
+            "Actual Total Time": 0.002,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            "One-Time Filter": "false",
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning": {
+            "Shared Hit Blocks": 109,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning Time": 0.606,
+          "Triggers": [],
+          "Execution Time": 0.013
+        }
+      ]
+    },
+    {
+      "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+      "parameters": [
+        "0"
+      ],
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Result",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0,
+            "Total Cost": 0,
+            "Plan Rows": 0,
+            "Plan Width": 0,
+            "Actual Startup Time": 0.001,
+            "Actual Total Time": 0.001,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            "One-Time Filter": "false",
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning": {
+            "Shared Hit Blocks": 159,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning Time": 0.538,
+          "Triggers": [],
+          "Execution Time": 0.005
+        }
+      ]
+    },
+    {
+      "query": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"display_name\", \"public\".\"users\".\"profile_photo_url\", \"public\".\"users\".\"first_name\", \"public\".\"users\".\"last_name\", \"public\".\"users\".\"name_setup_completed_at\", \"public\".\"users\".\"client_features\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"id\" IN (NULL) OFFSET $1",
+      "parameters": [
+        "0"
+      ],
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Result",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0,
+            "Total Cost": 0,
+            "Plan Rows": 0,
+            "Plan Width": 0,
+            "Actual Startup Time": 0,
+            "Actual Total Time": 0,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            "One-Time Filter": "false",
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning": {
+            "Shared Hit Blocks": 0,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning Time": 0.024,
+          "Triggers": [],
+          "Execution Time": 0.003
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6779 @@
+{
+  "complete": true,
+  "passed": false,
+  "traces": [
+    {
+      "topology": "same",
+      "memberships": 1,
+      "baselineRuns": 3,
+      "candidateRuns": 3,
+      "checks": {
+        "sameTrace": true,
+        "allSuccessful": true,
+        "visibleTotals": true,
+        "exercisedNarrowHome": true,
+        "identicalOutcomes": true,
+        "elapsedMs": true,
+        "sessionP95Ms": true,
+        "sessionP99Ms": true,
+        "requestP95Ms": true,
+        "requestP99Ms": false,
+        "lowerMeanSessionSql": true
+      },
+      "baseline": {
+        "sqlEvents": {
+          "runs": [
+            866,
+            866,
+            866
+          ],
+          "mean": 866,
+          "min": 866,
+          "max": 866
+        },
+        "elapsedMs": {
+          "runs": [
+            10192,
+            10086,
+            10169
+          ],
+          "mean": 10149,
+          "min": 10086,
+          "max": 10192,
+          "acceptanceCeiling": 10298
+        },
+        "sessionP95Ms": {
+          "runs": [
+            9972,
+            9863,
+            9947
+          ],
+          "mean": 9927.333333333334,
+          "min": 9863,
+          "max": 9972,
+          "acceptanceCeiling": 10081
+        },
+        "sessionP99Ms": {
+          "runs": [
+            9972,
+            9863,
+            9947
+          ],
+          "mean": 9927.333333333334,
+          "min": 9863,
+          "max": 9972,
+          "acceptanceCeiling": 10081
+        },
+        "requestP95Ms": {
+          "runs": [
+            39,
+            36,
+            38
+          ],
+          "mean": 37.666666666666664,
+          "min": 36,
+          "max": 39,
+          "acceptanceCeiling": 42
+        },
+        "requestP99Ms": {
+          "runs": [
+            49,
+            45,
+            54
+          ],
+          "mean": 49.333333333333336,
+          "min": 45,
+          "max": 54,
+          "acceptanceCeiling": 63
+        }
+      },
+      "candidate": {
+        "sqlEvents": {
+          "runs": [
+            843,
+            845,
+            844
+          ],
+          "mean": 844,
+          "min": 843,
+          "max": 845
+        },
+        "elapsedMs": {
+          "runs": [
+            10151,
+            10151,
+            10057
+          ],
+          "mean": 10119.666666666666,
+          "min": 10057,
+          "max": 10151
+        },
+        "sessionP95Ms": {
+          "runs": [
+            9929,
+            9938,
+            9844
+          ],
+          "mean": 9903.666666666666,
+          "min": 9844,
+          "max": 9938
+        },
+        "sessionP99Ms": {
+          "runs": [
+            9929,
+            9938,
+            9844
+          ],
+          "mean": 9903.666666666666,
+          "min": 9844,
+          "max": 9938
+        },
+        "requestP95Ms": {
+          "runs": [
+            37,
+            40,
+            41
+          ],
+          "mean": 39.333333333333336,
+          "min": 37,
+          "max": 41
+        },
+        "requestP99Ms": {
+          "runs": [
+            55,
+            60,
+            64
+          ],
+          "mean": 59.666666666666664,
+          "min": 55,
+          "max": 64
+        }
+      },
+      "passed": false
+    },
+    {
+      "topology": "same",
+      "memberships": 3,
+      "baselineRuns": 3,
+      "candidateRuns": 3,
+      "checks": {
+        "sameTrace": true,
+        "allSuccessful": true,
+        "visibleTotals": true,
+        "exercisedNarrowHome": true,
+        "identicalOutcomes": true,
+        "elapsedMs": true,
+        "sessionP95Ms": true,
+        "sessionP99Ms": true,
+        "requestP95Ms": true,
+        "requestP99Ms": true,
+        "lowerMeanSessionSql": true
+      },
+      "baseline": {
+        "sqlEvents": {
+          "runs": [
+            1342,
+            1338,
+            1347
+          ],
+          "mean": 1342.3333333333333,
+          "min": 1338,
+          "max": 1347
+        },
+        "elapsedMs": {
+          "runs": [
+            10192,
+            10203,
+            10162
+          ],
+          "mean": 10185.666666666666,
+          "min": 10162,
+          "max": 10203,
+          "acceptanceCeiling": 10244
+        },
+        "sessionP95Ms": {
+          "runs": [
+            9974,
+            9980,
+            9945
+          ],
+          "mean": 9966.333333333334,
+          "min": 9945,
+          "max": 9980,
+          "acceptanceCeiling": 10015
+        },
+        "sessionP99Ms": {
+          "runs": [
+            9974,
+            9980,
+            9945
+          ],
+          "mean": 9966.333333333334,
+          "min": 9945,
+          "max": 9980,
+          "acceptanceCeiling": 10015
+        },
+        "requestP95Ms": {
+          "runs": [
+            42,
+            47,
+            35
+          ],
+          "mean": 41.333333333333336,
+          "min": 35,
+          "max": 47,
+          "acceptanceCeiling": 59
+        },
+        "requestP99Ms": {
+          "runs": [
+            46,
+            60,
+            50
+          ],
+          "mean": 52,
+          "min": 46,
+          "max": 60,
+          "acceptanceCeiling": 74
+        }
+      },
+      "candidate": {
+        "sqlEvents": {
+          "runs": [
+            1318,
+            1337,
+            1323
+          ],
+          "mean": 1326,
+          "min": 1318,
+          "max": 1337
+        },
+        "elapsedMs": {
+          "runs": [
+            10075,
+            10076,
+            10178
+          ],
+          "mean": 10109.666666666666,
+          "min": 10075,
+          "max": 10178
+        },
+        "sessionP95Ms": {
+          "runs": [
+            9854,
+            9865,
+            9963
+          ],
+          "mean": 9894,
+          "min": 9854,
+          "max": 9963
+        },
+        "sessionP99Ms": {
+          "runs": [
+            9854,
+            9865,
+            9963
+          ],
+          "mean": 9894,
+          "min": 9854,
+          "max": 9963
+        },
+        "requestP95Ms": {
+          "runs": [
+            36,
+            35,
+            36
+          ],
+          "mean": 35.666666666666664,
+          "min": 35,
+          "max": 36
+        },
+        "requestP99Ms": {
+          "runs": [
+            47,
+            48,
+            57
+          ],
+          "mean": 50.666666666666664,
+          "min": 47,
+          "max": 57
+        }
+      },
+      "passed": true
+    },
+    {
+      "topology": "same",
+      "memberships": 5,
+      "baselineRuns": 3,
+      "candidateRuns": 3,
+      "checks": {
+        "sameTrace": true,
+        "allSuccessful": true,
+        "visibleTotals": true,
+        "exercisedNarrowHome": true,
+        "identicalOutcomes": true,
+        "elapsedMs": true,
+        "sessionP95Ms": true,
+        "sessionP99Ms": true,
+        "requestP95Ms": false,
+        "requestP99Ms": true,
+        "lowerMeanSessionSql": false
+      },
+      "baseline": {
+        "sqlEvents": {
+          "runs": [
+            1828,
+            1809,
+            1828
+          ],
+          "mean": 1821.6666666666667,
+          "min": 1809,
+          "max": 1828
+        },
+        "elapsedMs": {
+          "runs": [
+            10229,
+            10214,
+            10210
+          ],
+          "mean": 10217.666666666666,
+          "min": 10210,
+          "max": 10229,
+          "acceptanceCeiling": 10248
+        },
+        "sessionP95Ms": {
+          "runs": [
+            10002,
+            9999,
+            10022
+          ],
+          "mean": 10007.666666666666,
+          "min": 9999,
+          "max": 10022,
+          "acceptanceCeiling": 10045
+        },
+        "sessionP99Ms": {
+          "runs": [
+            10002,
+            9999,
+            10022
+          ],
+          "mean": 10007.666666666666,
+          "min": 9999,
+          "max": 10022,
+          "acceptanceCeiling": 10045
+        },
+        "requestP95Ms": {
+          "runs": [
+            37,
+            36,
+            30
+          ],
+          "mean": 34.333333333333336,
+          "min": 30,
+          "max": 37,
+          "acceptanceCeiling": 44
+        },
+        "requestP99Ms": {
+          "runs": [
+            54,
+            50,
+            69
+          ],
+          "mean": 57.666666666666664,
+          "min": 50,
+          "max": 69,
+          "acceptanceCeiling": 88
+        }
+      },
+      "candidate": {
+        "sqlEvents": {
+          "runs": [
+            1861,
+            1810,
+            1825
+          ],
+          "mean": 1832,
+          "min": 1810,
+          "max": 1861
+        },
+        "elapsedMs": {
+          "runs": [
+            10219,
+            10081,
+            10178
+          ],
+          "mean": 10159.333333333334,
+          "min": 10081,
+          "max": 10219
+        },
+        "sessionP95Ms": {
+          "runs": [
+            9963,
+            9868,
+            9968
+          ],
+          "mean": 9933,
+          "min": 9868,
+          "max": 9968
+        },
+        "sessionP99Ms": {
+          "runs": [
+            9963,
+            9868,
+            9968
+          ],
+          "mean": 9933,
+          "min": 9868,
+          "max": 9968
+        },
+        "requestP95Ms": {
+          "runs": [
+            47,
+            45,
+            44
+          ],
+          "mean": 45.333333333333336,
+          "min": 44,
+          "max": 47
+        },
+        "requestP99Ms": {
+          "runs": [
+            65,
+            59,
+            62
+          ],
+          "mean": 62,
+          "min": 59,
+          "max": 65
+        }
+      },
+      "passed": false
+    },
+    {
+      "topology": "disjoint",
+      "memberships": 1,
+      "baselineRuns": 3,
+      "candidateRuns": 3,
+      "checks": {
+        "sameTrace": true,
+        "allSuccessful": true,
+        "visibleTotals": true,
+        "exercisedNarrowHome": true,
+        "identicalOutcomes": true,
+        "elapsedMs": true,
+        "sessionP95Ms": true,
+        "sessionP99Ms": true,
+        "requestP95Ms": true,
+        "requestP99Ms": true,
+        "lowerMeanSessionSql": true
+      },
+      "baseline": {
+        "sqlEvents": {
+          "runs": [
+            1651,
+            1639,
+            1636
+          ],
+          "mean": 1642,
+          "min": 1636,
+          "max": 1651
+        },
+        "elapsedMs": {
+          "runs": [
+            10039,
+            10057,
+            10062
+          ],
+          "mean": 10052.666666666666,
+          "min": 10039,
+          "max": 10062,
+          "acceptanceCeiling": 10085
+        },
+        "sessionP95Ms": {
+          "runs": [
+            5468,
+            5457,
+            5460
+          ],
+          "mean": 5461.666666666667,
+          "min": 5457,
+          "max": 5468,
+          "acceptanceCeiling": 5479
+        },
+        "sessionP99Ms": {
+          "runs": [
+            5468,
+            5457,
+            5460
+          ],
+          "mean": 5461.666666666667,
+          "min": 5457,
+          "max": 5468,
+          "acceptanceCeiling": 5479
+        },
+        "requestP95Ms": {
+          "runs": [
+            34,
+            37,
+            39
+          ],
+          "mean": 36.666666666666664,
+          "min": 34,
+          "max": 39,
+          "acceptanceCeiling": 44
+        },
+        "requestP99Ms": {
+          "runs": [
+            54,
+            53,
+            45
+          ],
+          "mean": 50.666666666666664,
+          "min": 45,
+          "max": 54,
+          "acceptanceCeiling": 63
+        }
+      },
+      "candidate": {
+        "sqlEvents": {
+          "runs": [
+            1585,
+            1607,
+            1614
+          ],
+          "mean": 1602,
+          "min": 1585,
+          "max": 1614
+        },
+        "elapsedMs": {
+          "runs": [
+            10039,
+            10046,
+            10052
+          ],
+          "mean": 10045.666666666666,
+          "min": 10039,
+          "max": 10052
+        },
+        "sessionP95Ms": {
+          "runs": [
+            5467,
+            5429,
+            5460
+          ],
+          "mean": 5452,
+          "min": 5429,
+          "max": 5467
+        },
+        "sessionP99Ms": {
+          "runs": [
+            5467,
+            5429,
+            5460
+          ],
+          "mean": 5452,
+          "min": 5429,
+          "max": 5467
+        },
+        "requestP95Ms": {
+          "runs": [
+            36,
+            27,
+            35
+          ],
+          "mean": 32.666666666666664,
+          "min": 27,
+          "max": 36
+        },
+        "requestP99Ms": {
+          "runs": [
+            53,
+            46,
+            59
+          ],
+          "mean": 52.666666666666664,
+          "min": 46,
+          "max": 59
+        }
+      },
+      "passed": true
+    },
+    {
+      "topology": "disjoint",
+      "memberships": 3,
+      "baselineRuns": 3,
+      "candidateRuns": 3,
+      "checks": {
+        "sameTrace": true,
+        "allSuccessful": true,
+        "visibleTotals": true,
+        "exercisedNarrowHome": true,
+        "identicalOutcomes": true,
+        "elapsedMs": true,
+        "sessionP95Ms": true,
+        "sessionP99Ms": true,
+        "requestP95Ms": true,
+        "requestP99Ms": true,
+        "lowerMeanSessionSql": true
+      },
+      "baseline": {
+        "sqlEvents": {
+          "runs": [
+            3690,
+            3656,
+            3643
+          ],
+          "mean": 3663,
+          "min": 3643,
+          "max": 3690
+        },
+        "elapsedMs": {
+          "runs": [
+            10176,
+            10196,
+            10048
+          ],
+          "mean": 10140,
+          "min": 10048,
+          "max": 10196,
+          "acceptanceCeiling": 10344
+        },
+        "sessionP95Ms": {
+          "runs": [
+            5496,
+            5483,
+            5507
+          ],
+          "mean": 5495.333333333333,
+          "min": 5483,
+          "max": 5507,
+          "acceptanceCeiling": 5531
+        },
+        "sessionP99Ms": {
+          "runs": [
+            5496,
+            5483,
+            5507
+          ],
+          "mean": 5495.333333333333,
+          "min": 5483,
+          "max": 5507,
+          "acceptanceCeiling": 5531
+        },
+        "requestP95Ms": {
+          "runs": [
+            34,
+            35,
+            34
+          ],
+          "mean": 34.333333333333336,
+          "min": 34,
+          "max": 35,
+          "acceptanceCeiling": 36
+        },
+        "requestP99Ms": {
+          "runs": [
+            44,
+            51,
+            52
+          ],
+          "mean": 49,
+          "min": 44,
+          "max": 52,
+          "acceptanceCeiling": 60
+        }
+      },
+      "candidate": {
+        "sqlEvents": {
+          "runs": [
+            3637,
+            3616,
+            3598
+          ],
+          "mean": 3617,
+          "min": 3598,
+          "max": 3637
+        },
+        "elapsedMs": {
+          "runs": [
+            10282,
+            10052,
+            10087
+          ],
+          "mean": 10140.333333333334,
+          "min": 10052,
+          "max": 10282
+        },
+        "sessionP95Ms": {
+          "runs": [
+            5482,
+            5490,
+            5484
+          ],
+          "mean": 5485.333333333333,
+          "min": 5482,
+          "max": 5490
+        },
+        "sessionP99Ms": {
+          "runs": [
+            5482,
+            5490,
+            5484
+          ],
+          "mean": 5485.333333333333,
+          "min": 5482,
+          "max": 5490
+        },
+        "requestP95Ms": {
+          "runs": [
+            33,
+            31,
+            35
+          ],
+          "mean": 33,
+          "min": 31,
+          "max": 35
+        },
+        "requestP99Ms": {
+          "runs": [
+            51,
+            55,
+            45
+          ],
+          "mean": 50.333333333333336,
+          "min": 45,
+          "max": 55
+        }
+      },
+      "passed": true
+    },
+    {
+      "topology": "disjoint",
+      "memberships": 5,
+      "baselineRuns": 3,
+      "candidateRuns": 3,
+      "checks": {
+        "sameTrace": true,
+        "allSuccessful": true,
+        "visibleTotals": true,
+        "exercisedNarrowHome": true,
+        "identicalOutcomes": true,
+        "elapsedMs": true,
+        "sessionP95Ms": true,
+        "sessionP99Ms": true,
+        "requestP95Ms": true,
+        "requestP99Ms": true,
+        "lowerMeanSessionSql": true
+      },
+      "baseline": {
+        "sqlEvents": {
+          "runs": [
+            5634,
+            5613,
+            5656
+          ],
+          "mean": 5634.333333333333,
+          "min": 5613,
+          "max": 5656
+        },
+        "elapsedMs": {
+          "runs": [
+            10015,
+            10113,
+            10413
+          ],
+          "mean": 10180.333333333334,
+          "min": 10015,
+          "max": 10413,
+          "acceptanceCeiling": 10811
+        },
+        "sessionP95Ms": {
+          "runs": [
+            5510,
+            5525,
+            5525
+          ],
+          "mean": 5520,
+          "min": 5510,
+          "max": 5525,
+          "acceptanceCeiling": 5540
+        },
+        "sessionP99Ms": {
+          "runs": [
+            5510,
+            5525,
+            5525
+          ],
+          "mean": 5520,
+          "min": 5510,
+          "max": 5525,
+          "acceptanceCeiling": 5540
+        },
+        "requestP95Ms": {
+          "runs": [
+            29,
+            27,
+            30
+          ],
+          "mean": 28.666666666666668,
+          "min": 27,
+          "max": 30,
+          "acceptanceCeiling": 33
+        },
+        "requestP99Ms": {
+          "runs": [
+            44,
+            56,
+            47
+          ],
+          "mean": 49,
+          "min": 44,
+          "max": 56,
+          "acceptanceCeiling": 68
+        }
+      },
+      "candidate": {
+        "sqlEvents": {
+          "runs": [
+            5574,
+            5604,
+            5605
+          ],
+          "mean": 5594.333333333333,
+          "min": 5574,
+          "max": 5605
+        },
+        "elapsedMs": {
+          "runs": [
+            9991,
+            10093,
+            10411
+          ],
+          "mean": 10165,
+          "min": 9991,
+          "max": 10411
+        },
+        "sessionP95Ms": {
+          "runs": [
+            5530,
+            5520,
+            5532
+          ],
+          "mean": 5527.333333333333,
+          "min": 5520,
+          "max": 5532
+        },
+        "sessionP99Ms": {
+          "runs": [
+            5530,
+            5520,
+            5532
+          ],
+          "mean": 5527.333333333333,
+          "min": 5520,
+          "max": 5532
+        },
+        "requestP95Ms": {
+          "runs": [
+            33,
+            25,
+            32
+          ],
+          "mean": 30,
+          "min": 25,
+          "max": 33
+        },
+        "requestP99Ms": {
+          "runs": [
+            61,
+            54,
+            50
+          ],
+          "mean": 55,
+          "min": 50,
+          "max": 61
+        }
+      },
+      "passed": true
+    }
+  ],
+  "runs": [
+    {
+      "file": "baseline-disjoint-1-r1.json",
+      "sha256": "82d9c456895daf8d965193ae3714f08e5010d698bd1b9583b14f5e789301e68f",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10039,
+        "sqlEvents": 1651,
+        "sessionP95Ms": 5468,
+        "sessionP99Ms": 5468,
+        "requestP95Ms": 34,
+        "requestP99Ms": 54,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 25,
+            "elapsedMs": 122.52050000000003,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 18,
+              "COMMIT": 6
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 99.19495700000067,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 492,
+            "elapsedMs": 578.9874199999977,
+            "leadingSql": {
+              "SELECT": 274,
+              "INSERT": 14,
+              "WITH": 109,
+              "COMMIT": 61,
+              "DELETE": 1,
+              "UPDATE": 33
+            },
+            "sourceReads": 12
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 14.88575099999889,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.677000000001499,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 13.819666000006691,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 500,
+            "elapsedMs": 278.0327860000216,
+            "leadingSql": {
+              "SELECT": 311,
+              "WITH": 67,
+              "COMMIT": 50,
+              "INSERT": 48,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 679,
+            "elapsedMs": 660.3049130000109,
+            "leadingSql": {
+              "SELECT": 445,
+              "WITH": 114,
+              "INSERT": 36,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 36
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 972,
+            "elapsedMs": 483.0208220000277,
+            "leadingSql": {
+              "SELECT": 557,
+              "WITH": 188,
+              "INSERT": 74,
+              "COMMIT": 99,
+              "UPDATE": 54
+            },
+            "sourceReads": 24
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.804958999997325,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.002042999996775,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 486,
+            "elapsedMs": 230.7629150000248,
+            "leadingSql": {
+              "SELECT": 298,
+              "WITH": 63,
+              "COMMIT": 52,
+              "INSERT": 49,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.379590000007738,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-1-r2.json",
+      "sha256": "aa0bf26fad84777cf3570a730d22d2b57ac6f9eb60728defb442a3692520a7e2",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10057,
+        "sqlEvents": 1639,
+        "sessionP95Ms": 5457,
+        "sessionP99Ms": 5457,
+        "requestP95Ms": 37,
+        "requestP99Ms": 53,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 25,
+            "elapsedMs": 121.17749900000007,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 18,
+              "COMMIT": 6
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 97.54579599999965,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 504,
+            "elapsedMs": 553.2969140000151,
+            "leadingSql": {
+              "SELECT": 275,
+              "INSERT": 14,
+              "WITH": 119,
+              "COMMIT": 65,
+              "DELETE": 1,
+              "UPDATE": 30
+            },
+            "sourceReads": 12
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 11.32075199999872,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.210541999998895,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 16.457375999998476,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 499,
+            "elapsedMs": 323.457416000012,
+            "leadingSql": {
+              "SELECT": 310,
+              "WITH": 67,
+              "COMMIT": 50,
+              "INSERT": 48,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 679,
+            "elapsedMs": 710.4717479999763,
+            "leadingSql": {
+              "SELECT": 445,
+              "WITH": 114,
+              "INSERT": 36,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 36
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 960,
+            "elapsedMs": 503.4565490000841,
+            "leadingSql": {
+              "SELECT": 554,
+              "WITH": 183,
+              "INSERT": 73,
+              "COMMIT": 96,
+              "UPDATE": 54
+            },
+            "sourceReads": 24
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.501335000004474,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 15.009418000005098,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 490,
+            "elapsedMs": 231.73534300005122,
+            "leadingSql": {
+              "SELECT": 300,
+              "WITH": 64,
+              "COMMIT": 53,
+              "INSERT": 49,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 16.260006000007706,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-1-r3.json",
+      "sha256": "45d8f7f1b919442d1c646fef54789560423a1666a8adf62ca0a16be5f2a596f0",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10062,
+        "sqlEvents": 1636,
+        "sessionP95Ms": 5460,
+        "sessionP99Ms": 5460,
+        "requestP95Ms": 39,
+        "requestP99Ms": 45,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 25,
+            "elapsedMs": 128.77612600000003,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 18,
+              "COMMIT": 6
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 171.11594800000057,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 484,
+            "elapsedMs": 577.322457999996,
+            "leadingSql": {
+              "SELECT": 272,
+              "WITH": 110,
+              "COMMIT": 57,
+              "INSERT": 14,
+              "DELETE": 1,
+              "UPDATE": 30
+            },
+            "sourceReads": 12
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 7.702916999995978,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.658708000000843,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 17.818458000007013,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 495,
+            "elapsedMs": 296.9632639999636,
+            "leadingSql": {
+              "SELECT": 309,
+              "WITH": 66,
+              "COMMIT": 49,
+              "INSERT": 47,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 678,
+            "elapsedMs": 647.3073259999819,
+            "leadingSql": {
+              "SELECT": 445,
+              "WITH": 114,
+              "INSERT": 35,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 36
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 958,
+            "elapsedMs": 577.5788779999912,
+            "leadingSql": {
+              "SELECT": 553,
+              "WITH": 183,
+              "INSERT": 72,
+              "COMMIT": 96,
+              "UPDATE": 54
+            },
+            "sourceReads": 24
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 11.829041999997571,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 10.400375000001077,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 491,
+            "elapsedMs": 244.66638699999385,
+            "leadingSql": {
+              "SELECT": 300,
+              "WITH": 65,
+              "COMMIT": 54,
+              "INSERT": 48,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.833669000003283,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-3-r1.json",
+      "sha256": "481b2c0e991706cf4058814c802f56ac371280ac7453da42e0ea618b10101a8b",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10176,
+        "sqlEvents": 3690,
+        "sessionP95Ms": 5496,
+        "sessionP99Ms": 5496,
+        "requestP95Ms": 34,
+        "requestP99Ms": 44,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 61,
+            "elapsedMs": 150.31116399999962,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 42,
+              "COMMIT": 18
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 97.38625099999956,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1205,
+            "elapsedMs": 796.2992799999945,
+            "leadingSql": {
+              "SELECT": 708,
+              "INSERT": 38,
+              "WITH": 233,
+              "COMMIT": 127,
+              "DELETE": 1,
+              "UPDATE": 98
+            },
+            "sourceReads": 36
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 12.092794000002868,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 11.333373999998003,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 16.811751999999615,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 1333,
+            "elapsedMs": 513.3189490000277,
+            "leadingSql": {
+              "SELECT": 855,
+              "WITH": 152,
+              "COMMIT": 123,
+              "INSERT": 131,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1086,
+            "elapsedMs": 775.6739569999863,
+            "leadingSql": {
+              "SELECT": 745,
+              "WITH": 186,
+              "INSERT": 71,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 60
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 2604,
+            "elapsedMs": 1038.9420579999933,
+            "leadingSql": {
+              "SELECT": 1519,
+              "WITH": 458,
+              "INSERT": 208,
+              "COMMIT": 257,
+              "UPDATE": 162
+            },
+            "sourceReads": 72
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.480833000001439,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 12.324248000000807,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 1305,
+            "elapsedMs": 405.76519999994343,
+            "leadingSql": {
+              "SELECT": 824,
+              "WITH": 142,
+              "COMMIT": 131,
+              "INSERT": 136,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.319460999991861,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-3-r2.json",
+      "sha256": "95033509873913db973c1c6befaf73bd1f4abe359477202e9d129a5984c13907",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10196,
+        "sqlEvents": 3656,
+        "sessionP95Ms": 5483,
+        "sessionP99Ms": 5483,
+        "requestP95Ms": 35,
+        "requestP99Ms": 51,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 61,
+            "elapsedMs": 127.158455,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 42,
+              "COMMIT": 18
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 109.32654100000036,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1209,
+            "elapsedMs": 870.229762999994,
+            "leadingSql": {
+              "SELECT": 708,
+              "WITH": 235,
+              "INSERT": 38,
+              "COMMIT": 130,
+              "DELETE": 1,
+              "UPDATE": 97
+            },
+            "sourceReads": 36
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.70837500000016,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 12.734666999998808,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 14.574081999997361,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 1338,
+            "elapsedMs": 540.1452209999879,
+            "leadingSql": {
+              "SELECT": 856,
+              "WITH": 153,
+              "COMMIT": 124,
+              "INSERT": 133,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1085,
+            "elapsedMs": 817.6168039999884,
+            "leadingSql": {
+              "SELECT": 745,
+              "WITH": 186,
+              "INSERT": 70,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 60
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 2571,
+            "elapsedMs": 899.681395000056,
+            "leadingSql": {
+              "SELECT": 1504,
+              "WITH": 450,
+              "INSERT": 203,
+              "COMMIT": 252,
+              "UPDATE": 162
+            },
+            "sourceReads": 72
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.77308300000368,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.460789000007935,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 1296,
+            "elapsedMs": 377.89033700004074,
+            "leadingSql": {
+              "SELECT": 824,
+              "WITH": 138,
+              "COMMIT": 127,
+              "INSERT": 135,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.112165999998979,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-3-r3.json",
+      "sha256": "20cd7fae0039780b8a098b14dc92796de9685b8e187a2dedb67c4318bb818b01",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10048,
+        "sqlEvents": 3643,
+        "sessionP95Ms": 5507,
+        "sessionP99Ms": 5507,
+        "requestP95Ms": 34,
+        "requestP99Ms": 52,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 61,
+            "elapsedMs": 123.63616600000006,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 42,
+              "COMMIT": 18
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 105.00462800000025,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1206,
+            "elapsedMs": 811.1234420000043,
+            "leadingSql": {
+              "SELECT": 706,
+              "WITH": 235,
+              "INSERT": 38,
+              "COMMIT": 128,
+              "DELETE": 1,
+              "UPDATE": 98
+            },
+            "sourceReads": 36
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.78112499999861,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.904501000000892,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 17.657624999996187,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 1341,
+            "elapsedMs": 413.3013650000157,
+            "leadingSql": {
+              "SELECT": 858,
+              "WITH": 154,
+              "COMMIT": 125,
+              "INSERT": 132,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1083,
+            "elapsedMs": 758.0359209999642,
+            "leadingSql": {
+              "SELECT": 745,
+              "WITH": 186,
+              "INSERT": 68,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 60
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 2560,
+            "elapsedMs": 820.5500709999942,
+            "leadingSql": {
+              "SELECT": 1507,
+              "WITH": 442,
+              "INSERT": 203,
+              "COMMIT": 246,
+              "UPDATE": 162
+            },
+            "sourceReads": 72
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 4.14387600000191,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 16.801706999995076,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 1280,
+            "elapsedMs": 384.8068519999688,
+            "leadingSql": {
+              "SELECT": 817,
+              "WITH": 136,
+              "COMMIT": 125,
+              "INSERT": 130,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.747164000003977,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-5-r1.json",
+      "sha256": "f6e36f7f9ba950ebb789f0366ae42700fe48a55f1c1e458e77c7985fc330e32a",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10015,
+        "sqlEvents": 5634,
+        "sessionP95Ms": 5510,
+        "sessionP99Ms": 5510,
+        "requestP95Ms": 29,
+        "requestP99Ms": 44,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 97,
+            "elapsedMs": 134.9334219999999,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 66,
+              "COMMIT": 30
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 101.40350400000057,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1905,
+            "elapsedMs": 989.5093290000074,
+            "leadingSql": {
+              "SELECT": 1127,
+              "INSERT": 62,
+              "WITH": 355,
+              "COMMIT": 199,
+              "DELETE": 1,
+              "UPDATE": 161
+            },
+            "sourceReads": 60
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 7.7360839999992095,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.027290999996694,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 18.625126000004457,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 2166,
+            "elapsedMs": 607.499958000024,
+            "leadingSql": {
+              "SELECT": 1398,
+              "WITH": 235,
+              "COMMIT": 194,
+              "INSERT": 219,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1491,
+            "elapsedMs": 874.569405999986,
+            "leadingSql": {
+              "SELECT": 1045,
+              "WITH": 258,
+              "INSERT": 104,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 84
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 4143,
+            "elapsedMs": 1301.3580600000205,
+            "leadingSql": {
+              "SELECT": 2450,
+              "WITH": 694,
+              "INSERT": 339,
+              "COMMIT": 390,
+              "UPDATE": 270
+            },
+            "sourceReads": 120
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.340083999999479,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 12.910875000001397,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 2087,
+            "elapsedMs": 636.374069999958,
+            "leadingSql": {
+              "SELECT": 1340,
+              "WITH": 207,
+              "COMMIT": 196,
+              "INSERT": 224,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.653334000005998,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-5-r2.json",
+      "sha256": "b9f6b7082af901e924bc28cbdd97e4acc4720b5361eb93d6858adaa4daf8ce63",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10113,
+        "sqlEvents": 5613,
+        "sessionP95Ms": 5525,
+        "sessionP99Ms": 5525,
+        "requestP95Ms": 27,
+        "requestP99Ms": 56,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 97,
+            "elapsedMs": 138.23758399999986,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 66,
+              "COMMIT": 30
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 106.81384099999929,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1915,
+            "elapsedMs": 1007.4618409999898,
+            "leadingSql": {
+              "SELECT": 1131,
+              "INSERT": 62,
+              "WITH": 357,
+              "COMMIT": 201,
+              "DELETE": 1,
+              "UPDATE": 163
+            },
+            "sourceReads": 60
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.81712300000072,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.183375000002343,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 25.48137399999905,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 2160,
+            "elapsedMs": 646.4543869999761,
+            "leadingSql": {
+              "SELECT": 1396,
+              "WITH": 234,
+              "COMMIT": 193,
+              "INSERT": 217,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1491,
+            "elapsedMs": 947.6634499999818,
+            "leadingSql": {
+              "SELECT": 1045,
+              "WITH": 258,
+              "INSERT": 104,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 84
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 4122,
+            "elapsedMs": 1257.120065000072,
+            "leadingSql": {
+              "SELECT": 2447,
+              "WITH": 688,
+              "INSERT": 331,
+              "COMMIT": 386,
+              "UPDATE": 270
+            },
+            "sourceReads": 120
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 14.267500000001746,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 14.959747999993851,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 2087,
+            "elapsedMs": 610.9824739999349,
+            "leadingSql": {
+              "SELECT": 1346,
+              "WITH": 209,
+              "COMMIT": 198,
+              "INSERT": 214,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.25591600000189,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-disjoint-5-r3.json",
+      "sha256": "733b36a5d010c3fb6f41192327979043647ab3be83d5e7cad6aad9f8039d77aa",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10413,
+        "sqlEvents": 5656,
+        "sessionP95Ms": 5525,
+        "sessionP99Ms": 5525,
+        "requestP95Ms": 30,
+        "requestP99Ms": 47,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 97,
+            "elapsedMs": 136.53341300000028,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 66,
+              "COMMIT": 30
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 96.55028899999934,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1920,
+            "elapsedMs": 1030.8092139999972,
+            "leadingSql": {
+              "SELECT": 1133,
+              "INSERT": 62,
+              "WITH": 359,
+              "COMMIT": 202,
+              "DELETE": 1,
+              "UPDATE": 163
+            },
+            "sourceReads": 60
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 12.775583000001461,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 13.364001999998436,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 23.26037400000132,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 2180,
+            "elapsedMs": 636.9794189999666,
+            "leadingSql": {
+              "SELECT": 1403,
+              "WITH": 240,
+              "COMMIT": 199,
+              "INSERT": 218,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1487,
+            "elapsedMs": 952.5850410000294,
+            "leadingSql": {
+              "SELECT": 1045,
+              "WITH": 258,
+              "INSERT": 100,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 84
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 4169,
+            "elapsedMs": 1327.468582000036,
+            "leadingSql": {
+              "SELECT": 2455,
+              "WITH": 709,
+              "INSERT": 335,
+              "COMMIT": 400,
+              "UPDATE": 270
+            },
+            "sourceReads": 120
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.096417000004294,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 14.787000000000262,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 2109,
+            "elapsedMs": 646.3568490000507,
+            "leadingSql": {
+              "SELECT": 1350,
+              "WITH": 207,
+              "COMMIT": 202,
+              "INSERT": 223,
+              "UPDATE": 127
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 5.788126999985252,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-1-r1.json",
+      "sha256": "741740af6856c0812845ccea33612b133e422b077f6b1b9857a5f8cb5f4d01ec",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10192,
+        "sqlEvents": 866,
+        "sessionP95Ms": 9972,
+        "sessionP99Ms": 9972,
+        "requestP95Ms": 39,
+        "requestP99Ms": 49,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 10,
+            "elapsedMs": 118.4876239999999,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 8,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 91.70136999999977,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 159,
+            "elapsedMs": 280.05862599999887,
+            "leadingSql": {
+              "SELECT": 86,
+              "INSERT": 4,
+              "WITH": 40,
+              "COMMIT": 23,
+              "DELETE": 1,
+              "UPDATE": 5
+            },
+            "sourceReads": 2
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 7.86108200000308,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.886750000001484,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 17.64700399999856,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 153,
+            "elapsedMs": 131.08145400000558,
+            "leadingSql": {
+              "SELECT": 87,
+              "WITH": 34,
+              "COMMIT": 20,
+              "INSERT": 8,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 559,
+            "elapsedMs": 684.8683479999709,
+            "leadingSql": {
+              "SELECT": 366,
+              "WITH": 88,
+              "INSERT": 21,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 26
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 307,
+            "elapsedMs": 199.50408099997912,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 77,
+              "INSERT": 16,
+              "COMMIT": 36,
+              "UPDATE": 9
+            },
+            "sourceReads": 4
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.052290999999968,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 11.78883799999312,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 155,
+            "elapsedMs": 97.31562199999098,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 35,
+              "COMMIT": 23,
+              "INSERT": 10,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.47612799999115,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-1-r2.json",
+      "sha256": "dbaabc832e6367832476c1b287bee061e5a0033349c9c6b9a5563481e7e4ae87",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10086,
+        "sqlEvents": 866,
+        "sessionP95Ms": 9863,
+        "sessionP99Ms": 9863,
+        "requestP95Ms": 36,
+        "requestP99Ms": 45,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 10,
+            "elapsedMs": 117.92912599999991,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 8,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 104.00766699999986,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 157,
+            "elapsedMs": 306.2030419999965,
+            "leadingSql": {
+              "SELECT": 85,
+              "INSERT": 4,
+              "WITH": 40,
+              "COMMIT": 22,
+              "DELETE": 1,
+              "UPDATE": 5
+            },
+            "sourceReads": 2
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 12.64274899999964,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.49029100000007,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/worker": {
+            "events": 7,
+            "elapsedMs": 4.832290999998804,
+            "leadingSql": {
+              "SELECT": 4,
+              "WITH": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 12.065792000004876,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 146,
+            "elapsedMs": 121.26498999999785,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 32,
+              "COMMIT": 19,
+              "INSERT": 8,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 559,
+            "elapsedMs": 680.8575389999696,
+            "leadingSql": {
+              "SELECT": 365,
+              "WITH": 89,
+              "INSERT": 21,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 26
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 307,
+            "elapsedMs": 266.8897040000211,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 77,
+              "INSERT": 16,
+              "COMMIT": 36,
+              "UPDATE": 9
+            },
+            "sourceReads": 4
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.581625999995595,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 11.841125000013562,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 155,
+            "elapsedMs": 100.7089549999946,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 35,
+              "COMMIT": 23,
+              "INSERT": 10,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.492873999995936,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-1-r3.json",
+      "sha256": "928f2dd5366ac17683d3d25c34d17fec831e68749215969330f8beee35053ab2",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10169,
+        "sqlEvents": 866,
+        "sessionP95Ms": 9947,
+        "sessionP99Ms": 9947,
+        "requestP95Ms": 38,
+        "requestP99Ms": 54,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 10,
+            "elapsedMs": 121.64912500000008,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 8,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 96.7562109999995,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 156,
+            "elapsedMs": 311.7030840000077,
+            "leadingSql": {
+              "SELECT": 85,
+              "INSERT": 4,
+              "WITH": 39,
+              "COMMIT": 22,
+              "DELETE": 1,
+              "UPDATE": 5
+            },
+            "sourceReads": 2
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.389291000002231,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.376125000000684,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/worker": {
+            "events": 7,
+            "elapsedMs": 2.752625999999509,
+            "leadingSql": {
+              "WITH": 2,
+              "COMMIT": 1,
+              "SELECT": 4
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 19.101626000003307,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 146,
+            "elapsedMs": 121.34200000000237,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 32,
+              "COMMIT": 19,
+              "INSERT": 8,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 559,
+            "elapsedMs": 617.5425230000073,
+            "leadingSql": {
+              "SELECT": 366,
+              "WITH": 88,
+              "INSERT": 21,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 26
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 307,
+            "elapsedMs": 235.57971399998678,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 77,
+              "INSERT": 16,
+              "COMMIT": 36,
+              "UPDATE": 9
+            },
+            "sourceReads": 4
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.835167000001093,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 10.10562599998957,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 155,
+            "elapsedMs": 99.48170700000992,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 35,
+              "COMMIT": 23,
+              "INSERT": 10,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.647791000017605,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-3-r1.json",
+      "sha256": "d85de065cfa373c59dd80cc9bd2acc7be14531988e947d7ba90545a31c0a6e9a",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10192,
+        "sqlEvents": 1342,
+        "sessionP95Ms": 9974,
+        "sessionP99Ms": 9974,
+        "requestP95Ms": 42,
+        "requestP99Ms": 46,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 16,
+            "elapsedMs": 120.31478999999985,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 12,
+              "COMMIT": 3
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 159.0395379999988,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 293,
+            "elapsedMs": 550.1529109999856,
+            "leadingSql": {
+              "SELECT": 172,
+              "WITH": 63,
+              "INSERT": 8,
+              "COMMIT": 34,
+              "DELETE": 1,
+              "UPDATE": 15
+            },
+            "sourceReads": 6
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 14.861750000003667,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.527667000000292,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 21.69908299999952,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 284,
+            "elapsedMs": 238.69333100000404,
+            "leadingSql": {
+              "SELECT": 172,
+              "WITH": 45,
+              "COMMIT": 31,
+              "INSERT": 24,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 736,
+            "elapsedMs": 774.9994860000443,
+            "leadingSql": {
+              "SELECT": 516,
+              "WITH": 109,
+              "INSERT": 27,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 30
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 606,
+            "elapsedMs": 512.3121180000217,
+            "leadingSql": {
+              "SELECT": 353,
+              "WITH": 122,
+              "INSERT": 44,
+              "COMMIT": 60,
+              "UPDATE": 27
+            },
+            "sourceReads": 12
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.9004580000000715,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.24783500000558,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 287,
+            "elapsedMs": 205.20087900001454,
+            "leadingSql": {
+              "SELECT": 168,
+              "WITH": 46,
+              "COMMIT": 35,
+              "INSERT": 26,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 10.16320899999846,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-3-r2.json",
+      "sha256": "2e054c734760cfc5873ac6c6c329c7e01e43ec92170762f69e87c1790cd0b0a6",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10203,
+        "sqlEvents": 1338,
+        "sessionP95Ms": 9980,
+        "sessionP99Ms": 9980,
+        "requestP95Ms": 47,
+        "requestP99Ms": 60,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 16,
+            "elapsedMs": 142.81916400000014,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 12,
+              "COMMIT": 3
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 120.27166400000027,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 294,
+            "elapsedMs": 570.612995000005,
+            "leadingSql": {
+              "SELECT": 171,
+              "INSERT": 8,
+              "WITH": 64,
+              "COMMIT": 35,
+              "DELETE": 1,
+              "UPDATE": 15
+            },
+            "sourceReads": 6
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 15.72200100000191,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.102666999997382,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 17.7835849999974,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 284,
+            "elapsedMs": 222.76830500000142,
+            "leadingSql": {
+              "SELECT": 172,
+              "WITH": 45,
+              "COMMIT": 31,
+              "INSERT": 24,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 731,
+            "elapsedMs": 874.3943409999611,
+            "leadingSql": {
+              "SELECT": 514,
+              "WITH": 106,
+              "INSERT": 27,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 30
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 607,
+            "elapsedMs": 450.4562500000029,
+            "leadingSql": {
+              "SELECT": 354,
+              "WITH": 122,
+              "INSERT": 44,
+              "COMMIT": 60,
+              "UPDATE": 27
+            },
+            "sourceReads": 12
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.855959000004077,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 10.563750000012078,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 289,
+            "elapsedMs": 177.42370900002425,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 47,
+              "COMMIT": 35,
+              "INSERT": 26,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 11.652459999997518,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-3-r3.json",
+      "sha256": "4fa53f3df4f1bf3b0312bf83d723b85689fd096fbf5becd7e418c87b65d28ea1",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10162,
+        "sqlEvents": 1347,
+        "sessionP95Ms": 9945,
+        "sessionP99Ms": 9945,
+        "requestP95Ms": 35,
+        "requestP99Ms": 50,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 16,
+            "elapsedMs": 118.964541,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 12,
+              "COMMIT": 3
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 104.35824899999955,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 284,
+            "elapsedMs": 552.6820939999969,
+            "leadingSql": {
+              "SELECT": 167,
+              "INSERT": 8,
+              "WITH": 60,
+              "COMMIT": 33,
+              "DELETE": 1,
+              "UPDATE": 15
+            },
+            "sourceReads": 6
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.788248000002568,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.8657079999975394,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/worker": {
+            "events": 7,
+            "elapsedMs": 7.919374999997672,
+            "leadingSql": {
+              "SELECT": 4,
+              "WITH": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 21.62949899999512,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 284,
+            "elapsedMs": 216.1105419999967,
+            "leadingSql": {
+              "SELECT": 172,
+              "WITH": 45,
+              "COMMIT": 31,
+              "INSERT": 24,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 738,
+            "elapsedMs": 821.7012320000104,
+            "leadingSql": {
+              "SELECT": 516,
+              "WITH": 111,
+              "INSERT": 27,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 30
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 609,
+            "elapsedMs": 437.1980369999328,
+            "leadingSql": {
+              "WITH": 123,
+              "SELECT": 354,
+              "INSERT": 44,
+              "COMMIT": 61,
+              "UPDATE": 27
+            },
+            "sourceReads": 12
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 3.212333999999828,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 5.74908499999583,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 289,
+            "elapsedMs": 154.2466269999968,
+            "leadingSql": {
+              "SELECT": 170,
+              "WITH": 46,
+              "COMMIT": 35,
+              "INSERT": 26,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.603086999999505,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-5-r1.json",
+      "sha256": "884ca46621596cfa34de327388ce5e4dbe581c0f45fa668237c48a3a66818927",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10229,
+        "sqlEvents": 1828,
+        "sessionP95Ms": 10002,
+        "sessionP99Ms": 10002,
+        "requestP95Ms": 37,
+        "requestP99Ms": 54,
+        "successfulPolls": 3,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 22,
+            "elapsedMs": 130.3781239999998,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 16,
+              "COMMIT": 5
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 95.38557699999984,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 425,
+            "elapsedMs": 1064.6006129999955,
+            "leadingSql": {
+              "SELECT": 252,
+              "INSERT": 12,
+              "WITH": 87,
+              "COMMIT": 48,
+              "DELETE": 1,
+              "UPDATE": 25
+            },
+            "sourceReads": 10
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 7.943583000000217,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.6793340000022,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 22.161085000005187,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 429,
+            "elapsedMs": 295.8992949999938,
+            "leadingSql": {
+              "SELECT": 264,
+              "WITH": 61,
+              "COMMIT": 44,
+              "INSERT": 40,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 916,
+            "elapsedMs": 893.65517799999,
+            "leadingSql": {
+              "SELECT": 666,
+              "WITH": 133,
+              "INSERT": 33,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 34
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 912,
+            "elapsedMs": 614.9397840000274,
+            "leadingSql": {
+              "SELECT": 540,
+              "WITH": 170,
+              "INSERT": 72,
+              "COMMIT": 85,
+              "UPDATE": 45
+            },
+            "sourceReads": 20
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.3849999999984,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.860833999991883,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 422,
+            "elapsedMs": 206.06497399996806,
+            "leadingSql": {
+              "SELECT": 255,
+              "WITH": 59,
+              "COMMIT": 46,
+              "INSERT": 42,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 10.037791999995534,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-5-r2.json",
+      "sha256": "5efeb24febb7cac4d46bcb7996100ecc2967027424456dcaeb7742f94a9f3105",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10214,
+        "sqlEvents": 1809,
+        "sessionP95Ms": 9999,
+        "sessionP99Ms": 9999,
+        "requestP95Ms": 36,
+        "requestP99Ms": 50,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 22,
+            "elapsedMs": 118.045998,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 16,
+              "COMMIT": 5
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 100.59308899999934,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 419,
+            "elapsedMs": 599.4164690000122,
+            "leadingSql": {
+              "SELECT": 251,
+              "INSERT": 12,
+              "WITH": 84,
+              "COMMIT": 45,
+              "DELETE": 1,
+              "UPDATE": 26
+            },
+            "sourceReads": 10
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.326540999999452,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.775416999998924,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/worker": {
+            "events": 7,
+            "elapsedMs": 5.710207999998602,
+            "leadingSql": {
+              "WITH": 2,
+              "SELECT": 4,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 15.947706000002654,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 427,
+            "elapsedMs": 279.650510999998,
+            "leadingSql": {
+              "SELECT": 264,
+              "WITH": 60,
+              "COMMIT": 43,
+              "INSERT": 40,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 907,
+            "elapsedMs": 932.582168999943,
+            "leadingSql": {
+              "SELECT": 666,
+              "WITH": 124,
+              "INSERT": 33,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 34
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 902,
+            "elapsedMs": 526.629834999987,
+            "leadingSql": {
+              "SELECT": 535,
+              "WITH": 165,
+              "INSERT": 71,
+              "COMMIT": 86,
+              "UPDATE": 45
+            },
+            "sourceReads": 18
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.1852079999989655,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 11.489415000000008,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 428,
+            "elapsedMs": 231.18333100002928,
+            "leadingSql": {
+              "SELECT": 257,
+              "WITH": 61,
+              "COMMIT": 48,
+              "INSERT": 42,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 11.955418000001373,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "baseline-same-5-r3.json",
+      "sha256": "3572075e1e8200aaa653e919f16736b7e481bbf6014f4b9d7d96763168ebabac",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10210,
+        "sqlEvents": 1828,
+        "sessionP95Ms": 10022,
+        "sessionP99Ms": 10022,
+        "requestP95Ms": 30,
+        "requestP99Ms": 69,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 22,
+            "elapsedMs": 120.88328899999999,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 16,
+              "COMMIT": 5
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 106.98920699999962,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 423,
+            "elapsedMs": 631.5815929999972,
+            "leadingSql": {
+              "SELECT": 252,
+              "WITH": 86,
+              "INSERT": 12,
+              "COMMIT": 47,
+              "DELETE": 1,
+              "UPDATE": 25
+            },
+            "sourceReads": 10
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.119208000000981,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.147833000000901,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 15.73917000000074,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 428,
+            "elapsedMs": 271.33440000001974,
+            "leadingSql": {
+              "SELECT": 264,
+              "WITH": 61,
+              "COMMIT": 44,
+              "INSERT": 39,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 914,
+            "elapsedMs": 866.0784179999391,
+            "leadingSql": {
+              "SELECT": 665,
+              "WITH": 132,
+              "INSERT": 33,
+              "OTHER": 12,
+              "UPDATE": 48,
+              "COMMIT": 24
+            },
+            "sourceReads": 34
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 914,
+            "elapsedMs": 572.3903460000674,
+            "leadingSql": {
+              "SELECT": 543,
+              "WITH": 171,
+              "INSERT": 71,
+              "COMMIT": 84,
+              "UPDATE": 45
+            },
+            "sourceReads": 20
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 27.474083000000974,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 7.71058200000698,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 427,
+            "elapsedMs": 273.6154429999915,
+            "leadingSql": {
+              "SELECT": 256,
+              "WITH": 61,
+              "COMMIT": 48,
+              "INSERT": 42,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 6.88216699998884,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-1-r1.json",
+      "sha256": "3d4f8bcfcbc9308aefa39a59220674ed19bc42f8b33bef1abad30f0460ec1365",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10039,
+        "sqlEvents": 1585,
+        "sessionP95Ms": 5467,
+        "sessionP99Ms": 5467,
+        "requestP95Ms": 36,
+        "requestP99Ms": 53,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 25,
+            "elapsedMs": 118.54641700000008,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 18,
+              "COMMIT": 6
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 109.28583000000009,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 479,
+            "elapsedMs": 518.191416999999,
+            "leadingSql": {
+              "WITH": 106,
+              "SELECT": 270,
+              "COMMIT": 57,
+              "INSERT": 14,
+              "DELETE": 1,
+              "UPDATE": 31
+            },
+            "sourceReads": 12
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 10.237917000004927,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 11.279915999999503,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 12.332665999998426,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 500,
+            "elapsedMs": 294.6464479999904,
+            "leadingSql": {
+              "SELECT": 311,
+              "WITH": 67,
+              "COMMIT": 50,
+              "INSERT": 48,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 636,
+            "elapsedMs": 538.3556669999489,
+            "leadingSql": {
+              "SELECT": 409,
+              "WITH": 114,
+              "INSERT": 35,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 36
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 949,
+            "elapsedMs": 463.2694050001155,
+            "leadingSql": {
+              "SELECT": 547,
+              "WITH": 181,
+              "INSERT": 71,
+              "COMMIT": 96,
+              "UPDATE": 54
+            },
+            "sourceReads": 24
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.268416999999317,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 8.675334999999905,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 493,
+            "elapsedMs": 253.86080399999264,
+            "leadingSql": {
+              "WITH": 65,
+              "SELECT": 300,
+              "COMMIT": 54,
+              "INSERT": 50,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 7.22775099998762,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-1-r2.json",
+      "sha256": "9be07d7562322b30938a0c3540acec7438752ce3a9b9e3d82939e19290384b98",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10046,
+        "sqlEvents": 1607,
+        "sessionP95Ms": 5429,
+        "sessionP99Ms": 5429,
+        "requestP95Ms": 27,
+        "requestP99Ms": 46,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 25,
+            "elapsedMs": 122.34212600000018,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 18,
+              "COMMIT": 6
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 96.09778899999907,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 497,
+            "elapsedMs": 492.57479800000846,
+            "leadingSql": {
+              "SELECT": 274,
+              "INSERT": 14,
+              "WITH": 115,
+              "COMMIT": 63,
+              "DELETE": 1,
+              "UPDATE": 30
+            },
+            "sourceReads": 12
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 8.491793000002872,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.776248999998643,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 14.078167999996367,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 496,
+            "elapsedMs": 282.7928370000209,
+            "leadingSql": {
+              "SELECT": 309,
+              "WITH": 66,
+              "COMMIT": 49,
+              "INSERT": 48,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 637,
+            "elapsedMs": 522.3020300000062,
+            "leadingSql": {
+              "SELECT": 409,
+              "WITH": 114,
+              "INSERT": 36,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 36
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 970,
+            "elapsedMs": 529.2139070000085,
+            "leadingSql": {
+              "SELECT": 555,
+              "WITH": 189,
+              "INSERT": 72,
+              "COMMIT": 100,
+              "UPDATE": 54
+            },
+            "sourceReads": 24
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.2190410000002885,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 10.58087700001488,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 489,
+            "elapsedMs": 249.81896199999028,
+            "leadingSql": {
+              "WITH": 64,
+              "SELECT": 299,
+              "COMMIT": 53,
+              "INSERT": 49,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 5.0277489999862155,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-1-r3.json",
+      "sha256": "e5f519b6471c8e5c4ea99630d95c743e17ca359f373f35a97fb5c5ae140029c0",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10052,
+        "sqlEvents": 1614,
+        "sessionP95Ms": 5460,
+        "sessionP99Ms": 5460,
+        "requestP95Ms": 35,
+        "requestP99Ms": 59,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 25,
+            "elapsedMs": 123.296582,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 18,
+              "COMMIT": 6
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 97.75782300000014,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 481,
+            "elapsedMs": 657.8457109999997,
+            "leadingSql": {
+              "SELECT": 269,
+              "INSERT": 14,
+              "WITH": 106,
+              "COMMIT": 59,
+              "DELETE": 1,
+              "UPDATE": 32
+            },
+            "sourceReads": 12
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.542457999999897,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.141414999998233,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 15.141917999997531,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 495,
+            "elapsedMs": 271.9575909999967,
+            "leadingSql": {
+              "SELECT": 309,
+              "WITH": 66,
+              "COMMIT": 49,
+              "INSERT": 47,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 637,
+            "elapsedMs": 597.2418370000469,
+            "leadingSql": {
+              "SELECT": 409,
+              "WITH": 114,
+              "INSERT": 36,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 36
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 977,
+            "elapsedMs": 605.6907140000312,
+            "leadingSql": {
+              "SELECT": 559,
+              "WITH": 191,
+              "INSERT": 71,
+              "COMMIT": 102,
+              "UPDATE": 54
+            },
+            "sourceReads": 24
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 13.520418000000063,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 14.502417000006972,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 497,
+            "elapsedMs": 248.7303310000534,
+            "leadingSql": {
+              "WITH": 66,
+              "SELECT": 303,
+              "COMMIT": 55,
+              "INSERT": 49,
+              "UPDATE": 24
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 7.7043330000087735,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-3-r1.json",
+      "sha256": "5478780e66cc6ed29f7dfc7332b3a13948301175b299ddafbcbda1a3fb5afdd6",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10282,
+        "sqlEvents": 3637,
+        "sessionP95Ms": 5482,
+        "sessionP99Ms": 5482,
+        "requestP95Ms": 33,
+        "requestP99Ms": 51,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 61,
+            "elapsedMs": 128.11375300000014,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 42,
+              "COMMIT": 18
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 102.44787399999944,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1198,
+            "elapsedMs": 814.9939719999875,
+            "leadingSql": {
+              "SELECT": 703,
+              "INSERT": 38,
+              "WITH": 232,
+              "COMMIT": 128,
+              "DELETE": 1,
+              "UPDATE": 96
+            },
+            "sourceReads": 36
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 10.905791000001045,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 11.604707999998936,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 16.92220500000076,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 1337,
+            "elapsedMs": 485.41178600000785,
+            "leadingSql": {
+              "SELECT": 856,
+              "WITH": 152,
+              "COMMIT": 123,
+              "INSERT": 134,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1045,
+            "elapsedMs": 744.6445719998428,
+            "leadingSql": {
+              "SELECT": 709,
+              "WITH": 186,
+              "INSERT": 72,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 60
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 2592,
+            "elapsedMs": 1010.5188169998946,
+            "leadingSql": {
+              "SELECT": 1508,
+              "WITH": 453,
+              "INSERT": 215,
+              "COMMIT": 254,
+              "UPDATE": 162
+            },
+            "sourceReads": 72
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 3.481791999998677,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.776457000007213,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 1280,
+            "elapsedMs": 410.21262400004343,
+            "leadingSql": {
+              "SELECT": 818,
+              "WITH": 134,
+              "COMMIT": 123,
+              "INSERT": 133,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 7.642792000009649,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-3-r2.json",
+      "sha256": "de6959d5921d152e0fcb2aa8af25bd2f8431fc8dd56279d4f43e89038580202d",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10052,
+        "sqlEvents": 3616,
+        "sessionP95Ms": 5490,
+        "sessionP99Ms": 5490,
+        "requestP95Ms": 31,
+        "requestP99Ms": 55,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 61,
+            "elapsedMs": 136.10495999999978,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 42,
+              "COMMIT": 18
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 118.33912399999963,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1213,
+            "elapsedMs": 1040.7646689999915,
+            "leadingSql": {
+              "SELECT": 707,
+              "WITH": 235,
+              "INSERT": 38,
+              "COMMIT": 134,
+              "DELETE": 1,
+              "UPDATE": 98
+            },
+            "sourceReads": 36
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 9.133999999999105,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.076291999999739,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 19.515292999996745,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 1337,
+            "elapsedMs": 432.5020640000148,
+            "leadingSql": {
+              "SELECT": 855,
+              "WITH": 153,
+              "COMMIT": 124,
+              "INSERT": 133,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1043,
+            "elapsedMs": 716.1088369999925,
+            "leadingSql": {
+              "SELECT": 709,
+              "WITH": 186,
+              "INSERT": 70,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 60
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 2573,
+            "elapsedMs": 778.8779980001091,
+            "leadingSql": {
+              "SELECT": 1512,
+              "WITH": 447,
+              "INSERT": 202,
+              "COMMIT": 250,
+              "UPDATE": 162
+            },
+            "sourceReads": 72
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.410666999996465,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 12.114125000003696,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 1289,
+            "elapsedMs": 402.1052049999744,
+            "leadingSql": {
+              "SELECT": 821,
+              "WITH": 136,
+              "COMMIT": 125,
+              "INSERT": 135,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.453961000010167,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-3-r3.json",
+      "sha256": "dbb72c61dfe43932514d999d14380deeda886731f02793e2ca81a733880afe7d",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10087,
+        "sqlEvents": 3598,
+        "sessionP95Ms": 5484,
+        "sessionP99Ms": 5484,
+        "requestP95Ms": 35,
+        "requestP99Ms": 45,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 61,
+            "elapsedMs": 129.1215000000002,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 42,
+              "COMMIT": 18
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 96.75082599999968,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1202,
+            "elapsedMs": 814.2687510000164,
+            "leadingSql": {
+              "SELECT": 704,
+              "WITH": 233,
+              "INSERT": 38,
+              "COMMIT": 128,
+              "DELETE": 1,
+              "UPDATE": 98
+            },
+            "sourceReads": 36
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 10.987334999999803,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 13.180707999999868,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 18.18620799999735,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 1335,
+            "elapsedMs": 443.01572099999066,
+            "leadingSql": {
+              "SELECT": 853,
+              "WITH": 152,
+              "COMMIT": 123,
+              "INSERT": 135,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1043,
+            "elapsedMs": 764.532546000004,
+            "leadingSql": {
+              "SELECT": 709,
+              "WITH": 186,
+              "INSERT": 70,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 60
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 2555,
+            "elapsedMs": 908.600900999887,
+            "leadingSql": {
+              "SELECT": 1506,
+              "WITH": 441,
+              "COMMIT": 246,
+              "INSERT": 200,
+              "UPDATE": 162
+            },
+            "sourceReads": 72
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 13.0312490000033,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 12.738582000005408,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 1298,
+            "elapsedMs": 423.04175200004465,
+            "leadingSql": {
+              "SELECT": 822,
+              "WITH": 138,
+              "COMMIT": 127,
+              "INSERT": 139,
+              "UPDATE": 72
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 6.63646000000881,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-5-r1.json",
+      "sha256": "1d6c1a8ec8b3136ec116764a939e24b6c151825b5c30a15d63764e2c0d5d74dc",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 9991,
+        "sqlEvents": 5574,
+        "sessionP95Ms": 5530,
+        "sessionP99Ms": 5530,
+        "requestP95Ms": 33,
+        "requestP99Ms": 61,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 97,
+            "elapsedMs": 135.12958499999962,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 66,
+              "COMMIT": 30
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 101.20353999999986,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1926,
+            "elapsedMs": 999.5974609999798,
+            "leadingSql": {
+              "SELECT": 1139,
+              "WITH": 359,
+              "INSERT": 62,
+              "COMMIT": 202,
+              "DELETE": 1,
+              "UPDATE": 163
+            },
+            "sourceReads": 60
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 11.913833999999042,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 12.30949999999757,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 24.24575200000254,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 2171,
+            "elapsedMs": 635.2778430000453,
+            "leadingSql": {
+              "SELECT": 1402,
+              "WITH": 237,
+              "COMMIT": 196,
+              "INSERT": 216,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1451,
+            "elapsedMs": 873.1841450000247,
+            "leadingSql": {
+              "SELECT": 1009,
+              "WITH": 258,
+              "INSERT": 106,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 84
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 4123,
+            "elapsedMs": 1111.2728599998609,
+            "leadingSql": {
+              "SELECT": 2445,
+              "WITH": 690,
+              "INSERT": 329,
+              "COMMIT": 389,
+              "UPDATE": 270
+            },
+            "sourceReads": 120
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.821041999995941,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 13.756459000000177,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 2100,
+            "elapsedMs": 534.1010179999575,
+            "leadingSql": {
+              "SELECT": 1348,
+              "WITH": 214,
+              "COMMIT": 203,
+              "INSERT": 215,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.1785839999975,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-5-r2.json",
+      "sha256": "c48b7e07a6727c110e32beca5306459143ac3bc9dc0b7cbdb44f979cda3735aa",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10093,
+        "sqlEvents": 5604,
+        "sessionP95Ms": 5520,
+        "sessionP99Ms": 5520,
+        "requestP95Ms": 25,
+        "requestP99Ms": 54,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 97,
+            "elapsedMs": 135.33758500000022,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 66,
+              "COMMIT": 30
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 98.7986679999999,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1919,
+            "elapsedMs": 986.845339000004,
+            "leadingSql": {
+              "SELECT": 1133,
+              "INSERT": 62,
+              "WITH": 359,
+              "COMMIT": 203,
+              "DELETE": 1,
+              "UPDATE": 161
+            },
+            "sourceReads": 60
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 11.062456999996357,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 13.553624999998647,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 21.26121000000603,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 2185,
+            "elapsedMs": 585.0897849999274,
+            "leadingSql": {
+              "SELECT": 1406,
+              "WITH": 243,
+              "COMMIT": 202,
+              "INSERT": 214,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1448,
+            "elapsedMs": 816.3202679999595,
+            "leadingSql": {
+              "SELECT": 1009,
+              "WITH": 258,
+              "INSERT": 103,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 84
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 4156,
+            "elapsedMs": 1125.0136919999113,
+            "leadingSql": {
+              "SELECT": 2455,
+              "WITH": 699,
+              "INSERT": 339,
+              "COMMIT": 393,
+              "UPDATE": 270
+            },
+            "sourceReads": 120
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.79766600000221,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 15.758789000003162,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 2069,
+            "elapsedMs": 654.689382000055,
+            "leadingSql": {
+              "SELECT": 1335,
+              "WITH": 206,
+              "COMMIT": 195,
+              "INSERT": 213,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 10.925878999994893,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-disjoint-5-r3.json",
+      "sha256": "89aafc186b5ca1444177e39f0454377ae988caac9bc87015322748de3e727a18",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10411,
+        "sqlEvents": 5605,
+        "sessionP95Ms": 5532,
+        "sessionP99Ms": 5532,
+        "requestP95Ms": 32,
+        "requestP99Ms": 50,
+        "successfulPolls": 6,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 97,
+            "elapsedMs": 135.25828599999994,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 66,
+              "COMMIT": 30
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 91.07736599999953,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 1910,
+            "elapsedMs": 980.1262699999986,
+            "leadingSql": {
+              "WITH": 357,
+              "SELECT": 1129,
+              "COMMIT": 200,
+              "INSERT": 62,
+              "DELETE": 1,
+              "UPDATE": 161
+            },
+            "sourceReads": 60
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 14.825373000001491,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 12.626750999997967,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 23.54370899999958,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 2159,
+            "elapsedMs": 761.1741110000112,
+            "leadingSql": {
+              "SELECT": 1396,
+              "WITH": 234,
+              "COMMIT": 193,
+              "INSERT": 216,
+              "UPDATE": 120
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 1448,
+            "elapsedMs": 857.6747059999598,
+            "leadingSql": {
+              "SELECT": 1009,
+              "WITH": 258,
+              "INSERT": 103,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 84
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 4157,
+            "elapsedMs": 1191.1735640000552,
+            "leadingSql": {
+              "SELECT": 2450,
+              "WITH": 705,
+              "INSERT": 336,
+              "COMMIT": 396,
+              "UPDATE": 270
+            },
+            "sourceReads": 120
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.711039999994682,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 15.071662999998807,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 2110,
+            "elapsedMs": 649.9956260000254,
+            "leadingSql": {
+              "SELECT": 1349,
+              "WITH": 205,
+              "COMMIT": 200,
+              "INSERT": 229,
+              "UPDATE": 127
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.25762599999507,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-1-r1.json",
+      "sha256": "e086203ae4b5a22917273ce87b472be80e7977d520ef34e226ff699a7c1ee712",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10151,
+        "sqlEvents": 843,
+        "sessionP95Ms": 9929,
+        "sessionP99Ms": 9929,
+        "requestP95Ms": 37,
+        "requestP99Ms": 55,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 10,
+            "elapsedMs": 120.94170699999995,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 8,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 108.06014000000044,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 164,
+            "elapsedMs": 319.4751279999998,
+            "leadingSql": {
+              "SELECT": 89,
+              "INSERT": 4,
+              "WITH": 42,
+              "COMMIT": 23,
+              "DELETE": 1,
+              "UPDATE": 5
+            },
+            "sourceReads": 2
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 4.374000999996497,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.6281660000004194,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 11.967999999998938,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 148,
+            "elapsedMs": 104.44562200001565,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 33,
+              "COMMIT": 20,
+              "INSERT": 8,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 536,
+            "elapsedMs": 613.0402870000307,
+            "leadingSql": {
+              "SELECT": 349,
+              "WITH": 88,
+              "INSERT": 21,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 26
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 307,
+            "elapsedMs": 233.66212200000155,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 77,
+              "INSERT": 16,
+              "COMMIT": 36,
+              "UPDATE": 9
+            },
+            "sourceReads": 4
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.5437090000013995,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 10.723207000006369,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 155,
+            "elapsedMs": 97.41158700003143,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 35,
+              "COMMIT": 23,
+              "INSERT": 10,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.81116599998495,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-1-r2.json",
+      "sha256": "3cb71951c6b96ecc8247a0f49947b44f5ea8c5b22706b5c1614ab0818d34246c",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10151,
+        "sqlEvents": 845,
+        "sessionP95Ms": 9938,
+        "sessionP99Ms": 9938,
+        "requestP95Ms": 40,
+        "requestP99Ms": 60,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 10,
+            "elapsedMs": 115.71654199999995,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 8,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 102.54016500000074,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 157,
+            "elapsedMs": 313.152079999992,
+            "leadingSql": {
+              "SELECT": 85,
+              "WITH": 40,
+              "INSERT": 4,
+              "COMMIT": 22,
+              "DELETE": 1,
+              "UPDATE": 5
+            },
+            "sourceReads": 2
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 7.146290000002409,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.622540999998819,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 153,
+            "elapsedMs": 106.65894999999637,
+            "leadingSql": {
+              "SELECT": 87,
+              "WITH": 34,
+              "COMMIT": 20,
+              "INSERT": 8,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 15.124706999999034,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 538,
+            "elapsedMs": 585.5141560000575,
+            "leadingSql": {
+              "SELECT": 350,
+              "WITH": 89,
+              "INSERT": 21,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 26
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 307,
+            "elapsedMs": 210.94091199999457,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 77,
+              "INSERT": 16,
+              "COMMIT": 36,
+              "UPDATE": 9
+            },
+            "sourceReads": 4
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 4.357584000001225,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 8.559585000006336,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 155,
+            "elapsedMs": 84.57512500000303,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 35,
+              "COMMIT": 23,
+              "INSERT": 10,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.002329999995709,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-1-r3.json",
+      "sha256": "77bb7fdb331e5a7ce9ddce02677939b97cabdd680831c1d4fa2ff6367fdcfd04",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10057,
+        "sqlEvents": 844,
+        "sessionP95Ms": 9844,
+        "sessionP99Ms": 9844,
+        "requestP95Ms": 41,
+        "requestP99Ms": 64,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 10,
+            "elapsedMs": 183.19324900000015,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 8,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 127.01624399999923,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 167,
+            "elapsedMs": 281.4464669999958,
+            "leadingSql": {
+              "SELECT": 91,
+              "WITH": 43,
+              "INSERT": 4,
+              "COMMIT": 23,
+              "DELETE": 1,
+              "UPDATE": 5
+            },
+            "sourceReads": 2
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 8.927960999999414,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.325124999999389,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 11.068042000000787,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 145,
+            "elapsedMs": 115.3220009999859,
+            "leadingSql": {
+              "SELECT": 82,
+              "WITH": 32,
+              "COMMIT": 19,
+              "INSERT": 8,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 537,
+            "elapsedMs": 590.7441700000309,
+            "leadingSql": {
+              "SELECT": 350,
+              "WITH": 88,
+              "INSERT": 21,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 26
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 307,
+            "elapsedMs": 207.47567300005176,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 77,
+              "INSERT": 16,
+              "COMMIT": 36,
+              "UPDATE": 9
+            },
+            "sourceReads": 4
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.70829099999537,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.35645900000236,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 155,
+            "elapsedMs": 132.18896000000314,
+            "leadingSql": {
+              "SELECT": 83,
+              "WITH": 35,
+              "COMMIT": 23,
+              "INSERT": 10,
+              "UPDATE": 4
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 12.379791000013938,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-3-r1.json",
+      "sha256": "63e8aff1b5ddb3c2139e2ce49e494f07cdeec7761ebb7d8d378f5b2e25a5f234",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10075,
+        "sqlEvents": 1318,
+        "sessionP95Ms": 9854,
+        "sessionP99Ms": 9854,
+        "requestP95Ms": 36,
+        "requestP99Ms": 47,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 16,
+            "elapsedMs": 115.37979200000001,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 12,
+              "COMMIT": 3
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 106.40616399999954,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 285,
+            "elapsedMs": 499.43407300000365,
+            "leadingSql": {
+              "SELECT": 168,
+              "INSERT": 8,
+              "WITH": 60,
+              "COMMIT": 33,
+              "DELETE": 1,
+              "UPDATE": 15
+            },
+            "sourceReads": 6
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 11.092627000000903,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.981126000000586,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 294,
+            "elapsedMs": 227.02225000001818,
+            "leadingSql": {
+              "SELECT": 177,
+              "WITH": 49,
+              "COMMIT": 32,
+              "INSERT": 24,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 13.721748999998454,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 714,
+            "elapsedMs": 721.6191799999633,
+            "leadingSql": {
+              "SELECT": 500,
+              "WITH": 109,
+              "INSERT": 27,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 30
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 604,
+            "elapsedMs": 444.2101209999637,
+            "leadingSql": {
+              "SELECT": 353,
+              "WITH": 121,
+              "INSERT": 44,
+              "COMMIT": 59,
+              "UPDATE": 27
+            },
+            "sourceReads": 12
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.870459000001574,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.506542999992234,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 291,
+            "elapsedMs": 177.83772000000317,
+            "leadingSql": {
+              "SELECT": 170,
+              "WITH": 48,
+              "COMMIT": 35,
+              "INSERT": 26,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 8.750296000016533,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-3-r2.json",
+      "sha256": "4ab3f34c61964538bfcaf11df9845cac85c4a5970edac90f65191e37bd1c43ce",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10076,
+        "sqlEvents": 1337,
+        "sessionP95Ms": 9865,
+        "sessionP99Ms": 9865,
+        "requestP95Ms": 35,
+        "requestP99Ms": 48,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 16,
+            "elapsedMs": 114.625291,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 12,
+              "COMMIT": 3
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 99.80363399999936,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 286,
+            "elapsedMs": 508.1100539999966,
+            "leadingSql": {
+              "SELECT": 167,
+              "INSERT": 8,
+              "WITH": 61,
+              "COMMIT": 34,
+              "DELETE": 1,
+              "UPDATE": 15
+            },
+            "sourceReads": 6
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 13.429044000000431,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.679500000002008,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 295,
+            "elapsedMs": 216.87287499998274,
+            "leadingSql": {
+              "WITH": 49,
+              "SELECT": 178,
+              "COMMIT": 32,
+              "INSERT": 24,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 21.084791000001132,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 715,
+            "elapsedMs": 744.8839510000253,
+            "leadingSql": {
+              "SELECT": 500,
+              "WITH": 110,
+              "INSERT": 27,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 30
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 622,
+            "elapsedMs": 384.5569690000357,
+            "leadingSql": {
+              "SELECT": 358,
+              "WITH": 129,
+              "INSERT": 44,
+              "COMMIT": 64,
+              "UPDATE": 27
+            },
+            "sourceReads": 12
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.068833000001177,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 9.488038999996206,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 290,
+            "elapsedMs": 168.84400499998446,
+            "leadingSql": {
+              "SELECT": 169,
+              "WITH": 48,
+              "COMMIT": 35,
+              "INSERT": 26,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.336460000002262,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-3-r3.json",
+      "sha256": "b52fd73826177ce8f89da249bef98a948683b03d531d30319f7d67be5ecad421",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10178,
+        "sqlEvents": 1323,
+        "sessionP95Ms": 9963,
+        "sessionP99Ms": 9963,
+        "requestP95Ms": 36,
+        "requestP99Ms": 57,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 16,
+            "elapsedMs": 118.31079200000005,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 12,
+              "COMMIT": 3
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 92.52728899999954,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 282,
+            "elapsedMs": 517.984375999999,
+            "leadingSql": {
+              "SELECT": 166,
+              "INSERT": 8,
+              "WITH": 59,
+              "COMMIT": 33,
+              "DELETE": 1,
+              "UPDATE": 15
+            },
+            "sourceReads": 6
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 10.814918000000944,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.976915999999619,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 18.843581999999515,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 291,
+            "elapsedMs": 223.6287060000068,
+            "leadingSql": {
+              "SELECT": 176,
+              "WITH": 47,
+              "COMMIT": 32,
+              "INSERT": 24,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 716,
+            "elapsedMs": 649.8061990000278,
+            "leadingSql": {
+              "SELECT": 500,
+              "WITH": 111,
+              "INSERT": 27,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 30
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 607,
+            "elapsedMs": 461.6998770000355,
+            "leadingSql": {
+              "SELECT": 354,
+              "WITH": 122,
+              "INSERT": 44,
+              "COMMIT": 60,
+              "UPDATE": 27
+            },
+            "sourceReads": 12
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 5.6447079999998095,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 8.140581999989081,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 285,
+            "elapsedMs": 184.59037100000205,
+            "leadingSql": {
+              "SELECT": 168,
+              "WITH": 45,
+              "COMMIT": 34,
+              "INSERT": 26,
+              "UPDATE": 12
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 9.395872999994026,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-5-r1.json",
+      "sha256": "fe6423062aab66df1043f8ac5d930403d1f2eb375e68f8b44e28e13a1a1eefc0",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10219,
+        "sqlEvents": 1861,
+        "sessionP95Ms": 9963,
+        "sessionP99Ms": 9963,
+        "requestP95Ms": 47,
+        "requestP99Ms": 65,
+        "successfulPolls": 3,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 22,
+            "elapsedMs": 117.05574999999988,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 16,
+              "COMMIT": 5
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 93.1782139999998,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 421,
+            "elapsedMs": 577.4330350000064,
+            "leadingSql": {
+              "SELECT": 253,
+              "INSERT": 12,
+              "WITH": 84,
+              "COMMIT": 46,
+              "DELETE": 1,
+              "UPDATE": 25
+            },
+            "sourceReads": 10
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 12.66508199999862,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 8.77545900000041,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 16.04304300000149,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 430,
+            "elapsedMs": 226.92179299999952,
+            "leadingSql": {
+              "SELECT": 264,
+              "WITH": 62,
+              "COMMIT": 44,
+              "INSERT": 40,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 888,
+            "elapsedMs": 1064.415042000006,
+            "leadingSql": {
+              "SELECT": 645,
+              "WITH": 132,
+              "INSERT": 33,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 34
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 973,
+            "elapsedMs": 593.3529320000089,
+            "leadingSql": {
+              "SELECT": 567,
+              "WITH": 185,
+              "INSERT": 77,
+              "COMMIT": 96,
+              "UPDATE": 48
+            },
+            "sourceReads": 25
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.792499999999563,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 10.231958000018494,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 428,
+            "elapsedMs": 236.03596200003085,
+            "leadingSql": {
+              "SELECT": 257,
+              "WITH": 61,
+              "COMMIT": 48,
+              "INSERT": 42,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 10.161543000001984,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-5-r2.json",
+      "sha256": "1b47c7d244b5adec281c88af23139207229fe2b23f1988177c3dceb0c5a09ed5",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10081,
+        "sqlEvents": 1810,
+        "sessionP95Ms": 9868,
+        "sessionP99Ms": 9868,
+        "requestP95Ms": 45,
+        "requestP99Ms": 59,
+        "successfulPolls": 3,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 22,
+            "elapsedMs": 121.96208399999992,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 16,
+              "COMMIT": 5
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 111.2893259999999,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 418,
+            "elapsedMs": 561.2226220000006,
+            "leadingSql": {
+              "SELECT": 249,
+              "INSERT": 12,
+              "WITH": 84,
+              "COMMIT": 47,
+              "DELETE": 1,
+              "UPDATE": 25
+            },
+            "sourceReads": 10
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 7.7404969999997775,
+            "leadingSql": {
+              "WITH": 4,
+              "COMMIT": 2,
+              "SELECT": 8
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 6.672666999997091,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 17.349500000000262,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 436,
+            "elapsedMs": 253.9414949999864,
+            "leadingSql": {
+              "SELECT": 269,
+              "WITH": 63,
+              "COMMIT": 44,
+              "INSERT": 40,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 890,
+            "elapsedMs": 836.5766979999644,
+            "leadingSql": {
+              "SELECT": 646,
+              "WITH": 133,
+              "INSERT": 33,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 34
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 920,
+            "elapsedMs": 534.9472489999571,
+            "leadingSql": {
+              "SELECT": 545,
+              "WITH": 172,
+              "INSERT": 72,
+              "COMMIT": 86,
+              "UPDATE": 45
+            },
+            "sourceReads": 20
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 9.66175000000294,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 8.961418000009871,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 428,
+            "elapsedMs": 201.87013399996795,
+            "leadingSql": {
+              "SELECT": 257,
+              "WITH": 61,
+              "COMMIT": 48,
+              "INSERT": 42,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 10.083709999995335,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-same-5-r3.json",
+      "sha256": "d66d6181e5958aa1aa27813f0d6834233e67123f0616729d2279dc85906b6847",
+      "summary": {
+        "success": true,
+        "sessions": 6,
+        "acceptedUploads": 12,
+        "errors": 0,
+        "elapsedMs": 10178,
+        "sqlEvents": 1825,
+        "sessionP95Ms": 9968,
+        "sessionP99Ms": 9968,
+        "requestP95Ms": 44,
+        "requestP99Ms": 62,
+        "successfulPolls": 2,
+        "sqlSummary": {
+          "setup/http/cron": {
+            "events": 22,
+            "elapsedMs": 115.18925099999979,
+            "leadingSql": {
+              "DO": 1,
+              "INSERT": 16,
+              "COMMIT": 5
+            },
+            "sourceReads": 0
+          },
+          "worker-startup-and-warmup/http/cron": {
+            "events": 164,
+            "elapsedMs": 110.04712600000028,
+            "leadingSql": {
+              "SELECT": 49,
+              "WITH": 43,
+              "INSERT": 18,
+              "UPDATE": 30,
+              "COMMIT": 18,
+              "OTHER": 6
+            },
+            "sourceReads": 12
+          },
+          "worker-startup-and-warmup/worker": {
+            "events": 424,
+            "elapsedMs": 549.3792100000153,
+            "leadingSql": {
+              "SELECT": 253,
+              "INSERT": 12,
+              "WITH": 86,
+              "COMMIT": 47,
+              "DELETE": 1,
+              "UPDATE": 25
+            },
+            "sourceReads": 10
+          },
+          "warm-worker-idle/worker": {
+            "events": 14,
+            "elapsedMs": 8.783957999999984,
+            "leadingSql": {
+              "SELECT": 8,
+              "WITH": 4,
+              "COMMIT": 2
+            },
+            "sourceReads": 0
+          },
+          "event-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 10.194374000000607,
+            "leadingSql": {
+              "INSERT": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/http/cron": {
+            "events": 17,
+            "elapsedMs": 16.908667999998215,
+            "leadingSql": {
+              "SELECT": 12,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-start-cohort/worker": {
+            "events": 428,
+            "elapsedMs": 220.25333700000374,
+            "leadingSql": {
+              "SELECT": 263,
+              "WITH": 61,
+              "COMMIT": 44,
+              "INSERT": 40,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "fixed-arrival-event-sessions/http/cron": {
+            "events": 891,
+            "elapsedMs": 766.7369049999888,
+            "leadingSql": {
+              "SELECT": 650,
+              "WITH": 130,
+              "INSERT": 33,
+              "OTHER": 12,
+              "UPDATE": 42,
+              "COMMIT": 24
+            },
+            "sourceReads": 34
+          },
+          "fixed-arrival-event-sessions/worker": {
+            "events": 934,
+            "elapsedMs": 546.2789579999917,
+            "leadingSql": {
+              "SELECT": 556,
+              "WITH": 171,
+              "INSERT": 75,
+              "COMMIT": 87,
+              "UPDATE": 45
+            },
+            "sourceReads": 20
+          },
+          "event-end-fixture-setup/http/cron": {
+            "events": 3,
+            "elapsedMs": 7.187499999996362,
+            "leadingSql": {
+              "UPDATE": 2,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/http/cron": {
+            "events": 16,
+            "elapsedMs": 8.447248000004038,
+            "leadingSql": {
+              "SELECT": 11,
+              "INSERT": 3,
+              "UPDATE": 1,
+              "COMMIT": 1
+            },
+            "sourceReads": 0
+          },
+          "event-end-cohort/worker": {
+            "events": 425,
+            "elapsedMs": 297.24832499996774,
+            "leadingSql": {
+              "SELECT": 256,
+              "WITH": 60,
+              "COMMIT": 48,
+              "INSERT": 41,
+              "UPDATE": 20
+            },
+            "sourceReads": 0
+          },
+          "final-outcome-inspection/http/cron": {
+            "events": 30,
+            "elapsedMs": 10.053501999998844,
+            "leadingSql": {
+              "SELECT": 30
+            },
+            "sourceReads": 0
+          }
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Six sessions per repetition: p95/p99 are observed tail samples, not population estimates.",
+    "completionMs includes observer drain followed by progress navigation with verified totals; automatic catch-up HTTP timing is recorded separately.",
+    "SQL totals include periodic worker queries; isolated per-action savings require the focused integration tests."
+  ]
+}

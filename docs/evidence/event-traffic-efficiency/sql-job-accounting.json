@@ -1,0 +1,6329 @@
+{
+  "limitations": [
+    "Operation-presence counts overlap for CTEs and ON CONFLICT; they are not physical commands or changed-row counts.",
+    "Rows changed are proven separately by focused MVCC tests.",
+    "Final job generations do not reveal every enqueue or coalescing call; worker logs and SQL attempt counts are reported separately."
+  ],
+  "runs": [
+    {
+      "file": "baseline-disjoint-1-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 25,
+          "elapsedMs": 122.52050000000003,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 18
+          },
+          "controlOnly": 6
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 99.19495700000067,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 492,
+          "elapsedMs": 578.9874199999977,
+          "operationPresence": {
+            "SELECT": 387,
+            "INSERT": 23,
+            "UPDATE": 148,
+            "DELETE": 4
+          },
+          "controlOnly": 61
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 14.88575099999889,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.677000000001499,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 13.819666000006691,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 500,
+          "elapsedMs": 278.0327860000216,
+          "operationPresence": {
+            "SELECT": 378,
+            "UPDATE": 162,
+            "INSERT": 56,
+            "DELETE": 2
+          },
+          "controlOnly": 50
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 679,
+          "elapsedMs": 660.3049130000109,
+          "operationPresence": {
+            "SELECT": 577,
+            "INSERT": 66,
+            "UPDATE": 102,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 972,
+          "elapsedMs": 483.0208220000277,
+          "operationPresence": {
+            "SELECT": 745,
+            "UPDATE": 296,
+            "INSERT": 90,
+            "DELETE": 4
+          },
+          "controlOnly": 99
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.804958999997325,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.002042999996775,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 486,
+          "elapsedMs": 230.7629150000248,
+          "operationPresence": {
+            "SELECT": 361,
+            "UPDATE": 147,
+            "INSERT": 58,
+            "DELETE": 3
+          },
+          "controlOnly": 52
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.379590000007738,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 30,
+        "commitOutcomes": 30,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 30
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-1-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 25,
+          "elapsedMs": 121.17749900000007,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 18
+          },
+          "controlOnly": 6
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 97.54579599999965,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 504,
+          "elapsedMs": 553.2969140000151,
+          "operationPresence": {
+            "SELECT": 395,
+            "INSERT": 23,
+            "UPDATE": 155,
+            "DELETE": 4
+          },
+          "controlOnly": 65
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 11.32075199999872,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.210541999998895,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 16.457375999998476,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 499,
+          "elapsedMs": 323.457416000012,
+          "operationPresence": {
+            "SELECT": 377,
+            "UPDATE": 162,
+            "INSERT": 56,
+            "DELETE": 2
+          },
+          "controlOnly": 50
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 679,
+          "elapsedMs": 710.4717479999763,
+          "operationPresence": {
+            "SELECT": 577,
+            "INSERT": 66,
+            "UPDATE": 102,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 960,
+          "elapsedMs": 503.4565490000841,
+          "operationPresence": {
+            "SELECT": 737,
+            "UPDATE": 290,
+            "INSERT": 89,
+            "DELETE": 4
+          },
+          "controlOnly": 96
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.501335000004474,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 15.009418000005098,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 490,
+          "elapsedMs": 231.73534300005122,
+          "operationPresence": {
+            "SELECT": 364,
+            "UPDATE": 148,
+            "INSERT": 58,
+            "DELETE": 3
+          },
+          "controlOnly": 53
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 16.260006000007706,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 30,
+        "commitOutcomes": 30,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 30
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-1-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 25,
+          "elapsedMs": 128.77612600000003,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 18
+          },
+          "controlOnly": 6
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 171.11594800000057,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 484,
+          "elapsedMs": 577.322457999996,
+          "operationPresence": {
+            "SELECT": 383,
+            "UPDATE": 146,
+            "INSERT": 23,
+            "DELETE": 4
+          },
+          "controlOnly": 57
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 7.702916999995978,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.658708000000843,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 17.818458000007013,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 495,
+          "elapsedMs": 296.9632639999636,
+          "operationPresence": {
+            "SELECT": 375,
+            "UPDATE": 160,
+            "INSERT": 55,
+            "DELETE": 2
+          },
+          "controlOnly": 49
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 678,
+          "elapsedMs": 647.3073259999819,
+          "operationPresence": {
+            "SELECT": 577,
+            "INSERT": 65,
+            "UPDATE": 101,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 958,
+          "elapsedMs": 577.5788779999912,
+          "operationPresence": {
+            "SELECT": 736,
+            "UPDATE": 289,
+            "INSERT": 88,
+            "DELETE": 4
+          },
+          "controlOnly": 96
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 11.829041999997571,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 10.400375000001077,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 491,
+          "elapsedMs": 244.66638699999385,
+          "operationPresence": {
+            "SELECT": 365,
+            "UPDATE": 148,
+            "INSERT": 57,
+            "DELETE": 3
+          },
+          "controlOnly": 54
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.833669000003283,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 30,
+        "commitOutcomes": 30,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 30
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-3-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 61,
+          "elapsedMs": 150.31116399999962,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 42
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 97.38625099999956,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1205,
+          "elapsedMs": 796.2992799999945,
+          "operationPresence": {
+            "SELECT": 950,
+            "INSERT": 59,
+            "UPDATE": 355,
+            "DELETE": 4
+          },
+          "controlOnly": 127
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 12.092794000002868,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 11.333373999998003,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 16.811751999999615,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 1333,
+          "elapsedMs": 513.3189490000277,
+          "operationPresence": {
+            "SELECT": 1007,
+            "UPDATE": 426,
+            "INSERT": 151,
+            "DELETE": 2
+          },
+          "controlOnly": 123
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1086,
+          "elapsedMs": 775.6739569999863,
+          "operationPresence": {
+            "SELECT": 961,
+            "INSERT": 101,
+            "UPDATE": 137,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 2604,
+          "elapsedMs": 1038.9420579999933,
+          "operationPresence": {
+            "SELECT": 1977,
+            "UPDATE": 782,
+            "INSERT": 250,
+            "DELETE": 6
+          },
+          "controlOnly": 257
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.480833000001439,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 12.324248000000807,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 1305,
+          "elapsedMs": 405.76519999994343,
+          "operationPresence": {
+            "SELECT": 966,
+            "UPDATE": 385,
+            "INSERT": 157,
+            "DELETE": 3
+          },
+          "controlOnly": 131
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.319460999991861,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 90,
+        "commitOutcomes": 90,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 90
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-3-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 61,
+          "elapsedMs": 127.158455,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 42
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 109.32654100000036,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1209,
+          "elapsedMs": 870.229762999994,
+          "operationPresence": {
+            "SELECT": 951,
+            "UPDATE": 358,
+            "INSERT": 59,
+            "DELETE": 4
+          },
+          "controlOnly": 130
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.70837500000016,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 12.734666999998808,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 14.574081999997361,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 1338,
+          "elapsedMs": 540.1452209999879,
+          "operationPresence": {
+            "SELECT": 1009,
+            "UPDATE": 429,
+            "INSERT": 153,
+            "DELETE": 2
+          },
+          "controlOnly": 124
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1085,
+          "elapsedMs": 817.6168039999884,
+          "operationPresence": {
+            "SELECT": 961,
+            "INSERT": 100,
+            "UPDATE": 136,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 2571,
+          "elapsedMs": 899.681395000056,
+          "operationPresence": {
+            "SELECT": 1954,
+            "UPDATE": 769,
+            "INSERT": 245,
+            "DELETE": 6
+          },
+          "controlOnly": 252
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.77308300000368,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.460789000007935,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 1296,
+          "elapsedMs": 377.89033700004074,
+          "operationPresence": {
+            "SELECT": 962,
+            "UPDATE": 380,
+            "INSERT": 156,
+            "DELETE": 3
+          },
+          "controlOnly": 127
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.112165999998979,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 90,
+        "commitOutcomes": 90,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 90
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-3-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 61,
+          "elapsedMs": 123.63616600000006,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 42
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 105.00462800000025,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1206,
+          "elapsedMs": 811.1234420000043,
+          "operationPresence": {
+            "SELECT": 950,
+            "UPDATE": 357,
+            "INSERT": 59,
+            "DELETE": 4
+          },
+          "controlOnly": 128
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.78112499999861,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.904501000000892,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 17.657624999996187,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 1341,
+          "elapsedMs": 413.3013650000157,
+          "operationPresence": {
+            "SELECT": 1012,
+            "UPDATE": 429,
+            "INSERT": 152,
+            "DELETE": 2
+          },
+          "controlOnly": 125
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1083,
+          "elapsedMs": 758.0359209999642,
+          "operationPresence": {
+            "SELECT": 961,
+            "INSERT": 98,
+            "UPDATE": 134,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 2560,
+          "elapsedMs": 820.5500709999942,
+          "operationPresence": {
+            "SELECT": 1949,
+            "UPDATE": 762,
+            "INSERT": 243,
+            "DELETE": 4
+          },
+          "controlOnly": 246
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 4.14387600000191,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 16.801706999995076,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 1280,
+          "elapsedMs": 384.8068519999688,
+          "operationPresence": {
+            "SELECT": 953,
+            "UPDATE": 373,
+            "INSERT": 151,
+            "DELETE": 3
+          },
+          "controlOnly": 125
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.747164000003977,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 90,
+        "commitOutcomes": 90,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 90
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-5-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 97,
+          "elapsedMs": 134.9334219999999,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 66
+          },
+          "controlOnly": 30
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 101.40350400000057,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1905,
+          "elapsedMs": 989.5093290000074,
+          "operationPresence": {
+            "SELECT": 1494,
+            "INSERT": 95,
+            "UPDATE": 570,
+            "DELETE": 4
+          },
+          "controlOnly": 199
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 7.7360839999992095,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.027290999996694,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 18.625126000004457,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 2166,
+          "elapsedMs": 607.499958000024,
+          "operationPresence": {
+            "SELECT": 1633,
+            "UPDATE": 693,
+            "INSERT": 251,
+            "DELETE": 2
+          },
+          "controlOnly": 194
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1491,
+          "elapsedMs": 874.569405999986,
+          "operationPresence": {
+            "SELECT": 1345,
+            "INSERT": 134,
+            "UPDATE": 170,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 4143,
+          "elapsedMs": 1301.3580600000205,
+          "operationPresence": {
+            "SELECT": 3144,
+            "UPDATE": 1234,
+            "INSERT": 403,
+            "DELETE": 4
+          },
+          "controlOnly": 390
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.340083999999479,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 12.910875000001397,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 2087,
+          "elapsedMs": 636.374069999958,
+          "operationPresence": {
+            "SELECT": 1547,
+            "UPDATE": 610,
+            "INSERT": 257,
+            "DELETE": 3
+          },
+          "controlOnly": 196
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.653334000005998,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 150,
+        "commitOutcomes": 150,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 150
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-5-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 97,
+          "elapsedMs": 138.23758399999986,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 66
+          },
+          "controlOnly": 30
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 106.81384099999929,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1915,
+          "elapsedMs": 1007.4618409999898,
+          "operationPresence": {
+            "SELECT": 1502,
+            "INSERT": 95,
+            "UPDATE": 573,
+            "DELETE": 4
+          },
+          "controlOnly": 201
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.81712300000072,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.183375000002343,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 25.48137399999905,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 2160,
+          "elapsedMs": 646.4543869999761,
+          "operationPresence": {
+            "SELECT": 1630,
+            "UPDATE": 690,
+            "INSERT": 249,
+            "DELETE": 2
+          },
+          "controlOnly": 193
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1491,
+          "elapsedMs": 947.6634499999818,
+          "operationPresence": {
+            "SELECT": 1345,
+            "INSERT": 134,
+            "UPDATE": 170,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 4122,
+          "elapsedMs": 1257.120065000072,
+          "operationPresence": {
+            "SELECT": 3135,
+            "UPDATE": 1221,
+            "INSERT": 395,
+            "DELETE": 4
+          },
+          "controlOnly": 386
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 14.267500000001746,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 14.959747999993851,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 2087,
+          "elapsedMs": 610.9824739999349,
+          "operationPresence": {
+            "SELECT": 1555,
+            "UPDATE": 602,
+            "INSERT": 247,
+            "DELETE": 3
+          },
+          "controlOnly": 198
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.25591600000189,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 150,
+        "commitOutcomes": 150,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 150
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-disjoint-5-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 97,
+          "elapsedMs": 136.53341300000028,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 66
+          },
+          "controlOnly": 30
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 96.55028899999934,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1920,
+          "elapsedMs": 1030.8092139999972,
+          "operationPresence": {
+            "SELECT": 1506,
+            "INSERT": 95,
+            "UPDATE": 574,
+            "DELETE": 4
+          },
+          "controlOnly": 202
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 12.775583000001461,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 13.364001999998436,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 23.26037400000132,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 2180,
+          "elapsedMs": 636.9794189999666,
+          "operationPresence": {
+            "SELECT": 1643,
+            "UPDATE": 697,
+            "INSERT": 250,
+            "DELETE": 2
+          },
+          "controlOnly": 199
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1487,
+          "elapsedMs": 952.5850410000294,
+          "operationPresence": {
+            "SELECT": 1345,
+            "INSERT": 130,
+            "UPDATE": 166,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 4169,
+          "elapsedMs": 1327.468582000036,
+          "operationPresence": {
+            "SELECT": 3164,
+            "UPDATE": 1242,
+            "INSERT": 402,
+            "DELETE": 7
+          },
+          "controlOnly": 400
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.096417000004294,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 14.787000000000262,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 2109,
+          "elapsedMs": 646.3568490000507,
+          "operationPresence": {
+            "SELECT": 1564,
+            "UPDATE": 616,
+            "INSERT": 256,
+            "DELETE": 3
+          },
+          "controlOnly": 202
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 5.788126999985252,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 150,
+        "commitOutcomes": 150,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 150
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-1-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 10,
+          "elapsedMs": 118.4876239999999,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 8
+          },
+          "controlOnly": 1
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 91.70136999999977,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 159,
+          "elapsedMs": 280.05862599999887,
+          "operationPresence": {
+            "SELECT": 127,
+            "INSERT": 8,
+            "UPDATE": 46,
+            "DELETE": 4
+          },
+          "controlOnly": 23
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 7.86108200000308,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.886750000001484,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 17.64700399999856,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 153,
+          "elapsedMs": 131.08145400000558,
+          "operationPresence": {
+            "SELECT": 121,
+            "UPDATE": 49,
+            "INSERT": 11,
+            "DELETE": 2
+          },
+          "controlOnly": 20
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 559,
+          "elapsedMs": 684.8683479999709,
+          "operationPresence": {
+            "SELECT": 467,
+            "INSERT": 51,
+            "UPDATE": 87,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 307,
+          "elapsedMs": 199.50408099997912,
+          "operationPresence": {
+            "SELECT": 246,
+            "UPDATE": 96,
+            "INSERT": 22,
+            "DELETE": 4
+          },
+          "controlOnly": 36
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.052290999999968,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 11.78883799999312,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 155,
+          "elapsedMs": 97.31562199999098,
+          "operationPresence": {
+            "SELECT": 118,
+            "UPDATE": 50,
+            "INSERT": 14,
+            "DELETE": 3
+          },
+          "controlOnly": 23
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.47612799999115,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 5,
+        "commitOutcomes": 5,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 5
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-1-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 10,
+          "elapsedMs": 117.92912599999991,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 8
+          },
+          "controlOnly": 1
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 104.00766699999986,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 157,
+          "elapsedMs": 306.2030419999965,
+          "operationPresence": {
+            "SELECT": 126,
+            "INSERT": 8,
+            "UPDATE": 46,
+            "DELETE": 4
+          },
+          "controlOnly": 22
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 12.64274899999964,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.49029100000007,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-fixture-setup/worker": {
+          "statements": 7,
+          "elapsedMs": 4.832290999998804,
+          "operationPresence": {
+            "SELECT": 6,
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 12.065792000004876,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 146,
+          "elapsedMs": 121.26498999999785,
+          "operationPresence": {
+            "SELECT": 115,
+            "UPDATE": 47,
+            "INSERT": 11,
+            "DELETE": 2
+          },
+          "controlOnly": 19
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 559,
+          "elapsedMs": 680.8575389999696,
+          "operationPresence": {
+            "SELECT": 467,
+            "INSERT": 51,
+            "UPDATE": 87,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 307,
+          "elapsedMs": 266.8897040000211,
+          "operationPresence": {
+            "SELECT": 246,
+            "UPDATE": 96,
+            "INSERT": 22,
+            "DELETE": 4
+          },
+          "controlOnly": 36
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.581625999995595,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 11.841125000013562,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 155,
+          "elapsedMs": 100.7089549999946,
+          "operationPresence": {
+            "SELECT": 118,
+            "UPDATE": 50,
+            "INSERT": 14,
+            "DELETE": 3
+          },
+          "controlOnly": 23
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.492873999995936,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 5,
+        "commitOutcomes": 5,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 5
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-1-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 10,
+          "elapsedMs": 121.64912500000008,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 8
+          },
+          "controlOnly": 1
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 96.7562109999995,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 156,
+          "elapsedMs": 311.7030840000077,
+          "operationPresence": {
+            "SELECT": 125,
+            "INSERT": 8,
+            "UPDATE": 45,
+            "DELETE": 4
+          },
+          "controlOnly": 22
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.389291000002231,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.376125000000684,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-fixture-setup/worker": {
+          "statements": 7,
+          "elapsedMs": 2.752625999999509,
+          "operationPresence": {
+            "SELECT": 6,
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 19.101626000003307,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 146,
+          "elapsedMs": 121.34200000000237,
+          "operationPresence": {
+            "SELECT": 115,
+            "UPDATE": 47,
+            "INSERT": 11,
+            "DELETE": 2
+          },
+          "controlOnly": 19
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 559,
+          "elapsedMs": 617.5425230000073,
+          "operationPresence": {
+            "SELECT": 467,
+            "INSERT": 51,
+            "UPDATE": 87,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 307,
+          "elapsedMs": 235.57971399998678,
+          "operationPresence": {
+            "SELECT": 246,
+            "UPDATE": 96,
+            "INSERT": 22,
+            "DELETE": 4
+          },
+          "controlOnly": 36
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.835167000001093,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 10.10562599998957,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 155,
+          "elapsedMs": 99.48170700000992,
+          "operationPresence": {
+            "SELECT": 118,
+            "UPDATE": 50,
+            "INSERT": 14,
+            "DELETE": 3
+          },
+          "controlOnly": 23
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.647791000017605,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 5,
+        "commitOutcomes": 5,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 5
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-3-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 16,
+          "elapsedMs": 120.31478999999985,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 12
+          },
+          "controlOnly": 3
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 159.0395379999988,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 293,
+          "elapsedMs": 550.1529109999856,
+          "operationPresence": {
+            "SELECT": 236,
+            "UPDATE": 82,
+            "INSERT": 14,
+            "DELETE": 4
+          },
+          "controlOnly": 34
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 14.861750000003667,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.527667000000292,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 21.69908299999952,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 284,
+          "elapsedMs": 238.69333100000404,
+          "operationPresence": {
+            "SELECT": 217,
+            "UPDATE": 92,
+            "INSERT": 29,
+            "DELETE": 2
+          },
+          "controlOnly": 31
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 736,
+          "elapsedMs": 774.9994860000443,
+          "operationPresence": {
+            "SELECT": 640,
+            "INSERT": 57,
+            "UPDATE": 93,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 606,
+          "elapsedMs": 512.3121180000217,
+          "operationPresence": {
+            "SELECT": 475,
+            "UPDATE": 180,
+            "INSERT": 54,
+            "DELETE": 4
+          },
+          "controlOnly": 60
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.9004580000000715,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.24783500000558,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 287,
+          "elapsedMs": 205.20087900001454,
+          "operationPresence": {
+            "SELECT": 214,
+            "UPDATE": 89,
+            "INSERT": 32,
+            "DELETE": 3
+          },
+          "controlOnly": 35
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 10.16320899999846,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 15,
+        "commitOutcomes": 15,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 15
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-3-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 16,
+          "elapsedMs": 142.81916400000014,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 12
+          },
+          "controlOnly": 3
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 120.27166400000027,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 294,
+          "elapsedMs": 570.612995000005,
+          "operationPresence": {
+            "SELECT": 236,
+            "INSERT": 14,
+            "UPDATE": 83,
+            "DELETE": 4
+          },
+          "controlOnly": 35
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 15.72200100000191,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.102666999997382,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 17.7835849999974,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 284,
+          "elapsedMs": 222.76830500000142,
+          "operationPresence": {
+            "SELECT": 217,
+            "UPDATE": 92,
+            "INSERT": 29,
+            "DELETE": 2
+          },
+          "controlOnly": 31
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 731,
+          "elapsedMs": 874.3943409999611,
+          "operationPresence": {
+            "SELECT": 635,
+            "INSERT": 57,
+            "UPDATE": 93,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 607,
+          "elapsedMs": 450.4562500000029,
+          "operationPresence": {
+            "SELECT": 476,
+            "UPDATE": 180,
+            "INSERT": 54,
+            "DELETE": 4
+          },
+          "controlOnly": 60
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.855959000004077,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 10.563750000012078,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 289,
+          "elapsedMs": 177.42370900002425,
+          "operationPresence": {
+            "SELECT": 216,
+            "UPDATE": 90,
+            "INSERT": 32,
+            "DELETE": 3
+          },
+          "controlOnly": 35
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 11.652459999997518,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 15,
+        "commitOutcomes": 15,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 15
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-3-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 16,
+          "elapsedMs": 118.964541,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 12
+          },
+          "controlOnly": 3
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 104.35824899999955,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 284,
+          "elapsedMs": 552.6820939999969,
+          "operationPresence": {
+            "SELECT": 228,
+            "INSERT": 14,
+            "UPDATE": 80,
+            "DELETE": 4
+          },
+          "controlOnly": 33
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.788248000002568,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.8657079999975394,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-fixture-setup/worker": {
+          "statements": 7,
+          "elapsedMs": 7.919374999997672,
+          "operationPresence": {
+            "SELECT": 6,
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 21.62949899999512,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 284,
+          "elapsedMs": 216.1105419999967,
+          "operationPresence": {
+            "SELECT": 217,
+            "UPDATE": 92,
+            "INSERT": 29,
+            "DELETE": 2
+          },
+          "controlOnly": 31
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 738,
+          "elapsedMs": 821.7012320000104,
+          "operationPresence": {
+            "SELECT": 642,
+            "INSERT": 57,
+            "UPDATE": 93,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 609,
+          "elapsedMs": 437.1980369999328,
+          "operationPresence": {
+            "SELECT": 477,
+            "UPDATE": 181,
+            "INSERT": 54,
+            "DELETE": 4
+          },
+          "controlOnly": 61
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 3.212333999999828,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 5.74908499999583,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 289,
+          "elapsedMs": 154.2466269999968,
+          "operationPresence": {
+            "SELECT": 216,
+            "UPDATE": 89,
+            "INSERT": 32,
+            "DELETE": 3
+          },
+          "controlOnly": 35
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.603086999999505,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 15,
+        "commitOutcomes": 15,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 15
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-5-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 22,
+          "elapsedMs": 130.3781239999998,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 16
+          },
+          "controlOnly": 5
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 95.38557699999984,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 425,
+          "elapsedMs": 1064.6006129999955,
+          "operationPresence": {
+            "SELECT": 340,
+            "INSERT": 20,
+            "UPDATE": 120,
+            "DELETE": 4
+          },
+          "controlOnly": 48
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 7.943583000000217,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.6793340000022,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 22.161085000005187,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 429,
+          "elapsedMs": 295.8992949999938,
+          "operationPresence": {
+            "SELECT": 325,
+            "UPDATE": 140,
+            "INSERT": 47,
+            "DELETE": 2
+          },
+          "controlOnly": 44
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 916,
+          "elapsedMs": 893.65517799999,
+          "operationPresence": {
+            "SELECT": 816,
+            "INSERT": 63,
+            "UPDATE": 99,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 912,
+          "elapsedMs": 614.9397840000274,
+          "operationPresence": {
+            "SELECT": 710,
+            "UPDATE": 269,
+            "INSERT": 86,
+            "DELETE": 4
+          },
+          "controlOnly": 85
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.3849999999984,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.860833999991883,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 422,
+          "elapsedMs": 206.06497399996806,
+          "operationPresence": {
+            "SELECT": 314,
+            "UPDATE": 130,
+            "INSERT": 50,
+            "DELETE": 3
+          },
+          "controlOnly": 46
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 10.037791999995534,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 3,
+        "SUPERSEDED": 3
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 25,
+        "commitOutcomes": 25,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 25
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "baseline-same-5-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 22,
+          "elapsedMs": 118.045998,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 16
+          },
+          "controlOnly": 5
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 100.59308899999934,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 419,
+          "elapsedMs": 599.4164690000122,
+          "operationPresence": {
+            "SELECT": 337,
+            "INSERT": 20,
+            "UPDATE": 117,
+            "DELETE": 4
+          },
+          "controlOnly": 45
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.326540999999452,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.775416999998924,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-fixture-setup/worker": {
+          "statements": 7,
+          "elapsedMs": 5.710207999998602,
+          "operationPresence": {
+            "SELECT": 6,
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 15.947706000002654,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 427,
+          "elapsedMs": 279.650510999998,
+          "operationPresence": {
+            "SELECT": 324,
+            "UPDATE": 139,
+            "INSERT": 47,
+            "DELETE": 2
+          },
+          "controlOnly": 43
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 907,
+          "elapsedMs": 932.582168999943,
+          "operationPresence": {
+            "SELECT": 807,
+            "INSERT": 63,
+            "UPDATE": 99,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 902,
+          "elapsedMs": 526.629834999987,
+          "operationPresence": {
+            "SELECT": 700,
+            "UPDATE": 269,
+            "INSERT": 85,
+            "DELETE": 4
+          },
+          "controlOnly": 86
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.1852079999989655,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 11.489415000000008,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 428,
+          "elapsedMs": 231.18333100002928,
+          "operationPresence": {
+            "SELECT": 318,
+            "UPDATE": 132,
+            "INSERT": 50,
+            "DELETE": 3
+          },
+          "controlOnly": 48
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 11.955418000001373,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 25,
+        "commitOutcomes": 25,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 25
+        },
+        "artifactFallbackReasons": {
+          "input_or_config_mismatch": 2
+        }
+      }
+    },
+    {
+      "file": "baseline-same-5-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 22,
+          "elapsedMs": 120.88328899999999,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 16
+          },
+          "controlOnly": 5
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 106.98920699999962,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 423,
+          "elapsedMs": 631.5815929999972,
+          "operationPresence": {
+            "SELECT": 339,
+            "UPDATE": 120,
+            "INSERT": 20,
+            "DELETE": 4
+          },
+          "controlOnly": 47
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.119208000000981,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.147833000000901,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 15.73917000000074,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 428,
+          "elapsedMs": 271.33440000001974,
+          "operationPresence": {
+            "SELECT": 325,
+            "UPDATE": 139,
+            "INSERT": 46,
+            "DELETE": 2
+          },
+          "controlOnly": 44
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 914,
+          "elapsedMs": 866.0784179999391,
+          "operationPresence": {
+            "SELECT": 814,
+            "INSERT": 63,
+            "UPDATE": 99,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 914,
+          "elapsedMs": 572.3903460000674,
+          "operationPresence": {
+            "SELECT": 714,
+            "UPDATE": 267,
+            "INSERT": 85,
+            "DELETE": 4
+          },
+          "controlOnly": 84
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 27.474083000000974,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 7.71058200000698,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 427,
+          "elapsedMs": 273.6154429999915,
+          "operationPresence": {
+            "SELECT": 317,
+            "UPDATE": 132,
+            "INSERT": 50,
+            "DELETE": 3
+          },
+          "controlOnly": 48
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 6.88216699998884,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 25,
+        "commitOutcomes": 25,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 25
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-1-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 25,
+          "elapsedMs": 118.54641700000008,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 18
+          },
+          "controlOnly": 6
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 109.28583000000009,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 479,
+          "elapsedMs": 518.191416999999,
+          "operationPresence": {
+            "SELECT": 378,
+            "UPDATE": 143,
+            "INSERT": 23,
+            "DELETE": 4
+          },
+          "controlOnly": 57
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 10.237917000004927,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 11.279915999999503,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 12.332665999998426,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 500,
+          "elapsedMs": 294.6464479999904,
+          "operationPresence": {
+            "SELECT": 378,
+            "UPDATE": 162,
+            "INSERT": 56,
+            "DELETE": 2
+          },
+          "controlOnly": 50
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 636,
+          "elapsedMs": 538.3556669999489,
+          "operationPresence": {
+            "SELECT": 541,
+            "INSERT": 65,
+            "UPDATE": 95,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 949,
+          "elapsedMs": 463.2694050001155,
+          "operationPresence": {
+            "SELECT": 728,
+            "UPDATE": 286,
+            "INSERT": 87,
+            "DELETE": 4
+          },
+          "controlOnly": 96
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.268416999999317,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 8.675334999999905,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 493,
+          "elapsedMs": 253.86080399999264,
+          "operationPresence": {
+            "SELECT": 365,
+            "UPDATE": 150,
+            "INSERT": 59,
+            "DELETE": 3
+          },
+          "controlOnly": 54
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 7.22775099998762,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 30,
+        "commitOutcomes": 30,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 30
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-1-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 25,
+          "elapsedMs": 122.34212600000018,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 18
+          },
+          "controlOnly": 6
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 96.09778899999907,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 497,
+          "elapsedMs": 492.57479800000846,
+          "operationPresence": {
+            "SELECT": 390,
+            "INSERT": 23,
+            "UPDATE": 151,
+            "DELETE": 4
+          },
+          "controlOnly": 63
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 8.491793000002872,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.776248999998643,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 14.078167999996367,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 496,
+          "elapsedMs": 282.7928370000209,
+          "operationPresence": {
+            "SELECT": 375,
+            "UPDATE": 161,
+            "INSERT": 56,
+            "DELETE": 2
+          },
+          "controlOnly": 49
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 637,
+          "elapsedMs": 522.3020300000062,
+          "operationPresence": {
+            "SELECT": 541,
+            "INSERT": 66,
+            "UPDATE": 96,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 970,
+          "elapsedMs": 529.2139070000085,
+          "operationPresence": {
+            "SELECT": 744,
+            "UPDATE": 295,
+            "INSERT": 88,
+            "DELETE": 4
+          },
+          "controlOnly": 100
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.2190410000002885,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 10.58087700001488,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 489,
+          "elapsedMs": 249.81896199999028,
+          "operationPresence": {
+            "SELECT": 363,
+            "UPDATE": 148,
+            "INSERT": 58,
+            "DELETE": 3
+          },
+          "controlOnly": 53
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 5.0277489999862155,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 30,
+        "commitOutcomes": 30,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 30
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-1-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 25,
+          "elapsedMs": 123.296582,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 18
+          },
+          "controlOnly": 6
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 97.75782300000014,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 481,
+          "elapsedMs": 657.8457109999997,
+          "operationPresence": {
+            "SELECT": 378,
+            "INSERT": 23,
+            "UPDATE": 144,
+            "DELETE": 4
+          },
+          "controlOnly": 59
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.542457999999897,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.141414999998233,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 15.141917999997531,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 495,
+          "elapsedMs": 271.9575909999967,
+          "operationPresence": {
+            "SELECT": 375,
+            "UPDATE": 160,
+            "INSERT": 55,
+            "DELETE": 2
+          },
+          "controlOnly": 49
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 637,
+          "elapsedMs": 597.2418370000469,
+          "operationPresence": {
+            "SELECT": 541,
+            "INSERT": 66,
+            "UPDATE": 96,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 977,
+          "elapsedMs": 605.6907140000312,
+          "operationPresence": {
+            "SELECT": 750,
+            "UPDATE": 296,
+            "INSERT": 87,
+            "DELETE": 4
+          },
+          "controlOnly": 102
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 13.520418000000063,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 14.502417000006972,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 497,
+          "elapsedMs": 248.7303310000534,
+          "operationPresence": {
+            "SELECT": 369,
+            "UPDATE": 150,
+            "INSERT": 58,
+            "DELETE": 3
+          },
+          "controlOnly": 55
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 7.7043330000087735,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 30,
+        "commitOutcomes": 30,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 30
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-3-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 61,
+          "elapsedMs": 128.11375300000014,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 42
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 102.44787399999944,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1198,
+          "elapsedMs": 814.9939719999875,
+          "operationPresence": {
+            "SELECT": 942,
+            "INSERT": 59,
+            "UPDATE": 357,
+            "DELETE": 4
+          },
+          "controlOnly": 128
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 10.905791000001045,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 11.604707999998936,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 16.92220500000076,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 1337,
+          "elapsedMs": 485.41178600000785,
+          "operationPresence": {
+            "SELECT": 1008,
+            "UPDATE": 429,
+            "INSERT": 154,
+            "DELETE": 2
+          },
+          "controlOnly": 123
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1045,
+          "elapsedMs": 744.6445719998428,
+          "operationPresence": {
+            "SELECT": 925,
+            "INSERT": 102,
+            "UPDATE": 132,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 2592,
+          "elapsedMs": 1010.5188169998946,
+          "operationPresence": {
+            "SELECT": 1961,
+            "UPDATE": 784,
+            "INSERT": 257,
+            "DELETE": 6
+          },
+          "controlOnly": 254
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 3.481791999998677,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.776457000007213,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 1280,
+          "elapsedMs": 410.21262400004343,
+          "operationPresence": {
+            "SELECT": 952,
+            "UPDATE": 374,
+            "INSERT": 154,
+            "DELETE": 3
+          },
+          "controlOnly": 123
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 7.642792000009649,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 90,
+        "commitOutcomes": 90,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 90
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-3-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 61,
+          "elapsedMs": 136.10495999999978,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 42
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 118.33912399999963,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1213,
+          "elapsedMs": 1040.7646689999915,
+          "operationPresence": {
+            "SELECT": 951,
+            "UPDATE": 362,
+            "INSERT": 59,
+            "DELETE": 4
+          },
+          "controlOnly": 134
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 9.133999999999105,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.076291999999739,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 19.515292999996745,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 1337,
+          "elapsedMs": 432.5020640000148,
+          "operationPresence": {
+            "SELECT": 1008,
+            "UPDATE": 429,
+            "INSERT": 153,
+            "DELETE": 2
+          },
+          "controlOnly": 124
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1043,
+          "elapsedMs": 716.1088369999925,
+          "operationPresence": {
+            "SELECT": 925,
+            "INSERT": 100,
+            "UPDATE": 130,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 2573,
+          "elapsedMs": 778.8779980001091,
+          "operationPresence": {
+            "SELECT": 1959,
+            "UPDATE": 767,
+            "INSERT": 242,
+            "DELETE": 4
+          },
+          "controlOnly": 250
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.410666999996465,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 12.114125000003696,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 1289,
+          "elapsedMs": 402.1052049999744,
+          "operationPresence": {
+            "SELECT": 957,
+            "UPDATE": 378,
+            "INSERT": 156,
+            "DELETE": 3
+          },
+          "controlOnly": 125
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.453961000010167,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 90,
+        "commitOutcomes": 90,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 90
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-3-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 61,
+          "elapsedMs": 129.1215000000002,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 42
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 96.75082599999968,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1202,
+          "elapsedMs": 814.2687510000164,
+          "operationPresence": {
+            "SELECT": 946,
+            "UPDATE": 357,
+            "INSERT": 59,
+            "DELETE": 4
+          },
+          "controlOnly": 128
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 10.987334999999803,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 13.180707999999868,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 18.18620799999735,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 1335,
+          "elapsedMs": 443.01572099999066,
+          "operationPresence": {
+            "SELECT": 1005,
+            "UPDATE": 430,
+            "INSERT": 155,
+            "DELETE": 2
+          },
+          "controlOnly": 123
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1043,
+          "elapsedMs": 764.532546000004,
+          "operationPresence": {
+            "SELECT": 925,
+            "INSERT": 100,
+            "UPDATE": 130,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 2555,
+          "elapsedMs": 908.600900999887,
+          "operationPresence": {
+            "SELECT": 1947,
+            "UPDATE": 759,
+            "INSERT": 240,
+            "DELETE": 4
+          },
+          "controlOnly": 246
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 13.0312490000033,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 12.738582000005408,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 1298,
+          "elapsedMs": 423.04175200004465,
+          "operationPresence": {
+            "SELECT": 960,
+            "UPDATE": 384,
+            "INSERT": 160,
+            "DELETE": 3
+          },
+          "controlOnly": 127
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 6.63646000000881,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 90,
+        "commitOutcomes": 90,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 90
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-5-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 97,
+          "elapsedMs": 135.12958499999962,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 66
+          },
+          "controlOnly": 30
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 101.20353999999986,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1926,
+          "elapsedMs": 999.5974609999798,
+          "operationPresence": {
+            "SELECT": 1512,
+            "UPDATE": 574,
+            "INSERT": 95,
+            "DELETE": 4
+          },
+          "controlOnly": 202
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 11.913833999999042,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 12.30949999999757,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 24.24575200000254,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 2171,
+          "elapsedMs": 635.2778430000453,
+          "operationPresence": {
+            "SELECT": 1639,
+            "UPDATE": 692,
+            "INSERT": 248,
+            "DELETE": 2
+          },
+          "controlOnly": 196
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1451,
+          "elapsedMs": 873.1841450000247,
+          "operationPresence": {
+            "SELECT": 1309,
+            "INSERT": 136,
+            "UPDATE": 166,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 4123,
+          "elapsedMs": 1111.2728599998609,
+          "operationPresence": {
+            "SELECT": 3135,
+            "UPDATE": 1221,
+            "INSERT": 393,
+            "DELETE": 4
+          },
+          "controlOnly": 389
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.821041999995941,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 13.756459000000177,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 2100,
+          "elapsedMs": 534.1010179999575,
+          "operationPresence": {
+            "SELECT": 1562,
+            "UPDATE": 608,
+            "INSERT": 248,
+            "DELETE": 3
+          },
+          "controlOnly": 203
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.1785839999975,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 150,
+        "commitOutcomes": 150,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 150
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-5-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 97,
+          "elapsedMs": 135.33758500000022,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 66
+          },
+          "controlOnly": 30
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 98.7986679999999,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1919,
+          "elapsedMs": 986.845339000004,
+          "operationPresence": {
+            "SELECT": 1504,
+            "INSERT": 95,
+            "UPDATE": 574,
+            "DELETE": 4
+          },
+          "controlOnly": 203
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 11.062456999996357,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 13.553624999998647,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 21.26121000000603,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 2185,
+          "elapsedMs": 585.0897849999274,
+          "operationPresence": {
+            "SELECT": 1649,
+            "UPDATE": 696,
+            "INSERT": 246,
+            "DELETE": 2
+          },
+          "controlOnly": 202
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1448,
+          "elapsedMs": 816.3202679999595,
+          "operationPresence": {
+            "SELECT": 1309,
+            "INSERT": 133,
+            "UPDATE": 163,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 4156,
+          "elapsedMs": 1125.0136919999113,
+          "operationPresence": {
+            "SELECT": 3154,
+            "UPDATE": 1239,
+            "INSERT": 403,
+            "DELETE": 4
+          },
+          "controlOnly": 393
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.79766600000221,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 15.758789000003162,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 2069,
+          "elapsedMs": 654.689382000055,
+          "operationPresence": {
+            "SELECT": 1541,
+            "UPDATE": 598,
+            "INSERT": 246,
+            "DELETE": 3
+          },
+          "controlOnly": 195
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 10.925878999994893,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 150,
+        "commitOutcomes": 150,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 150
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-disjoint-5-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 97,
+          "elapsedMs": 135.25828599999994,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 66
+          },
+          "controlOnly": 30
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 91.07736599999953,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 1910,
+          "elapsedMs": 980.1262699999986,
+          "operationPresence": {
+            "SELECT": 1498,
+            "UPDATE": 571,
+            "INSERT": 95,
+            "DELETE": 4
+          },
+          "controlOnly": 200
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 14.825373000001491,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 12.626750999997967,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 23.54370899999958,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 2159,
+          "elapsedMs": 761.1741110000112,
+          "operationPresence": {
+            "SELECT": 1630,
+            "UPDATE": 689,
+            "INSERT": 248,
+            "DELETE": 2
+          },
+          "controlOnly": 193
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 1448,
+          "elapsedMs": 857.6747059999598,
+          "operationPresence": {
+            "SELECT": 1309,
+            "INSERT": 133,
+            "UPDATE": 163,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 4157,
+          "elapsedMs": 1191.1735640000552,
+          "operationPresence": {
+            "SELECT": 3155,
+            "UPDATE": 1239,
+            "INSERT": 403,
+            "DELETE": 7
+          },
+          "controlOnly": 396
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.711039999994682,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 15.071662999998807,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 2110,
+          "elapsedMs": 649.9956260000254,
+          "operationPresence": {
+            "SELECT": 1561,
+            "UPDATE": 620,
+            "INSERT": 262,
+            "DELETE": 3
+          },
+          "controlOnly": 200
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.25762599999507,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 6
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 150,
+        "commitOutcomes": 150,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 150
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-1-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 10,
+          "elapsedMs": 120.94170699999995,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 8
+          },
+          "controlOnly": 1
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 108.06014000000044,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 164,
+          "elapsedMs": 319.4751279999998,
+          "operationPresence": {
+            "SELECT": 132,
+            "INSERT": 8,
+            "UPDATE": 48,
+            "DELETE": 4
+          },
+          "controlOnly": 23
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 4.374000999996497,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.6281660000004194,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 11.967999999998938,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 148,
+          "elapsedMs": 104.44562200001565,
+          "operationPresence": {
+            "SELECT": 116,
+            "UPDATE": 48,
+            "INSERT": 11,
+            "DELETE": 2
+          },
+          "controlOnly": 20
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 536,
+          "elapsedMs": 613.0402870000307,
+          "operationPresence": {
+            "SELECT": 450,
+            "INSERT": 51,
+            "UPDATE": 81,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 307,
+          "elapsedMs": 233.66212200000155,
+          "operationPresence": {
+            "SELECT": 246,
+            "UPDATE": 96,
+            "INSERT": 22,
+            "DELETE": 4
+          },
+          "controlOnly": 36
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.5437090000013995,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 10.723207000006369,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 155,
+          "elapsedMs": 97.41158700003143,
+          "operationPresence": {
+            "SELECT": 118,
+            "UPDATE": 50,
+            "INSERT": 14,
+            "DELETE": 3
+          },
+          "controlOnly": 23
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.81116599998495,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 5,
+        "commitOutcomes": 5,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 5
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-1-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 10,
+          "elapsedMs": 115.71654199999995,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 8
+          },
+          "controlOnly": 1
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 102.54016500000074,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 157,
+          "elapsedMs": 313.152079999992,
+          "operationPresence": {
+            "SELECT": 126,
+            "UPDATE": 46,
+            "INSERT": 8,
+            "DELETE": 4
+          },
+          "controlOnly": 22
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 7.146290000002409,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.622540999998819,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 153,
+          "elapsedMs": 106.65894999999637,
+          "operationPresence": {
+            "SELECT": 121,
+            "UPDATE": 49,
+            "INSERT": 11,
+            "DELETE": 2
+          },
+          "controlOnly": 20
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 15.124706999999034,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 538,
+          "elapsedMs": 585.5141560000575,
+          "operationPresence": {
+            "SELECT": 452,
+            "INSERT": 51,
+            "UPDATE": 81,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 307,
+          "elapsedMs": 210.94091199999457,
+          "operationPresence": {
+            "SELECT": 246,
+            "UPDATE": 96,
+            "INSERT": 22,
+            "DELETE": 4
+          },
+          "controlOnly": 36
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 4.357584000001225,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 8.559585000006336,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 155,
+          "elapsedMs": 84.57512500000303,
+          "operationPresence": {
+            "SELECT": 118,
+            "UPDATE": 50,
+            "INSERT": 14,
+            "DELETE": 3
+          },
+          "controlOnly": 23
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.002329999995709,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 5,
+        "commitOutcomes": 5,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 5
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-1-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 10,
+          "elapsedMs": 183.19324900000015,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 8
+          },
+          "controlOnly": 1
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 127.01624399999923,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 167,
+          "elapsedMs": 281.4464669999958,
+          "operationPresence": {
+            "SELECT": 135,
+            "UPDATE": 49,
+            "INSERT": 8,
+            "DELETE": 4
+          },
+          "controlOnly": 23
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 8.927960999999414,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.325124999999389,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 11.068042000000787,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 145,
+          "elapsedMs": 115.3220009999859,
+          "operationPresence": {
+            "SELECT": 114,
+            "UPDATE": 47,
+            "INSERT": 11,
+            "DELETE": 2
+          },
+          "controlOnly": 19
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 537,
+          "elapsedMs": 590.7441700000309,
+          "operationPresence": {
+            "SELECT": 451,
+            "INSERT": 51,
+            "UPDATE": 81,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 307,
+          "elapsedMs": 207.47567300005176,
+          "operationPresence": {
+            "SELECT": 246,
+            "UPDATE": 96,
+            "INSERT": 22,
+            "DELETE": 4
+          },
+          "controlOnly": 36
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.70829099999537,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.35645900000236,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 155,
+          "elapsedMs": 132.18896000000314,
+          "operationPresence": {
+            "SELECT": 118,
+            "UPDATE": 50,
+            "INSERT": 14,
+            "DELETE": 3
+          },
+          "controlOnly": 23
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 12.379791000013938,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 6,
+      "committedMembershipJobs": 6,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 5,
+        "commitOutcomes": 5,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 18,
+        "placementHandoffOutcomes": {
+          "queued": 5
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-3-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 16,
+          "elapsedMs": 115.37979200000001,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 12
+          },
+          "controlOnly": 3
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 106.40616399999954,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 285,
+          "elapsedMs": 499.43407300000365,
+          "operationPresence": {
+            "SELECT": 229,
+            "INSERT": 14,
+            "UPDATE": 80,
+            "DELETE": 4
+          },
+          "controlOnly": 33
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 11.092627000000903,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.981126000000586,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 294,
+          "elapsedMs": 227.02225000001818,
+          "operationPresence": {
+            "SELECT": 226,
+            "UPDATE": 96,
+            "INSERT": 29,
+            "DELETE": 2
+          },
+          "controlOnly": 32
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 13.721748999998454,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 714,
+          "elapsedMs": 721.6191799999633,
+          "operationPresence": {
+            "SELECT": 624,
+            "INSERT": 57,
+            "UPDATE": 87,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 604,
+          "elapsedMs": 444.2101209999637,
+          "operationPresence": {
+            "SELECT": 474,
+            "UPDATE": 179,
+            "INSERT": 54,
+            "DELETE": 4
+          },
+          "controlOnly": 59
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.870459000001574,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.506542999992234,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 291,
+          "elapsedMs": 177.83772000000317,
+          "operationPresence": {
+            "SELECT": 218,
+            "UPDATE": 91,
+            "INSERT": 32,
+            "DELETE": 3
+          },
+          "controlOnly": 35
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 8.750296000016533,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 15,
+        "commitOutcomes": 15,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 15
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-3-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 16,
+          "elapsedMs": 114.625291,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 12
+          },
+          "controlOnly": 3
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 99.80363399999936,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 286,
+          "elapsedMs": 508.1100539999966,
+          "operationPresence": {
+            "SELECT": 229,
+            "INSERT": 14,
+            "UPDATE": 81,
+            "DELETE": 4
+          },
+          "controlOnly": 34
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 13.429044000000431,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.679500000002008,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 295,
+          "elapsedMs": 216.87287499998274,
+          "operationPresence": {
+            "SELECT": 227,
+            "UPDATE": 96,
+            "INSERT": 29,
+            "DELETE": 2
+          },
+          "controlOnly": 32
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 21.084791000001132,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 715,
+          "elapsedMs": 744.8839510000253,
+          "operationPresence": {
+            "SELECT": 625,
+            "INSERT": 57,
+            "UPDATE": 87,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 622,
+          "elapsedMs": 384.5569690000357,
+          "operationPresence": {
+            "SELECT": 487,
+            "UPDATE": 188,
+            "INSERT": 54,
+            "DELETE": 4
+          },
+          "controlOnly": 64
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.068833000001177,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 9.488038999996206,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 290,
+          "elapsedMs": 168.84400499998446,
+          "operationPresence": {
+            "SELECT": 217,
+            "UPDATE": 91,
+            "INSERT": 32,
+            "DELETE": 3
+          },
+          "controlOnly": 35
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.336460000002262,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 15,
+        "commitOutcomes": 15,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 15
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-3-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 16,
+          "elapsedMs": 118.31079200000005,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 12
+          },
+          "controlOnly": 3
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 92.52728899999954,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 282,
+          "elapsedMs": 517.984375999999,
+          "operationPresence": {
+            "SELECT": 226,
+            "INSERT": 14,
+            "UPDATE": 79,
+            "DELETE": 4
+          },
+          "controlOnly": 33
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 10.814918000000944,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.976915999999619,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 18.843581999999515,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 291,
+          "elapsedMs": 223.6287060000068,
+          "operationPresence": {
+            "SELECT": 223,
+            "UPDATE": 94,
+            "INSERT": 29,
+            "DELETE": 2
+          },
+          "controlOnly": 32
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 716,
+          "elapsedMs": 649.8061990000278,
+          "operationPresence": {
+            "SELECT": 626,
+            "INSERT": 57,
+            "UPDATE": 87,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 607,
+          "elapsedMs": 461.6998770000355,
+          "operationPresence": {
+            "SELECT": 476,
+            "UPDATE": 180,
+            "INSERT": 54,
+            "DELETE": 4
+          },
+          "controlOnly": 60
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 5.6447079999998095,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 8.140581999989081,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 285,
+          "elapsedMs": 184.59037100000205,
+          "operationPresence": {
+            "SELECT": 213,
+            "UPDATE": 88,
+            "INSERT": 32,
+            "DELETE": 3
+          },
+          "controlOnly": 34
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 9.395872999994026,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 18,
+      "committedMembershipJobs": 18,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 15,
+        "commitOutcomes": 15,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 54,
+        "placementHandoffOutcomes": {
+          "queued": 15
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-5-r1.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 22,
+          "elapsedMs": 117.05574999999988,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 16
+          },
+          "controlOnly": 5
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 93.1782139999998,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 421,
+          "elapsedMs": 577.4330350000064,
+          "operationPresence": {
+            "SELECT": 338,
+            "INSERT": 20,
+            "UPDATE": 118,
+            "DELETE": 4
+          },
+          "controlOnly": 46
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 12.66508199999862,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 8.77545900000041,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 16.04304300000149,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 430,
+          "elapsedMs": 226.92179299999952,
+          "operationPresence": {
+            "SELECT": 326,
+            "UPDATE": 141,
+            "INSERT": 47,
+            "DELETE": 2
+          },
+          "controlOnly": 44
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 888,
+          "elapsedMs": 1064.415042000006,
+          "operationPresence": {
+            "SELECT": 794,
+            "INSERT": 63,
+            "UPDATE": 93,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 973,
+          "elapsedMs": 593.3529320000089,
+          "operationPresence": {
+            "SELECT": 752,
+            "UPDATE": 289,
+            "INSERT": 91,
+            "DELETE": 4
+          },
+          "controlOnly": 96
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.792499999999563,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 10.231958000018494,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 428,
+          "elapsedMs": 236.03596200003085,
+          "operationPresence": {
+            "SELECT": 318,
+            "UPDATE": 132,
+            "INSERT": 50,
+            "DELETE": 3
+          },
+          "controlOnly": 48
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 10.161543000001984,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 3,
+        "SUPERSEDED": 3
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 25,
+        "commitOutcomes": 25,
+        "closureFenceRejections": 2,
+        "sourceInputFenceRejections": 1,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 25
+        },
+        "artifactFallbackReasons": {
+          "input_or_config_mismatch": 1
+        }
+      }
+    },
+    {
+      "file": "candidate-same-5-r2.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 22,
+          "elapsedMs": 121.96208399999992,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 16
+          },
+          "controlOnly": 5
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 111.2893259999999,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 418,
+          "elapsedMs": 561.2226220000006,
+          "operationPresence": {
+            "SELECT": 334,
+            "INSERT": 20,
+            "UPDATE": 118,
+            "DELETE": 4
+          },
+          "controlOnly": 47
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 7.7404969999997775,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 6.672666999997091,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 17.349500000000262,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 436,
+          "elapsedMs": 253.9414949999864,
+          "operationPresence": {
+            "SELECT": 332,
+            "UPDATE": 142,
+            "INSERT": 47,
+            "DELETE": 2
+          },
+          "controlOnly": 44
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 890,
+          "elapsedMs": 836.5766979999644,
+          "operationPresence": {
+            "SELECT": 796,
+            "INSERT": 63,
+            "UPDATE": 93,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 920,
+          "elapsedMs": 534.9472489999571,
+          "operationPresence": {
+            "SELECT": 717,
+            "UPDATE": 270,
+            "INSERT": 86,
+            "DELETE": 4
+          },
+          "controlOnly": 86
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 9.66175000000294,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 8.961418000009871,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 428,
+          "elapsedMs": 201.87013399996795,
+          "operationPresence": {
+            "SELECT": 318,
+            "UPDATE": 132,
+            "INSERT": 50,
+            "DELETE": 3
+          },
+          "controlOnly": 48
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 10.083709999995335,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 3,
+        "SUPERSEDED": 3
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 25,
+        "commitOutcomes": 25,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 25
+        },
+        "artifactFallbackReasons": {}
+      }
+    },
+    {
+      "file": "candidate-same-5-r3.json",
+      "phases": {
+        "setup/http/cron": {
+          "statements": 22,
+          "elapsedMs": 115.18925099999979,
+          "operationPresence": {
+            "UPDATE": 1,
+            "INSERT": 16
+          },
+          "controlOnly": 5
+        },
+        "worker-startup-and-warmup/http/cron": {
+          "statements": 164,
+          "elapsedMs": 110.04712600000028,
+          "operationPresence": {
+            "SELECT": 104,
+            "INSERT": 42,
+            "UPDATE": 73,
+            "DELETE": 6
+          },
+          "controlOnly": 18
+        },
+        "worker-startup-and-warmup/worker": {
+          "statements": 424,
+          "elapsedMs": 549.3792100000153,
+          "operationPresence": {
+            "SELECT": 340,
+            "INSERT": 20,
+            "UPDATE": 120,
+            "DELETE": 4
+          },
+          "controlOnly": 47
+        },
+        "warm-worker-idle/worker": {
+          "statements": 14,
+          "elapsedMs": 8.783957999999984,
+          "operationPresence": {
+            "SELECT": 12,
+            "UPDATE": 4
+          },
+          "controlOnly": 2
+        },
+        "event-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 10.194374000000607,
+          "operationPresence": {
+            "INSERT": 2
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/http/cron": {
+          "statements": 17,
+          "elapsedMs": 16.908667999998215,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-start-cohort/worker": {
+          "statements": 428,
+          "elapsedMs": 220.25333700000374,
+          "operationPresence": {
+            "SELECT": 324,
+            "UPDATE": 140,
+            "INSERT": 47,
+            "DELETE": 2
+          },
+          "controlOnly": 44
+        },
+        "fixed-arrival-event-sessions/http/cron": {
+          "statements": 891,
+          "elapsedMs": 766.7369049999888,
+          "operationPresence": {
+            "SELECT": 797,
+            "INSERT": 63,
+            "UPDATE": 93,
+            "DELETE": 6
+          },
+          "controlOnly": 24
+        },
+        "fixed-arrival-event-sessions/worker": {
+          "statements": 934,
+          "elapsedMs": 546.2789579999917,
+          "operationPresence": {
+            "SELECT": 727,
+            "UPDATE": 274,
+            "INSERT": 89,
+            "DELETE": 4
+          },
+          "controlOnly": 87
+        },
+        "event-end-fixture-setup/http/cron": {
+          "statements": 3,
+          "elapsedMs": 7.187499999996362,
+          "operationPresence": {
+            "UPDATE": 2
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/http/cron": {
+          "statements": 16,
+          "elapsedMs": 8.447248000004038,
+          "operationPresence": {
+            "SELECT": 14,
+            "INSERT": 3,
+            "UPDATE": 4
+          },
+          "controlOnly": 1
+        },
+        "event-end-cohort/worker": {
+          "statements": 425,
+          "elapsedMs": 297.24832499996774,
+          "operationPresence": {
+            "SELECT": 316,
+            "UPDATE": 130,
+            "INSERT": 49,
+            "DELETE": 3
+          },
+          "controlOnly": 48
+        },
+        "final-outcome-inspection/http/cron": {
+          "statements": 30,
+          "elapsedMs": 10.053501999998844,
+          "operationPresence": {
+            "SELECT": 30
+          },
+          "controlOnly": 0
+        }
+      },
+      "durableMembershipJobs": 30,
+      "committedMembershipJobs": 30,
+      "acceptedReceiptsCovered": 6,
+      "pollStates": {
+        "SUCCEEDED": 2,
+        "SUPERSEDED": 4
+      },
+      "eventStart": {
+        "starts": 6,
+        "stale": 0,
+        "failures": 0,
+        "bisections": 0,
+        "transactionAttempts": 1
+      },
+      "eventEnd": [
+        {
+          "ends": 6,
+          "transactionAttempts": 1,
+          "failures": 0,
+          "more": false,
+          "retryAfterMs": 250
+        }
+      ],
+      "workerOutcomes": {
+        "scope": "entire worker lifetime, including separately recorded warmup/start/end cohorts",
+        "claims": 25,
+        "commitOutcomes": 25,
+        "closureFenceRejections": 0,
+        "sourceInputFenceRejections": 0,
+        "reportedParticipantRowsChanged": 90,
+        "placementHandoffOutcomes": {
+          "queued": 25
+        },
+        "artifactFallbackReasons": {
+          "fence_mismatch": 1
+        }
+      }
+    }
+  ],
+  "sameFiveLatency": {
+    "baseline-same-5-r1.json": {
+      "GET /home/race-card?view=shell-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 12,
+        "meanMs": 14.916666666666666,
+        "maxMs": 36,
+        "p95Ms": 36
+      },
+      "POST /steps/sync-v2": {
+        "count": 12,
+        "meanMs": 17.666666666666668,
+        "maxMs": 37,
+        "p95Ms": 37
+      },
+      "GET /steps/race-resolution/:id?generation=3": {
+        "count": 18,
+        "meanMs": 5.111111111111111,
+        "maxMs": 11,
+        "p95Ms": 11
+      },
+      "GET /auth/me": {
+        "count": 6,
+        "meanMs": 9.166666666666666,
+        "maxMs": 20,
+        "p95Ms": 20
+      },
+      "GET /races?view=compact": {
+        "count": 6,
+        "meanMs": 17,
+        "maxMs": 37,
+        "p95Ms": 37
+      },
+      "GET /races/:id/progress": {
+        "count": 30,
+        "meanMs": 17.866666666666667,
+        "maxMs": 54,
+        "p95Ms": 48
+      }
+    },
+    "baseline-same-5-r2.json": {
+      "GET /home/race-card?view=shell-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 12,
+        "meanMs": 17,
+        "maxMs": 36,
+        "p95Ms": 36
+      },
+      "POST /steps/sync-v2": {
+        "count": 12,
+        "meanMs": 17.333333333333332,
+        "maxMs": 34,
+        "p95Ms": 34
+      },
+      "GET /steps/race-resolution/:id?generation=3": {
+        "count": 18,
+        "meanMs": 4.444444444444445,
+        "maxMs": 8,
+        "p95Ms": 8
+      },
+      "GET /auth/me": {
+        "count": 6,
+        "meanMs": 10,
+        "maxMs": 32,
+        "p95Ms": 32
+      },
+      "GET /races?view=compact": {
+        "count": 6,
+        "meanMs": 24.333333333333332,
+        "maxMs": 50,
+        "p95Ms": 50
+      },
+      "GET /races/:id/progress": {
+        "count": 30,
+        "meanMs": 16.866666666666667,
+        "maxMs": 46,
+        "p95Ms": 45
+      }
+    },
+    "baseline-same-5-r3.json": {
+      "GET /home/race-card?view=shell-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 12,
+        "meanMs": 15.833333333333334,
+        "maxMs": 30,
+        "p95Ms": 30
+      },
+      "POST /steps/sync-v2": {
+        "count": 12,
+        "meanMs": 17.416666666666668,
+        "maxMs": 44,
+        "p95Ms": 44
+      },
+      "GET /steps/race-resolution/:id?generation=3": {
+        "count": 18,
+        "meanMs": 5.333333333333333,
+        "maxMs": 8,
+        "p95Ms": 8
+      },
+      "GET /auth/me": {
+        "count": 6,
+        "meanMs": 11,
+        "maxMs": 22,
+        "p95Ms": 22
+      },
+      "GET /races?view=compact": {
+        "count": 6,
+        "meanMs": 20.333333333333332,
+        "maxMs": 35,
+        "p95Ms": 35
+      },
+      "GET /races/:id/progress": {
+        "count": 30,
+        "meanMs": 13.566666666666666,
+        "maxMs": 69,
+        "p95Ms": 30
+      }
+    },
+    "candidate-same-5-r1.json": {
+      "GET /home/race-card?view=shell-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 9,
+        "meanMs": 13.777777777777779,
+        "maxMs": 38,
+        "p95Ms": 38
+      },
+      "POST /steps/sync-v2": {
+        "count": 12,
+        "meanMs": 15.333333333333334,
+        "maxMs": 36,
+        "p95Ms": 36
+      },
+      "GET /steps/race-resolution/:id?generation=3": {
+        "count": 18,
+        "meanMs": 4.222222222222222,
+        "maxMs": 7,
+        "p95Ms": 7
+      },
+      "GET /auth/me": {
+        "count": 6,
+        "meanMs": 10.833333333333334,
+        "maxMs": 28,
+        "p95Ms": 28
+      },
+      "GET /home/race-card?view=sync-refresh-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 3,
+        "meanMs": 17.333333333333332,
+        "maxMs": 30,
+        "p95Ms": 30
+      },
+      "GET /races?view=compact": {
+        "count": 6,
+        "meanMs": 19.833333333333332,
+        "maxMs": 58,
+        "p95Ms": 58
+      },
+      "GET /races/:id/progress": {
+        "count": 30,
+        "meanMs": 19.233333333333334,
+        "maxMs": 65,
+        "p95Ms": 64
+      }
+    },
+    "candidate-same-5-r2.json": {
+      "GET /home/race-card?view=shell-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 9,
+        "meanMs": 15.11111111111111,
+        "maxMs": 43,
+        "p95Ms": 43
+      },
+      "POST /steps/sync-v2": {
+        "count": 12,
+        "meanMs": 16.583333333333332,
+        "maxMs": 43,
+        "p95Ms": 43
+      },
+      "GET /steps/race-resolution/:id?generation=3": {
+        "count": 18,
+        "meanMs": 4.388888888888889,
+        "maxMs": 7,
+        "p95Ms": 7
+      },
+      "GET /auth/me": {
+        "count": 6,
+        "meanMs": 11,
+        "maxMs": 29,
+        "p95Ms": 29
+      },
+      "GET /home/race-card?view=sync-refresh-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 3,
+        "meanMs": 17.333333333333332,
+        "maxMs": 31,
+        "p95Ms": 31
+      },
+      "GET /races?view=compact": {
+        "count": 6,
+        "meanMs": 19.333333333333332,
+        "maxMs": 52,
+        "p95Ms": 52
+      },
+      "GET /races/:id/progress": {
+        "count": 30,
+        "meanMs": 17.733333333333334,
+        "maxMs": 59,
+        "p95Ms": 58
+      }
+    },
+    "candidate-same-5-r3.json": {
+      "GET /home/race-card?view=shell-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 10,
+        "meanMs": 13.3,
+        "maxMs": 33,
+        "p95Ms": 33
+      },
+      "POST /steps/sync-v2": {
+        "count": 12,
+        "meanMs": 13.416666666666666,
+        "maxMs": 31,
+        "p95Ms": 31
+      },
+      "GET /steps/race-resolution/:id?generation=3": {
+        "count": 18,
+        "meanMs": 4.277777777777778,
+        "maxMs": 7,
+        "p95Ms": 7
+      },
+      "GET /auth/me": {
+        "count": 6,
+        "meanMs": 11,
+        "maxMs": 25,
+        "p95Ms": 25
+      },
+      "GET /home/race-card?view=sync-refresh-v1&homeActiveRaces=1&localDate=2026-09-10": {
+        "count": 2,
+        "meanMs": 17.5,
+        "maxMs": 27,
+        "p95Ms": 27
+      },
+      "GET /races?view=compact": {
+        "count": 6,
+        "meanMs": 18.833333333333332,
+        "maxMs": 45,
+        "p95Ms": 45
+      },
+      "GET /races/:id/progress": {
+        "count": 30,
+        "meanMs": 17.066666666666666,
+        "maxMs": 62,
+        "p95Ms": 46
+      }
+    }
+  }
+}
