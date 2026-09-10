@@ -1,0 +1,49 @@
+{
+  "date": "2026-09-10",
+  "runtimeCommit": "92b386e78565e58875996619936e44e4038f5d2e",
+  "previousRuntimeCommit": "b8a2969ff977734a0a4ffde18f23749bbb803fb6",
+  "tag": "deploy/trail-preview-20260910-92b386e",
+  "deploymentMethod": "guarded PM2 reload after fast-forward",
+  "explicitUserAuthorization": true,
+  "migrations": [],
+  "configurationChanges": false,
+  "dependencyChanges": false,
+  "environmentAndModifiedLockfilePreserved": true,
+  "onlineProcesses": {
+    "http": 2,
+    "resolution": 1,
+    "cron": 1
+  },
+  "staging": "stopped",
+  "poolBudget": {
+    "http": 20,
+    "resolution": 8,
+    "cron": 4,
+    "total": 32
+  },
+  "health": {
+    "status": "ok",
+    "redis": "ok"
+  },
+  "referralCatchup": {
+    "initialAudit": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    },
+    "applied": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    },
+    "finalAudit": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    }
+  },
+  "sourceLogDigests": {
+    "bara-combined21-deploy.log": "af38498048c9d2f0b8a243842d707c4b3c5604ce3d5ae326bf0f961f4a6feea8",
+    "bara-combined21-smoke.log": "5ab688887d4be73aa3712c68e2b31bb7472a112f97722390ea4408e7201d8309",
+    "bara-combined21-compat-smoke.log": "1718865f51de5394b9d90c60bb89451086de036c79f48b201849bfe64aed0046",
+    "bara-combined21-referral-audit.log": "ad142ac2d768bd674330023acbfef82a5eb7eec63ccad88fb4a50925fe7d5460",
+    "bara-combined21-referral-finish.log": "04a53692997b61eda7346e43ab74c6deeb34ac3548adfd9a73e4e7b864083fe0"
+  }
+}

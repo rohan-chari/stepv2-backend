@@ -1,0 +1,39 @@
+{
+  "integration": {
+    "commit": "92b386e78565e58875996619936e44e4038f5d2e",
+    "passed": 30,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 12464.27175,
+    "files": [
+      "test/integration/accessory-preview.test.js",
+      "test/integration/trail-mine-visibility.test.js",
+      "test/integration/powerups-trail-mine.test.js",
+      "test/integration/character-wardrobes.test.js"
+    ],
+    "databaseSafety": "Dedicated local *_test PostgreSQL identity verified before writes; real local Redis for warm-cache cases"
+  },
+  "unit": {
+    "implementationCommit": "20522fe8325d4bcd4c8b2d77d229f1cb6af9defd",
+    "passed": 3399,
+    "failed": 0,
+    "skipped": 0,
+    "note": "Verified local test DB. Prior same-scope implementation run; not rerun on the clean release cherry-pick."
+  },
+  "redEvidence": [
+    "New preview endpoint returned 404 before implementation.",
+    "Owner Trail Mine position metadata was absent before implementation."
+  ],
+  "checks": [
+    "Reviewed seven-file delta against exact deployed baseline; four additive lines in progress.",
+    "Coin catalog and paged-odds code preserved.",
+    "git diff --check passed.",
+    "Architect and implementation reviewer approved."
+  ],
+  "sourceLogDigests": {
+    "trail-preview-current-integration.log": "0b7930f20ae6d09cf8da5ae7cbeeb76c82068710ad7ac99229e92c9c886d6141",
+    "trail-preview-unit-testdb.log": "775b1e1df80805083f8e81f9c54d55aec3416275523c2a04b846757bcb1139fd",
+    "trail-mine-before.log": "625d4ba09908d5159647f3951a29e350f185a31c707d74bb375d87027c78dc02",
+    "trail-preview-before.log": "bf5796b8e8f0dd3e3d2c6937855e08c6df864256c36a6b9fa3670018aef0e5b5"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "previewAndBilling": {
+    "checkedAt": "2026-09-10T22:01:20.504Z",
+    "results": [
+      {
+        "path": "/shop/items/:itemId/preview",
+        "status": 200,
+        "canPreview": true,
+        "accessoryCount": 2,
+        "usedFallbackCharacter": false
+      },
+      {
+        "path": "/billing/bootstrap?platform=ios",
+        "status": 200,
+        "packs": [
+          {
+            "id": "coins_500",
+            "coins": 500,
+            "storeProductId": "bara_coins_500_v1"
+          },
+          {
+            "id": "coins_2800",
+            "coins": 3000,
+            "storeProductId": "bara_coins_2800_v1"
+          },
+          {
+            "id": "coins_6000",
+            "coins": 7500,
+            "storeProductId": "bara_coins_6000_v1"
+          }
+        ]
+      },
+      {
+        "path": "/billing/bootstrap?platform=android",
+        "status": 200,
+        "available": false
+      },
+      {
+        "path": "/shop/characters",
+        "status": 200
+      }
+    ]
+  },
+  "compatibility": {
+    "checkedAt": "2026-09-10T22:01:40.820Z",
+    "results": [
+      {
+        "path": "/races/:raceId/progress",
+        "status": 200,
+        "reelPreviewAvailable": true,
+        "probabilityCount": 20
+      },
+      {
+        "path": "/races/:raceId/inventory",
+        "status": 200
+      },
+      {
+        "path": "/shop/powerups",
+        "status": 200,
+        "decoyPriceCoins": 150
+      },
+      {
+        "path": "/powerups/catalog",
+        "status": 200,
+        "availabilityVersion": 2,
+        "emptyUpgradeTierRows": 15
+      }
+    ]
+  },
+  "note": "No production mine or ownership data was created for verification. Owner placement/privacy behavior was verified in local HTTP integration tests."
+}
