@@ -18,7 +18,6 @@ async function findEligibleByRace({
   allowMissingImpactEventUserKeys = null,
   participantMemberships = null,
 }) {
-  const queryStartedAt = Date.now();
   const ids = [...new Set((userIds || []).filter(Boolean))];
   const map = new Map(ids.map((id) => [id, []]));
   if (ids.length === 0) return map;
@@ -94,15 +93,6 @@ async function findEligibleByRace({
     if (normalized.startsAt < new Date(normalized.endsAt)) {
       map.get(entitlement.userId)?.push(normalized);
     }
-  }
-  if (entitlements.length > 0) {
-    try {
-      const { recordOperationalCounters } = require("../services/globalStepEventObservability");
-      await recordOperationalCounters(client, {
-        scoringQueries: 1,
-        scoringLatencyMs: Date.now() - queryStartedAt,
-      });
-    } catch {}
   }
   return map;
 }
