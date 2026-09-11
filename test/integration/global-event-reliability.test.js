@@ -1636,7 +1636,7 @@ describe("global-event reliability v2 contract", () => {
       "intentional terminal payload cleanup never becomes repair work");
   });
 
-  it("repairs missing materialization, overdue outbox, snapshot, and terminal-target gaps independently", async () => {
+  it("leaves completed materialization untouched while repairing overdue outbox, snapshot, and terminal-target gaps", async () => {
     const startsAt = new Date("2098-08-26T10:00:00.000Z");
     const current = new Date(startsAt.getTime() + 60_000);
     const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
@@ -1695,7 +1695,7 @@ describe("global-event reliability v2 contract", () => {
     const repaired = await buildNotificationCompletenessReconciler({
       prisma, now: () => current, logger: { log() {}, error() {} },
     })();
-    assert.equal(repaired.materializationGapsRearmed, 2);
+    assert.equal(repaired.materializationGapsRearmed, 0);
     assert.equal(repaired.overdueOutboxesRearmed, 1);
     assert.equal(repaired.missingSnapshotsRearmed, 1);
     assert.equal(repaired.terminalTargetsRepaired, 1);
@@ -1707,14 +1707,15 @@ describe("global-event reliability v2 contract", () => {
     assert.equal(
       await prisma.inboxDeliveryOutbox.count({ where: { alertId: missingOutboxAlert.id } }),
       0,
-      "repair only rearms durable schedules; the dedicated release worker owns materialization",
+      "completed schedules with missing push jobs are no longer reconstructed",
     );
     const release = buildNotificationScheduleRelease({
       notificationIntentService,
       now: () => current,
     });
-    assert.equal((await release()).released, 2);
-    assert.equal(await prisma.inboxDeliveryOutbox.count({ where: { alertId: missingOutboxAlert.id } }), 1);
+    assert.equal((await release()).released, 0);
+    assert.equal(await prisma.inboxDeliveryOutbox.count({ where: { alertId: missingOutboxAlert.id } }), 0);
+    assert.equal(await prisma.inboxAlert.count({ where: { userId: accounts[0].user.id } }), 0);
     assert.equal((await prisma.inboxDeliveryOutbox.findUniqueOrThrow({
       where: { id: overdueOutbox.id },
     })).status, "RETRY");

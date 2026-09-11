@@ -785,7 +785,7 @@ describe("event-start durable notification admission", () => {
     assert.equal(telemetry.at(-1).canceled, 1);
   });
 
-  it("serializes admitted completeness rearm so a retry cannot jump newly restored first work", async () => {
+  it("leaves completed schedules untouched and existing push retries claimable", async () => {
     const startsAt = new Date("2098-08-26T10:00:00.000Z");
     const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
     const fixture = await eventFixture({ count: 2, startsAt, endsAt });
@@ -816,33 +816,20 @@ describe("event-start durable notification admission", () => {
       admissionSequence: 2n,
       admissionExpiresAt: new Date(endsAt.getTime() - GLOBAL_EVENT_DELIVERY_SAFETY_MARGIN_MS),
     } });
-    let releaseLane;
-    let laneLocked;
-    const laneLockedPromise = new Promise((resolve) => { laneLocked = resolve; });
-    const laneBlocked = new Promise((resolve) => { releaseLane = resolve; });
     const reconcile = buildNotificationCompletenessReconciler({
-      prisma, now: () => startsAt,
-      afterAdmissionLaneLock: async () => {
-        laneLocked();
-        await laneBlocked;
-      },
+      prisma,
+      now: () => startsAt,
     });
-
-    const reconciliation = reconcile();
-    await laneLockedPromise;
-    const concurrentClaim = claimProviderAttemptPage({ prisma, now: startsAt, maximumRows: 10 });
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    releaseLane();
-    assert.equal((await reconciliation).materializationGapsRearmed, 1);
-    const claimed = await concurrentClaim;
+    assert.equal((await reconcile()).materializationGapsRearmed, 0);
+    const claimed = await claimProviderAttemptPage({ prisma, now: startsAt, maximumRows: 10 });
 
     assert.equal(claimed.claimed.length, 1);
-    assert.notEqual(claimed.claimed[0].id, retryOutbox.id);
+    assert.equal(claimed.claimed[0].id, retryOutbox.id);
     assert.equal((await prisma.notificationSchedule.findUniqueOrThrow({
       where: { id: rearmedSchedule.id },
     })).status, "MATERIALIZED");
     assert.equal((await prisma.inboxDeliveryOutbox.findUniqueOrThrow({
       where: { id: retryOutbox.id },
-    })).status, "ADMISSION_RETRY");
+    })).status, "ADMISSION_LEASED");
   });
 });

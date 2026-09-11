@@ -1,8 +1,4 @@
 const { prisma: defaultPrisma } = require("../../../db");
-const {
-  ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
-  lockNotificationAdmissionLane,
-} = require("../services/notificationAdmission");
 const redisCache = require("../../../shared/cache/redisCache");
 const { NotificationScheduleReceipt } = require("../models/notificationScheduleReceipt");
 
@@ -137,36 +133,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       }, tx);
       return rows.length;
     });
-    const materializationGapsRearmed = await prisma.$transaction(async (tx) => {
-      await lockNotificationAdmissionLane(tx, {
-        admissionClass: ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
-        now: current,
-      });
-      await dependencies.afterAdmissionLaneLock?.();
-      return tx.$executeRawUnsafe(
-        `WITH candidates AS (
-           SELECT schedule.id
-             FROM notification_schedules schedule
-            WHERE schedule.type='GLOBAL_EVENT_STARTED'
-              AND schedule.status='MATERIALIZED'
-              AND (
-                NOT EXISTS (
-                  SELECT 1 FROM inbox_alerts alert
-                  JOIN inbox_delivery_outbox outbox ON outbox.alert_id=alert.id AND outbox.kind='PUSH'
-                   WHERE alert.user_id=schedule.recipient_user_id
-                     AND alert.source_key=schedule.delivery_key
-                )
-              )
-            ORDER BY schedule.updated_at,schedule.id LIMIT $2
-         )
-         UPDATE notification_schedules schedule
-            SET status=CASE WHEN schedule.admission_class IS NULL THEN 'PENDING' ELSE 'ADMISSION_PENDING' END,
-                claimed_at=NULL,released_at=NULL,
-                canceled_at=NULL,cancellation_reason=NULL,available_at=$1,updated_at=$1
-           FROM candidates WHERE schedule.id=candidates.id`,
-        current, pageSize,
-      );
-    });
     const overdueOutboxesRearmed = await prisma.$executeRawUnsafe(
       `WITH candidates AS (
          SELECT outbox.id
@@ -256,19 +222,20 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       return rows.length;
     });
     if (Number(unknownReset) + Number(projectionsRearmed) > 0) await publishDomainWake();
-    if (Number(materializationGapsRearmed) + Number(overdueOutboxesRearmed) +
+    if (Number(overdueOutboxesRearmed) +
         Number(missingSnapshotsRearmed) > 0) await publishNotificationWake();
     return {
       unknownEventsReset: Number(unknownReset),
       projectionsRearmed: Number(projectionsRearmed),
       linkedDormant: Number(linkedDormant),
-      materializationGapsRearmed: Number(materializationGapsRearmed),
+      // Retain the diagnostic shape for consumers of reconciliation results.
+      materializationGapsRearmed: 0,
       overdueOutboxesRearmed: Number(overdueOutboxesRearmed),
       terminalTargetsRepaired: Number(terminalTargetsRepaired),
       missingSnapshotsRearmed: Number(missingSnapshotsRearmed),
       expired: Number(expired),
       fullPage: Number(unknownReset) === pageSize || Number(projectionsRearmed) === pageSize ||
-        Number(linkedDormant) === pageSize || Number(materializationGapsRearmed) === pageSize ||
+        Number(linkedDormant) === pageSize ||
         Number(overdueOutboxesRearmed) === pageSize || Number(terminalTargetsRepaired) === pageSize ||
         Number(missingSnapshotsRearmed) === pageSize || Number(expired) === pageSize,
     };
