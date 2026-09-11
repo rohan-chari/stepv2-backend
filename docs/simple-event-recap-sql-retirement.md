@@ -1,6 +1,7 @@
 # Simple recap: SQL retirement and deployment gates
 
-Implementation artifact, not deployment authorization. Production has not been changed.
+Implementation artifact, not deployment authorization. See the separate
+[production release audit](simple-event-recap-production-release.md) for actual deployment status.
 
 ## Release A: replacement and stopped-writer cutover
 
@@ -12,6 +13,26 @@ Implementation artifact, not deployment authorization. Production has not been c
 6. Cutover copies all saved IDs, numbers, timestamps and acknowledgments in 500-row pages; preserves null legacy expiry; suppresses nonpositive, null-expiry and previously hidden V1 saved results. It detaches eight old triggers, rewrites notification recovery, changes only ten enumerated retired-storage FKs, removes retired recovery hints/job fences in 500-row statements, and records `simple_event_recap:cutover:v1` in existing `job_runs`. Repeated successful cutover preserves the initial stamp and saved values. Old completed scratch without a live request is removed in bounded 500-owner pages (maximum 10,000 owners, otherwise abort).
 7. Start only the replacement runtime. Its bumped saved-recap cache namespace makes old cached entries unreachable; no Redis-wide flush. Verify old/new Home, acknowledgment, terminal receipt shim, step sync, real race scoring and notification recovery. Inspect SQL/capture counters: no summary scheduler, capture journaling, old-root GC or recap-driven race work.
 8. Record successful deployment time and the final-drop due date in the release audit. The SQL marker proves cutover time; schedule B at least seven days after the **successful replacement deployment**, even if deployment completed later than that marker. Backend owner tracks this task. Client rollout percentage does not control retirement because old endpoints already use the replacement.
+
+### Stopped-writer operator for this cutover
+
+The normal production wrapper is rolling-only and must not be used for this
+retirement. The reviewed `scripts/pm2-safe-recap-cutover.sh` holds the same
+`/run/steps-tracker-pm2.lock` throughout stop, SQL, restart and final validation.
+Supply a JSON object on stdin, never a URL in command arguments or a saved
+credential file: `directUrl`, `expectedCommit`, `backupPath`, `backupSha256`,
+and optional `expectedPackageLockSha256` for the exact known pre-existing
+lockfile modification. No other tracked changes are accepted.
+
+Apply additive migration A first. The operator verifies the backup and source,
+rejects stray production writers, stops all four existing processes, proves
+their OS identities have exited, then retires only identity-matching idle
+application sessions retained by PgBouncer. Unknown/active clients fail closed.
+It executes only cutover and verification SQL, never final drop, then starts
+the existing resolution/cron/two-HTTP topology and validates the 32-connection
+budget before saving PM2. A failure does not authorize restarting old code or
+restoring the database. Its named stage output identifies where to inspect;
+raw subprocess errors and credentials are deliberately suppressed.
 
 ## Release B: physical retirement, at least one week later
 
