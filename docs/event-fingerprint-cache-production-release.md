@@ -43,7 +43,34 @@ Redis was stopped. No integration test used production.
 
 ## Outcome
 
-Pending deployment and exact-release validation. The earlier 31-to-30 read
+Deployed source **`83940f9`**, beginning 2026-09-11 17:35:50 UTC. Independent
+review approved the integrated runtime with no remaining issues. Origin/main
+contains the release. All four migrations succeeded; production now has 268
+applied migrations. The new index is ready and valid; seven fingerprint
+triggers are installed. Prisma generation and the serialized reload succeeded;
+the wrapper verified the final pool budget and saved PM2.
+
+Verified two HTTP workers, one resolution, one cron online; staging stopped.
+Public API reports API/Redis healthy, and all three marketing URLs return 200.
+Observed the new v2 scoring cache in production Redis. The transient queue
+backlog fell from 27 queued jobs (oldest 96 seconds) to three (oldest 28
+seconds), with 47 race jobs completing in the last two-minute sample. No
+running/failed jobs appeared in that final census. Referral audit/apply/final
+audit all reported zero missing rows; apply inserted nothing.
+
+Fresh logs showed no missing-column, BigInt, uncaught-exception, or deadlock
+signals. Billing availability/realm warnings, insufficient-participant
+scheduled starts, notification terminal-failure alerts, and referral HMAC
+configuration warnings continued; each was also present before deployment.
+A transient queue-age alarm occurred during startup and the backlog then
+drained. These pre-existing warnings were not changed by this release.
+
+Restricted server backup: `/root/backups/event-fingerprint-cache-20260911T173550Z`
+contains the original package-lock, source diff, and log offsets/process IDs.
+No dependency installation, environment change, staging start, recap
+cutover/final-drop, catalog mutation, or app release was needed.
+
+The earlier 31-to-30 read
 comparison describes the original test baseline, not measured production CPU
 savings or a new measurement against this integrated release.
 
