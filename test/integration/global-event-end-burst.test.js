@@ -11,8 +11,10 @@ assert.match(target.pathname, /_test$/);
 const { prisma, cleanDatabase, createTestUser, getSharedServer, request } = require('./setup');
 const { buildLocalGlobalStepEventTick } = require('../../src/modules/steps/jobs/globalStepEventScheduler');
 const { buildRaceResolutionWorkerV2 } = require('../../src/modules/races/jobs/raceResolutionQueueV2');
-const { buildGlobalEventSummaryTick } = require('../../src/modules/steps/jobs/globalEventSummary');
 let server;
+async function recapCount(eventId) {
+  return (await prisma.$queryRawUnsafe('SELECT count(*)::int AS n FROM event_recaps WHERE event_id=$1', eventId))[0].n;
+}
 after(async () => { if (server) await server.close(); await prisma.$disconnect(); });
 const logger = { log() {}, error() {} };
 
@@ -38,7 +40,7 @@ async function fixture(size) {
   }
   const event = await prisma.globalStepEvent.create({ data: {
     startsAt: new Date(+current - 3600000), endsAt: new Date(+current - 1800000),
-    scheduleMode: 'LOCAL_ENTITLEMENTS', multiplier: 2, summaryAttributionVersion: 2,
+    scheduleMode: 'LOCAL_ENTITLEMENTS', multiplier: 2,
     eventDay: current.toISOString().slice(0, 10), localStartMinute: 600,
     durationMinutes: 30, schedulePolicyVersion: 1,
   } });
@@ -46,9 +48,10 @@ async function fixture(size) {
     eventId: event.id, userId: user.id, timezone: 'UTC',
     localDate: current.toISOString().slice(0, 10), startsAt: event.startsAt,
     endsAt: event.endsAt, startOutcome: 'ACTIVATED_ON_TIME', startProcessedAt: event.startsAt,
+    recapRaceCount: 2, recapCountPolicyVersion: 1, recapWindowRevision: 0,
   })) });
   await prisma.globalEventRaceImpact.createMany({ data: users.flatMap(user => races.map(race => ({
-    eventId: event.id, userId: user.id, raceId: race.id, attributionVersion: 2,
+    eventId: event.id, userId: user.id, raceId: race.id,
   }))) });
   const body = { date: current.toISOString().slice(0, 10), steps: 100, samples: [{
     periodStart: new Date(+current - 7200000).toISOString(),
@@ -74,15 +77,14 @@ async function observe(t, run) {
   return { queries, elapsedMs: performance.now() - start };
 }
 
-for (const size of [10, 40]) test(`end cohort ${size}: bounded queue writes preserve HTTP totals and durable summaries`, { timeout: 90000 }, async t => {
+for (const size of [10, 40]) test(`end cohort ${size}: bounded queue writes preserve HTTP totals without recap jobs`, { timeout: 90000 }, async t => {
   const f = await fixture(size);
   const before = await prisma.raceResolutionJobV2.findMany({ where: { raceId: { in: f.races.map(r => r.id) } } });
   const result = await observe(t, buildLocalGlobalStepEventTick({ now: () => f.current, logger }));
   const ended = await prisma.globalStepEventEntitlement.count({ where: { eventId: f.event.id, endProcessedAt: { not: null } } });
   assert.equal(ended, size, 'one scheduler tick finishes the bounded cohort');
-  const works = await prisma.globalEventSummaryWork.findMany({ where: { eventId: f.event.id } });
-  assert.equal(works.length, size);
-  assert.ok(works.every(w => w.requiredRaceCount === 2 && w.status === 'WAITING_SYNC'));
+  assert.equal(await recapCount(f.event.id), 0, 'end processing never calculates recaps');
+  assert.ok(!result.queries.some(q => /global_event_summary_work|durable_capture_/.test(q)), 'no retired worker writes');
   const jobs = await prisma.raceResolutionJobV2.findMany({ where: { raceId: { in: f.races.map(r => r.id) } } });
   const bumps = jobs.map(j => j.generation - before.find(b => b.raceId === j.raceId).generation);
   const queueWrites = result.queries.filter(q => /INSERT INTO race_resolution_jobs_v2/.test(q) && /ON CONFLICT \(race_id\) DO UPDATE/.test(q)).length;
@@ -103,7 +105,7 @@ for (const size of [10, 40]) test(`end cohort ${size}: bounded queue writes pres
   console.log(JSON.stringify({ experiment: 'end-cohort-downstream', size, queries: downstream.queries.length, elapsedMs: downstream.elapsedMs }));
   const replay = await observe(t, buildLocalGlobalStepEventTick({ now: () => f.current, logger }));
   assert.equal(replay.queries.filter(q => /INSERT INTO race_resolution_jobs_v2/.test(q) && /ON CONFLICT \(race_id\) DO UPDATE/.test(q)).length, 0);
-  assert.equal(await prisma.globalEventSummaryWork.count({ where: { eventId: f.event.id } }), size);
+  assert.equal(await recapCount(f.event.id), 0, 'recaps are calculated only by an eligible app open');
   assert.ok(queueWrites <= 1, `shared races need one batch enqueue, observed ${queueWrites}`);
   assert.ok(bumps.every(n => n <= 1), `at most one new generation per shared race, observed ${bumps}`);
   assert.ok(result.queries.length <= 45, `cohort work must be bounded rather than per-user: ${result.queries.length}`);
@@ -120,7 +122,7 @@ test('concurrent end schedulers and a fresh HTTP sync retain every participant a
     assert.equal(response.status, 202, await response.text());
   });
   assert.equal(await prisma.globalStepEventEntitlement.count({ where: { eventId: f.event.id, endProcessedAt: { not: null } } }), 40);
-  assert.equal(await prisma.globalEventSummaryWork.count({ where: { eventId: f.event.id } }), 40);
+  assert.equal(await recapCount(f.event.id), 0, 'recaps are calculated only by an eligible app open');
   const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
   for (const race of f.races) {
     const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: race.id } });
@@ -135,7 +137,7 @@ test('concurrent end schedulers and a fresh HTTP sync retain every participant a
   assert.ok(enqueues <= 2, `one end batch plus one HTTP sync, not one per scheduler/user: ${enqueues}`);
 });
 
-test('failure after end stamping rolls back queue and summary work; a later scheduler retries exactly once', { timeout: 90000 }, async t => {
+test('failure after end stamping rolls back queue; a later scheduler retries exactly once without recap work', { timeout: 90000 }, async t => {
   const f = await fixture(10);
   const before = await prisma.raceResolutionJobV2.findMany({ where: { raceId: { in: f.races.map(r => r.id) } } });
   const original = Client.prototype.query;
@@ -154,57 +156,48 @@ test('failure after end stamping rolls back queue and summary work; a later sche
   try { await buildLocalGlobalStepEventTick({ now: () => f.current, logger })(); } finally { spy.mock.restore(); }
   assert.ok(failures > 0, 'fault must occur after a real successful PostgreSQL write');
   assert.equal(await prisma.globalStepEventEntitlement.count({ where: { eventId: f.event.id, endProcessedAt: { not: null } } }), 0);
-  assert.equal(await prisma.globalEventSummaryWork.count({ where: { eventId: f.event.id } }), 0);
+  assert.equal(await recapCount(f.event.id), 0, 'recaps are calculated only by an eligible app open');
   for (const previous of before) {
     const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: previous.raceId } });
     assert.equal(job.generation, previous.generation, 'queue changes roll back with the end stamp');
   }
   const tick = buildLocalGlobalStepEventTick({ now: () => f.current, logger });
   await tick(); await tick();
-  assert.equal(await prisma.globalEventSummaryWork.count({ where: { eventId: f.event.id } }), 10);
+  assert.equal(await recapCount(f.event.id), 0, 'recaps are calculated only by an eligible app open');
   for (const previous of before) {
     const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: previous.raceId } });
     assert.equal(job.generation, previous.generation + 1);
   }
-  const work = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: { eventId_userId: { eventId: f.event.id, userId: f.account.user.id } } });
-  const response = await request(server.baseUrl, 'GET', `/home/global-event-summary-work/${work.id}`, {
-    token: f.account.token, headers: { 'X-Client-Features': 'impact_summaries,impact_summary_expiry_v1' },
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).state, 'WAITING_SYNC');
-});
-
-test('batched end preserves expired, incompatible, zero-race and existing summary outcomes', { timeout: 90000 }, async () => {
-  const f = await fixture(10);
-  const [expiredUser, incompatibleUser, emptyUser, existingUser] = f.users;
-  await prisma.globalStepEventEntitlement.update({ where: { eventId_userId: { eventId: f.event.id, userId: expiredUser.id } },
-    data: { localDate: new Date(+f.current - 86400000).toISOString().slice(0, 10) } });
-  await prisma.globalEventRaceImpact.updateMany({ where: { eventId: f.event.id, userId: incompatibleUser.id },
-    data: { attributionVersion: 1, status: 'FINAL', deltaSteps: 0 } });
-  await prisma.globalEventRaceImpact.deleteMany({ where: { eventId: f.event.id, userId: emptyUser.id } });
-  const existing = await prisma.globalEventSummaryWork.create({ data: {
-    eventId: f.event.id, userId: existingUser.id, status: 'PROCESSING', requiredRaceCount: 2,
-    expiresAt: new Date(+f.current + 3600000), availableAt: f.current,
-    leaseToken: 'existing-worker-lease', leaseUntil: new Date(+f.current + 60000),
-  } });
-  await buildLocalGlobalStepEventTick({ now: () => f.current, logger })();
-  const works = await prisma.globalEventSummaryWork.findMany({ where: { eventId: f.event.id } });
-  assert.equal(works.find(w => w.userId === expiredUser.id).status, 'EXPIRED_UNDELIVERED');
-  assert.equal(works.find(w => w.userId === incompatibleUser.id).status, 'UNSCORABLE');
-  assert.equal(works.find(w => w.userId === emptyUser.id).requiredRaceCount, 0);
-  const retained = works.find(w => w.userId === existingUser.id);
-  assert.equal(retained.id, existing.id);
-  assert.equal(retained.status, 'PROCESSING');
-  assert.equal(retained.leaseToken, 'existing-worker-lease');
-  for (const [user, outcome] of [[expiredUser, 'EXPIRED_UNDELIVERED'], [incompatibleUser, 'UNSCORABLE']]) {
-    const fence = await prisma.jobRun.findUniqueOrThrow({ where: { jobName: `global_event_summary:${f.event.id}:${user.id}:v2` } });
-    assert.equal(fence.lastRanFor, outcome);
-  }
-  const response = await request(server.baseUrl, 'GET', `/home/global-event-summary-work/${works.find(w => w.userId === expiredUser.id).id}`, {
+  const response = await request(server.baseUrl, 'GET', `/home/global-event-summary-work/${randomUUID()}`, {
     token: f.account.token, headers: { 'X-Client-Features': 'impact_summaries,impact_summary_expiry_v1' },
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).state, 'EXPIRED_UNDELIVERED');
+});
+
+test('batched end preserves saved recaps and leaves expired, unknown and zero-race candidates uncalculated', { timeout: 90000 }, async () => {
+  const f = await fixture(10);
+  const [expiredUser, unknownUser, emptyUser, existingUser] = f.users;
+  await prisma.globalStepEventEntitlement.update({ where: { eventId_userId: { eventId: f.event.id, userId: expiredUser.id } },
+    data: { localDate: new Date(+f.current - 86400000).toISOString().slice(0, 10) } });
+  await prisma.globalStepEventEntitlement.update({ where: { eventId_userId: { eventId: f.event.id, userId: unknownUser.id } },
+    data: { recapRaceCount: null, recapCountPolicyVersion: null, recapWindowRevision: null } });
+  await prisma.globalStepEventEntitlement.update({ where: { eventId_userId: { eventId: f.event.id, userId: emptyUser.id } },
+    data: { recapRaceCount: 0 } });
+  await prisma.globalEventRaceImpact.deleteMany({ where: { eventId: f.event.id, userId: emptyUser.id } });
+  const savedId = randomUUID();
+  await prisma.$executeRawUnsafe(`INSERT INTO event_recaps
+    (id,event_id,user_id,calculation_version,raw_steps,race_count,extra_race_steps,settled_at,expires_at,suppressed)
+    VALUES($1,$2,$3,'SIMPLE_RAW_V1',50,2,100,$4,$5,false)`,
+    savedId,f.event.id,existingUser.id,f.current,new Date(+f.current+3600000));
+  await buildLocalGlobalStepEventTick({ now: () => f.current, logger })();
+  assert.equal(await prisma.globalStepEventEntitlement.count({where:{eventId:f.event.id,endProcessedAt:{not:null}}}),10);
+  assert.equal(await recapCount(f.event.id),1,'scheduler neither replaces saved recap nor computes other candidates');
+  const [saved] = await prisma.$queryRawUnsafe('SELECT id,extra_race_steps FROM event_recaps WHERE event_id=$1',f.event.id);
+  assert.equal(saved.id,savedId); assert.equal(saved.extra_race_steps,100);
+  const response = await request(server.baseUrl,'GET','/home/event-recap',{token:f.account.token});
+  assert.equal(response.status,200); assert.deepEqual(await response.json(),{state:'none'});
+  assert.equal((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM job_runs WHERE starts_with(job_name,'global_event_summary:')"))[0].n,0);
 });
 
 test('failed batch still isolates and retries after consuming the original tick budget', { timeout: 30000 }, async t => {
@@ -242,7 +235,7 @@ test('a cohort larger than one page progresses without processing another timezo
   assert.equal(await prisma.globalStepEventEntitlement.count({ where: { eventId: f.event.id, endProcessedAt: { not: null } } }), 100);
   const second = await observe(t, tick);
   assert.equal(await prisma.globalStepEventEntitlement.count({ where: { eventId: f.event.id, endProcessedAt: { not: null } } }), 120);
-  assert.equal(await prisma.globalEventSummaryWork.count({ where: { eventId: f.event.id } }), 120);
+  assert.equal(await recapCount(f.event.id), 0, 'recaps are calculated only by an eligible app open');
   const future = await prisma.globalStepEventEntitlement.findUniqueOrThrow({ where: { eventId_userId: { eventId: f.event.id, userId: futureUser.id } } });
   assert.equal(future.endProcessedAt, null);
   for (const result of [first, second]) {
@@ -251,7 +244,7 @@ test('a cohort larger than one page progresses without processing another timezo
   }
 });
 
-test('in-challenge HTTP samples retain 2x scoring through end batching and summary capture', { timeout: 90000 }, async () => {
+test('in-challenge HTTP samples retain 2x scoring through end batching without summary capture', { timeout: 90000 }, async () => {
   const f = await fixture(10);
   await buildLocalGlobalStepEventTick({ now: () => f.current, logger })();
   const response = await request(server.baseUrl, 'POST', '/steps/sync-v2', {
@@ -262,11 +255,9 @@ test('in-challenge HTTP samples retain 2x scoring through end batching and summa
     }] },
   });
   assert.equal(response.status, 202, await response.text());
-  const summaryTick = buildGlobalEventSummaryTick({ logger });
   const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
   let totals = [];
   for (let attempt = 0; attempt < 30; attempt++) {
-    await summaryTick();
     for (const race of f.races) await worker.processRace({ raceId: race.id });
     totals = await prisma.raceParticipant.findMany({ where: { userId: f.account.user.id }, select: { totalSteps: true } });
     if (totals.every(p => p.totalSteps === 220)) break;
@@ -302,11 +293,9 @@ test('bounded concurrent end drains and timezone travel retain late-upload histo
     }] },
   });
   assert.equal(response.status, 202, await response.text());
-  const summaryTick = buildGlobalEventSummaryTick({ logger });
   const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
   let totals = [];
   for (let attempt = 0; attempt < 30; attempt++) {
-    await summaryTick();
     for (const race of f.races) await worker.processRace({ raceId: race.id });
     totals = await prisma.raceParticipant.findMany({ where: { userId: f.account.user.id }, select: { totalSteps: true } });
     if (totals.every(p => p.totalSteps === 220)) break;

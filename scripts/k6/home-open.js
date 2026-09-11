@@ -136,8 +136,6 @@ const legacyStepRetries = new Counter("home_open_legacy_step_retries");
 const presentationFallbacks = new Counter("home_open_presentation_fallbacks");
 const friendsFallbacks = new Counter("home_open_friends_fallbacks");
 const resolutionPolls = new Counter("home_open_resolution_polls");
-const globalSummaryPolls = new Counter("home_open_global_summary_polls");
-const globalSummaryCreatedRefetches = new Counter("home_open_global_summary_created_refetches");
 const networkErrors = new Counter("home_open_network_errors");
 const endpointStatus = new Counter("home_open_endpoint_status");
 
@@ -232,13 +230,11 @@ function observeNetwork(value) {
       "home-race-card": "/home/race-card", "compact-races": "/races", "suggested-races": "/home/suggested-races",
       "shop-catalog": "/shop/catalog", "friends-summary": "/friends", "auth-me": "/auth/me",
       "assets-manifest": "/assets/manifest", "race-resolution": "/steps/race-resolution/",
-      "global-summary-work": "/home/global-event-summary-work/",
     })[name] && url.includes(({
       "sync-v2": "/steps/sync-v2", "legacy-steps": "/steps", "legacy-samples": "/steps/samples",
       "home-race-card": "/home/race-card", "compact-races": "/races", "suggested-races": "/home/suggested-races",
       "shop-catalog": "/shop/catalog", "friends-summary": "/friends", "auth-me": "/auth/me",
       "assets-manifest": "/assets/manifest", "race-resolution": "/steps/race-resolution/",
-      "global-summary-work": "/home/global-event-summary-work/",
     })[name])) || "unknown";
     const status = failedNetwork ? "timeout" : `${Math.floor(row.status / 100)}xx`;
     endpointStatus.add(1, { endpoint, status });
@@ -258,17 +254,11 @@ function classifySync(response) {
     if (!body) return { retry: false, persisted: false, legacy: false,
       usePersistedHome: false, job: null };
     const receipt = body.raceResolution || {};
-    const summary = body.globalEventSummaryWork;
-    const summaryStates = ["WAITING_SYNC", "QUEUED", "PROCESSING", "WAITING_RACES", "CREATED",
-      "ALL_ZERO", "UNSCORABLE", "EXPIRED_UNDELIVERED"];
-    const summaryWork = isJsonMap(summary) && typeof summary.id === "string" && summary.id.length > 0 &&
-      summaryStates.includes(summary.state) && typeof summary.expiresAt === "string" &&
-      !Number.isNaN(Date.parse(summary.expiresAt)) ? summary : null;
     return { retry: false, persisted: true, legacy: false,
       usePersistedHome: body.uploaderReconciliation?.state === "CURRENT",
       job: typeof receipt.jobId === "string" && Number.isInteger(receipt.generation)
         ? { id: receipt.jobId, generation: receipt.generation } : null,
-      summaryWork };
+      };
   }
   if (response.status === 409) return { retry: false, persisted: true, legacy: false, usePersistedHome: false, job: null };
   return { retry: false, persisted: false, legacy: false, usePersistedHome: false, job: null };
@@ -473,30 +463,16 @@ export async function homeOpen() {
     manifestsOk = check(manifests, { "Home-triggered manifests return 200": (rows) => rows.every(successful) });
   }
 
-  // The app owns two independent background polls. k6 uses one bounded due-time
-  // scheduler so both keep their 750ms/1.5s/3s/5s cadence without serializing
-  // one entire receipt behind the other.
+  // Only ordinary race resolution is polled; recap work no longer exists.
   let resolutionSettled = !sync.job;
-  let globalSummarySettled = !sync.summaryWork;
+  const globalSummarySettled = true; // historical report compatibility
   let raceActive = Boolean(sync.job);
-  let summaryActive = Boolean(sync.summaryWork);
-  const summaryTerminal = ["ALL_ZERO", "UNSCORABLE", "EXPIRED_UNDELIVERED"];
-  if (sync.summaryWork?.state === "CREATED") {
-    globalSummaryCreatedRefetches.add(1);
-    const createdCard = http.get(`${__ENV.K6_BASE_URL}/home/race-card?view=shell-v1&homeActiveRaces=1&localDate=${today}`,
-      { headers: userHeaders(user), tags: { endpoint: "home-race-card", critical: "false", telemetry: "sut" },
-        timeout: `${Math.max(100, Math.min(5000, deadlineRemainingMs()))}ms`, responseCallback: http.expectedStatuses(200) });
-    observeNetwork(createdCard); globalSummarySettled = successful(createdCard); summaryActive = false;
-  } else if (summaryTerminal.includes(sync.summaryWork?.state)) {
-    globalSummarySettled = true; summaryActive = false;
-  }
   const waitsMs = [750, 1500, 3000, 5000];
-  let raceIndex = 0; let summaryIndex = 0;
-  let raceDueMs = waitsMs[0]; let summaryDueMs = waitsMs[0];
-  while ((raceActive && raceIndex < waitsMs.length || summaryActive) && deadlineRemainingMs() > 100) {
+  let raceIndex = 0;
+  let raceDueMs = waitsMs[0];
+  while (raceActive && raceIndex < waitsMs.length && deadlineRemainingMs() > 100) {
     const nextRace = raceActive && raceIndex < waitsMs.length ? raceDueMs : Number.POSITIVE_INFINITY;
-    const nextSummary = summaryActive ? summaryDueMs : Number.POSITIVE_INFINITY;
-    const dueMs = Math.min(nextRace, nextSummary);
+    const dueMs = nextRace;
     const remainingUntilDue = dueMs - (Date.now() - began);
     if (deadlineRemainingMs() <= Math.max(0, remainingUntilDue) + 100) break;
     if (remainingUntilDue > 0) sleep(remainingUntilDue / 1000);
@@ -521,25 +497,6 @@ export async function homeOpen() {
         raceActive = false;
       } else if (["FAILED", "SUPERSEDED", "NOT_FOUND"].includes(state) ||
           poll.status === 400 || poll.status === 404 || raceIndex >= waitsMs.length) raceActive = false;
-    }
-    if (nextSummary === dueMs && summaryActive) {
-      globalSummaryPolls.add(1); summaryIndex += 1;
-      summaryDueMs += waitsMs[Math.min(summaryIndex, waitsMs.length - 1)];
-      const poll = http.get(`${__ENV.K6_BASE_URL}/home/global-event-summary-work/${sync.summaryWork.id}`,
-        { headers: userHeaders(user), tags: { endpoint: "global-summary-work", critical: "false", telemetry: "sut" },
-          timeout: `${Math.max(100, Math.min(5000, deadlineRemainingMs()))}ms`,
-          responseCallback: http.expectedStatuses(200) });
-      observeNetwork(poll);
-      const body = parseMap(poll); const state = String(body?.state || "").toUpperCase();
-      if (state === "CREATED") {
-        globalSummaryCreatedRefetches.add(1);
-        const createdCard = http.get(`${__ENV.K6_BASE_URL}/home/race-card?view=shell-v1&homeActiveRaces=1&localDate=${today}`,
-          { headers: userHeaders(user), tags: { endpoint: "home-race-card", critical: "false", telemetry: "sut" },
-            timeout: `${Math.max(100, Math.min(5000, deadlineRemainingMs()))}ms`, responseCallback: http.expectedStatuses(200) });
-        observeNetwork(createdCard); globalSummarySettled = successful(createdCard); summaryActive = false;
-      } else if (!body || !successful(poll) || summaryTerminal.includes(state)) {
-        globalSummarySettled = true; summaryActive = false;
-      }
     }
   }
   const suggested = await suggestedPromise;

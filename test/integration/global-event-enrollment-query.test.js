@@ -93,7 +93,7 @@ test('zero-created full pages advance past exact-start/elapsed users to future t
   const event = await h.prisma.globalStepEvent.create({ data: {
     id: 'boundary-event', eventDay: '2098-01-01', scheduleMode: 'LOCAL_ENTITLEMENTS',
     startsAt: new Date('2097-12-31T20:00:00Z'), endsAt: new Date('2098-01-02T00:00:00Z'),
-    localStartMinute: 600, durationMinutes: 30, summaryAttributionVersion: 2,
+    localStartMinute: 600, durationMinutes: 30,
   } });
   await h.prisma.user.update({ where: { id: id(500) }, data: { globalEventTimezone: 'America/New_York', timezone: 'America/New_York' } });
   await h.prisma.user.update({ where: { id: id(501) }, data: { globalEventTimezone: 'invalid-zone', timezone: 'invalid-zone' } });
@@ -149,7 +149,6 @@ test('legacy/current HTTP progress expose the same active event after the real s
     scheduleMode: 'LOCAL_ENTITLEMENTS', eventDay: start.toISOString().slice(0, 10),
     localStartMinute: 720 + start.getUTCMinutes(), durationMinutes: 30,
     startsAt: new Date(+start - 14 * 3600_000), endsAt: new Date(+start + 14 * 3600_000),
-    summaryAttributionVersion: 2,
   } });
   await h.tick({ now: beforeStart, freezeBudget: true });
   await buildGlobalEventBoundaryDrain({ now: () => current }).runUntilIdle();

@@ -75,10 +75,6 @@ describe("home-open capacity session public HTTP contract", () => {
       startsAt: new Date(Date.now() - 60_000), endsAt: new Date(Date.now() + 60_000),
       multiplier: 2, label: "snapshot-active-event",
     } });
-    await prisma.globalEventSummaryWork.create({ data: {
-      eventId: activeEvent.id, userId: snapshotUser.id, status: "WAITING_SYNC",
-      expiresAt: new Date(Date.now() + 3_600_000),
-    } });
     const fixture = await createHomeOpenFixtures({ prisma, runId, users: 10, arrivalRate: 1, env: process.env });
     const fixtureParticipants = await prisma.raceParticipant.findMany({
       where: { id: { in: fixture.manifest.ids.raceParticipants } },
@@ -104,10 +100,10 @@ describe("home-open capacity session public HTTP contract", () => {
     assert.equal(fixtureUserBefore.metricsV2EligibleEpochId, metricsEpoch.id);
     assert.ok(fixtureUserBefore.metricsV2EligibleAt instanceof Date);
     assert.equal(await prisma.globalStepEvent.count(), 0);
-    assert.equal(await prisma.globalEventSummaryWork.count(), 0);
+    assert.equal(await prisma.eventRecap.count(), 0);
     assert.deepEqual(fixture.topology.globalEventIsolation, {
       snapshotActiveEventCount: 1, removedEventCount: 1,
-      removedSummaryWorkCount: 1, activeEventCountAfterIsolation: 0,
+      removedSummaryWorkCount: 0, activeEventCountAfterIsolation: 0,
       summaryWorkCountAfterIsolation: 0,
     });
     let cleanup; let session;

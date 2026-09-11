@@ -36,7 +36,6 @@ const {
   scheduleGlobalEventBoundaryDrain,
   scheduleGlobalEventEntitlementEventReconciler,
 } = require("./modules/steps");
-const { scheduleGlobalEventSummaryTick } = require("./modules/steps");
 const { scheduleStepSampleRetention } = require("./modules/steps");
 const {
   scheduleAutoStartScheduledRaces,
@@ -119,7 +118,6 @@ function startServer({
   scheduleGlobalEventBoundaryDrain: scheduleGlobalEventBoundaryDrainJob = scheduleGlobalEventBoundaryDrain,
   scheduleGlobalEventEntitlementEventReconciler:
     scheduleGlobalEventEntitlementEventReconcilerJob = scheduleGlobalEventEntitlementEventReconciler,
-  scheduleGlobalEventSummaryTick: scheduleGlobalSummary = scheduleGlobalEventSummaryTick,
   scheduleStepSampleRetention: scheduleStepRetention = scheduleStepSampleRetention,
   scheduleAutoStartScheduledRaces:
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
@@ -189,8 +187,8 @@ function startServer({
   // production environment switch: it runs the complete event notification
   // path while excluding unrelated whole-base jobs from the measurement.
   capacityGlobalEventOnly = false,
-  // Capacity-only global-event step-sync profile: keep the summary and
-  // boundary schedulers alive, while excluding unrelated cron fan-outs.
+  // Capacity-only event step-sync profile: keep ordinary boundary schedulers
+  // alive while excluding unrelated cron fan-outs. Recaps have no scheduler.
   capacityGlobalEventSync = false,
   // Injected only by the local capacity entrypoint. Production startup cannot
   // use this to suppress cron work.
@@ -287,7 +285,6 @@ function startServer({
         retainStopHandle(scheduleGlobalEvents());
         retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
         retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
-        retainStopHandle(scheduleGlobalSummary());
         return;
       }
       // Home-open capacity runs retain the production cron process and its
@@ -316,7 +313,6 @@ function startServer({
       retainStopHandle(scheduleGlobalEvents());
       retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
       retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
-      retainStopHandle(scheduleGlobalSummary());
       scheduleAutoStartRaces();
       // Established fan-outs share the single operational brake.
       if (!userFanoutDisabled("LIVE_PLACEMENT_DISABLED")) {

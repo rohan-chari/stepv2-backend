@@ -1,5 +1,7 @@
 # Post-global-event step-sync capacity harness requirements
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 **Status:** Draft for approval (architect review incorporated)
 **Owner:** Backend / performance tooling
 **Operator entrypoint:** `./perf global-event-sync <mode>` (proposed)

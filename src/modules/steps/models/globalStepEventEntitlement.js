@@ -57,7 +57,7 @@ async function findEligibleByRace({
   const [impacts, memberships] = await Promise.all([
     eventIds.length === 0 ? [] : client.globalEventRaceImpact.findMany({
       where: { raceId, userId: { in: ids }, eventId: { in: eventIds } },
-      select: { id: true, eventId: true, userId: true, status: true },
+      select: { id: true, eventId: true, userId: true },
     }),
     // Membership clipping is consumed only by local entitlements below.
     // An empty entitlement result needs no roster query at all; legacy global

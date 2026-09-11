@@ -134,7 +134,6 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/services/seededChallengeAdmission.js": ["raceParticipant.create", "raceParticipant.update"],
   "src/modules/races/services/seededChallengeMaterialization.js": ["raceParticipant.createMany"],
   "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
-  "src/modules/loadTesting/globalEventSyncFixture.js": ["raceParticipant.deleteMany"],
   "src/modules/loadTesting/racesTabOpenFixtures.js": [
     "raceParticipant.deleteMany",
     "tournamentParticipant.deleteMany",
@@ -439,7 +438,6 @@ const INDIRECT_MEMBERSHIP_LOCK_OWNERS = {
 
 const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/loadTesting/fixtures.js",
-  "src/modules/loadTesting/globalEventSyncFixture.js",
   "src/modules/loadTesting/racesTabOpenFixtures.js",
   "src/modules/notifications/dailyMover.js",
   "src/modules/powerups/commands/openMysteryBox.js",

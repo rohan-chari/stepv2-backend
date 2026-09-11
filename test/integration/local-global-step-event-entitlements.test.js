@@ -31,9 +31,6 @@ const {
   resolveExpiredRaces,
 } = require("../../src/modules/races/jobs/raceExpiry");
 const {
-  buildGlobalEventSummaryTick,
-} = require("../../src/modules/steps/jobs/globalEventSummary");
-const {
   buildMaybeStartGlobalEvent,
 } = require("../../src/modules/steps/jobs/globalStepEventScheduler");
 const {
@@ -206,7 +203,6 @@ test("HTTP Home active-event contract remains exactly backward compatible", asyn
     eventId: event.id,
     raceId: race.id,
     userId: user.id,
-    status: "PENDING",
   } });
 
   const response = await request(server.baseUrl, "GET", "/home/race-card", { token });
@@ -271,7 +267,6 @@ test("unique entitlement snapshot and race/viewer eligibility are participant-sp
     eventId: event.id,
     raceId: race.id,
     userId: madrid.id,
-    status: "PENDING",
   } });
 
   await assert.rejects(
@@ -461,8 +456,8 @@ test("authenticated uploads and progress keep two local zones isolated and old c
       startProcessedAt: madridWindow.startsAt, endProcessedAt: madridWindow.endsAt },
   ] });
   await prisma.globalEventRaceImpact.createMany({ data: [
-    { eventId: scoredParent.id, raceId: race.id, userId: ny.id, status: "PENDING" },
-    { eventId: scoredParent.id, raceId: race.id, userId: madrid.id, status: "PENDING" },
+    { eventId: scoredParent.id, raceId: race.id, userId: ny.id },
+    { eventId: scoredParent.id, raceId: race.id, userId: madrid.id },
   ] });
 
   const [nyUpload, madridUpload] = await Promise.all([
@@ -539,7 +534,7 @@ test("HTTP progress clips local boost to race start and each participant's late 
     endProcessedAt: windowEnd,
   })) });
   await prisma.globalEventRaceImpact.createMany({ data: [creator.id, late.id].map((userId) => ({
-    eventId: event.id, raceId: race.id, userId, status: "PENDING",
+    eventId: event.id, raceId: race.id, userId,
   })) });
   const sample = {
     periodStart: windowStart.toISOString(), periodEnd: windowEnd.toISOString(), steps: 100,
@@ -757,7 +752,7 @@ test("Redis-down cold HTTP progress uses participant-specific PostgreSQL local e
       endsAt: new Date(now.getTime() + 5.5 * 60 * 60 * 1000) },
   ] });
   await prisma.globalEventRaceImpact.createMany({ data: [ny.id, madrid.id].map((userId) => ({
-    eventId: event.id, raceId: race.id, userId, status: "PENDING",
+    eventId: event.id, raceId: race.id, userId,
   })) });
 
   const priorUrl = process.env.REDIS_URL;
@@ -944,7 +939,7 @@ test("operational snapshots tolerate PostgreSQL-unknown legacy timezone aliases"
   assert.equal(snapshot.entitlementsByOffset.utc_minus_6_to_0, 1);
 });
 
-test("retention deletes complete 30-day lifecycle dependents but keeps active-race and unsettled-summary rows", async () => {
+test("retention deletes complete 30-day lifecycle dependents regardless of recap settlement but keeps active races", async () => {
   const accounts = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
   const now = new Date();
   const oldStart = new Date(now.getTime() - 32 * 24 * 60 * 60 * 1000);
@@ -974,10 +969,10 @@ test("retention deletes complete 30-day lifecycle dependents but keeps active-ra
     } });
     await prisma.globalEventRaceImpact.create({ data: {
       eventId: event.id, raceId: race.id, userId: user.id,
-      status: "FINAL", deltaSteps: 10, settledAt: oldEnd,
     } });
-    await prisma.globalEventUserSummary.create({ data: {
+    await prisma.eventRecap.create({ data: {
       eventId: event.id, userId: user.id, extraRaceSteps: 10, raceCount: 1,
+      calculationVersion: "SIMPLE_RAW_V1", rawSteps: 10, expiresAt: oldEnd,
       settledAt: kind === "unsettled" ? now : oldEnd,
       acknowledgedAt: kind === "deletable" ? now : null,
     } });
@@ -985,18 +980,18 @@ test("retention deletes complete 30-day lifecycle dependents but keeps active-ra
   }
 
   const result = await cleanupExpiredEntitlements({ client: prisma, now });
-  assert.equal(result.deletedEntitlements, 1);
-  assert.equal(result.blockedEntitlements, 2);
+  assert.equal(result.deletedEntitlements, 2);
+  assert.equal(result.blockedEntitlements, 1);
   assert.equal(await prisma.globalStepEventEntitlement.count({ where: { id: ids.deletable.entitlementId } }), 0);
   assert.equal(await prisma.globalEventRaceImpact.count({ where: {
     eventId: ids.deletable.eventId, userId: ids.deletable.userId,
   } }), 0);
-  assert.equal(await prisma.globalEventUserSummary.count({ where: {
+  assert.equal(await prisma.eventRecap.count({ where: {
     eventId: ids.deletable.eventId, userId: ids.deletable.userId,
   } }), 0);
   assert.equal(await prisma.globalStepEventEntitlement.count({ where: {
     id: { in: [ids.active.entitlementId, ids.unsettled.entitlementId] },
-  } }), 2);
+  } }), 1);
 });
 
 test("HTTP live totals settle identically across two races and summarize only the locally eligible participant", async () => {
@@ -1014,7 +1009,8 @@ test("HTTP live totals settle identically across two races and summarize only th
     startsAt: eventStart, endsAt: eventEnd,
   } });
   await prisma.globalStepEventEntitlement.create({ data: {
-    eventId: event.id, userId: eligible.id, timezone: "UTC", localDate: "2098-11-01",
+    eventId: event.id, userId: eligible.id, timezone: "UTC", localDate: now.toISOString().slice(0, 10),
+    recapRaceCount: 2, recapCountPolicyVersion: 1, recapWindowRevision: 0,
     startsAt: eventStart, endsAt: eventEnd,
     startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: eventStart,
     endProcessedAt: eventEnd,
@@ -1030,7 +1026,7 @@ test("HTTP live totals settle identically across two races and summarize only th
       raceId: race.id, userId, status: "ACCEPTED", joinedAt: raceStart,
     })) });
     await prisma.globalEventRaceImpact.create({ data: {
-      eventId: event.id, raceId: race.id, userId: eligible.id, status: "PENDING",
+      eventId: event.id, raceId: race.id, userId: eligible.id,
     } });
     races.push(race);
   }
@@ -1053,18 +1049,19 @@ test("HTTP live totals settle identically across two races and summarize only th
     assert.equal(participants.find((row) => row.userId === ineligible.id).totalSteps, liveIneligible);
   }
   assert.equal(await prisma.globalEventRaceImpact.count({ where: {
-    eventId: event.id, userId: eligible.id, status: "FINAL",
+    eventId: event.id, userId: eligible.id,
   } }), 2);
   assert.equal(await prisma.globalEventRaceImpact.count({ where: {
     eventId: event.id, userId: ineligible.id,
   } }), 0);
-  assert.deepEqual(await buildGlobalEventSummaryTick({ prisma, now: () => now })(), { upserts: 1 });
-  const summary = await prisma.globalEventUserSummary.findUnique({
-    where: { eventId_userId: { eventId: event.id, userId: eligible.id } },
+  const recapResponse = await request(server.baseUrl, "POST", "/home/event-recap", {
+    token, body: { eventId: event.id, revision: 0, rawSteps: 100 },
   });
+  assert.equal(recapResponse.status, 200);
+  const summary = (await recapResponse.json()).globalEventSummary;
   assert.equal(summary.raceCount, 2);
   assert.equal(summary.extraRaceSteps, 200);
-  assert.equal(await prisma.globalEventUserSummary.count({ where: { userId: ineligible.id } }), 0);
+  assert.equal(await prisma.eventRecap.count({ where: { userId: ineligible.id } }), 0);
 });
 
 test("active-impact capture stacks only the recipient's local entitlement through HTTP upload and worker", async () => {
@@ -1096,7 +1093,7 @@ test("active-impact capture stacks only the recipient's local entitlement throug
     endProcessedAt: eventEnd,
   } });
   await prisma.globalEventRaceImpact.create({ data: {
-    eventId: event.id, raceId: race.id, userId: eligible.id, status: "PENDING",
+    eventId: event.id, raceId: race.id, userId: eligible.id,
   } });
   const effectStart = new Date(now.getTime() - 70 * 60 * 1000);
   const effectEnd = new Date(now.getTime() - 20 * 60 * 1000);
@@ -1327,7 +1324,7 @@ test("HTTP step-sync dependency closure fails closed while that participant's lo
     startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: event.startsAt,
   } });
   await prisma.globalEventRaceImpact.create({ data: {
-    eventId: event.id, raceId: race.id, userId: user.id, status: "PENDING",
+    eventId: event.id, raceId: race.id, userId: user.id,
   } });
   const powerup = await prisma.racePowerup.create({ data: {
     raceId: race.id, participantId: participant.id, userId: user.id,
@@ -1457,7 +1454,7 @@ test("enabled Home cache is user-isolated, invalidated at end, and progress does
     startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: now,
   } });
   await prisma.globalEventRaceImpact.create({ data: {
-    eventId: event.id, raceId: race.id, userId: active.id, status: "PENDING",
+    eventId: event.id, raceId: race.id, userId: active.id,
   } });
   const previousRedisUrl = process.env.REDIS_URL;
   process.env.REDIS_URL = process.env.LOCAL_REDIS_TEST_URL || "redis://127.0.0.1:6379/15";
@@ -1526,7 +1523,7 @@ test("HTTP display artifact cannot cross a participant's local entitlement end f
     startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: entitlementStart,
   } });
   await prisma.globalEventRaceImpact.create({ data: {
-    eventId: event.id, raceId: race.id, userId: user.id, status: "PENDING",
+    eventId: event.id, raceId: race.id, userId: user.id,
   } });
 
   const previousRedisUrl = process.env.REDIS_URL;

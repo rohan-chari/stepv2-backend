@@ -70,7 +70,7 @@ async function parents(now = NOW) {
       startsAt: new Date(`${eventDay}T00:00:00Z`),
       endsAt: new Date(`${eventDay}T23:59:00Z`),
       localStartMinute: 600, durationMinutes: 30, schedulePolicyVersion: 2,
-      summaryAttributionVersion: 2, multiplier: 2,
+      multiplier: 2,
     } }));
   }
   return events;

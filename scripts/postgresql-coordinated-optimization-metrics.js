@@ -82,7 +82,7 @@ async function main() {
       const statements = await client.query(`SELECT queryid::text,calls,total_exec_time,mean_exec_time,rows,
           shared_blks_hit,shared_blks_read,wal_bytes::text,query
           FROM pg_stat_statements
-          WHERE query ~* '(race_resolution|race_placement|domain_event|notification_schedule|inbox_delivery|global_event_summary|step_samples)'
+          WHERE query ~* '(race_resolution|race_placement|domain_event|notification_schedule|inbox_delivery|event_recaps|step_samples)'
           ORDER BY total_exec_time DESC LIMIT 100`).catch(() => ({ rows: [] }));
       const pgss = await client.query(`SELECT stats_reset,dealloc FROM pg_stat_statements_info`)
         .catch(() => ({ rows: [] }));
@@ -93,12 +93,11 @@ async function main() {
           UNION ALL SELECT 'domain_event_outbox',status,COUNT(*) FROM domain_event_outbox GROUP BY status
           UNION ALL SELECT 'notification_schedules',status,COUNT(*) FROM notification_schedules GROUP BY status
           UNION ALL SELECT 'inbox_delivery_outbox',status,COUNT(*) FROM inbox_delivery_outbox GROUP BY status
-          UNION ALL SELECT 'global_event_summary_work',status,COUNT(*) FROM global_event_summary_work GROUP BY status
         ) queues ORDER BY queue,status`);
       const tables = await client.query(`SELECT relname,n_live_tup,n_dead_tup,n_tup_ins,n_tup_upd,n_tup_hot_upd,n_tup_del,
           seq_scan,seq_tup_read,idx_scan,last_autovacuum,autovacuum_count
           FROM pg_stat_user_tables
-          WHERE relname ~ '(race_resolution|race_placement|domain_event|notification_schedule|inbox_delivery|global_event_summary)'
+          WHERE relname ~ '(race_resolution|race_placement|domain_event|notification_schedule|inbox_delivery|event_recaps)'
           ORDER BY relname`);
       const provisionals = await client.query(`SELECT COUNT(*)::bigint AS count,
           EXTRACT(EPOCH FROM (now()-MIN(created_at)))::float8 AS oldest_seconds

@@ -23,7 +23,7 @@ test('real cron enrollment pages unique users in PostgreSQL', {timeout:150000}, 
  const dormant=await prisma.race.create({data:{name:'Dormant',status:'PENDING',targetSteps:10000}});
  await prisma.raceParticipant.createMany({data:excluded.map((u,i)=>({raceId:i===3?dormant.id:races[0].id,userId:u.id,status:i===0?'INVITED':'ACCEPTED',buyInStatus:'NONE',...(i===1?{forfeitedAt:new Date()}:{}),...(i===2?{finishedAt:new Date()}: {})}))});
  const day=new Date(Date.now()+2*86400000).toISOString().slice(0,10);
- const event=await prisma.globalStepEvent.create({data:{startsAt:new Date(day+'T08:00:00Z'),endsAt:new Date(day+'T08:30:00Z'),scheduleMode:'LOCAL_ENTITLEMENTS',eventDay:day,localStartMinute:480,durationMinutes:30,summaryAttributionVersion:2,multiplier:2}});
+ const event=await prisma.globalStepEvent.create({data:{startsAt:new Date(day+'T08:00:00Z'),endsAt:new Date(day+'T08:30:00Z'),scheduleMode:'LOCAL_ENTITLEMENTS',eventDay:day,localStartMinute:480,durationMinutes:30,multiplier:2}});
  const otherEvent=await prisma.globalStepEvent.create({data:{startsAt:event.startsAt,endsAt:event.endsAt,multiplier:2}});
  const entitlement=(eventId,userId)=>({eventId,userId,timezone:'UTC',localDate:day,startsAt:event.startsAt,endsAt:event.endsAt,startOutcome:'PENDING'});
  await prisma.globalStepEventEntitlement.createMany({data:[entitlement(event.id,users[0].id),entitlement(otherEvent.id,users[2].id)]});

@@ -2,7 +2,9 @@ const efficiency = require('../../../shared/cache/cacheEfficiencyInvalidation');
 async function entitlementsChanged(userIds) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   if (!ids.length) return;
-  await efficiency.afterCommit(ids.map(identity => ({ domain: 'entitlement', identity })));
+  await efficiency.afterCommit(ids.flatMap(identity => [
+    { domain: 'entitlement', identity }, { domain: 'summary', identity },
+  ]));
   const { deferUntilAfterCommitBatch } = require('../../../db');
   if (require('../../../shared/cache/redisCache').isEnabled()) {
     await deferUntilAfterCommitBatch('entitlement-race-display', ids, async (users) => {
@@ -37,6 +39,10 @@ async function entitlementsChanged(userIds) {
     await derived.invalidate({
       keys: [...new Set(users)].map(id => keys.homeActiveGlobalEvent(id)),
       prefix: keys.PREFIX.HOME_ACTIVE_GLOBAL_EVENT,
+    });
+    await derived.invalidate({
+      keys: [...new Set(users)].map(id => keys.homeImpactSummary(id)),
+      prefix: keys.PREFIX.HOME_IMPACT_SUMMARY,
     });
   });
 }

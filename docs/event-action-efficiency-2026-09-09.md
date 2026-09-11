@@ -1,5 +1,7 @@
 # Event traffic efficiency investigation — September 9, 2026
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 ## Objective and method
 
 Reduce database work per app open, step sync and race refresh during legitimate daily-event activity. This is an investigation, not an implemented optimization or a production capacity certification.

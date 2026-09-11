@@ -1,5 +1,7 @@
 # Summary wake and notification planning hotfix
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 A successful race-resolution commit previously woke the summary worker even when
 it had no summary consequences. Production observation found 35 summary wakes
 for 35 race-resolution commits in 65 seconds, while an earlier three-minute

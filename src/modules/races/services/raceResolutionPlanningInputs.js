@@ -70,7 +70,7 @@ function planningInputModels({ fingerprint, validUntil, scoringInputVersionModel
           } else if (event.scheduleMode === "LOCAL_ENTITLEMENTS" && map.has(event.userId)) {
             const normalized = normalizedEntitlementEvent(event, {
               id: event.entitlementId, startsAt: event.startsAt, endsAt: event.endsAt,
-            }, { id: event.impactId, status: event.impactStatus });
+            }, { id: event.impactId });
             normalized.startsAt = new Date(Math.max(new Date(event.startsAt).getTime(), start,
               members.get(event.userId).joinedAt == null ? start : Number(members.get(event.userId).joinedAt)));
             if (normalized.startsAt < new Date(normalized.endsAt)) map.get(event.userId).push(normalized);

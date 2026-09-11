@@ -2579,7 +2579,7 @@ describe("resolved impact events v2 HTTP contract", () => {
     assert.equal(await prisma.raceImpactEvent.count({ where: { sourceId: effect.id } }), 1);
   });
 
-  it("preserves Home all-zero global-summary filtering from the replaced suite", async () => {
+  it("preserves Home zero-recap suppression even when later race membership changes", async () => {
     const user = await createTestUser();
     await appSettings.setFlagsAtomically([
       ["apiImpactSummariesEnabled", true],
@@ -2591,26 +2591,20 @@ describe("resolved impact events v2 HTTP contract", () => {
         startsAt: new Date(Date.now() - 120_000),
         endsAt: new Date(Date.now() - 60_000),
         multiplier: 2,
-        summaryAttributionVersion: 2,
       } });
       const raceA = await createRaceWithParticipants([user], "COMPLETED");
       await prisma.globalEventRaceImpact.create({ data: {
         eventId: event.id,
         raceId: raceA.id,
         userId: user.user.id,
-        status: "FINAL",
-        deltaSteps: 0,
-        attributionVersion: 2,
-        settledAt: new Date(),
       } });
-      const summary = await prisma.globalEventUserSummary.create({ data: {
-        eventId: event.id,
+      const summary = await require('./helpers/eventRecapFixture').createSavedRecap(prisma, {
+        event,
         userId: user.user.id,
         extraRaceSteps: 0,
         raceCount: 1,
-        attributionVersion: 2,
         expiresAt: new Date(Date.now() + 60_000),
-      } });
+      });
       for (const features of [
         "impact_summaries,impact_summary_expiry_v1",
         "impact_summaries,impact_summary_expiry_v1,home_shell_v1",
@@ -2623,31 +2617,18 @@ describe("resolved impact events v2 HTTP contract", () => {
         assert.equal((await response.json()).globalEventSummary, undefined);
       }
       const raceB = await createRaceWithParticipants([user], "COMPLETED");
-      await prisma.globalEventRaceImpact.update({
-        where: {
-          eventId_raceId_userId: {
-            eventId: event.id,
-            raceId: raceA.id,
-            userId: user.user.id,
-          },
-        },
-        data: { deltaSteps: 100 },
-      });
       await prisma.globalEventRaceImpact.create({ data: {
         eventId: event.id,
         raceId: raceB.id,
         userId: user.user.id,
-        status: "FINAL",
-        deltaSteps: -100,
-        attributionVersion: 2,
-        settledAt: new Date(),
       } });
       const eligible = await request(server.baseUrl, "GET", "/home/race-card", {
         token: user.token,
         headers: { "X-Client-Features": "impact_summaries,impact_summary_expiry_v1" },
       });
       assert.equal(eligible.status, 200);
-      assert.equal((await eligible.json()).globalEventSummary.id, summary.id);
+      assert.equal((await eligible.json()).globalEventSummary, undefined);
+      assert.equal((await prisma.eventRecap.findUnique({ where: { id: summary.id } })).suppressed, true);
     } finally {
       await appSettings.setFlagsAtomically([
         ["apiImpactSummariesEnabled", false],

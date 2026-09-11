@@ -42,7 +42,7 @@ for (const scenario of [
     if (eventMode) {
       event = await prisma.globalStepEvent.create({ data: {
         startsAt: new Date(now + (scenario.startOffset ?? -5400000)), endsAt: new Date(now + (scenario.endOffset ?? 3600000)),
-        scheduleMode: eventMode, multiplier: 2, summaryAttributionVersion: 2,
+        scheduleMode: eventMode, multiplier: 2,
       } });
       if (eventMode === "LOCAL_ENTITLEMENTS") {
         await prisma.globalStepEventEntitlement.create({ data: {
@@ -51,7 +51,7 @@ for (const scenario of [
           startOutcome: scenario.startOutcome || "ACTIVATED_ON_TIME", startProcessedAt: event.startsAt,
         } });
         if (!scenario.missingImpact) await prisma.globalEventRaceImpact.create({ data: {
-          eventId: event.id, raceId: race.id, userId: account.user.id, attributionVersion: 2,
+          eventId: event.id, raceId: race.id, userId: account.user.id,
         } });
       }
     }

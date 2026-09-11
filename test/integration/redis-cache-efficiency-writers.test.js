@@ -95,8 +95,9 @@ describe("Redis efficiency release A awaited public writer fencing", () => {
     const event = await prisma.globalStepEvent.create({ data: {
       startsAt: new Date(Date.now() - 7200000), endsAt: new Date(Date.now() - 3600000), multiplier: 2,
     } });
-    const summary = await prisma.globalEventUserSummary.create({ data: {
+    const summary = await prisma.eventRecap.create({ data: {
       eventId: event.id, userId: user.user.id, extraRaceSteps: 400, raceCount: 1,
+      calculationVersion: "LEGACY_SAVED", expiresAt: new Date(Date.now() + 3600000),
     } });
     const response = await request(server.baseUrl, "POST", `/home/global-event-summaries/${summary.id}/acknowledge`, {
       token: user.token, headers: { "X-Client-Features": "impact_summaries" },

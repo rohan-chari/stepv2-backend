@@ -39,7 +39,7 @@ test("home launch auxiliary reads collapse concurrent users into set-based queri
       calls.threads += 1;
       return [{ userId: "u2", expiresAt: new Date("2026-09-01T00:10:00Z") }];
     } },
-    async $queryRaw() {
+    async $queryRawUnsafe() {
       calls.summaries += 1;
       return [{ userId: "u2", id: "summary", remainingMsAtLoad: 5000 }];
     },

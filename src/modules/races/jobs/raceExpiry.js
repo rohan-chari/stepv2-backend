@@ -39,12 +39,7 @@ const {
   chronologicalAttributionRows,
   scoreWholeRaceTotals,
 } = require("../services/wholeRaceAttributionScoring");
-const derivedCache = require("../../../shared/cache/derivedCache");
-const cacheKeys = require("../../../shared/cache/cacheKeys");
 const redisCache = require("../../../shared/cache/redisCache");
-const {
-  refreshSummaryReadinessForRace,
-} = require("../../steps/services/globalEventSummaryCapture");
 
 // Settlement acquires the race through the SAME fence-first ownership protocol
 // the resolution worker uses (spec §5a item 6): the write transaction BEGINS by
@@ -373,14 +368,6 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
         // the scorer uses to decide whether each participant is eligible.
         ).map((event) => [event.id, event])
       ).values()];
-      // Version-2 events are finalized only by fenced boundary capture. Filter
-      // them before opening a settlement transaction so the permanent group
-      // trigger remains a last-resort rolling-old-binary guard, not control
-      // flow inside an already-aborted transaction. Missing metadata is v1 for
-      // compatibility with legacy normalized event shapes.
-      const legacySummaryEventIds = new Set(globalEvents
-        .filter((event) => Number(event.summaryAttributionVersion || 1) !== 2)
-        .map((event) => event.id));
 
       // Seeded races settle in their canonical tz so settled totals match what
       // getRaceProgress showed live; user races keep UTC (legacy).
@@ -641,11 +628,6 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
             },
           });
         }
-        // PENDING is normally written at event start/race start/late join.
-        // Upserting the final canonical vector here is also the repair fence
-        // for a previously interrupted enrollment write: it never derives any
-        // score itself, and the recap worker still waits for event close plus
-        // every enrolled race/user to be FINAL.
         return true;
       });
       trace("totals-written", phaseStartedAt, { settledTotalsWritten });
@@ -655,18 +637,6 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
         );
         continue;
       }
-      // The upsert above is also the final-impact repair path. Any previously
-      // cached Home eligibility must be discarded after that transaction
-      // commits; Redis remains best-effort and Postgres remains authoritative.
-      for (const userId of new Set(
-        (effectAttribution?.globalImpacts || []).map((row) => row.userId)
-      )) {
-        await derivedCache.invalidate({
-          keys: [cacheKeys.homeImpactSummary(userId)],
-          prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
-        });
-      }
-
       // ── Team settlement (TR-401/402/404) ─────────────────────────────────
       // Team total = sum of member effective totals (forfeited members' frozen
       // totals included). Higher total wins; equal totals are a TIE — no
@@ -750,21 +720,6 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
           eventsByUserId,
           stepSampleModel: settlementSampleModel,
         });
-        // Global-event impacts are lifecycle data for every enrolled runner,
-        // including DNP/non-prize runners. Keep that vector complete while the
-        // expensive effect replay above remains bounded to paid places.
-        const globalAttribution = await computeSettlementEffectAttribution({
-          race,
-          acceptedParticipants,
-          preLeech,
-          settlementTime,
-          attributionEffects: { effectsByParticipant: new Map(), hitchhikes: [] },
-          globalEvents,
-          eventsByUserId,
-          stepSampleModel: settlementSampleModel,
-        });
-        if (effectAttribution) effectAttribution.globalImpacts = globalAttribution?.globalImpacts || [];
-        else effectAttribution = globalAttribution;
         trace("attribution-complete", attributionStartedAt, {
           effectRows: [...attributionEffects.effectsByParticipant.values()].reduce((count, rows) => count + rows.length, 0),
           hitchhikes: attributionEffects.hitchhikes.length,
@@ -774,8 +729,6 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
       }
 
       if (effectAttribution) {
-        const settlementGlobalImpacts = (effectAttribution.globalImpacts || [])
-          .filter((row) => legacySummaryEventIds.has(row.eventId));
         await withSettlementFence(race.id, async (tx) => {
           for (const row of effectAttribution.effectImpacts || []) {
             await tx.raceEffectImpact.upsert({
@@ -786,56 +739,7 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
                 attributionVersion: effectAttribution.attributionVersion, settledAt: settlementTime },
             });
           }
-          for (const row of settlementGlobalImpacts) {
-            const existing = await tx.globalEventRaceImpact.findUnique({
-              where: {
-                eventId_raceId_userId: {
-                  eventId: row.eventId,
-                  raceId: race.id,
-                  userId: row.userId,
-                },
-              },
-              select: { attributionVersion: true, status: true },
-            });
-            // Version-2 lifecycle belongs to the immutable post-boundary
-            // capture path. Settlement may neither manufacture missing v2
-            // provenance nor overwrite an already-terminal boundary result.
-            if (existing?.attributionVersion === 2) continue;
-            if (existing) {
-              await tx.globalEventRaceImpact.updateMany({
-                where: {
-                  eventId: row.eventId,
-                  raceId: race.id,
-                  userId: row.userId,
-                  attributionVersion: 1,
-                  status: "PENDING",
-                },
-                data: {
-                  status: "FINAL",
-                  deltaSteps: row.deltaSteps,
-                  settledAt: settlementTime,
-                },
-              });
-            } else {
-              await tx.globalEventRaceImpact.create({
-                data: {
-                  eventId: row.eventId,
-                  raceId: race.id,
-                  userId: row.userId,
-                  status: "FINAL",
-                  deltaSteps: row.deltaSteps,
-                  attributionVersion: effectAttribution.attributionVersion,
-                  settledAt: settlementTime,
-                },
-              });
-            }
-          }
-          await refreshSummaryReadinessForRace(tx, {
-            raceId: race.id,
-            now: settlementTime,
-          });
         });
-        await redisCache.publishDurableQueueWakeup("summary");
       }
 
       // Fenced write #2 — final placements. Same protocol: fence first, then the

@@ -220,12 +220,11 @@ test("settlement eligibility repair inserts a missing impact before loading the 
     eventId: "event-1",
     raceId: "race-1",
     userId: "user-1",
-    status: "PENDING",
   }]);
   assert.equal(eventsForUser(result, "user-1").length, 1);
 });
 
-test("settlement eligibility repair still enrolls v2 membership before WAITING_SYNC capture", async () => {
+test("settlement eligibility repair still enrolls membership without retired capture storage", async () => {
   const writes = [];
   const event = { ...EVENT, summaryAttributionVersion: 2 };
   const entitlement = {
@@ -291,8 +290,6 @@ test("settlement eligibility repair still enrolls v2 membership before WAITING_S
     eventId: event.id,
     raceId: "race-1",
     userId: "user-1",
-    status: "PENDING",
-    attributionVersion: 2,
   }]);
   assert.equal(eventsForUser(result, "user-1").length, 1);
 });

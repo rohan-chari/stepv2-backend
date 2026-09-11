@@ -31,7 +31,6 @@ Object.assign(module.exports, require("./commands/claimStepMilestone"));
 Object.assign(module.exports, require("./jobs/globalStepEventScheduler"));
 Object.assign(module.exports, require("./jobs/globalEventBoundaryDrain"));
 Object.assign(module.exports, require("./jobs/globalEventEntitlementEventReconciler"));
-Object.assign(module.exports, require("./jobs/globalEventSummary"));
 Object.assign(module.exports, require("./jobs/stepSampleRetention"));
 
 Object.assign(module.exports, require("./routes/steps"));

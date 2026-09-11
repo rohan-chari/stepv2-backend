@@ -18,7 +18,7 @@ function valid(value) {
   const row = value.summary;
   return row && Object.keys(row).every((field) => FIELDS.has(field)) &&
     typeof row.id === "string" && typeof row.eventId === "string" &&
-    Number.isInteger(row.extraRaceSteps) && Number.isInteger(row.raceCount) &&
+    Number.isInteger(row.extraRaceSteps) && row.extraRaceSteps > 0 && Number.isInteger(row.raceCount) &&
     Number.isFinite(new Date(row.expiresAt).getTime());
 }
 async function getCachedGlobalEventSummary({ key, userId = null, enabled, load }) {
@@ -33,7 +33,7 @@ async function getCachedGlobalEventSummary({ key, userId = null, enabled, load }
   if (!userId) return legacySummaryRead({ key, enabled, load });
   let remaining = 0;
   const result = await readFragment({
-    kind: "summary", key: `ce:v1:summary:${userId}`,
+    kind: "summary", key: `ce:v2:summary:${userId}`,
     markers: [{ domain: "summary", identity: userId }],
     ttlMs: (value) => value.kind === "empty" ? 15000 : remaining,
     validate: valid,

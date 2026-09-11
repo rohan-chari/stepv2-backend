@@ -1,5 +1,7 @@
 # Event traffic efficiency — backend validation
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 Implementation matches the approved three-workstream scope. API contract locked before frontend work; no migration, new setting, runtime flag or production operation.
 
 ## Locked HTTP contract

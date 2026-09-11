@@ -1,5 +1,7 @@
 # Recover lease-free PROCESSING summary work
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 Revalidated against backend main `3ecc74e` and deployed `7e4132c` on
 2026-09-08. Read-only production observations at 19:05 and 19:11 UTC found
 357 PROCESSING summary-work rows; all had NULL leases and expired deadlines.

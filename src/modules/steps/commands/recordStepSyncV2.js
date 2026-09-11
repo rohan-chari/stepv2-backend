@@ -20,9 +20,6 @@ const {
   lastStepSyncWriteBatch,
 } = require("../services/lastStepSyncWriteBatch");
 const redisCache = require("../../../shared/cache/redisCache");
-const {
-  coordinatedOptimizationMetrics,
-} = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
 const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
@@ -30,11 +27,6 @@ const DEFAULT_MAX_WAIT_MS = 5000;
 const DEFAULT_POLL_MS = 150;
 const HOME_PULL_COOLDOWN_SECONDS = 30;
 const STEP_INTAKE_SEMANTICS = "CANONICAL_SOURCE_QUEUE_V1";
-const CAPTURE_CLOSURE_RETRIES = 3;
-
-function isSummaryCaptureClosureChanged(error) {
-  return error?.code === "SUMMARY_CAPTURE_CLOSURE_CHANGED";
-}
 
 class StepSyncCooldownError extends Error {
   constructor(retryAfterSeconds) {
@@ -70,7 +62,7 @@ function serializeRecord(step) {
   };
 }
 
-function buildResponse({ record, sampleCount, jobs, requestedAt, globalEventSummaryWork = null }) {
+function buildResponse({ record, sampleCount, jobs, requestedAt }) {
   const reported = (jobs || []).find(Boolean) || null;
   return {
     record: serializeRecord(record),
@@ -87,7 +79,6 @@ function buildResponse({ record, sampleCount, jobs, requestedAt, globalEventSumm
       requestedAt: reported ? reported.requestedAt : requestedAt,
     },
     stepIntakeSemantics: STEP_INTAKE_SEMANTICS,
-    ...(globalEventSummaryWork ? { globalEventSummaryWork } : {}),
   };
 }
 
@@ -101,17 +92,11 @@ function resolutionWakeOptions(intake) {
 }
 
 function buildRecordStepSyncV2(dependencies = {}) {
-  const publishSummaryWake = dependencies.publishSummaryWake ||
-    (() => redisCache.publishDurableQueueWakeup("summary"));
   const publishResolutionWake = dependencies.publishResolutionWake ||
     ((options) => redisCache.publishDurableQueueWakeup("resolution", options));
   const prisma = dependencies.prisma || defaultPrisma;
   const stepSyncRequestModel = dependencies.StepSyncRequest || defaultStepSyncRequestModel;
   const stepInputIntake = dependencies.stepInputIntake || defaultStepInputIntake;
-  const lockEligibleSummaryCaptureDependencies =
-    dependencies.lockEligibleSummaryCaptureDependencies ||
-    ((tx, args) => require("../services/globalEventSummaryCapture")
-      .lockEligibleSummaryCaptureDependencies(tx, args));
   const events = dependencies.eventBus || defaultEventBus;
   const appSettings = dependencies.appSettings || defaultAppSettings;
   const now = dependencies.now || (() => new Date());
@@ -125,29 +110,15 @@ function buildRecordStepSyncV2(dependencies = {}) {
     : (userId, at) => lastStepSyncWriteBatch.stamp({ prisma, userId, at });
 
   async function runIntakeTransaction(work) {
-    for (let attempt = 0; attempt < CAPTURE_CLOSURE_RETRIES; attempt += 1) {
-      const startedAt = process.hrtime.bigint();
-      try {
-        // Durable capture selects metadata and fact revisions in one statement
-        // under its retention fence; race fences alone do not exclude every
-        // effect/checkpoint writer. Read Committed lets a
-        // shared race queue row wait for its current writer and then merge the
-        // latest committed generation instead of aborting on a stale snapshot.
-        return await prisma.$transaction(work, { timeout: 15_000, maxWait: 10_000 });
-      } catch (error) {
-        markStepTelemetryTransactionError(error);
-        if (!isSummaryCaptureClosureChanged(error) ||
-            attempt === CAPTURE_CLOSURE_RETRIES - 1) {
-          throw error;
-        }
-      } finally {
-        recordStepTelemetryPhase(
-          "transaction_total",
-          Number(process.hrtime.bigint() - startedAt) / 1e6,
-        );
-      }
+    const startedAt = process.hrtime.bigint();
+    try {
+      return await prisma.$transaction(work, { timeout: 15_000, maxWait: 10_000 });
+    } catch (error) {
+      markStepTelemetryTransactionError(error);
+      throw error;
+    } finally {
+      recordStepTelemetryPhase("transaction_total", Number(process.hrtime.bigint()-startedAt)/1e6);
     }
-    return null;
   }
 
   async function queueOptions() {
@@ -200,15 +171,6 @@ function buildRecordStepSyncV2(dependencies = {}) {
     beforeSourceWrites,
   }) {
     const requestedAt = now();
-    const summaryCaptureDependencies = await measureStepTelemetryPhase(
-      "summary_finalization",
-      () => lockEligibleSummaryCaptureDependencies(tx, {
-          userId,
-          at: requestedAt,
-        }),
-    );
-    coordinatedOptimizationMetrics.increment("global_summary_capture_lookup_total");
-    coordinatedOptimizationMetrics.observe("global_summary_capture_lookup_per_sync", 1);
     const intake = await stepInputIntake({
       userId,
       daily: { date: canonical.date, steps: canonical.steps },
@@ -220,27 +182,14 @@ function buildRecordStepSyncV2(dependencies = {}) {
       ...options,
     }, tx);
     const completedAt = intake.completedAt || requestedAt;
-    const globalEventSummaryWork = await measureStepTelemetryPhase(
-      "summary_finalization",
-      () => require("../services/globalEventSummaryCapture")
-        .claimEligibleSummaryWork(tx, {
-          userId,
-          captureDependencies: summaryCaptureDependencies,
-          captureSyncRequestId: reservation.id,
-          captureCompletedAt: completedAt,
-          captureCoverageThrough: intake.canonicalCoverageThrough,
-          sourceScoringInputGeneration: intake.generation,
-        }),
-    );
     const response = buildResponse({
       record: intake.record,
       sampleCount: cleaned.length,
       jobs: intake.jobs,
       requestedAt,
-      globalEventSummaryWork,
     });
     await measureStepTelemetryPhase(
-      "summary_finalization",
+      "idempotency_finalization",
       () => stepSyncRequestModel.finalize(
         {
           id: reservation.id,
@@ -268,7 +217,6 @@ function buildRecordStepSyncV2(dependencies = {}) {
       if (result.response?.raceResolution?.jobId) {
         await publishResolutionWake(result.resolutionWakeOptions);
       }
-      if (result.response?.globalEventSummaryWork) await publishSummaryWake();
       await stampAfterCommit({
         userId,
         date: canonical.date,

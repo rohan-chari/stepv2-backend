@@ -163,10 +163,6 @@ function buildProfiles() {
       query: "generation={{generation}}", fixturePrerequisites: ["synthetic-user", "queue-job"],
       allowedStatuses: [200, 400, 404], queue: true,
     }),
-    entry("GET", "/home/global-event-summary-work/:workId", {
-      fixturePrerequisites: ["synthetic-user", "global-summary-work"],
-      allowedStatuses: [200], queue: true,
-    }),
   ];
   const racesTabOpenTraffic = [
     entry("GET", "/races", {
@@ -244,7 +240,6 @@ function buildProfiles() {
         arrivalBucketMs: 1000,
         allSettledDeadlineMs: 15_000,
         resolutionPollWaitMs: Object.freeze([750, 1500, 3000, 5000]),
-        globalSummaryPollWaitMs: Object.freeze([750, 1500, 3000, 5000]),
         suggestedRaces404Policy: "contract-failure-no-legacy-fanout",
         criticalEndpoints: Object.freeze([
           "POST /steps/sync-v2", "POST /steps", "GET /home/race-card",

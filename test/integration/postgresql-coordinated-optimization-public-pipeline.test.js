@@ -24,9 +24,6 @@ const {
 const {
   buildInboxDelivery,
 } = require("../../src/modules/inbox/jobs/inboxDelivery");
-const {
-  buildGlobalEventSummaryTick,
-} = require("../../src/modules/steps/jobs/globalEventSummary");
 const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
 
 const FEATURES = "impact_summaries,impact_summary_expiry_v1,inbox_v1";
@@ -87,7 +84,7 @@ describe("§30.7 public step-sync durable pipeline", () => {
     const summaryEndsAt = new Date(now.getTime() - HOUR_MS);
     const summaryEvent = await prisma.globalStepEvent.create({ data: {
       startsAt: summaryStartsAt, endsAt: summaryEndsAt, multiplier: 2,
-      scheduleMode: "LOCAL_ENTITLEMENTS", summaryAttributionVersion: 2,
+      scheduleMode: "LOCAL_ENTITLEMENTS",
     } });
     await prisma.globalStepEventEntitlement.create({ data: {
       eventId: summaryEvent.id, userId: owner.user.id, timezone: "UTC",
@@ -95,14 +92,10 @@ describe("§30.7 public step-sync durable pipeline", () => {
       startsAt: summaryStartsAt, endsAt: summaryEndsAt,
       startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: summaryStartsAt,
       endProcessedAt: summaryEndsAt,
+      recapRaceCount: 1, recapCountPolicyVersion: 1, recapWindowRevision: 0,
     } });
     await prisma.globalEventRaceImpact.create({ data: {
       eventId: summaryEvent.id, raceId: race.id, userId: owner.user.id,
-      status: "PENDING", attributionVersion: 2,
-    } });
-    await prisma.globalEventSummaryWork.create({ data: {
-      eventId: summaryEvent.id, userId: owner.user.id, status: "WAITING_SYNC",
-      expiresAt: new Date(now.getTime() + HOUR_MS), requiredRaceCount: 1,
     } });
 
     const idempotencyKey = randomUUID();
@@ -171,7 +164,7 @@ describe("§30.7 public step-sync durable pipeline", () => {
     const notificationEndsAt = new Date(now.getTime() + 30 * 60_000);
     const notificationEvent = await prisma.globalStepEvent.create({ data: {
       startsAt: notificationStartsAt, endsAt: notificationEndsAt, multiplier: 2,
-      scheduleMode: "LOCAL_ENTITLEMENTS", summaryAttributionVersion: 2,
+      scheduleMode: "LOCAL_ENTITLEMENTS",
     } });
     const notificationEntitlement = await prisma.globalStepEventEntitlement.create({ data: {
       eventId: notificationEvent.id, userId: owner.user.id, timezone: "UTC",
@@ -181,7 +174,6 @@ describe("§30.7 public step-sync durable pipeline", () => {
     } });
     await prisma.globalEventRaceImpact.create({ data: {
       eventId: notificationEvent.id, raceId: race.id, userId: owner.user.id,
-      status: "PENDING", attributionVersion: 2,
     } });
     const scheduledDomainEvent = await prisma.domainEventOutbox.create({ data: {
       eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${notificationEntitlement.id}:0`,
@@ -225,14 +217,7 @@ describe("§30.7 public step-sync durable pipeline", () => {
     assert.equal((await inboxWorker()).delivered, 1);
     assert.equal(sends.length, 1);
 
-    let summaryTickNow = new Date(now.getTime() + 2 * 60_000);
-    const summaryTick = buildGlobalEventSummaryTick({ prisma, now: () => summaryTickNow });
-    let summaryUpserts = 0;
-    for (let index = 0; index < 3; index += 1) {
-      summaryUpserts += (await summaryTick()).upserts;
-      summaryTickNow = new Date(summaryTickNow.getTime() + 61_000);
-    }
-    assert.equal(summaryUpserts, 1);
+    assert.equal(await prisma.eventRecap.count(), 1, "accepted contiguous legacy sync saves one recap without a worker");
     const [activeRaceResponse, homeResponse, inboxResponse] = await Promise.all([
       request(server.baseUrl, "GET", "/races", { token: owner.token }),
       request(server.baseUrl, "GET", "/home/race-card", {
@@ -261,15 +246,18 @@ describe("§30.7 public step-sync durable pipeline", () => {
 
     const durableCounts = await Promise.all([
       prisma.domainEventOutbox.count(), prisma.notificationSchedule.count(),
-      prisma.inboxAlert.count(), prisma.globalEventUserSummary.count(),
+      prisma.inboxAlert.count(), prisma.eventRecap.count(),
     ]);
     await projector.run();
     await release();
     await inboxWorker();
-    await summaryTick();
+    const recapReplay = await request(server.baseUrl, "POST", "/home/event-recap", {
+      token: owner.token, body: { eventId: summaryEvent.id, revision: 0, rawSteps: 1200 },
+    });
+    assert.equal(recapReplay.status, 200);
     assert.deepEqual(await Promise.all([
       prisma.domainEventOutbox.count(), prisma.notificationSchedule.count(),
-      prisma.inboxAlert.count(), prisma.globalEventUserSummary.count(),
+      prisma.inboxAlert.count(), prisma.eventRecap.count(),
     ]), durableCounts, "worker retry must not duplicate any public-visible output");
   });
 });

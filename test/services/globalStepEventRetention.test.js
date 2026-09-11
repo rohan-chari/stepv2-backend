@@ -17,10 +17,10 @@ test("retention deletes complete lifecycle dependents and reports old blockers",
           }
           return [{ blocked: 0n }];
         },
-        globalEventUserSummary: { async deleteMany() { return { count: 1 }; } },
+        eventRecap: { async deleteMany() { return { count: 1 }; } },
         globalEventRaceImpact: { async deleteMany() { return { count: 2 }; } },
         globalStepEventEntitlement: { async deleteMany() { return { count: 1 }; } },
-        jobRun: { async deleteMany() { return { count: 1 }; } },
+        jobRun: { async findUnique() { return null; }, async deleteMany() { return { count: 1 }; } },
       });
     },
   };
@@ -34,7 +34,7 @@ test("retention deletes complete lifecycle dependents and reports old blockers",
   });
   assert.equal(statements[0].at.toISOString(), "2026-07-20T00:00:00.000Z");
   assert.match(statements[0].sql, /start_processed_at IS NOT NULL/);
-  assert.match(statements[0].sql, /i\.status <> 'FINAL'/);
-  assert.match(statements[0].sql, /r\.status = 'active'::"RaceStatus"/);
-  assert.match(statements[0].sql, /acknowledged_at IS NOT NULL OR s\.settled_at < \$1/);
+  assert.doesNotMatch(statements[0].sql, /i\.status|global_event_summary_work/);
+  assert.match(statements[0].sql, /r\.status='active'/);
+  assert.match(statements[0].sql, /e\.ends_at<\$1/);
 });

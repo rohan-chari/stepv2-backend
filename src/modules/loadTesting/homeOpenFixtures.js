@@ -336,7 +336,7 @@ async function createHomeOpenFixtures({
   const [isolated] = await prisma.$queryRawUnsafe(`SELECT
     (SELECT count(*)::int FROM global_step_events WHERE starts_at <= now() AND ends_at > now())
       AS "activeEventCount",
-    (SELECT count(*)::int FROM global_event_summary_work) AS "summaryWorkCount"`);
+    0::int AS "summaryWorkCount"`);
   if (Number(isolated?.activeEventCount || 0) !== 0 ||
       Number(isolated?.summaryWorkCount || 0) !== 0) {
     throw new Error("home-open fixture global-event isolation failed");
@@ -535,7 +535,7 @@ async function readHomeOpenGlobalIsolationCensus(prisma) {
     (SELECT count(*)::int FROM global_step_events) AS "totalEventCount",
     (SELECT count(*)::int FROM global_step_events
       WHERE starts_at <= now() AND ends_at > now()) AS "activeEventCount",
-    (SELECT count(*)::int FROM global_event_summary_work) AS "summaryWorkCount"`);
+    0::int AS "summaryWorkCount"`);
   const result = { totalEventCount: Number(row?.totalEventCount),
     activeEventCount: Number(row?.activeEventCount),
     summaryWorkCount: Number(row?.summaryWorkCount) };

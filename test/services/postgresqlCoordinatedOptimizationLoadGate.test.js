@@ -5,7 +5,6 @@ const { evaluateLoadGate, RECOVERY_LIMITS_MS } = require("../../scripts/postgres
 test("load gate enforces the complete production-shaped acceptance contract", () => {
   const statements = [
     { normalizedQuery: "race_resolution SKIP LOCKED", callsPerSecond: 100, shared_blks_hit: 0, rows: 0 },
-    { normalizedQuery: "global_event_summary_work", callsPerSecond: 0, shared_blks_hit: 100, rows: 0 },
     { normalizedQuery: "domain_event_notification_projections", callsPerSecond: 0, shared_blks_hit: 0, rows: 100 },
   ];
   const baseline = { intervalSeconds: 60, statements, runtimeEvidence: {
@@ -29,7 +28,6 @@ test("load gate enforces the complete production-shaped acceptance contract", ()
     eligibleWorkWaitingForRecoveryPoll: 0,
     lostWakeRecoveryMs: { ...RECOVERY_LIMITS_MS },
     postTaskEmptyClaimsPer30Seconds: 1,
-    waitingRacesRecoveryChurn: 0,
     duplicateVisibleOutputs: 0,
   } };
   assert.deepEqual(evaluateLoadGate(baseline, candidate).failures, []);

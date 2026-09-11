@@ -35,7 +35,7 @@ describe('durable signup recovery through production scheduler and worker', () =
   for (const mode of ['LEGACY', 'BUCKET']) it(`${mode}: late signup recovery preserves requested scoring time and enrolls the event active at that time`, async () => {
     if (mode === 'BUCKET') await prisma.seededRaceWindowModeRecord.createMany({data:[{seedId:'seed-daily-10k',windowStart:new Date('2026-09-09T04:00:00Z'),windowEnd:new Date('2026-09-10T04:00:00Z'),mode},{seedId:'seed-weekly-50k',windowStart:new Date('2026-09-07T04:00:00Z'),windowEnd:new Date('2026-09-14T04:00:00Z'),mode}]});
     await prisma.raceSeed.updateMany({data:{powerupsEnabled:true}});
-    const event = await prisma.globalStepEvent.create({ data: { startsAt: new Date('2026-09-09T15:00:00Z'), endsAt: new Date('2026-09-09T17:00:00Z'), multiplier: 2, summaryAttributionVersion: 2 } });
+    const event = await prisma.globalStepEvent.create({ data: { startsAt: new Date('2026-09-09T15:00:00Z'), endsAt: new Date('2026-09-09T17:00:00Z'), multiplier: 2 } });
     const signed = await request(server.baseUrl, 'POST', '/auth/apple', { headers: HEADERS, body: { identityToken: `recover-${randomUUID()}` } });
     assert.equal(signed.status, 200, await signed.clone().text()); const auth = await signed.json();
     assert.equal(await prisma.seededChallengeEnrollmentRequest.count({ where: { userId: auth.user.id, source: 'SIGNUP' } }), 4);

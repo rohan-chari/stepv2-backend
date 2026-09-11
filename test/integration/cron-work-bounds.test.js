@@ -2,7 +2,6 @@ const assert = require("node:assert/strict");
 const { beforeEach, describe, it } = require("node:test");
 const { Client } = require("pg");
 const { cleanDatabase, createTestUser, prisma, getSharedServer, request } = require("./setup");
-const { buildGlobalEventSummaryV2Tick } = require("../../src/modules/steps/jobs/globalEventSummary");
 const { buildRenewSeededRaces } = require("../../src/modules/races/jobs/seededRaceRenewal");
 const { appSettings } = require("../../src/shared/config/appSettings");
 const { buildNotificationProjector } = require("../../src/modules/domainEvents/services/notificationProjector");
@@ -37,60 +36,6 @@ const ageCleanup = (sql) => /DELETE FROM durable_capture_(method_progress|interv
 describe("cron work bounds against real PostgreSQL", () => {
   beforeEach(cleanDatabase);
 
-  it("routine capture wakes do not perform historical retention; recovery still does", async (t) => {
-    const queries = observeQueries(t);
-    const tick = buildGlobalEventSummaryV2Tick({ prisma, now: () => new Date() });
-    await tick({ recovery: false });
-    await tick({ recovery: false });
-    assert.equal(queries.filter(ageCleanup).length, 0, "empty wakes must not repeatedly scan retained history");
-    queries.length = 0;
-    await tick({ recovery: true });
-    assert.equal(queries.filter(ageCleanup).length, 3, "recovery must retain all three bounded collectors");
-  });
-
-  it("retention uses indexable fixed cutoffs rather than a per-row volatile clock", async (t) => {
-    const queries = observeQueries(t);
-    await buildGlobalEventSummaryV2Tick({ prisma, now: () => new Date() })({ recovery: true });
-    const collected = queries.filter(ageCleanup);
-    assert.equal(collected.length, 3);
-    for (const sql of collected) {
-      assert.doesNotMatch(sql, /clock_timestamp\(\)/, "retention range must be usable as an index condition");
-    }
-  });
-
-  it("recovery collects old derived progress in bounded pages while preserving recent rows", async () => {
-    const account = await createTestUser();
-    await prisma.$executeRawUnsafe(`INSERT INTO durable_capture_method_progress
-      (scope_digest,method_digest,user_id,state,updated_at)
-      SELECT lpad(i::text,64,'0'),repeat('a',64),$1,'{}'::jsonb,
-        CURRENT_TIMESTAMP-CASE WHEN i<=132 THEN interval '31 days' ELSE interval '1 day' END
-      FROM generate_series(1,135) i`, account.user.id);
-    const count = async () => Number((await prisma.$queryRawUnsafe(
-      "SELECT count(*)::int AS n FROM durable_capture_method_progress WHERE user_id=$1", account.user.id))[0].n);
-    const tick = buildGlobalEventSummaryV2Tick({ prisma, now: () => new Date() });
-    await tick({ recovery: false });
-    assert.equal(await count(), 135, "normal wake must leave historical collection to recovery");
-    await tick({ recovery: true });
-    assert.equal(await count(), 7, "exactly one bounded page of 128 old rows is collected");
-    await tick({ recovery: false });
-    assert.equal(await count(), 3, "a full retention page must continue on the next wake, without a minute-long backlog stall");
-    await tick({ recovery: true });
-    assert.equal(await count(), 3, "empty collector is idempotent");
-  });
-
-  it("routine wakes still compact eligible live mutation journals", async () => {
-    const account = await createTestUser();
-    await prisma.stepSample.create({ data: { userId: account.user.id,
-      periodStart: new Date("2026-01-01T12:00:00Z"), periodEnd: new Date("2026-01-01T12:01:00Z"), steps: 1 } });
-    await prisma.$executeRawUnsafe(`UPDATE durable_capture_fact_heads
-      SET updated_at=CURRENT_TIMESTAMP-interval '11 minutes',next_compaction_at=CURRENT_TIMESTAMP-interval '1 second'
-      WHERE user_id=$1`, account.user.id);
-    const count = async () => Number((await prisma.$queryRawUnsafe(
-      "SELECT count(*)::int AS n FROM durable_capture_fact_journal WHERE user_id=$1", account.user.id))[0].n);
-    assert.ok(await count() > 0, "source writes must create a real mutation journal");
-    await buildGlobalEventSummaryV2Tick({ prisma })({ recovery: false });
-    assert.equal(await count(), 0, "live journal maintenance cannot wait for age-based retention");
-  });
 
   it("an already elected bucket cohort performs no sample-history reads on retry", async (t) => {
     // Other integration suites retain custom active seeds. This regression is

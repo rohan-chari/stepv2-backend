@@ -152,9 +152,7 @@ async function resetGlobalEventDerivedState(prisma) {
          domain_event_outbox,
          race_resolution_full_triggers,
          race_resolution_jobs_v2,
-         global_event_capture_artifacts,
-         global_event_summary_work,
-         global_event_user_summaries,
+         event_recaps,
          global_event_race_impacts,
          global_step_event_boundary_cursors,
          global_step_event_entitlements,
@@ -167,7 +165,7 @@ async function resetGlobalEventDerivedState(prisma) {
       ? await tx.$queryRawUnsafe(`
           SELECT
             (SELECT count(*)::int FROM global_step_events) AS "eventCount",
-            (SELECT count(*)::int FROM global_event_summary_work) AS "summaryWorkCount"
+            0::int AS "summaryWorkCount"
         `)
       : [{}];
     await tx.$executeRawUnsafe(
@@ -191,9 +189,7 @@ async function resetGlobalEventDerivedState(prisma) {
     // after this reset.
     await tx.$executeRawUnsafe("DELETE FROM race_resolution_full_triggers");
     await tx.$executeRawUnsafe("DELETE FROM race_resolution_jobs_v2");
-    await tx.$executeRawUnsafe("DELETE FROM global_event_capture_artifacts");
-    await tx.$executeRawUnsafe("DELETE FROM global_event_summary_work");
-    await tx.$executeRawUnsafe("DELETE FROM global_event_user_summaries");
+    await tx.$executeRawUnsafe("DELETE FROM event_recaps");
     await tx.$executeRawUnsafe("DELETE FROM global_event_race_impacts");
     await tx.$executeRawUnsafe("DELETE FROM global_step_event_boundary_cursors");
     await tx.$executeRawUnsafe("DELETE FROM global_step_event_entitlements");
@@ -307,7 +303,7 @@ async function cleanupSyntheticRun({
         lockedEventIds,
       );
       await tx.$executeRawUnsafe(
-        `DELETE FROM global_event_user_summaries
+        `DELETE FROM event_recaps
           WHERE event_id::text = ANY($1::text[])`,
         lockedEventIds,
       );

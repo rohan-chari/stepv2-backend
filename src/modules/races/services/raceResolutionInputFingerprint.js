@@ -147,17 +147,17 @@ async function buildRaceResolutionInputFingerprint({
          ), false) AS current
        ), candidate_events AS (
          SELECT event.id, event.starts_at, event.ends_at,
-           event.multiplier, event.label, event.schedule_mode, event.summary_attribution_version,
+           event.multiplier, event.label, event.schedule_mode,
            NULL::text AS entitlement_id, NULL::text AS impact_id,
-           NULL::text AS impact_status, NULL::text AS user_id
+           NULL::text AS user_id
          FROM global_step_events event
          JOIN races race ON race.id=$1
          WHERE event.schedule_mode='LEGACY_GLOBAL'
            AND event.ends_at > race.started_at AND event.starts_at <= $2
          UNION ALL
          SELECT event.id, entitlement.starts_at, entitlement.ends_at,
-           event.multiplier, event.label, event.schedule_mode, event.summary_attribution_version,
-           entitlement.id, impact.id, impact.status, entitlement.user_id
+           event.multiplier, event.label, event.schedule_mode,
+           entitlement.id, impact.id, entitlement.user_id
          FROM global_step_event_entitlements entitlement
          JOIN global_step_events event ON event.id=entitlement.event_id
            AND event.schedule_mode='LOCAL_ENTITLEMENTS'
@@ -172,9 +172,8 @@ async function buildRaceResolutionInputFingerprint({
        )
        SELECT event.id, event.starts_at AS "startsAt", event.ends_at AS "endsAt",
          event.multiplier, event.label, event.schedule_mode AS "scheduleMode",
-         event.summary_attribution_version AS "summaryAttributionVersion",
          event.entitlement_id AS "entitlementId", event.impact_id AS "impactId",
-         event.impact_status AS "impactStatus", event.user_id AS "userId",
+         event.user_id AS "userId",
          schedule.current AS "globalBoundaryScheduleCurrent"
        FROM schedule LEFT JOIN candidate_events event ON TRUE
        ORDER BY event.starts_at, event.id`,

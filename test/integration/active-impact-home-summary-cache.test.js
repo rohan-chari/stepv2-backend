@@ -17,9 +17,7 @@ const redisCache = require("../../src/shared/cache/redisCache");
 const derivedCache = require("../../src/shared/cache/derivedCache");
 const cacheKeys = require("../../src/shared/cache/cacheKeys");
 const { appSettings } = require("../../src/shared/config/appSettings");
-const {
-  buildGlobalEventSummaryTick,
-} = require("../../src/modules/steps/jobs/globalEventSummary");
+const { createSavedRecap } = require('./helpers/eventRecapFixture');
 
 let server;
 let live;
@@ -66,33 +64,15 @@ async function createEndedEvent() {
     startsAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
     endsAt: new Date(Date.now() - 60 * 60 * 1000),
     multiplier: 2,
-    summaryAttributionVersion: 2,
+    scheduleMode: 'LOCAL_ENTITLEMENTS',
   } });
 }
 
-async function addFinal(event, race, user, deltaSteps) {
-  const impact = await prisma.globalEventRaceImpact.create({ data: {
-    eventId: event.id,
-    raceId: race.id,
-    userId: user.user.id,
-    status: "FINAL",
-    deltaSteps,
-    settledAt: new Date(),
-    attributionVersion: 2,
+async function addFinal(event, race, user, extraRaceSteps) {
+  await prisma.globalEventRaceImpact.create({ data: {
+    eventId: event.id, raceId: race.id, userId: user.user.id,
   } });
-  await prisma.globalEventSummaryWork.upsert({
-    where: { eventId_userId: { eventId: event.id, userId: user.user.id } },
-    update: { requiredRaceCount: { increment: 1 } },
-    create: {
-      eventId: event.id,
-      userId: user.user.id,
-      status: "WAITING_RACES",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      requiredRaceCount: 1,
-      finalRaceCount: 1,
-    },
-  });
-  return impact;
+  return createSavedRecap(prisma, { event, userId: user.user.id, extraRaceSteps });
 }
 
 describe("active impact Home summary Postgres + Redis matrix", () => {
@@ -119,19 +99,12 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     await live?.close();
   });
 
-  it("real summary worker durably claims an all-zero vector without publishing either Home path", async () => {
+  it("saved zero recap never publishes through either Home path", async () => {
     const user = await createTestUser();
     const event = await createEndedEvent();
     const race = await createCompletedRace(user, "zero");
     await addFinal(event, race, user, 0);
-    const tick = buildGlobalEventSummaryTick({ prisma, now: () => new Date() });
-    assert.deepEqual(await tick(), { upserts: 0 });
-    assert.deepEqual(await tick(), { upserts: 0 });
-    assert.equal(await prisma.globalEventUserSummary.count(), 0);
-    const run = await prisma.jobRun.findUnique({
-      where: { jobName: `global_event_summary:${event.id}:${user.user.id}:v2` },
-    });
-    assert.equal(run.lastRanFor, "ALL_ZERO");
+    assert.equal(await prisma.eventRecap.count({ where: { suppressed: true } }), 1);
     for (const shell of [false, true]) {
       const response = await home(user, shell);
       assert.equal(response.status, 200);
@@ -139,26 +112,23 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     }
   });
 
-  it("real summary worker preserves mixed nonzero contributions whose net is zero", async () => {
+  it("migrated mixed-net-zero recap is suppressed in both Home paths", async () => {
     const user = await createTestUser();
     const event = await createEndedEvent();
     const [raceA, raceB] = await Promise.all([
       createCompletedRace(user, "positive"),
       createCompletedRace(user, "negative"),
     ]);
-    await addFinal(event, raceA, user, 100);
-    await addFinal(event, raceB, user, -100);
-    const tick = buildGlobalEventSummaryTick({ prisma, now: () => new Date() });
-    assert.deepEqual(await tick(), { upserts: 1 });
-    const summary = await prisma.globalEventUserSummary.findUnique({
-      where: { eventId_userId: { eventId: event.id, userId: user.user.id } },
-    });
+    await prisma.globalEventRaceImpact.createMany({ data: [raceA, raceB].map(race => ({
+      eventId: event.id, raceId: race.id, userId: user.user.id,
+    })) });
+    const summary = await createSavedRecap(prisma, { event, userId: user.user.id, extraRaceSteps: 0, raceCount: 2 });
     assert.equal(summary.extraRaceSteps, 0);
     assert.equal(summary.raceCount, 2);
     for (const shell of [false, true]) {
       const response = await home(user, shell);
       assert.equal(response.status, 200);
-      assert.equal((await response.json()).globalEventSummary.id, summary.id);
+      assert.equal((await response.json()).globalEventSummary, undefined);
     }
   });
 
@@ -169,7 +139,6 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     const event = await createEndedEvent();
     const race = await createCompletedRace(user, "redis");
     await addFinal(event, race, user, 125);
-    await buildGlobalEventSummaryTick({ prisma })();
 
     await probe.set(
       `t:v1:home:impact-summary:${user.user.id}`,
@@ -181,7 +150,7 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     assert.notEqual(first.id, "stale-v1-all-zero");
     assert.ok(await probe.get(`t:${cacheKeys.homeImpactSummary(user.user.id)}`));
 
-    await prisma.globalEventUserSummary.update({
+    await prisma.eventRecap.update({
       where: { id: first.id },
       data: { extraRaceSteps: 777 },
     });
@@ -211,9 +180,16 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     } else {
       t.diagnostic("local Redis unavailable; warm-miss invalidation subcase skipped");
     }
-    await addFinal(event, race, user, -250);
-    await buildGlobalEventSummaryTick({ prisma })();
-    const summaryId = (await prisma.globalEventUserSummary.findFirst()).id;
+    await prisma.globalStepEventEntitlement.create({ data: {
+      eventId: event.id, userId: user.user.id, timezone: 'UTC', localDate: new Date().toISOString().slice(0,10),
+      startsAt: event.startsAt, endsAt: event.endsAt, startProcessedAt: event.startsAt,
+      startOutcome: 'ACTIVATED_ON_TIME', recapRaceCount: 1, recapCountPolicyVersion: 1, recapWindowRevision: 0,
+    } });
+    const finalize = await request(server.baseUrl, 'POST', '/home/event-recap', {
+      token: user.token, body: { eventId: event.id, revision: 0, rawSteps: 250 },
+    });
+    assert.equal(finalize.status, 200);
+    const summaryId = (await finalize.json()).globalEventSummary.id;
     assert.equal((await (await home(user)).json()).globalEventSummary.id, summaryId);
 
     await selectRedis(`redis://127.0.0.1:${await closedPort()}/15`);
@@ -229,10 +205,9 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     const event = await createEndedEvent();
     const race = await createCompletedRace(user, "delete-breaker");
     await addFinal(event, race, user, 125);
-    await buildGlobalEventSummaryTick({ prisma })();
     assert.equal((await (await home(user)).json()).globalEventSummary.extraRaceSteps, 125);
 
-    await prisma.globalEventUserSummary.updateMany({
+    await prisma.eventRecap.updateMany({
       where: { eventId: event.id, userId: user.user.id },
       data: { extraRaceSteps: 777 },
     });

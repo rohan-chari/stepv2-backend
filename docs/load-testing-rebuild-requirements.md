@@ -1,5 +1,7 @@
 # Bara load-testing rebuild requirements
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 **Status:** Approved for implementation  
 **Owner:** Backend / performance tooling  
 **Primary operator entrypoint:** `./perf`  

@@ -9,7 +9,7 @@ const {
   request,
 } = require("./setup");
 const { appSettings } = require("../../src/shared/config/appSettings");
-const { buildGlobalEventSummaryTick } = require("../../src/modules/steps/jobs/globalEventSummary");
+const { createSavedRecap } = require('./helpers/eventRecapFixture');
 const { buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com";
@@ -272,28 +272,21 @@ describe("2026-08-17 additive contracts", () => {
     const other = await createTestUser();
     const event = await prisma.globalStepEvent.create({ data: {
       startsAt: new Date(Date.now() - 120_000), endsAt: new Date(Date.now() - 60_000), multiplier: 2,
-      summaryAttributionVersion: 2,
     } });
     const mineSummaryRace = await createCompletedRace(user.user.id, "Mine summary race");
     const foreignSummaryRace = await createCompletedRace(other.user.id, "Foreign summary race");
     await prisma.globalEventRaceImpact.createMany({ data: [
       {
         eventId: event.id, raceId: mineSummaryRace.id, userId: user.user.id,
-        status: "FINAL", deltaSteps: 840, settledAt: new Date(), attributionVersion: 2,
       },
       {
         eventId: event.id, raceId: foreignSummaryRace.id, userId: other.user.id,
-        status: "FINAL", deltaSteps: 40, settledAt: new Date(), attributionVersion: 2,
       },
     ] });
-    const mine = await prisma.globalEventUserSummary.create({ data: {
-      eventId: event.id, userId: user.user.id, extraRaceSteps: 840, raceCount: 2,
-      attributionVersion: 2, expiresAt: new Date(Date.now() + 60_000),
-    } });
-    const foreign = await prisma.globalEventUserSummary.create({ data: {
-      eventId: event.id, userId: other.user.id, extraRaceSteps: 40, raceCount: 1,
-      attributionVersion: 2, expiresAt: new Date(Date.now() + 60_000),
-    } });
+    const mine = await createSavedRecap(prisma, { event, userId: user.user.id, extraRaceSteps: 840, raceCount: 2,
+      expiresAt: new Date(Date.now() + 60_000) });
+    const foreign = await createSavedRecap(prisma, { event, userId: other.user.id, extraRaceSteps: 40, raceCount: 1,
+      expiresAt: new Date(Date.now() + 60_000) });
     const mineHome = await request(server.baseUrl, "GET", "/home/race-card", {
       token: user.token, headers: { "X-Client-Features": "impact_summaries,impact_summary_expiry_v1" },
     });
@@ -327,36 +320,4 @@ describe("2026-08-17 additive contracts", () => {
     assert.equal(secondClaim.status, 409);
   });
 
-  it("uses a transactional JobRun fence when global impact groups become final", async () => {
-    const user = await createTestUser();
-    const event = await prisma.globalStepEvent.create({ data: {
-      // The recap is deliberately immutable only after the enrollment window
-      // closes; keep this fixture before the tick's injected clock.
-      startsAt: new Date("2026-08-17T11:50:00.000Z"),
-      endsAt: new Date("2026-08-17T11:55:00.000Z"),
-      multiplier: 2,
-    } });
-    const firstRace = await createCompletedRace(user.user.id, "First global-impact race");
-    const secondRace = await createCompletedRace(user.user.id, "Second global-impact race");
-    await prisma.globalEventRaceImpact.createMany({ data: [
-      { eventId: event.id, raceId: firstRace.id, userId: user.user.id, status: "FINAL", deltaSteps: 10, settledAt: new Date() },
-      { eventId: event.id, raceId: secondRace.id, userId: user.user.id, status: "PENDING" },
-    ] });
-    const tick = buildGlobalEventSummaryTick({ prisma, now: () => new Date("2026-08-17T12:00:00.000Z") });
-    assert.deepEqual(await tick(), { upserts: 0 }, "a pending race prevents an incomplete summary");
-
-    await prisma.globalEventRaceImpact.updateMany({
-      where: { eventId: event.id, raceId: secondRace.id, userId: user.user.id },
-      data: { status: "FINAL", deltaSteps: 5, settledAt: new Date() },
-    });
-    await Promise.all([tick(), tick()]);
-    const summary = await prisma.globalEventUserSummary.findUnique({
-      where: { eventId_userId: { eventId: event.id, userId: user.user.id } },
-    });
-    assert.equal(summary.extraRaceSteps, 15);
-    assert.equal(summary.raceCount, 2);
-    assert.equal(await prisma.jobRun.count({
-      where: { jobName: `global_event_summary:${event.id}:${user.user.id}:v1` },
-    }), 1);
-  });
 });

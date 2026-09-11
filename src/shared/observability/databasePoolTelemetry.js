@@ -27,7 +27,7 @@ const PHASES = new Set([
   "scoring_generation",
   "active_race",
   "durable_enqueue",
-  "summary_finalization",
+  "idempotency_finalization",
   "post_commit",
 ]);
 const SUPPORTED_IDENTITIES = new Set(["http:0", "http:1", "resolution:0", "cron:0"]);

@@ -1,5 +1,7 @@
 # Durable global-event capture
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 ## Summary and authorization
 
 The user authorized replacing repeated per-uploader history reconstruction with

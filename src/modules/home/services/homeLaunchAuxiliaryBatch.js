@@ -164,38 +164,7 @@ function createHomeLaunchAuxiliaryBatch() {
     return enqueue(prisma, "globalEventSummary", { userId }, async (requests) => {
       for (const page of chunks(requests)) {
         const ids = [...new Set(page.map((request) => request.userId))];
-        const rows = await prisma.$queryRaw(Prisma.sql`
-          WITH authoritative_time AS (
-            SELECT statement_timestamp() AT TIME ZONE 'UTC' AS now_at_load
-          ), ranked AS (
-            SELECT
-              s.user_id AS "userId",
-              s.id,
-              s.event_id AS "eventId",
-              s.extra_race_steps AS "extraRaceSteps",
-              s.race_count AS "raceCount",
-              s.settled_at AS "settledAt",
-              s.expires_at AS "expiresAt",
-              GREATEST(0,FLOOR(EXTRACT(EPOCH FROM
-                (s.expires_at-t.now_at_load))*1000))::int AS "remainingMsAtLoad",
-              ROW_NUMBER() OVER (
-                PARTITION BY s.user_id ORDER BY s.settled_at DESC,s.id DESC
-              )::int AS row_number
-            FROM global_event_user_summaries s
-            CROSS JOIN authoritative_time t
-            WHERE s.user_id IN (${Prisma.join(ids)})
-              AND s.acknowledged_at IS NULL
-              AND s.attribution_version=2
-              AND s.expires_at>t.now_at_load
-              AND EXISTS (
-                SELECT 1 FROM global_event_race_impacts i
-                WHERE i.event_id=s.event_id AND i.user_id=s.user_id
-                  AND i.status='FINAL' AND i.attribution_version=2
-                  AND i.delta_steps<>0
-              )
-          )
-          SELECT * FROM ranked WHERE row_number=1
-        `);
+        const rows = await require('../queries/readSavedEventRecaps').readSavedEventRecaps(prisma, ids);
         const byUserId = new Map();
         for (const row of rows || []) {
           if (!Number.isInteger(row.remainingMsAtLoad) || row.remainingMsAtLoad <= 0) continue;

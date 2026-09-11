@@ -226,13 +226,12 @@ test("capacity fixture reset removes only derived global-event notification stat
   assert.ok(sql.indexOf("LOCK TABLE") < sql.indexOf("DELETE FROM notification_schedules"));
   for (const table of [
     "notification_schedules", "inbox_alerts", "domain_event_outbox",
-    "global_event_capture_artifacts", "global_event_summary_work",
-    "global_event_user_summaries", "global_event_race_impacts",
+    "event_recaps", "global_event_race_impacts",
     "global_step_event_boundary_cursors", "global_step_event_entitlements",
     "global_step_events", "global_step_event_operational_snapshots",
     "global_step_event_operational_counters",
   ]) assert.match(sql, new RegExp(`DELETE FROM ${table}`, "i"));
-  assert.ok(sql.indexOf("DELETE FROM global_event_capture_artifacts") <
+  assert.ok(sql.indexOf("DELETE FROM event_recaps") <
     sql.indexOf("DELETE FROM global_step_events"));
   for (const protectedTable of ["users", "races", "race_participants", "steps", "step_samples"]) {
     assert.doesNotMatch(sql, new RegExp(`DELETE FROM ${protectedTable}(?:\\s|$)`, "i"));
@@ -291,7 +290,7 @@ test("capacity global-event cleanup locks and removes only owned parents before 
   const deletes = calls.filter((call) => call.kind === "execute");
   for (const table of [
     "notification_schedules", "inbox_alerts", "domain_event_outbox",
-    "global_event_user_summaries", "global_event_race_impacts",
+    "event_recaps", "global_event_race_impacts",
     "global_step_event_boundary_cursors", "global_step_event_entitlements",
     "global_step_events",
   ]) {

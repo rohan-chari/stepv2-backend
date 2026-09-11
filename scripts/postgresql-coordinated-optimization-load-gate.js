@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const RECOVERY_LIMITS_MS = Object.freeze({
   resolution: 5_000, placement: 10_000, postTask: 30_000, domainEvent: 10_000,
-  globalSummary: 60_000, notificationSchedule: 60_000, inbox: 60_000,
+  notificationSchedule: 60_000, inbox: 60_000,
 });
 function number(value) { return Number(value) || 0; }
 const sum = (artifact, pattern, field) => (artifact.statements || [])
@@ -24,12 +24,8 @@ const gates = {
     Number(baseline.intervalSeconds) > 0 && Number.isFinite(Number(candidate.intervalSeconds)) &&
     Number(candidate.intervalSeconds) > 0,
   idleQueueCallReduction: reduction(
-    sum(baseline, /SKIP LOCKED|race_resolution|race_placement|global_event_summary/i, "callsPerSecond"),
-    sum(candidate, /SKIP LOCKED|race_resolution|race_placement|global_event_summary/i, "callsPerSecond"),
-  ),
-  globalSummaryScanReduction: reduction(
-    sum(baseline, /global_event_summary_work/i, "shared_blks_hit"),
-    sum(candidate, /global_event_summary_work/i, "shared_blks_hit"),
+    sum(baseline, /SKIP LOCKED|race_resolution|race_placement/i, "callsPerSecond"),
+    sum(candidate, /SKIP LOCKED|race_resolution|race_placement/i, "callsPerSecond"),
   ),
   terminalProjectionFetchReduction: reduction(
     sum(baseline, /domain_event_notification_projections/i, "rows"),
@@ -55,7 +51,6 @@ const gates = {
     number(runtime.lostWakeRecoveryMs[name]) <= limit),
   postTaskIdleClaimBound: Number.isFinite(Number(runtime.postTaskEmptyClaimsPer30Seconds)) &&
     Number(runtime.postTaskEmptyClaimsPer30Seconds) <= 1,
-  noWaitingRacesRecoveryChurn: Number(runtime.waitingRacesRecoveryChurn) === 0,
   noDuplicateVisibleOutput: Number(runtime.duplicateVisibleOutputs) === 0,
 };
 const failures = Object.entries(gates)

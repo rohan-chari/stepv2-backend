@@ -55,12 +55,10 @@ function normalizedEntitlementEvent(event, entitlement, impact = null) {
     eventId: event.id,
     entitlementId: entitlement.id,
     impactId: impact?.id || null,
-    impactStatus: impact?.status || null,
     startsAt: entitlement.startsAt,
     endsAt: entitlement.endsAt,
     multiplier: event.multiplier,
     scheduleMode: LOCAL_ENTITLEMENTS,
-    summaryAttributionVersion: event.summaryAttributionVersion,
   };
 }
 
@@ -763,11 +761,11 @@ async function processDueEntitlementBoundaries({
           select: { id: true, raceId: true },
         });
         const raceIds = [...new Set(participants.map((row) => row.raceId))].sort();
+        await require('./eventRecapStartCount').stampEventRecapStartCounts(tx, [entitlement.id]);
         await createPendingEnrollmentsForRaces(tx, {
           eventId: entitlement.eventId,
           raceIds,
           userId: entitlement.userId,
-          attributionVersion: entitlement.event?.summaryAttributionVersion,
         });
         await enqueueRaces(tx, entitlement, raceIds, new Map(
           participants.map((row) => [row.raceId, row.id]),
@@ -837,10 +835,6 @@ async function processDueEntitlementBoundaries({
         await enqueueRaces(tx, entitlement, raceIds, new Map(
           participants.map((row) => [row.raceId, row.id]),
         ));
-        const {
-          createSummaryWorkForEntitlement,
-        } = require("./globalEventSummaryLifecycle");
-        await createSummaryWorkForEntitlement(tx, entitlement, current);
         await tx.globalStepEventEntitlement.updateMany({
           where: { id: entitlement.id, endProcessedAt: null },
           data: { endProcessedAt: current },
@@ -941,8 +935,7 @@ async function processDueEndMicroBatch({ prisma = defaultPrisma, now = new Date(
   const ids = discovered.map(row => row.id);
   const readImpacts = (client, entitlementIds) => client.$queryRawUnsafe(
     `SELECT entitlement.id AS "entitlementId", impact.race_id AS "raceId",
-       impact.user_id AS "userId", impact.attribution_version AS "attributionVersion",
-       impact.status, participant.id AS "participantId"
+       impact.user_id AS "userId", participant.id AS "participantId"
      FROM global_step_event_entitlements entitlement
      JOIN global_event_race_impacts impact
        ON impact.event_id=entitlement.event_id AND impact.user_id=entitlement.user_id
@@ -996,10 +989,6 @@ async function processDueEndMicroBatch({ prisma = defaultPrisma, now = new Date(
       }, tx);
       await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup('resolution', { workKind: 'ordinary' }));
     }
-    const { createSummaryWorkForEntitlements } = require('./globalEventSummaryLifecycle');
-    await createSummaryWorkForEntitlements(tx, entitlements.map(entitlement => ({
-      entitlement, impacts: impactsByEntitlement.get(entitlement.id) || [],
-    })), now);
     await tx.globalStepEventEntitlement.updateMany({
       where: { id: { in: claimedIds }, endProcessedAt: null }, data: { endProcessedAt: now },
     });
@@ -1123,10 +1112,6 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
           raceId: row.raceId,
           userId: entitlement.userId,
           participantId: row.id,
-          status: "PENDING",
-          ...(Number(entitlement.event?.summaryAttributionVersion) === 2
-            ? { attributionVersion: 2 }
-            : {}),
         });
       }
       (eligible.length ? activeIds : noRaceIds).push(entitlement.id);
@@ -1165,6 +1150,7 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
         ));
       }
     }
+    await require('./eventRecapStartCount').stampEventRecapStartCounts(tx, [...activeIds, ...noRaceIds]);
     if (activeIds.length) await tx.globalStepEventEntitlement.updateMany({
       where: { id: { in: activeIds }, startProcessedAt: null },
       data: { startOutcome: START_OUTCOMES.ACTIVATED_ON_TIME, startProcessedAt: current, startNextAttemptAt: null },
@@ -1254,7 +1240,6 @@ async function ensureRaceGlobalEventEligibility({
         eventId: entitlement.eventId,
         raceId: race.id,
         userIds: [entitlement.userId],
-        attributionVersion: entitlement.event?.summaryAttributionVersion,
       });
       if (outcome !== entitlement.startOutcome) {
         await tx.globalStepEventEntitlement.update({
@@ -1273,74 +1258,10 @@ async function ensureRaceGlobalEventEligibility({
     }
     if (pendingEnrollments.length === 0) return [];
 
-    // ON CONFLICT/skipDuplicates does not protect this path: PostgreSQL runs
-    // the permanent BEFORE INSERT group-fence trigger before it discovers the
-    // unique-key conflict. Preflight the complete all-version vectors and work
-    // groups while C0 + the enrollment advisory lock are held, then write only
-    // genuinely pre-capture membership. A work row is durable proof that the
-    // v2 vector boundary has begun, so a missing race row is scoring-eligible
-    // for this settlement repair but must never be appended to that vector.
-    const eventIds = [...new Set(pendingEnrollments.map((row) => row.eventId))];
-    const userIds = [...new Set(pendingEnrollments.flatMap((row) => row.userIds))];
-    // C0 is already held. Lock matching work groups next, in stable order, so
-    // expiry/capture cannot change the fence state between this preflight and
-    // the insert decision. The trigger's same-row UPDATE is re-entrant here.
-    const workGroups = typeof tx.$queryRawUnsafe === "function"
-      ? await tx.$queryRawUnsafe(
-          `SELECT event_id AS "eventId", user_id AS "userId", status,
-                  expires_at AS "expiresAt"
-             FROM global_event_summary_work
-            WHERE event_id = ANY($1::text[])
-              AND user_id = ANY($2::text[])
-            ORDER BY event_id ASC, user_id ASC
-            FOR UPDATE`,
-          eventIds,
-          userIds,
-        )
-      : await tx.globalEventSummaryWork.findMany({
-        where: {
-          eventId: { in: eventIds },
-          userId: { in: userIds },
-        },
-        select: { eventId: true, userId: true, status: true, expiresAt: true },
-      });
-    const impactVector = await tx.globalEventRaceImpact.findMany({
-      where: {
-        eventId: { in: eventIds },
-        userId: { in: userIds },
-      },
-      select: {
-        eventId: true,
-        raceId: true,
-        userId: true,
-        attributionVersion: true,
-        status: true,
-      },
-    });
-    const groupKey = (eventId, userId) => `${eventId}:${userId}`;
-    const exactImpactGroups = new Set(impactVector
-      .filter((impact) => impact.raceId === race.id)
-      .map((impact) => groupKey(impact.eventId, impact.userId)));
-    const fencedWorkGroups = new Set(workGroups
-      .filter((work) => work.status !== "WAITING_SYNC" ||
-        (work.expiresAt && new Date(work.expiresAt) <= current))
-      .map((work) => groupKey(work.eventId, work.userId)));
-    const missingFencedGroups = new Set();
-    const safeEnrollments = pendingEnrollments.filter((enrollment) => {
-      const userId = enrollment.userIds[0];
-      const key = groupKey(enrollment.eventId, userId);
-      if (exactImpactGroups.has(key)) return false;
-      if (Number(enrollment.attributionVersion) === 2 && fencedWorkGroups.has(key)) {
-        missingFencedGroups.add(key);
-        return false;
-      }
-      return true;
-    });
-    await createPendingEnrollmentsBatch(tx, {
-      raceId: race.id,
-      enrollments: safeEnrollments,
-    });
-    return [...missingFencedGroups];
+    // Membership is scoring authority, not a recap capture vector. The sorted
+    // race fence and enrollment lock above serialize its normal repair.
+    await createPendingEnrollmentsBatch(tx, { raceId: race.id, enrollments: pendingEnrollments });
+    return [];
   }, { timeout: 30_000, maxWait: 10_000 });
   const { findEligibleByRace } = require("../models/globalStepEventEntitlement");
   return findEligibleByRace({

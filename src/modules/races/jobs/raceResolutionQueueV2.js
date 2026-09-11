@@ -89,9 +89,6 @@ const {
   SNAPSHOT_AT_EXPIRY_TYPES,
 } = require("../../powerups/constants/expiryEffectTypes");
 const {
-  persistCapturedSummaryImpactsForRace,
-} = require("../../steps/services/globalEventSummaryCapture");
-const {
   createOperationalAlertSpool,
 } = require("../../../shared/operationalAlerts/operationalAlertSpool");
 const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
@@ -126,19 +123,6 @@ function containsSourceInputWork(reasons) {
   return Array.isArray(reasons) && reasons.includes("STEP_INPUT_CHANGED");
 }
 
-function shouldPersistCapturedSummaryImpacts(reasons) {
-  // Missing/legacy metadata stays conservative. Current workers only skip
-  // when a valid reason vector proves this resolution is unrelated.
-  if (!Array.isArray(reasons) || reasons.length === 0) return true;
-  return reasons.includes("GLOBAL_EVENT_BOUNDARY") || reasons.includes("FULL");
-}
-
-function capturedSummaryGateOutcome(reasons) {
-  if (Array.isArray(reasons) && reasons.includes("GLOBAL_EVENT_BOUNDARY")) {
-    return "boundary";
-  }
-  return shouldPersistCapturedSummaryImpacts(reasons) ? "full_fallback" : "skipped";
-}
 
 function sourceInputTargetIsTerminal(fingerprint, triggeringUserIds, at) {
   const race = fingerprint?.race;
@@ -2107,7 +2091,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const attemptedBoxSyncResults = [];
         const attemptedPowerupEvents = [];
         let attemptedPostTaskId = null;
-        let summaryWorkChanged = false;
         await phaseTimer.measure("transaction", () => prisma.$transaction(async (tx) => {
         // (i) fence
         const fenced = await phaseTimer.measure(
@@ -2550,43 +2533,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           impactContinuationNeeded =
             umbrella.hasMore ||
             result?.activeImpactCapture?.hasMoreTimedSources === true;
-          const shouldPersistGlobalSummary = shouldPersistCapturedSummaryImpacts(
-            job.processingDirtyReasons,
-          );
-          coordinatedOptimizationMetrics.increment(
-            "global_summary_race_resolution_gate_total",
-            { outcome: capturedSummaryGateOutcome(job.processingDirtyReasons) },
-          );
-          if (shouldPersistGlobalSummary) {
-            const persistedSummary = await persistCapturedSummaryImpactsForRace(tx, {
-              raceId: job.raceId,
-              sourceResolutionGeneration: job.processingGeneration,
-              now: currentTime,
-            });
-            summaryWorkChanged = persistedSummary.finalized > 0 ||
-              persistedSummary.terminalized > 0 || persistedSummary.readinessUpdated > 0;
-            coordinatedOptimizationMetrics.increment(
-              "global_summary_race_resolution_artifacts_total",
-              {},
-              persistedSummary.artifactCount,
-            );
-            coordinatedOptimizationMetrics.increment(
-              "global_summary_race_resolution_impacts_total",
-              { outcome: "finalized" },
-              persistedSummary.finalized,
-            );
-            coordinatedOptimizationMetrics.increment(
-              "global_summary_race_resolution_impacts_total",
-              { outcome: "terminalized" },
-              persistedSummary.terminalized,
-            );
-            if (persistedSummary.artifactCount === 0 &&
-                persistedSummary.terminalCandidateCount === 0) {
-              coordinatedOptimizationMetrics.increment(
-                "global_summary_race_resolution_empty_total",
-              );
-            }
-          }
         } finally {
           activeImpactPersistMs += Math.max(
             0,
@@ -2745,9 +2691,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           if (placementHandoffGeneration != null) {
             await publishDurableQueueWakeup("placement");
           }
-          // Only committed summary changes warrant a drain. Recovery and
-          // capture-maintenance deadlines remain owned by the summary scheduler.
-          if (summaryWorkChanged) await publishDurableQueueWakeup("summary");
           if (committedPostTaskId) {
             await publishDurableQueueWakeup("post-task");
           }

@@ -56,31 +56,7 @@ test("active due/lease/expiry claim branches have purpose-built partial indexes"
   ]) assert.match(summaryLeaseMigration, new RegExp(name));
 });
 
-test("summary exact-due probes use branch-indexable minima instead of row expressions", () => {
-  const source = fs.readFileSync(path.join(ROOT,
-    "src/modules/steps/jobs/globalEventSummary.js"), "utf8");
-  const start = source.indexOf("async function nextSummaryDueAt");
-  const end = source.indexOf("async function releaseWorkLease", start);
-  const query = source.slice(start, end);
-  assert.doesNotMatch(query, /GREATEST\(/);
-  assert.match(query, /MIN\(available_at\)[\s\S]*status='WAITING_RACES'[\s\S]*lease_until IS NULL/);
-  assert.match(query, /MIN\(lease_until\)[\s\S]*status='WAITING_RACES'[\s\S]*available_at <= CURRENT_TIMESTAMP/);
-  assert.match(query, /MIN\(expires_at\)[\s\S]*status='WAITING_SYNC'[\s\S]*lease_until IS NULL/);
-  assert.match(query, /MIN\(lease_until\)[\s\S]*status='WAITING_SYNC'[\s\S]*expires_at <= CURRENT_TIMESTAMP/);
-});
 
-test("summary claims bound unleased and expired-lease work in separate branches", () => {
-  const source = fs.readFileSync(path.join(ROOT,
-    "src/modules/steps/jobs/globalEventSummary.js"), "utf8");
-  const start = source.indexOf("async function claimActiveWork");
-  const end = source.indexOf("async function repairSummaryReadiness", start);
-  const claim = source.slice(start, end);
-  assert.doesNotMatch(claim, /lease_until IS NULL OR lease_until <=/);
-  assert.match(claim, /status='WAITING_RACES'[\s\S]*lease_until IS NULL[\s\S]*LIMIT \$2/);
-  assert.match(claim, /status='WAITING_RACES'[\s\S]*lease_until <= \$1[\s\S]*LIMIT \$2/);
-  assert.match(claim, /status='WAITING_SYNC'[\s\S]*lease_until IS NULL[\s\S]*LIMIT \$2/);
-  assert.match(claim, /status='WAITING_SYNC'[\s\S]*lease_until <= \$1[\s\S]*LIMIT \$2/);
-});
 
 test("admission exact-due probes split FIRST, RETRY, LEASED and include the indexed class", () => {
   const admission = fs.readFileSync(path.join(ROOT,

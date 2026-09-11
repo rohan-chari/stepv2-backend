@@ -59,7 +59,7 @@ test("active seeded-race auto enrollment creates participant and event impact in
 
   assert.equal(transactions, 1);
   assert.deepEqual(impacts, [{
-    eventId: "event-1", raceId: "race-1", userId: "user-1", status: "PENDING",
+    eventId: "event-1", raceId: "race-1", userId: "user-1",
   }]);
 });
 

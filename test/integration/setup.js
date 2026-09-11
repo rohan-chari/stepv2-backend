@@ -55,6 +55,7 @@ const TABLES_IN_ORDER = [
   "global_event_capture_artifacts",
   "global_event_summary_work",
   "global_event_user_summaries",
+  "event_recaps",
   "global_event_race_impacts",
   "global_step_event_operational_snapshots",
   "global_step_event_operational_counters",
@@ -201,6 +202,10 @@ async function cleanDatabase() {
              series_predecessor_race_id = NULL;
       FOREACH table_name IN ARRAY ARRAY[${tableLiterals}]
       LOOP
+        -- Only the explicitly retired tables may be absent after stage B.
+        IF table_name IN ('durable_capture_compaction_schedule', 'durable_capture_root_sweep',
+          'global_event_capture_artifacts', 'global_event_summary_work', 'global_event_user_summaries')
+          AND to_regclass(format('public.%I', table_name)) IS NULL THEN CONTINUE; END IF;
         EXECUTE format('DELETE FROM %I', table_name);
       END LOOP;
     END $$;

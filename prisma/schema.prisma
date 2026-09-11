@@ -219,9 +219,7 @@ model User {
   activeRaceImpactWork         ActiveRaceImpactWork[]
   activeRaceEffectImpacts      ActiveRaceEffectImpact[]
   globalEventRaceImpacts       GlobalEventRaceImpact[]
-  globalEventUserSummaries     GlobalEventUserSummary[]
-  globalEventSummaryWork       GlobalEventSummaryWork[]
-  globalEventCaptureArtifacts  GlobalEventCaptureArtifact[]
+  eventRecaps                  EventRecap[]
   globalStepEventEntitlements  GlobalStepEventEntitlement[]
   appReviewPromptAttempts      AppReviewPromptAttempt[]
   inboxAlerts                  InboxAlert[]
@@ -486,18 +484,6 @@ model GlobalEventRaceImpact {
   eventId                      String    @map("event_id")
   raceId                       String    @map("race_id")
   userId                       String    @map("user_id")
-  status                       String    @default("PENDING")
-  deltaSteps                   Int?      @map("delta_steps")
-  attributionVersion           Int       @default(1) @map("attribution_version")
-  captureKind                  String?   @map("capture_kind")
-  captureSyncRequestId         String?   @map("capture_sync_request_id")
-  captureCompletedAt           DateTime? @map("capture_completed_at")
-  captureCoverageThrough       DateTime? @map("capture_coverage_through")
-  sourceScoringInputGeneration BigInt?   @map("source_scoring_input_generation")
-  sourceResolutionGeneration   Int?      @map("source_resolution_generation")
-  terminalReason               String?   @map("terminal_reason")
-  terminalAt                   DateTime? @map("terminal_at")
-  settledAt                    DateTime? @map("settled_at")
   createdAt                    DateTime  @default(now()) @map("created_at")
   updatedAt                    DateTime  @updatedAt @map("updated_at")
 
@@ -506,91 +492,32 @@ model GlobalEventRaceImpact {
   user  User            @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@unique([eventId, raceId, userId])
-  @@index([eventId, userId, settledAt])
   @@index([userId, eventId])
   @@map("global_event_race_impacts")
 }
 
-model GlobalEventUserSummary {
-  id                 String    @id @default(uuid())
-  eventId            String    @map("event_id")
-  userId             String    @map("user_id")
-  extraRaceSteps     Int       @map("extra_race_steps")
-  raceCount          Int       @map("race_count")
-  attributionVersion Int       @default(1) @map("attribution_version")
-  settledAt          DateTime  @default(now()) @map("settled_at")
-  acknowledgedAt     DateTime? @map("acknowledged_at")
+model EventRecap {
+  id                 String @id @default(uuid())
+  eventId            String @map("event_id")
+  userId             String @map("user_id")
+  calculationVersion String @map("calculation_version")
+  rawSteps           Int? @map("raw_steps")
+  raceCount          Int @map("race_count")
+  extraRaceSteps     Int @map("extra_race_steps")
+  settledAt          DateTime @default(now()) @map("settled_at")
   expiresAt          DateTime? @map("expires_at")
-
+  acknowledgedAt     DateTime? @map("acknowledged_at")
+  suppressed         Boolean @default(false)
   event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
-  user  User            @relation(fields: [userId], references: [id], onDelete: Restrict)
-
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@unique([eventId, userId])
-  @@index([userId, acknowledgedAt, settledAt(sort: Desc)])
-  @@index([userId, acknowledgedAt, expiresAt, settledAt(sort: Desc)])
-  @@map("global_event_user_summaries")
+  @@index([userId, settledAt(sort: Desc), id], map: "event_recaps_user_latest_idx")
+  @@index([expiresAt], map: "event_recaps_expiry_idx")
+  @@map("event_recaps")
 }
 
-model GlobalEventSummaryWork {
-  id                           String    @id @default(uuid())
-  eventId                      String    @map("event_id")
-  userId                       String    @map("user_id")
-  status                       String    @default("WAITING_SYNC")
-  expiresAt                    DateTime  @map("expires_at")
-  captureSyncRequestId         String?   @map("capture_sync_request_id")
-  captureCompletedAt           DateTime? @map("capture_completed_at")
-  captureCoverageThrough       DateTime? @map("capture_coverage_through")
-  sourceScoringInputGeneration BigInt?   @map("source_scoring_input_generation")
-  requiredRaceCount            Int       @default(0) @map("required_race_count")
-  finalRaceCount               Int       @default(0) @map("final_race_count")
-  raceReconciledAt             DateTime? @map("race_reconciled_at")
-  readyAt                      DateTime? @map("ready_at")
-  nextRecoveryAt               DateTime  @default(now()) @map("next_recovery_at")
-  availableAt                  DateTime  @default(now()) @map("available_at")
-  leaseUntil                   DateTime? @map("lease_until")
-  leaseToken                   String?   @map("lease_token")
-  attemptCount                 Int       @default(0) @map("attempt_count")
-  lastErrorCode                String?   @map("last_error_code")
-  createdAt                    DateTime  @default(now()) @map("created_at")
-  updatedAt                    DateTime  @updatedAt @map("updated_at")
 
-  event     GlobalStepEvent              @relation(fields: [eventId], references: [id], onDelete: Restrict)
-  user      User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  artifacts GlobalEventCaptureArtifact[]
 
-  @@unique([eventId, userId])
-  @@index([status, availableAt, leaseUntil])
-  @@index([status, raceReconciledAt, id])
-  @@index([userId, status, expiresAt])
-  @@map("global_event_summary_work")
-}
-
-model GlobalEventCaptureArtifact {
-  id                           String   @id @default(uuid())
-  workId                       String   @map("work_id")
-  eventId                      String   @map("event_id")
-  raceId                       String   @map("race_id")
-  userId                       String   @map("user_id")
-  captureSyncRequestId         String   @map("capture_sync_request_id")
-  captureCompletedAt           DateTime @map("capture_completed_at")
-  captureCoverageThrough       DateTime @map("capture_coverage_through")
-  sourceScoringInputGeneration BigInt   @map("source_scoring_input_generation")
-  payload                      Json
-  payloadDigest                String   @map("payload_digest") @db.Char(64)
-  schemaVersion                Int      @default(1) @map("schema_version")
-  createdAt                    DateTime @default(now()) @map("created_at")
-  updatedAt                    DateTime @updatedAt @map("updated_at")
-
-  work  GlobalEventSummaryWork @relation(fields: [workId], references: [id], onDelete: Cascade)
-  event GlobalStepEvent        @relation(fields: [eventId], references: [id], onDelete: Restrict)
-  race  Race                   @relation(fields: [raceId], references: [id], onDelete: Restrict)
-  user  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([workId, raceId])
-  @@index([eventId, userId])
-  @@index([raceId, workId])
-  @@map("global_event_capture_artifacts")
-}
 
 model AppReviewPromptAttempt {
   id            String    @id @default(uuid())
@@ -1800,7 +1727,6 @@ model Race {
   activeImpactWork                 ActiveRaceImpactWork[]
   activeEffectImpacts              ActiveRaceEffectImpact[]
   globalEventImpacts               GlobalEventRaceImpact[]
-  globalEventCaptureArtifacts      GlobalEventCaptureArtifact[]
   reviewPromptAttempts             AppReviewPromptAttempt[]
   referralQualifications           Referral[]                            @relation("ReferralQualifyingRace")
   referralQualificationIntents     ReferralQualificationIntent[]         @relation("ReferralQualificationIntentRace")
@@ -3158,14 +3084,11 @@ model GlobalStepEvent {
   localStartMinute          Int?     @map("local_start_minute")
   durationMinutes           Int?     @map("duration_minutes")
   schedulePolicyVersion     Int?     @map("schedule_policy_version")
-  summaryAttributionVersion Int      @default(1) @map("summary_attribution_version")
   createdAt                 DateTime @default(now()) @map("created_at")
 
   raceImpacts      GlobalEventRaceImpact[]
-  userSummaries    GlobalEventUserSummary[]
+  recaps           EventRecap[]
   entitlements     GlobalStepEventEntitlement[]
-  summaryWork      GlobalEventSummaryWork[]
-  captureArtifacts GlobalEventCaptureArtifact[]
 
   @@index([startsAt, endsAt])
   @@map("global_step_events")
@@ -3190,6 +3113,9 @@ model GlobalStepEventEntitlement {
   timezoneRelocatedAt   DateTime? @map("timezone_relocated_at")
   timezoneRelocatedFrom String?   @map("timezone_relocated_from")
   scheduleRevision      Int       @default(0) @map("schedule_revision")
+  recapRaceCount        Int?      @map("recap_race_count")
+  recapCountPolicyVersion Int?    @map("recap_count_policy_version") @db.SmallInt
+  recapWindowRevision   Int?      @map("recap_window_revision")
   startAttemptCount     Int       @default(0) @map("start_attempt_count")
   startNextAttemptAt    DateTime? @map("start_next_attempt_at")
   startLastErrorCode    String?   @map("start_last_error_code")
@@ -3204,6 +3130,7 @@ model GlobalStepEventEntitlement {
   @@index([startNextAttemptAt, startsAt, id], map: "global_step_event_entitlements_retry_start_idx")
   @@index([endsAt, endProcessedAt])
   @@index([userId, startsAt, endsAt])
+  @@index([userId, endsAt(sort: Desc), id(sort: Desc)], map: "global_step_event_entitlements_user_end_idx")
   @@map("global_step_event_entitlements")
 }
 

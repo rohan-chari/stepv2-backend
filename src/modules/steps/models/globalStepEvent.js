@@ -30,7 +30,7 @@ const GlobalStepEvent = {
     const row = await prisma.globalStepEvent.create({
       data: { startsAt, endsAt, multiplier, label: label ?? null, eventDay,
         scheduleMode, localStartMinute, durationMinutes,
-        summaryAttributionVersion: 2 },
+      },
     });
     // C1 invalidation (spec §5 Phase B): the scheduler that mints a new event
     // must drop the cached not-yet-ended row set, or the "2x STEPS" home banner
@@ -73,7 +73,7 @@ const GlobalStepEvent = {
       const event = await tx.globalStepEvent.create({
         data: { startsAt: start, endsAt, multiplier, label: label ?? null,
           eventDay: day, scheduleMode: LEGACY_GLOBAL,
-          summaryAttributionVersion: 2 },
+        },
       });
       return { event, created: true };
     });
@@ -112,7 +112,7 @@ const GlobalStepEvent = {
       const event = await tx.globalStepEvent.create({
         data: { startsAt: start, endsAt, multiplier, label: label ?? null,
           eventDay: day, scheduleMode: LEGACY_GLOBAL,
-          summaryAttributionVersion: 2 },
+        },
       });
       const participants = await tx.raceParticipant.findMany({
         where: {
@@ -186,7 +186,6 @@ const GlobalStepEvent = {
           scheduleMode: LOCAL_ENTITLEMENTS,
           schedulePolicyVersion: LOCAL_EVENT_SCHEDULE_POLICY_VERSION,
           label,
-          summaryAttributionVersion: 2,
         },
       });
       return { event, created: true };

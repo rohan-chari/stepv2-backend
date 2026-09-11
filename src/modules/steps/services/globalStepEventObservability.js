@@ -150,8 +150,8 @@ async function captureOperationalSnapshot({ client = defaultPrisma, now = new Da
         'impactedRaces', (SELECT COUNT(DISTINCT race_id) FROM global_event_race_impacts),
         'pushesAttempted', (SELECT COUNT(*) FROM inbox_delivery_outbox o JOIN inbox_alerts a ON a.id=o.alert_id WHERE a.type='GLOBAL_EVENT_STARTED' AND o.attempt_count > 0),
         'pushesSent', (SELECT COUNT(*) FROM inbox_delivery_outbox o JOIN inbox_alerts a ON a.id=o.alert_id WHERE a.type='GLOBAL_EVENT_STARTED' AND o.delivered_at IS NOT NULL),
-        'summariesPending', (SELECT COUNT(DISTINCT (i.event_id, i.user_id)) FROM global_event_race_impacts i WHERE i.status <> 'FINAL'),
-        'summariesFinalized', (SELECT COUNT(*) FROM global_event_user_summaries),
+        'summariesPending', 0, -- frozen admin compatibility, retired worker
+        'summariesFinalized', (SELECT COUNT(*) FROM event_recaps),
         'maxStartQueueLatencyMs', COALESCE((SELECT MAX(EXTRACT(EPOCH FROM ($1-starts_at))*1000) FROM global_step_event_entitlements WHERE start_processed_at IS NULL AND starts_at <= $1), 0),
         'maxEndQueueLatencyMs', COALESCE((SELECT MAX(EXTRACT(EPOCH FROM ($1-ends_at))*1000) FROM global_step_event_entitlements WHERE end_processed_at IS NULL AND ends_at <= $1), 0)
       ) || (SELECT values FROM durable_counters) AS rollout_counters

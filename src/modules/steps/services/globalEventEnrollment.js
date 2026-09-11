@@ -42,8 +42,6 @@ async function createPendingEnrollments(tx, {
       eventId,
       raceId,
       userId,
-      status: "PENDING",
-      ...(Number(attributionVersion) === 2 ? { attributionVersion: 2 } : {}),
     }));
   const result = await tx.globalEventRaceImpact.createMany({
     data: rows,
@@ -68,8 +66,6 @@ async function createPendingEnrollmentsBatch(tx, { raceId, enrollments }) {
       eventId,
       raceId,
       userId,
-      status: "PENDING",
-      ...(Number(attributionVersion) === 2 ? { attributionVersion: 2 } : {}),
     }))
   ).filter((row) => row.eventId && row.raceId && row.userId);
   if (rows.length === 0) return 0;
@@ -100,8 +96,6 @@ async function createPendingEnrollmentsForRaces(tx, {
       eventId,
       raceId,
       userId,
-      status: "PENDING",
-      ...(Number(attributionVersion) === 2 ? { attributionVersion: 2 } : {}),
     }));
   const result = await tx.globalEventRaceImpact.createMany({
     data: rows,
@@ -138,7 +132,6 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
       eventId: event.id,
       raceId,
       userIds,
-      attributionVersion: event.summaryAttributionVersion,
     });
   }
 
@@ -182,7 +175,6 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
         eventId: parent.id,
         raceId,
         userIds: [userId],
-        attributionVersion: parent.summaryAttributionVersion,
       });
       if (outcome !== entitlement.startOutcome) {
         await tx.globalStepEventEntitlement.updateMany({

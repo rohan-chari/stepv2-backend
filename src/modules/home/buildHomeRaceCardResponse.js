@@ -199,9 +199,6 @@ function buildHomeRaceCardResponse(dependencies) {
         : Promise.resolve({ ok: true, value: null }),
       supportsImpactSummaries
         ? settle(async () => {
-            if (!(await isStrictFlagEnabled(appSettings, "apiImpactSummariesEnabled"))) {
-              return null;
-            }
             return getCachedGlobalEventSummary({
               key: cacheKeys.homeImpactSummary(user.id),
             userId: user.id,

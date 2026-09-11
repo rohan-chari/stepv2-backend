@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   computeSummaryExpiresAt,
-} = require("../../src/modules/steps/services/globalEventSummaryLifecycle");
+} = require("../../src/modules/home/services/eventRecapExpiry");
 
 test("summary expiry is the next civil midnight across ordinary and DST days", () => {
   assert.equal(

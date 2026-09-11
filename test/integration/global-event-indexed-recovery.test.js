@@ -4,7 +4,7 @@ const { Client } = require("pg");
 const { setTimeout: delay } = require("node:timers/promises");
 const { before, beforeEach, it } = require("node:test");
 const { cleanDatabase, createTestUser, getSharedServer, prisma, request } = require("./setup");
-const { buildGlobalEventSummaryV1Tick, buildGlobalEventSummaryV2Tick } = require("../../src/modules/steps/jobs/globalEventSummary");
+const { randomUUID } = require("node:crypto");
 const { buildGlobalEventEntitlementEventReconciler } = require("../../src/modules/steps/jobs/globalEventEntitlementEventReconciler");
 let server;
 let observed = null;
@@ -18,14 +18,14 @@ async function capture(run) {
   assert.ok(queries.length, "SQL observation must be active");
   return queries;
 }
-async function fixture(version = 2, future = false) {
+async function fixture(_retiredVersion = 2, future = true) {
   const account = await createTestUser();
   const current = new Date();
   const startsAt = new Date(current.getTime() + (future ? 3600000 : -1800000));
   const endsAt = new Date(startsAt.getTime() + 900000);
   const event = await prisma.globalStepEvent.create({ data: {
-    startsAt, endsAt, multiplier: 2, summaryAttributionVersion: version,
-    scheduleMode: future ? "LOCAL_ENTITLEMENTS" : "LEGACY_GLOBAL",
+    startsAt, endsAt, multiplier: 2,
+    scheduleMode: "LOCAL_ENTITLEMENTS",
   } });
   const entitlement = await prisma.globalStepEventEntitlement.create({ data: {
     eventId: event.id, userId: account.user.id, timezone: "UTC",
@@ -34,7 +34,6 @@ async function fixture(version = 2, future = false) {
   } });
   return { account, event, entitlement, current };
 }
-const workKey = f => ({ eventId_userId: { eventId: f.event.id, userId: f.account.user.id } });
 async function readyGeneration(current) {
   const capabilities = ["SCHEDULED_EVENT_CONSUMER", "UNIVERSAL_C0_LOCK_ORDER", "TOKEN_LIFECYCLE", "TARGET_AWARE_SENDER", "RECONCILER_OWNERSHIP"];
   await prisma.globalStepEventCronOwner.createMany({ data: ["http:0", "http:1", "resolution:0", "cron:0"].map(id => ({
@@ -44,35 +43,31 @@ async function readyGeneration(current) {
   await prisma.globalStepEventGenerationState.create({ data: { id: 1, readySince: new Date(current.getTime() - 100000) } });
 }
 
-it("v2 recovery repairs missing work and deleted receipts without a historical entitlement scan", async () => {
+it("retired work receipts terminate without storage or historical entitlement scans", async () => {
   const f = await fixture();
-  const tick = buildGlobalEventSummaryV2Tick({ prisma });
-  const queries = await capture(() => tick({ recovery: true }));
-  let work = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: workKey(f) });
-  const response = await request(server.baseUrl, "GET", `/home/global-event-summary-work/${work.id}`, {
-    token: f.account.token, headers: { "X-Client-Features": "impact_summaries,impact_summary_expiry_v1" },
+  const queries = await capture(async () => {
+    const response = await request(server.baseUrl,"GET",`/home/global-event-summary-work/${randomUUID()}`,{
+      token:f.account.token,headers:{"X-Client-Features":"impact_summaries,impact_summary_expiry_v1"},
+    });
+    assert.equal(response.status,200);assert.equal((await response.json()).state,"EXPIRED_UNDELIVERED");
   });
-  assert.equal(response.status, 200);
-  await prisma.globalEventSummaryWork.delete({ where: { id: work.id } });
-  await tick({ recovery: true });
-  work = await prisma.globalEventSummaryWork.findUniqueOrThrow({ where: workKey(f) });
-  assert.equal(work.eventId, f.event.id);
-  assert.equal(queries.filter(q => /SELECT e\.id\s+FROM global_step_event_entitlements e/.test(q)).length, 0,
-    "recovery must select bounded outstanding work, not scan all ended entitlements");
-  assert.ok(queries.some(q => q.includes("global_event_recovery_candidates")));
+  assert.equal(queries.filter(q=>/global_event_summary_work|global_event_recovery_candidates|FROM global_step_event_entitlements/.test(q)).length,0);
 });
 
-it("v1 recovery preserves exactly-once summaries while selecting indexed outstanding groups", async () => {
-  const f = await fixture(1);
-  const race = await prisma.race.create({ data: { creatorId: f.account.user.id, name: "Recovery", status: "ACTIVE", targetSteps: 10000 } });
-  await prisma.globalEventRaceImpact.create({ data: { eventId: f.event.id, raceId: race.id,
-    userId: f.account.user.id, status: "FINAL", attributionVersion: 1, deltaSteps: 75 } });
-  const tick = buildGlobalEventSummaryV1Tick({ prisma });
-  const queries = await capture(tick);
-  assert.equal((await prisma.globalEventUserSummary.findUniqueOrThrow({ where: workKey(f) })).extraRaceSteps, 75);
-  assert.equal((await tick()).candidatesSelected, 0);
-  assert.ok(queries.some(q => q.includes("global_event_recovery_candidates")),
-    "v1 completion discovery must start from outstanding groups");
+it("simple HTTP recap is saved once without selecting worker recovery groups", async () => {
+  const f=await fixture(2,false);
+  await prisma.globalStepEventEntitlement.update({where:{id:f.entitlement.id},
+    data:{recapRaceCount:2,recapCountPolicyVersion:1,recapWindowRevision:0}});
+  const queries=await capture(async()=>{
+    for(const rawSteps of [75,99]) {
+      const response=await request(server.baseUrl,"POST","/home/event-recap",{
+        token:f.account.token,body:{eventId:f.event.id,revision:0,rawSteps},
+      });
+      assert.equal(response.status,200);const body=await response.json();
+      assert.equal(body.globalEventSummary.extraRaceSteps,150);assert.equal(body.globalEventSummary.raceCount,2);
+    }
+  });
+  assert.ok(!queries.some(q=>/global_event_recovery_candidates|global_event_summary_work/.test(q)));
 });
 
 it("entitlement recovery repairs exact revisions and deleted outbox receipts without historical scans", async () => {
@@ -136,10 +131,11 @@ it("bootstrap advances a bounded durable cursor and stops revisiting completed h
   assert.equal(await page(), 3);
   assert.equal(await page(), 2);
   assert.equal(await page(), 0);
-  assert.equal((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM global_event_recovery_candidates WHERE kind='SUMMARY_V2'"))[0].n, 8);
-  const tick = buildGlobalEventSummaryV2Tick({ prisma });
-  await tick({ recovery: true });
-  for (const f of fixtures) assert.ok(await prisma.globalEventSummaryWork.findUnique({ where: workKey(f) }));
+  assert.equal((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM global_event_recovery_candidates WHERE kind='ENTITLEMENT_EVENT'"))[0].n, 8);
+  await readyGeneration(fixtures[0].current);
+  const tick=buildGlobalEventEntitlementEventReconciler({prisma});
+  assert.equal((await tick()).published,8);
+  for(const f of fixtures) assert.ok(await prisma.domainEventOutbox.findUnique({where:{eventKey:`GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${f.entitlement.id}:0`}}));
   assert.equal(await page(), 0, "completed bootstrap must not restart a historical sweep");
 });
 
@@ -153,21 +149,23 @@ it("rolled-back source writes cannot leave phantom repair work", async () => {
   }), /rollback source deletion/);
   assert.deepEqual(await prisma.$queryRawUnsafe("SELECT id::text FROM global_event_recovery_candidates WHERE event_id=$1 ORDER BY id", f.event.id), before,
     "rollback must preserve the exact pre-transaction signal identities");
-  await buildGlobalEventSummaryV2Tick({ prisma })({ recovery: true });
-  assert.ok(await prisma.globalEventSummaryWork.findUnique({ where: workKey(f) }));
+  await readyGeneration(f.current);
+  assert.equal((await buildGlobalEventEntitlementEventReconciler({prisma})()).published,1);
+  assert.ok(await prisma.domainEventOutbox.findUnique({where:{eventKey:`GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${f.entitlement.id}:0`}}));
 });
 
-it("a parent event edit queues a bounded refresh and respects its new end time", async () => {
-  const f = await fixture(1);
-  const race = await prisma.race.create({ data: { creatorId: f.account.user.id, name: "Parent edit", status: "ACTIVE", targetSteps: 10000 } });
-  await prisma.globalEventRaceImpact.create({ data: { eventId: f.event.id, raceId: race.id,
-    userId: f.account.user.id, status: "FINAL", attributionVersion: 1, deltaSteps: 25 } });
-  await prisma.globalStepEvent.update({ where: { id: f.event.id }, data: { endsAt: new Date(Date.now() + 3600000) } });
-  assert.equal((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM global_event_recovery_event_refresh"))[0].n, 1);
-  assert.equal((await buildGlobalEventSummaryV1Tick({ prisma })()).candidatesSelected, 0);
-  assert.equal(await prisma.globalEventUserSummary.count(), 0);
-  await prisma.globalStepEvent.update({ where: { id: f.event.id }, data: { endsAt: f.event.endsAt } });
-  assert.equal((await buildGlobalEventSummaryV1Tick({ prisma })()).summariesCommitted, 1);
+it("a parent edit queues bounded notification refresh without reviving an expired entitlement", async () => {
+  const f=await fixture();
+  await readyGeneration(f.current);
+  await prisma.globalStepEventEntitlement.update({where:{id:f.entitlement.id},data:{startsAt:new Date(Date.now()-3600000),endsAt:new Date(Date.now()-1000)}});
+  await prisma.globalStepEvent.update({where:{id:f.event.id},data:{endsAt:new Date(Date.now()+7200000)}});
+  assert.equal((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM global_event_recovery_event_refresh"))[0].n,1);
+  const tick=buildGlobalEventEntitlementEventReconciler({prisma});
+  assert.equal((await tick()).published,0);
+  assert.equal(await prisma.domainEventOutbox.count(),0);
+  await prisma.globalStepEventEntitlement.update({where:{id:f.entitlement.id},data:{startsAt:f.entitlement.startsAt,endsAt:f.entitlement.endsAt}});
+  await prisma.globalStepEvent.update({where:{id:f.event.id},data:{endsAt:f.event.endsAt}});
+  assert.equal((await tick()).published,1);
 });
 
 it("source writers append a fresh signal without waiting for maintenance's observed signal lock", async () => {
@@ -196,66 +194,47 @@ it("source writers append a fresh signal without waiting for maintenance's obser
   }
 });
 
-it("simultaneous final transitions in different races cannot lose the last-ready summary signal", async () => {
-  const f = await fixture(1);
-  const impacts = [];
-  for (let i = 0; i < 2; i++) {
-    const race = await prisma.race.create({ data: { creatorId: f.account.user.id, name: "Concurrent final", status: "ACTIVE", targetSteps: 10000 } });
-    impacts.push(await prisma.globalEventRaceImpact.create({ data: {
-      eventId: f.event.id, raceId: race.id, userId: f.account.user.id, status: "PENDING", attributionVersion: 1,
-    } }));
+it("simultaneous membership updates do not create recap recovery work", async () => {
+  const f=await fixture(2,false);
+  const impacts=[];
+  for(let i=0;i<2;i++) {
+    const race=await prisma.race.create({data:{creatorId:f.account.user.id,name:"Concurrent membership",status:"ACTIVE",targetSteps:10000}});
+    impacts.push(await prisma.globalEventRaceImpact.create({data:{eventId:f.event.id,raceId:race.id,userId:f.account.user.id}}));
   }
-  const tick = buildGlobalEventSummaryV1Tick({ prisma });
-  assert.equal((await tick()).summariesCommitted, 0);
-  const first = new Client({ connectionString: process.env.DATABASE_URL });
-  const second = new Client({ connectionString: process.env.DATABASE_URL });
-  await first.connect(); await second.connect();
+  const first=new Client({connectionString:process.env.DATABASE_URL});
+  const second=new Client({connectionString:process.env.DATABASE_URL});
+  await first.connect();await second.connect();
   try {
-    await first.query("BEGIN"); await second.query("BEGIN");
-    await first.query("SET LOCAL statement_timeout='500ms'");
-    await second.query("SET LOCAL statement_timeout='500ms'");
-    await first.query("UPDATE global_event_race_impacts SET status='FINAL',delta_steps=25 WHERE id=$1", [impacts[0].id]);
-    // Each trigger still sees the OTHER transaction's old PENDING row. Both
-    // must signal independently rather than trying to prove all-final here.
-    await second.query("UPDATE global_event_race_impacts SET status='FINAL',delta_steps=50 WHERE id=$1", [impacts[1].id]);
-    await first.query("COMMIT"); await second.query("COMMIT");
-  } finally {
-    await first.query("ROLLBACK"); await second.query("ROLLBACK");
-    await first.end(); await second.end();
-  }
-  assert.equal((await tick()).summariesCommitted, 1);
-  const summary = await prisma.globalEventUserSummary.findUniqueOrThrow({ where: workKey(f) });
-  assert.equal(summary.extraRaceSteps, 75);
-  assert.equal(summary.raceCount, 2, "duplicate source signals must never multiply the impact aggregation");
+    await first.query("BEGIN");await second.query("BEGIN");
+    await first.query("SET LOCAL statement_timeout='500ms'");await second.query("SET LOCAL statement_timeout='500ms'");
+    await first.query("UPDATE global_event_race_impacts SET updated_at=now() WHERE id=$1",[impacts[0].id]);
+    await second.query("UPDATE global_event_race_impacts SET updated_at=now() WHERE id=$1",[impacts[1].id]);
+    await first.query("COMMIT");await second.query("COMMIT");
+  } finally {await first.query("ROLLBACK");await second.query("ROLLBACK");await first.end();await second.end();}
+  assert.equal((await prisma.$queryRawUnsafe("SELECT count(*)::int AS n FROM global_event_recovery_candidates"))[0].n,0);
+  assert.equal(await prisma.globalEventRaceImpact.count({where:{eventId:f.event.id}}),2);
+  const response=await request(server.baseUrl,"GET","/home/event-recap",{token:f.account.token});
+  assert.equal(response.status,200);assert.deepEqual(await response.json(),{state:"none"});
 });
 
-it("more than a page of duplicate pending signals cannot permanently hide distinct ready work", async () => {
-  const pending = await fixture(1);
-  const race = await prisma.race.create({ data: { creatorId: pending.account.user.id, name: "Duplicate signals", status: "ACTIVE", targetSteps: 10000 } });
-  const impact = await prisma.globalEventRaceImpact.create({ data: {
-    eventId: pending.event.id, raceId: race.id, userId: pending.account.user.id, status: "PENDING", attributionVersion: 1,
-  } });
-  // Real source transitions, not fabricated queue rows. Each transition must
-  // remain recoverable, even if many accumulate before the maintenance tick.
-  for (let i = 0; i < 300; i++) {
-    await prisma.globalEventRaceImpact.update({ where: { id: impact.id }, data: { status: "FINAL", deltaSteps: 10 } });
-    await prisma.globalEventRaceImpact.update({ where: { id: impact.id }, data: { status: "PENDING" } });
+it("more than a page of duplicate notification signals cannot hide another ready entitlement", async () => {
+  const pending=await fixture();
+  for(let revision=1;revision<=300;revision++) {
+    await prisma.globalStepEventEntitlement.update({where:{id:pending.entitlement.id},data:{scheduleRevision:revision}});
   }
-  const ready = await fixture(1);
-  await prisma.globalEventRaceImpact.create({ data: {
-    eventId: ready.event.id, raceId: race.id, userId: ready.account.user.id, status: "FINAL", attributionVersion: 1, deltaSteps: 75,
-  } });
-  const tick = buildGlobalEventSummaryV1Tick({ prisma });
-  let committed = 0;
-  for (let i = 0; i < 3; i++) committed += (await tick()).summariesCommitted;
-  assert.equal(committed, 1);
-  assert.equal((await prisma.globalEventUserSummary.findUniqueOrThrow({ where: workKey(ready) })).extraRaceSteps, 75);
-  assert.equal(await prisma.globalEventUserSummary.findUnique({ where: workKey(pending) }), null);
+  const ready=await fixture();
+  await readyGeneration(ready.current);
+  const tick=buildGlobalEventEntitlementEventReconciler({prisma});
+  let published=0;for(let i=0;i<3;i++)published+=(await tick()).published;
+  assert.equal(published,2);
+  assert.ok(await prisma.domainEventOutbox.findUnique({where:{eventKey:`GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${pending.entitlement.id}:300`}}));
+  assert.ok(await prisma.domainEventOutbox.findUnique({where:{eventKey:`GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${ready.entitlement.id}:0`}}));
+  assert.equal(await prisma.domainEventOutbox.count(),2);
 });
 
 it("maintenance cannot deadlock a user deletion through replacement-signal foreign keys", async () => {
   const f = await fixture();
-  const [signal] = await prisma.$queryRawUnsafe("SELECT id::text FROM global_event_recovery_candidates WHERE kind='SUMMARY_V2' AND event_id=$1", f.event.id);
+  const [signal] = await prisma.$queryRawUnsafe("SELECT id::text FROM global_event_recovery_candidates WHERE kind='ENTITLEMENT_EVENT' AND event_id=$1", f.event.id);
   const maintenance = new Client({ connectionString: process.env.DATABASE_URL });
   const deletingUser = new Client({ connectionString: process.env.DATABASE_URL });
   await maintenance.connect(); await deletingUser.connect();
@@ -286,12 +265,12 @@ it("maintenance cannot deadlock a user deletion through replacement-signal forei
   }
 });
 
-it("a source status update cannot deadlock account deletion while appending its recovery signal", async () => {
+it("a membership update cannot deadlock account deletion after recap recovery removal", async () => {
   const f = await fixture(1);
   const owner = await createTestUser();
   const race = await prisma.race.create({ data: { creatorId: owner.user.id, name: "Source deletion race", status: "ACTIVE", targetSteps: 10000 } });
   const impact = await prisma.globalEventRaceImpact.create({ data: {
-    eventId: f.event.id, userId: f.account.user.id, raceId: race.id, status: "PENDING", attributionVersion: 1,
+    eventId: f.event.id, userId: f.account.user.id, raceId: race.id,
   } });
   const source = new Client({ connectionString: process.env.DATABASE_URL });
   const deletingUser = new Client({ connectionString: process.env.DATABASE_URL });
@@ -310,12 +289,13 @@ it("a source status update cannot deadlock account deletion while appending its 
       await delay(10);
     }
     assert.equal(blocked, true);
-    await source.query("UPDATE global_event_race_impacts SET status='FINAL',delta_steps=25 WHERE id=$1", [impact.id]);
+    const updatedAt=new Date();
+    await source.query("UPDATE global_event_race_impacts SET updated_at=$2 WHERE id=$1", [impact.id,updatedAt]);
     await source.query("COMMIT");
     // The existing impact->user FK is RESTRICT, not CASCADE. Once the source
     // commits, deletion must promptly reject normally, not deadlock/time out.
     assert.equal((await deletion).error?.code, "23503");
-    assert.equal((await prisma.globalEventRaceImpact.findUniqueOrThrow({ where: { id: impact.id } })).status, "FINAL");
+    assert.equal(+(await prisma.globalEventRaceImpact.findUniqueOrThrow({ where: { id: impact.id } })).updatedAt,+updatedAt);
     assert.ok(await prisma.user.findUnique({ where: { id: f.account.user.id } }));
   } finally {
     await source.query("ROLLBACK");
@@ -329,7 +309,7 @@ it("orphan cleanup bounds its work even for future-dated hints inserted after pa
   await prisma.user.delete({ where: { id: f.account.user.id } });
   // Models the narrow bootstrap-insert race AFTER the parent deletion trigger.
   await prisma.$executeRawUnsafe(`INSERT INTO global_event_recovery_candidates(kind,event_id,user_id,source_id,available_at,completion_key)
-    SELECT 'SUMMARY_V2',$1,$2,$3,clock_timestamp()+interval '1 year','orphan' FROM generate_series(1,8)`,
+    SELECT 'ENTITLEMENT_EVENT',$1,$2,$3,clock_timestamp()+interval '1 year','orphan' FROM generate_series(1,8)`,
     f.event.id, f.account.user.id, f.entitlement.id);
   const cleanup = async () => (await prisma.$queryRawUnsafe("SELECT global_event_recovery_cleanup_orphans(3) AS n"))[0].n;
   assert.equal(await cleanup(), 3);
@@ -361,8 +341,9 @@ it("parent refresh skips an event deletion lock before claiming its cursor", asy
 
 it("empty due selection and exact completion retirement use indexes amid a large future population", async () => {
   const f = await fixture(2, true);
+  await prisma.$executeRawUnsafe("DELETE FROM global_event_recovery_candidates WHERE event_id=$1",f.event.id);
   await prisma.$executeRawUnsafe(`INSERT INTO global_event_recovery_candidates(kind,event_id,user_id,source_id,available_at,completion_key)
-    SELECT 'SUMMARY_V2',$1,$2,$3,clock_timestamp()+interval '1 day','future:' || n::text FROM generate_series(1,20000) n`,
+    SELECT 'ENTITLEMENT_EVENT',$1,$2,$3,clock_timestamp()+interval '1 day','future:' || n::text FROM generate_series(1,20000) n`,
     f.event.id, f.account.user.id, f.entitlement.id);
   // cleanDatabase uses DELETE, so previous runs can leave thousands of dead
   // due-key entries until autovacuum happens. Normalize this test-only physical
@@ -372,7 +353,7 @@ it("empty due selection and exact completion retirement use indexes amid a large
   const plan = async sql => (await prisma.$queryRawUnsafe(`EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${sql}`))[0]["QUERY PLAN"][0].Plan;
   const nodes = root => [root, ...(root.Plans || []).flatMap(nodes)];
   const due = await plan(`SELECT id FROM global_event_recovery_candidates
-    WHERE kind='SUMMARY_V2' AND available_at<=CURRENT_TIMESTAMP::timestamp
+    WHERE kind='ENTITLEMENT_EVENT' AND available_at<=CURRENT_TIMESTAMP::timestamp
     ORDER BY available_at,event_id,user_id,id LIMIT 100`);
   assert.equal(due["Actual Rows"], 0);
   assert.ok(nodes(due).some(node => node["Index Name"] === "global_event_recovery_due_idx"));
@@ -388,7 +369,7 @@ it("orphan sweeps revisit skipped IDs even when arrivals continually outrun the 
   const f = await fixture(2, true);
   await prisma.user.delete({ where: { id: f.account.user.id } });
   const append = size => prisma.$executeRawUnsafe(`INSERT INTO global_event_recovery_candidates(kind,event_id,user_id,source_id,available_at,completion_key)
-    SELECT 'SUMMARY_V2',$1,$2,$3,clock_timestamp()+interval '1 year','orphan' FROM generate_series(1,$4::int)`,
+    SELECT 'ENTITLEMENT_EVENT',$1,$2,$3,clock_timestamp()+interval '1 year','orphan' FROM generate_series(1,$4::int)`,
     f.event.id, f.account.user.id, f.entitlement.id, size);
   await append(8);
   const [oldest] = await prisma.$queryRawUnsafe("SELECT id::text FROM global_event_recovery_candidates ORDER BY id LIMIT 1");

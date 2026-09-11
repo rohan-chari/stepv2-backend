@@ -123,7 +123,6 @@ test("startServer listens on 0.0.0.0 by default", () => {
     generationHeartbeat: 1,
     globalEventBoundaryDrain: 1,
     globalEventEntitlementEventReconciler: 1,
-    globalEventSummary: 1,
     autoStartScheduledRaces: 1,
     recomputePlacements: 1,
     notificationCleanup: 1,

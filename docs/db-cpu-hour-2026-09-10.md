@@ -1,5 +1,7 @@
 # Database CPU investigation — September 10, 2026
 
+> Historical summary-worker/capture guidance is superseded by the simple event recap. Do not run retired capture/summary operations. See [retirement runbook](simple-event-recap-sql-retirement.md); unrelated findings remain historical evidence.
+
 The hour shows a sustained mix of frequent application SQL, repeated query planning, background resolution/publication and notification work, and avoidable retained-capture maintenance. CPU steal adds a separate host-capacity cost. There is no evidence in the samples of one continuously running query or a sustained lock pileup explaining the hour.
 
 Direct managed-database non-idle CPU averaged **65.3%**, ranging from **38.4% to 92.1%**. Average idle was **34.7%**, below the previously stated 70% idle target. These are sample averages, not a matched-traffic before/after benchmark.

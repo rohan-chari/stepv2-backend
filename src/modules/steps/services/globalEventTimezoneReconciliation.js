@@ -230,7 +230,7 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
                    WHERE impact.event_id=locked."eventId" AND impact.user_id=$2
                 )
             AND NOT EXISTS (
-                  SELECT 1 FROM global_event_user_summaries summary
+                  SELECT 1 FROM event_recaps summary
                    WHERE summary.event_id=locked."eventId" AND summary.user_id=$2
                 )
             AND NOT EXISTS (

@@ -6,7 +6,7 @@ const {
   enrollIfGlobalEventActive,
 } = require("../../src/modules/steps/services/globalEventEnrollment");
 
-test("global enrollment writes one PENDING row per distinct race/user", async () => {
+test("global enrollment writes one membership row per distinct race/user", async () => {
   const calls = [];
   const tx = {
     globalEventRaceImpact: {
@@ -21,8 +21,8 @@ test("global enrollment writes one PENDING row per distinct race/user", async ()
   assert.equal(created, 2);
   assert.deepEqual(calls[0], {
     data: [
-      { eventId: "event-1", raceId: "race-1", userId: "user-a", status: "PENDING" },
-      { eventId: "event-1", raceId: "race-1", userId: "user-b", status: "PENDING" },
+      { eventId: "event-1", raceId: "race-1", userId: "user-a" },
+      { eventId: "event-1", raceId: "race-1", userId: "user-b" },
     ],
     skipDuplicates: true,
   });
@@ -112,7 +112,7 @@ test("late enrollment scans every local parent before returning the active match
   assert.equal(matched.id, "today");
   assert.deepEqual(visitedParents, ["today", "tomorrow"]);
   assert.deepEqual(writes, [{
-    eventId: "today", raceId: "race-1", userId: "user-1", status: "PENDING",
+    eventId: "today", raceId: "race-1", userId: "user-1",
   }]);
   assert.equal(entitlements.get("today").startOutcome, "ACTIVATED_LATE_JOIN");
   assert.equal(entitlements.get("tomorrow").startOutcome, "PENDING");

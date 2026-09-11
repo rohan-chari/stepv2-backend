@@ -165,7 +165,7 @@ test("home-open locks the versioned coherent-session contract without changing h
   assert.equal(profile.homeOpen.arrivalBucketMs, 1000);
   assert.equal(profile.homeOpen.allSettledDeadlineMs, 15000);
   assert.deepEqual(profile.homeOpen.resolutionPollWaitMs, [750, 1500, 3000, 5000]);
-  assert.deepEqual(profile.homeOpen.globalSummaryPollWaitMs, [750, 1500, 3000, 5000]);
+  assert.equal(profile.homeOpen.globalSummaryPollWaitMs, undefined);
   assert.equal(profile.homeOpen.suggestedRaces404Policy, "contract-failure-no-legacy-fanout");
   assert.deepEqual(profile.homeOpen.criticalEndpoints, [
     "POST /steps/sync-v2", "POST /steps", "GET /home/race-card",
@@ -177,12 +177,11 @@ test("home-open locks the versioned coherent-session contract without changing h
     "GET /home/race-card", "GET /races", "GET /home/suggested-races",
     "GET /shop/catalog", "GET /friends", "GET /auth/me",
     "GET /assets/manifest", "GET /steps/race-resolution/:jobId",
-    "GET /home/global-event-summary-work/:workId",
   ]);
   assert.equal(profile.entries[0].headers["X-Step-Sync-Intent"], undefined);
 });
 
-test("optional global summary receipt polls independently and refetches only Home card when created", async () => {
+test("retired summary receipts cannot schedule polls or delayed Home refetches", async () => {
   const calls = [];
   let summaryPolls = 0;
   const response = (status, body = {}) => ({ status, body, timeout: false,
@@ -214,18 +213,18 @@ test("optional global summary receipt polls independently and refetches only Hom
   });
   assert.equal(result.criticalComplete, true, "summary work never blocks visible Home completion");
   assert.equal(result.allSettled, true);
-  assert.equal(result.decisions.globalSummaryPolls, 2);
-  assert.equal(result.decisions.globalSummaryCreatedRefetches, 1);
-  assert.equal(calls.filter((row) => row === "GET /home/race-card").length, 2);
+  assert.equal(result.decisions.globalSummaryPolls, 0);
+  assert.equal(result.decisions.globalSummaryCreatedRefetches, 0);
+  assert.equal(calls.filter((row) => row === "GET /home/race-card").length, 1);
   assert.equal(calls.filter((row) => row === "GET /races").length, 1);
   assert.equal(calls.filter((row) => row === "GET /auth/me").length, 1);
 });
 
-test("k6 Home contract includes bounded summary polling and no suggested-races legacy 404 fanout", () => {
+test("k6 Home contract removes summary polling and preserves no suggested-races legacy 404 fanout", () => {
   const source = fs.readFileSync(path.join(root, "scripts/k6/home-open.js"), "utf8");
-  assert.match(source, /home\/global-event-summary-work/);
-  assert.match(source, /globalSummaryPolls/);
-  assert.match(source, /globalSummaryCreatedRefetches/);
+  assert.doesNotMatch(source, /home\/global-event-summary-work/);
+  assert.doesNotMatch(source, /globalSummaryPolls/);
+  assert.doesNotMatch(source, /globalSummaryCreatedRefetches/);
   assert.doesNotMatch(source, /races\/featured|races\/public|tournaments\/public/);
   assert.match(source, /deadlineRemainingMs\(\)/,
     "optional background receipt polling must remain bounded by the session deadline");

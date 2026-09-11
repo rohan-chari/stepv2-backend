@@ -206,14 +206,8 @@ function classifyHomeSyncV2(sample = {}) {
       typeof receipt.jobId === "string" && receipt.jobId.length > 0 &&
       Number.isInteger(receipt.generation)
       ? { id: receipt.jobId, generation: receipt.generation } : null;
-    const summary = body.globalEventSummaryWork;
-    const summaryWork = isJsonMap(summary) && typeof summary.id === "string" && summary.id.length > 0 &&
-      ["WAITING_SYNC", "QUEUED", "PROCESSING", "WAITING_RACES", "CREATED", "ALL_ZERO",
-        "UNSCORABLE", "EXPIRED_UNDELIVERED"].includes(summary.state) &&
-      typeof summary.expiresAt === "string" && !Number.isNaN(Date.parse(summary.expiresAt))
-      ? { id: summary.id, state: summary.state, expiresAt: summary.expiresAt } : null;
     return { persisted: true, usePersistedHome: Boolean(current), retry: false,
-      legacy: false, job, ...(summaryWork ? { summaryWork } : {}),
+      legacy: false, job,
       decision: current ? "current" : "deferred" };
   }
   if (status === 409) {
@@ -365,33 +359,6 @@ async function runHomeOpenSession({
     presentationOk && friendsOk && meOk;
   const criticalHomeMs = Math.max(0, clock() - startedAtMs);
 
-  const summaryWorkPromise = sync.summaryWork ? (async () => {
-    if (sync.summaryWork.state === "CREATED") {
-      decisions.globalSummaryCreatedRefetches += 1;
-      await request(byPath("/home/race-card"));
-      return true;
-    }
-    const terminal = new Set(["ALL_ZERO", "UNSCORABLE", "EXPIRED_UNDELIVERED"]);
-    if (terminal.has(sync.summaryWork.state)) return true;
-    for (const delay of profile.homeOpen.globalSummaryPollWaitMs) {
-      await wait(delay);
-      decisions.globalSummaryPolls += 1;
-      const previousWorkId = context.workId;
-      context.workId = sync.summaryWork.id;
-      const poll = await request(byPath("/home/global-event-summary-work/:workId"));
-      context.workId = previousWorkId;
-      if (!homeSampleSucceeded(poll, [200]) || !isJsonMap(poll.body)) return true;
-      const state = String(poll.body.state || "").toUpperCase();
-      if (state === "CREATED") {
-        decisions.globalSummaryCreatedRefetches += 1;
-        await request(byPath("/home/race-card"));
-        return true;
-      }
-      if (terminal.has(state)) return true;
-    }
-    return false;
-  })() : Promise.resolve(true);
-
   const resolutionPromise = sync.job ? (async () => {
     let terminalSuccess = false;
     for (const delay of profile.homeOpen.resolutionPollWaitMs) {
@@ -431,10 +398,10 @@ async function runHomeOpenSession({
   const deadline = new Promise((resolve) => {
     deadlineTimer = setTimeout(() => resolve("deadline"), profile.homeOpen.allSettledDeadlineMs);
   });
-  const settled = Promise.all([suggestedPromise, resolutionPromise, summaryWorkPromise])
-    .then(async ([suggested, resolutionSettled, summarySettled]) => {
+  const settled = Promise.all([suggestedPromise, resolutionPromise])
+    .then(async ([suggested, resolutionSettled]) => {
       await Promise.all(manifestPromises);
-      return homeSampleSucceeded(suggested, [200]) && resolutionSettled && summarySettled
+      return homeSampleSucceeded(suggested, [200]) && resolutionSettled
         ? "settled" : "diagnostic-failure";
     });
   const allState = await Promise.race([settled, deadline]);

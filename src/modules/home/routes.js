@@ -104,6 +104,13 @@ function createHomeRouter(dependencies = {}) {
 
   router.use(requireAuth);
 
+  router.get('/event-recap', asyncHandler(async (req, res) => {
+    res.json(await require('./services/eventRecap').readEventRecap({ prisma, userId: req.user.id, now: nowFn }));
+  }));
+  router.post('/event-recap', asyncHandler(async (req, res) => {
+    res.json(await require('./services/eventRecap').finalizeEventRecap({ prisma, userId: req.user.id, input: req.body, now: nowFn }));
+  }));
+
   router.get(
     "/suggested-races",
     asyncHandler(async (req, res) => {
@@ -344,8 +351,7 @@ function createHomeRouter(dependencies = {}) {
       // absence is the old-backend downgrade path for a carrying app build.
       if (
         req.clientFeatures?.has("impact_summaries") === true &&
-        req.clientFeatures?.has("impact_summary_expiry_v1") === true &&
-        (await isStrictFlagEnabled(settings, "apiImpactSummariesEnabled"))
+        req.clientFeatures?.has("impact_summary_expiry_v1") === true
       ) {
         try {
           const summary = await getCachedGlobalEventSummary({
@@ -421,46 +427,19 @@ function createHomeRouter(dependencies = {}) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)) {
       return res.status(400).json({ error: "Invalid work id", code: "INVALID_ID" });
     }
-    let work;
-    if (typeof prisma.$queryRawUnsafe === "function") {
-      [work] = await prisma.$queryRawUnsafe(
-        `SELECT status, expires_at AS "expiresAt",
-                expires_at <= (statement_timestamp() AT TIME ZONE 'UTC') AS expired
-           FROM global_event_summary_work
-          WHERE id = $1 AND user_id = $2
-          LIMIT 1`,
-        req.params.id,
-        req.user.id,
-      );
-    } else {
-      work = await prisma.globalEventSummaryWork.findFirst({
-        where: { id: req.params.id, userId: req.user.id },
-        select: { status: true, expiresAt: true },
-      });
-    }
-    if (!work) {
-      return res.status(404).json({ error: "Summary work not found", code: "NOT_FOUND" });
-    }
-    const activeStates = new Set(["WAITING_SYNC", "QUEUED", "PROCESSING", "WAITING_RACES"]);
-    const state = work.expired === true && activeStates.has(work.status)
-      ? "EXPIRED_UNDELIVERED"
-      : work.status;
-    return res.json({ state, expiresAt: work.expiresAt });
+    return res.json({ state: 'EXPIRED_UNDELIVERED', expiresAt: nowFn() });
   }));
 
   router.post("/global-event-summaries/:id/acknowledge", asyncHandler(async (req, res) => {
-    const enabled = req.clientFeatures?.has("impact_summaries") === true &&
-      (await isStrictFlagEnabled(settings, "apiImpactSummariesEnabled"));
+    const enabled = req.clientFeatures?.has("impact_summaries") === true;
     if (!enabled) return res.status(404).json({ error: "Global event summaries are unavailable", code: "FEATURE_DISABLED" });
-    const existing = await prisma.globalEventUserSummary.findFirst({
-      where: { id: req.params.id, userId: req.user.id }, select: { id: true, acknowledgedAt: true },
-    });
+    const [existing] = await prisma.$queryRawUnsafe(`SELECT id,acknowledged_at AS "acknowledgedAt"
+      FROM event_recaps WHERE id=$1 AND user_id=$2`, req.params.id, req.user.id);
     if (!existing) return res.status(404).json({ error: "Summary not found", code: "NOT_FOUND" });
     if (existing.acknowledgedAt) return res.status(409).json({ error: "Summary already acknowledged", code: "ALREADY_ACKNOWLEDGED" });
-    const updated = await prisma.globalEventUserSummary.updateMany({
-      where: { id: existing.id, userId: req.user.id, acknowledgedAt: null }, data: { acknowledgedAt: new Date() },
-    });
-    if (updated.count !== 1) return res.status(409).json({ error: "Summary already acknowledged", code: "ALREADY_ACKNOWLEDGED" });
+    const updated = await prisma.$executeRawUnsafe(`UPDATE event_recaps SET acknowledged_at=$3
+      WHERE id=$1 AND user_id=$2 AND acknowledged_at IS NULL`, existing.id, req.user.id, nowFn());
+    if (updated !== 1) return res.status(409).json({ error: "Summary already acknowledged", code: "ALREADY_ACKNOWLEDGED" });
     await require("../../shared/cache/cacheEfficiencyInvalidation").afterCommit([{ domain: "summary", identity: req.user.id }]);
     await derivedCache.invalidate({ keys: [cacheKeys.homeImpactSummary(req.user.id)], prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY });
     return res.json({ acknowledged: true });

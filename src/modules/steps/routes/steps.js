@@ -240,6 +240,13 @@ function createStepsRouter(dependencies = {}) {
         samples,
         timeZone: req.timeZone,
       });
+      if (Array.isArray(samples) && samples.length && !req.clientFeatures?.has('simple_event_recap_v1')) {
+        try {
+          await require('../../home/services/legacyEventRecapInput').finalizeLegacyEventRecap({
+            userId: req.user.id, prisma: dependencies.prisma, now: dependencies.now,
+          });
+        } catch (error) { console.error('Legacy recap deferred:', error.code || error.name); }
+      }
       res.json(result);
     } catch (error) {
       if (error.name === "StepSampleError") {
@@ -294,6 +301,13 @@ function createStepsRouter(dependencies = {}) {
         // the legacy unrestricted sync contract.
         homePull: req.get("X-Step-Sync-Intent") === "home-pull",
       });
+      if (Array.isArray(req.body?.samples) && req.body.samples.length && !req.clientFeatures?.has('simple_event_recap_v1')) {
+        try {
+          await require('../../home/services/legacyEventRecapInput').finalizeLegacyEventRecap({
+            userId: req.user.id, prisma: dependencies.prisma, now: dependencies.now,
+          });
+        } catch (error) { console.error('Legacy recap deferred:', error.code || error.name); }
+      }
       if (
         req.clientFeatures?.has("impact_summaries") !== true ||
         req.clientFeatures?.has("impact_summary_expiry_v1") !== true
