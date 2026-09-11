@@ -258,3 +258,45 @@ describe("race resolution post-task durable storage", () => {
     assert.equal(resolved, false);
   });
 });
+
+
+describe("incident: completed post-task reclaimed by a stale candidate", () => {
+  beforeEach(cleanDatabase);
+  it("drains the reclaimed task using its original completion proof without republishing", async () => {
+    const creator = await createTestUser({ displayName: "Reclaimed receipt" });
+    const completedAt = new Date("2026-09-10T01:35:04.521Z");
+    const retryAt = new Date("2026-09-11T03:00:00.000Z");
+    const race = await prisma.race.create({ data: {
+      creatorId: creator.user.id, name: "Receipt recovery", targetSteps: 10000,
+      status: "ACTIVE", startedAt: new Date("2026-09-09T00:00:00Z"),
+      endsAt: new Date("2026-09-12T00:00:00Z"),
+    } });
+    const created = await RaceResolutionPostTask.create({ raceId: race.id,
+      sourceGeneration: 1, snapshotCommand: { raceId: race.id, timeZone: "UTC" },
+      intents: [], now: completedAt });
+    const claim = await RaceResolutionPostTask.claimById({ id: created.id, now: completedAt });
+    await RaceResolutionPostTask.beginSnapshot({ taskId: claim.id, leaseToken: claim.leaseToken, now: completedAt });
+    await RaceResolutionPostTask.finish({ taskId: claim.id, leaseToken: claim.leaseToken,
+      now: completedAt, snapshotCompletion: { state: "succeeded" } });
+    const receiptBefore = await prisma.raceResolutionPostTaskReceipt.findUniqueOrThrow({
+      where: { raceId_sourceGeneration: { raceId: race.id, sourceGeneration: 1 } } });
+    // Reproduce the persisted production state left by the stale claim query:
+    // state/lease replaced, successful snapshot and completed_at retained.
+    await prisma.raceResolutionPostTask.update({ where: { id: claim.id }, data: {
+      state: "running", leaseToken: "stale-candidate", leaseExpiresAt: new Date(retryAt.getTime() - 1),
+    } });
+    let published = 0;
+    const runner = buildRaceResolutionPostTaskRunner({ env: {}, now: () => retryAt,
+      RaceResolutionPostTask, publishSnapshot: async () => { published++; },
+    });
+    await runner.tick();
+    const task = await prisma.raceResolutionPostTask.findUniqueOrThrow({ where: { id: claim.id } });
+    assert.equal(task.state, "succeeded");
+    assert.equal(task.completedAt.toISOString(), completedAt.toISOString());
+    assert.equal(task.leaseToken, null);
+    assert.equal(published, 0);
+    assert.deepEqual(await prisma.raceResolutionPostTaskReceipt.findUniqueOrThrow({
+      where: { raceId_sourceGeneration: { raceId: race.id, sourceGeneration: 1 } } }), receiptBefore);
+    assert.equal(await RaceResolutionPostTask.claimNext({ now: retryAt }), null);
+  });
+});

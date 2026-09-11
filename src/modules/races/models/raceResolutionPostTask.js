@@ -399,6 +399,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
            ), candidate AS (
              SELECT task.id FROM race_resolution_post_tasks task
              JOIN candidate_ids USING (id)
+             WHERE (task.state='queued' AND task.not_before_at <= $1)
+                OR (task.state='running' AND task.lease_expires_at <= $1)
              ORDER BY task.requested_at, task.id
              LIMIT 1 FOR UPDATE OF task SKIP LOCKED
            )
@@ -406,6 +408,8 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
            SET state='running', started_at=COALESCE(started_at,$1),
                lease_expires_at=$2, lease_token=$3, updated_at=$1
            FROM candidate WHERE task.id=candidate.id
+             AND ((task.state='queued' AND task.not_before_at <= $1)
+               OR (task.state='running' AND task.lease_expires_at <= $1))
            RETURNING task.id, task.race_id AS "raceId",
              task.source_generation AS "sourceGeneration",
              task.requested_at AS "requestedAt",
@@ -619,19 +623,19 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              snapshot_state=COALESCE($4::text,task.snapshot_state),
              snapshot_error_code=CASE WHEN $4::text IS NULL THEN task.snapshot_error_code ELSE $5::text END,
              snapshot_completed_at=CASE WHEN $4::text IS NULL THEN task.snapshot_completed_at ELSE $3 END,
-             completed_at=$3, lease_expires_at=NULL, lease_token=NULL, updated_at=$3
+             completed_at=COALESCE(task.completed_at,$3), lease_expires_at=NULL, lease_token=NULL, updated_at=$3
          FROM failures, pending
          WHERE task.id=$1 AND task.lease_token=$2 AND pending.count=0
            AND (($4::text IS NULL AND task.snapshot_state NOT IN ('pending','attempting'))
              OR ($4::text IS NOT NULL AND task.snapshot_state='attempting'))
          RETURNING task.race_id, task.source_generation, task.dedupe_key,
-           task.state, task.snapshot_state, task.intent_count, failures.count
+           task.state, task.snapshot_state, task.intent_count, task.completed_at, failures.count
          ), receipt AS (
            INSERT INTO race_resolution_post_task_receipts (
              race_id, source_generation, dedupe_key, terminal_state,
              snapshot_state, intent_count, failure_count, completed_at
            ) SELECT race_id, source_generation, dedupe_key, state,
-                    snapshot_state, intent_count, count, $3 FROM finished
+                    snapshot_state, intent_count, count, completed_at FROM finished
            ON CONFLICT (race_id,source_generation) DO NOTHING
            RETURNING race_id,source_generation,dedupe_key,terminal_state,
                      snapshot_state,intent_count,failure_count,completed_at
@@ -648,7 +652,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
               AND stored.snapshot_state=expected.snapshot_state
               AND stored.intent_count=expected.intent_count
               AND stored.failure_count=expected.count
-              AND stored.completed_at IS NOT DISTINCT FROM $3
+              AND stored.completed_at IS NOT DISTINCT FROM expected.completed_at
             WHERE NOT EXISTS (SELECT 1 FROM receipt)
          ) SELECT (SELECT COUNT(*)::int FROM finished) AS "finishedCount",
                   (SELECT terminal_state FROM validated LIMIT 1) AS state`,
