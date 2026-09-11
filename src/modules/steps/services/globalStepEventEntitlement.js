@@ -200,8 +200,12 @@ async function materializePreparedEntitlementsSetBased(tx, {
   occurredAt,
   generationReady,
 } = {}) {
-  const rows = prepared.map(({ fallback, ...row }) => ({
-    ...row,
+  // Match the SQL input record exactly. Prepared entries may be persisted
+  // Prisma rows, including database-only BigInt fingerprint revisions.
+  const rows = prepared.map((row) => ({
+    userId: row.userId,
+    timezone: row.timezone,
+    localDate: row.localDate,
     startsAt: new Date(row.startsAt).toISOString(),
     endsAt: new Date(row.endsAt).toISOString(),
   }));

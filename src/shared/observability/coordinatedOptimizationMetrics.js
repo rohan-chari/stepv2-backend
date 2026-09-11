@@ -1,4 +1,5 @@
 const APPROVED_METRICS = new Set([
+  "event_fingerprint_cache_total",
   "cache_efficiency_read_total", "cache_efficiency_source_loads_total",
   "cache_efficiency_redis_total", "cache_efficiency_bytes_total",
   "cache_efficiency_invalidations_total", "cache_efficiency_age_total",

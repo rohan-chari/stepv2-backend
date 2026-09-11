@@ -1507,7 +1507,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 // code paths computing the digest that must match each other, and
                 // a test can only ever see one of them.
                 buildInputFingerprint: async (options) => {
-                  planningFingerprint = await buildInputFingerprint(options);
+                  planningFingerprint = await buildInputFingerprint({ ...options, eventCacheRead: true });
                   return planningFingerprint;
                 },
               })
@@ -1699,6 +1699,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             const config = await balanceConfig.getSnapshot();
             const capturedAt = now();
             const fingerprint = await buildInputFingerprint({
+              eventCacheRead: true,
               raceId: job.raceId,
               now: capturedAt,
               balanceConfigVersion: config.version,
@@ -1757,6 +1758,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             } else {
               const config = await balanceConfig.getSnapshot();
               const fingerprint = await buildInputFingerprint({
+                eventCacheRead: true,
                 raceId: job.raceId,
                 now: now(),
                 balanceConfigVersion: config.version,

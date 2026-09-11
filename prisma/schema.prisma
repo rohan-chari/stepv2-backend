@@ -480,6 +480,8 @@ model ActiveRaceEffectImpact {
 }
 
 model GlobalEventRaceImpact {
+  fingerprintRevision BigInt @default(0) @map("fingerprint_revision")
+  fingerprintIncarnation String? @db.Uuid @map("fingerprint_incarnation")
   id                           String    @id @default(uuid())
   eventId                      String    @map("event_id")
   raceId                       String    @map("race_id")
@@ -3095,6 +3097,8 @@ model GlobalStepEvent {
 }
 
 model GlobalStepEventEntitlement {
+  fingerprintRevision BigInt @default(0) @map("fingerprint_revision")
+  fingerprintIncarnation String? @db.Uuid @map("fingerprint_incarnation")
   id                    String    @id @default(uuid())
   eventId               String    @map("event_id")
   userId                String    @map("user_id")
@@ -4276,4 +4280,13 @@ model ShopItemCharacterFit {
  @@id([accessoryShopItemId,characterKey])
  @@index([characterKey,accessoryShopItemId])
  @@map("shop_item_character_fits")
+}
+
+// PostgreSQL triggers cover old parent-event writers as well as current code.
+model EventCatalogRevision {
+  id       Int    @id @default(1)
+  revision BigInt @default(1)
+  epoch    String @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  @@map("event_catalog_revision")
 }
