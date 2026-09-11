@@ -106,13 +106,18 @@ function semanticKey(scope, root, kind, method, args) {
       dailyStart: scope.dailyStart, dailyEnd: scope.dailyEnd }).digest;
 }
 
-async function saveProjection(client, semantic, scope, root, result) {
+async function saveProjections(client, projections) {
+  if (!projections.length) return;
+  // Bounded by the claim's root budget, with at most five answers per root.
   await client.$executeRawUnsafe(`INSERT INTO durable_capture_interval_projections
     (semantic_digest,root_id,user_id,day,revision,result,result_digest)
-    VALUES ($1,$2::uuid,$3,$4::date,$5::bigint,$6::jsonb,
-      encode(sha256(convert_to(($6::jsonb)::text,'UTF8')),'hex'))
-    ON CONFLICT (semantic_digest,root_id) DO NOTHING`,
-  semantic, root.id, scope.userId, root.day, root.revision, JSON.stringify(result));
+    SELECT entry.semantic,entry."rootId"::uuid,entry."userId",entry.day::date,
+      entry.revision::bigint,entry.result,
+      encode(sha256(convert_to(entry.result::text,'UTF8')),'hex')
+    FROM jsonb_to_recordset($1::jsonb) AS entry(semantic text,"rootId" text,
+      "userId" text,day text,revision text,result jsonb)
+    ORDER BY entry.semantic,entry."rootId"
+    ON CONFLICT (semantic_digest,root_id) DO NOTHING`, JSON.stringify(projections));
 }
 
 async function resolveIntervalProjection({ client, scope, key, kind, method, args, budget }) {
@@ -159,60 +164,68 @@ async function resolveIntervalProjection({ client, scope, key, kind, method, arg
       updated_at=clock_timestamp()
     WHERE (durable_capture_method_progress.state->>'rootIndex')::integer<=(EXCLUDED.state->>'rootIndex')::integer`,
   scope.digest, methodKey, scope.userId, JSON.stringify(state));
-  while (state.rootIndex < roots.length) {
-    if (budget.roots <= 0) {
-      const error = new Error("Durable root aggregation budget exhausted");
-      error.code = "CAPTURE_YIELD";
-      throw error;
-    }
-    budget.roots--;
-    const root = roots[state.rootIndex];
-    metrics.increment("global_summary_capture_projection_root_operations");
-    if (kind === "stepsModel") metrics.increment("global_summary_capture_daily_projection_root_operations");
-    const semantic = semanticKey(scope, root, kind, method, args);
-    const projectionSelect = `SELECT root_id,revision::text,result,
-        result_digest=encode(sha256(convert_to(result::text,'UTF8')),'hex') AS valid
-      FROM durable_capture_interval_projections WHERE semantic_digest=$1`;
-    // Prefer the immutable ID with its primary-key lookup. Revision numbers
-    // can repeat after head retirement; sorting only by revision could keep
-    // selecting a retired epoch's answer and force a needless page reread.
-    let [stored] = await client.$queryRawUnsafe(`${projectionSelect} AND root_id=$2::uuid`, semantic, root.id);
-    if (!stored) [stored] = await client.$queryRawUnsafe(`${projectionSelect}
-      AND revision<=$2::bigint ORDER BY revision DESC LIMIT 1`, semantic, root.revision);
-    if (stored) validate(stored, method);
-    let result = stored?.root_id === root.id ? stored.result : stored ?
-      await advanceJournal({ client, scope, root, previous: stored, kind, method, args, budget }) : null;
-    if (!result) {
-      const rootScope = { ...scope, digest: digestCanonical({ semantic, rootId: root.id }).digest,
-        roots: [root], ownershipRoots: scope.roots };
-      result = await runScoringMethod({ client, scope: rootScope, key: semantic, kind, method, args, budget });
-      if (kind === "sampleModel" && result.baseline) {
-        const baselineArgs = [scope.userId, scope.sampleStart, scope.sampleEnd];
-        await saveProjection(client, semanticKey(scope, root, kind, "sumStepsInWindow", baselineArgs),
-          scope, root, { ...result.baseline, answer: result.baseline.openAnswer });
-        await saveProjection(client, semanticKey(scope, root, kind, "sumClosedStepsInWindow",
-          [...baselineArgs, scope.sampleEnd]), scope, root, result.baseline);
-        await saveProjection(client, semanticKey(scope, root, kind, "hasAnyInWindow", baselineArgs),
-          scope, root, { ...result.baseline, answer: result.baseline.matchCount > 0 });
+  const projections = [];
+  const initialRootIndex = state.rootIndex;
+  try {
+    while (state.rootIndex < roots.length) {
+      if (budget.roots <= 0) {
+        const error = new Error("Durable root aggregation budget exhausted");
+        error.code = "CAPTURE_YIELD";
+        throw error;
       }
-      const { baseline: _baseline, ...scalar } = result;
-      result = scalar;
-    }
-    if (stored?.root_id !== root.id) {
-      await saveProjection(client, semantic, scope, root, result);
-      if (kind === "sampleModel" && method === "sumClosedStepsInWindow") {
-        await saveProjection(client, semanticKey(scope, root, kind, "sumStepsInWindow", args.slice(0, 3)),
-          scope, root, { ...result, answer: result.openAnswer });
+      budget.roots--;
+      const root = roots[state.rootIndex];
+      metrics.increment("global_summary_capture_projection_root_operations");
+      if (kind === "stepsModel") metrics.increment("global_summary_capture_daily_projection_root_operations");
+      const semantic = semanticKey(scope, root, kind, method, args);
+      const projectionSelect = `SELECT root_id,revision::text,result,
+          result_digest=encode(sha256(convert_to(result::text,'UTF8')),'hex') AS valid
+        FROM durable_capture_interval_projections WHERE semantic_digest=$1`;
+      // Prefer the immutable ID with its primary-key lookup. Revision numbers
+      // can repeat after head retirement; sorting only by revision could keep
+      // selecting a retired epoch's answer and force a needless page reread.
+      let [stored] = await client.$queryRawUnsafe(`${projectionSelect} AND root_id=$2::uuid`, semantic, root.id);
+      if (!stored) [stored] = await client.$queryRawUnsafe(`${projectionSelect}
+        AND revision<=$2::bigint ORDER BY revision DESC LIMIT 1`, semantic, root.revision);
+      if (stored) validate(stored, method);
+      let result = stored?.root_id === root.id ? stored.result : stored ?
+        await advanceJournal({ client, scope, root, previous: stored, kind, method, args, budget }) : null;
+      const save = (semantic, result) => projections.push({ semantic, result,
+        rootId: root.id, userId: scope.userId, day: root.day, revision: String(root.revision) });
+      if (!result) {
+        const rootScope = { ...scope, digest: digestCanonical({ semantic, rootId: root.id }).digest,
+          roots: [root], ownershipRoots: scope.roots };
+        result = await runScoringMethod({ client, scope: rootScope, key: semantic, kind, method, args, budget });
+        if (kind === "sampleModel" && result.baseline) {
+          const baselineArgs = [scope.userId, scope.sampleStart, scope.sampleEnd];
+          save(semanticKey(scope, root, kind, "sumStepsInWindow", baselineArgs), { ...result.baseline, answer: result.baseline.openAnswer });
+          save(semanticKey(scope, root, kind, "sumClosedStepsInWindow",
+            [...baselineArgs, scope.sampleEnd]), result.baseline);
+          save(semanticKey(scope, root, kind, "hasAnyInWindow", baselineArgs), { ...result.baseline, answer: result.baseline.matchCount > 0 });
+        }
+        const { baseline: _baseline, ...scalar } = result;
+        result = scalar;
       }
+      if (stored?.root_id !== root.id) {
+        save(semantic, result);
+        if (kind === "sampleModel" && method === "sumClosedStepsInWindow") {
+          save(semanticKey(scope, root, kind, "sumStepsInWindow", args.slice(0, 3)), { ...result, answer: result.openAnswer });
+        }
+      }
+      total.openAnswer += result.openAnswer;
+      total.matchCount += result.matchCount;
+      if (method === "hasAnyInWindow") total.answer ||= result.answer;
+      else if (method === "findByUserIdAndDate") total.answer = result.answer ?? total.answer;
+      else if (method === "findByUserIdAndDateRange") total.answer.push(...result.answer);
+      else total.answer += result.answer;
+      state.rootIndex++;
     }
-    total.openAnswer += result.openAnswer;
-    total.matchCount += result.matchCount;
-    if (method === "hasAnyInWindow") total.answer ||= result.answer;
-    else if (method === "findByUserIdAndDate") total.answer = result.answer ?? total.answer;
-    else if (method === "findByUserIdAndDateRange") total.answer.push(...result.answer);
-    else total.answer += result.answer;
-    state.rootIndex++;
-    await persist();
+  } finally {
+    // Flush complete immutable answers before advancing the aggregate cursor.
+    // A yield/error retains completed work; a crash before the cursor write
+    // simply reuses these answers on retry, never skips source input.
+    await saveProjections(client, projections);
+    if (state.rootIndex > initialRootIndex) await persist();
   }
   return total;
 }

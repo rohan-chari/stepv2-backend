@@ -108,6 +108,22 @@ describe("durable interval projection reuse", () => {
     })).status, 202);
   }
 
+  it("batches related immutable projections while preserving public event attribution", async (t) => {
+    const f = await fixture();
+    assert.equal((await sync(f, 200)).status, 202);
+    const { Client } = require("pg");
+    const original = Client.prototype.query;
+    let projectionWrites = 0;
+    t.mock.method(Client.prototype, "query", function (...args) {
+      const sql = typeof args[0] === "string" ? args[0] : args[0].text;
+      if (/INSERT INTO durable_capture_interval_projections/.test(sql)) projectionWrites++;
+      return original.apply(this, args);
+    });
+    const artifact = await finishCapture(f.work.id);
+    assert.equal(artifact.payload.attributionDeltaSteps, 200);
+    assert.ok(projectionWrites <= 4, `expected bounded grouped projection writes, observed ${projectionWrites}`);
+  });
+
   it("reuses exact sample answers after same-day mutations without reading immutable payloads", async () => {
     const f = await fixture();
     assert.equal((await sync(f, 200)).status, 202);
