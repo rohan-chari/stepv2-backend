@@ -58,3 +58,9 @@ For legacy shared cache integration cases, set `LOCAL_REDIS_TEST_URL` to a dedic
 - `git diff --check` clean. Source-removal structural guards pass. Prisma validated with isolated generated client. Matched full HTTP/worker performance and populated SQL rehearsals are maintained by the root reviewer alongside these results.
 
 No claim of an entirely green repository or a guaranteed production CPU percentage is made. Existing red baseline tests are disclosed; deployment and final SQL retirement still require separate authorization and runbook execution.
+
+On 2026-09-11 the user explicitly directed that the existing failures be tracked
+separately. They are recorded in the frontend repository's
+`docs/existing-test-failures-2026-09-11.md`; no assertion was changed or skipped.
+This resolves the baseline-failure release decision for the verified recap
+change only. It does not authorize deployment or exempt new regressions.
