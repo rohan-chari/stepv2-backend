@@ -1,6 +1,6 @@
 # Deterministic event fingerprint ordering
 
-Status: verified locally and code-review approved (SHIP); production deployment pending explicit approval.
+Status: deployed with explicit approval on September 11, 2026. Runtime revision `e6201f7838af1f2bfe27933627c921a05bc7c741`; reviewed implementation `c76580b`.
 
 When several participants have the same multiplier-event start time, the previous event ordering `(starts_at, event_id)` left tied rows. Planning rejected the cache proof and reread the event vector. This change uses `(starts_at, event_id, entitlement_id, impact_id, user_id)` consistently in authoritative reads, cache fills, and local refreshes. Cached materialization preserves PostgreSQL's order instead of re-sorting text in JavaScript.
 
@@ -31,3 +31,13 @@ The older typed-roster test also banned JSON aggregation inside the pre-existing
 Prepared in an isolated branch based on deployed revision `83940f9f341f5889e805c59e62693468c41c5dd7`, excluding unrelated local work. Deploy only this reviewed change and required release documentation after approval. Keep exactly two HTTP workers and existing cron/resolution companions; keep staging stopped.
 
 After deployment, confirm process health and compare the event-query family over a comparable traffic window. Expected measured behavior is one fewer planning SELECT for warm tied races (four to three); final database revalidation stays. No total CPU reduction percentage is promised.
+
+## Production verification
+
+- Safe production reload completed successfully; two HTTP workers and one each cron/resolution online, staging stopped, final aggregate database pool budget 32.
+- Existing production environment and modified lockfile preserved. No migrations or dependency installation required.
+- Public health returned `status=ok, redis=ok`. Required referral catch-up audit/apply/audit all reported zero missing/changed records.
+- Live PostgreSQL statistics showed 35 new ordered-cache query calls returning 3,199 rows and four local-refresh calls returning 443 rows at verification.
+- Bounded Redis observation found ten v3 event-cache keys; all ten sampled payloads used schema 3. This proves live population, not a measured hit rate or CPU reduction.
+- Deployment tag: `deploy/event-fingerprint-ordering-20260911-e6201f7`; rollback anchor: `pre-event-fingerprint-ordering-20260911`.
+- No ten-minute performance comparison was included in this deployment.

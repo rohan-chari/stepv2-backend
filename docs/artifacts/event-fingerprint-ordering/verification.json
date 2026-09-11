@@ -15,8 +15,15 @@
   "warmTiedPlanningSelectsBefore": 4,
   "warmTiedPlanningSelectsAfter": 3,
   "finalDatabaseFenceRetained": true,
-  "productionDeployed": false,
+  "productionDeployed": true,
   "additionalIntegrationFile": "test/integration/query-efficiency-fingerprint-rows.test.js",
   "additionalIntegrationSelection": "typed fingerprint preserves payload/HTTP (team=false and team=true)",
-  "preexistingFailureReproduced": "typed-roster JSON guard on deployed base includes event-proof aggregation"
+  "preexistingFailureReproduced": "typed-roster JSON guard on deployed base includes event-proof aggregation",
+  "deployedRuntime": "e6201f7838af1f2bfe27933627c921a05bc7c741",
+  "httpWorkers": 2,
+  "poolBudget": 32,
+  "staging": "stopped",
+  "liveV3PayloadsObserved": 10,
+  "health": "ok",
+  "referralCatchUpMissing": 0
 }
