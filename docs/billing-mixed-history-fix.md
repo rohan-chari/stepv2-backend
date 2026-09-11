@@ -18,4 +18,10 @@ The change adds no database queries or writes. It avoids product lookups and sub
 - Independent code reviewer: SHIP, no blockers.
 - Dedicated local steps_billing_mixed_test database, fully migrated; no production test writes. The pre-existing shared integration database had an unrelated duplicate-index migration conflict.
 
-Implementation prepared locally. Production deployment requires separate authorization; no production runtime change made by this fix.
+## Production deployment
+
+Explicitly authorized and deployed as runtime `0b9b1b7`, isolated on top of production `b20ad0b`; only this fix, regression tests and this report changed. Exact release artifact: 16/16 billing regression/provider tests passed against the dedicated local test database after applying its existing migrations.
+
+Guarded PM2 reload completed: two HTTP workers, one resolution worker, one cron worker, staging stopped, aggregate pool budget 32. Production health and Redis returned OK. No production migrations, dependency installation or configuration changes; existing environment and modified package lock preserved.
+
+Two authenticated live billing syncs for the affected account returned HTTP 200 / complete. Both retained the pre-verification balance of 8,474 coins; ledger total also 8,474, exactly two purchase-credit entries, and reconciliation last_error is null. The earlier recovery balance was 8,624; intervening account activity occurred before verification, not during either sync. No duplicate purchase credits were issued.
