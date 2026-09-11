@@ -15,7 +15,9 @@ function createRaceBootstrapReadContext({ race, userId }) {
       summaryPromise = null;
       throw error;
     }),
-    fullScoringContext: () => fullPromise ??= Race.findProgressScoringContext(race.id),
+    fullScoringContext: () => fullPromise ??= (process.env.NODE_ENV === 'production'
+      ? require('./raceOpenDisplayCache').fullDisplayContext(race.id, { race, userId })
+      : Race.findProgressScoringContext(race.id)),
   });
 }
 

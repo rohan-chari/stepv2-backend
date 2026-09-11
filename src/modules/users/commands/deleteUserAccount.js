@@ -137,7 +137,7 @@ function buildDeleteUserAccount(dependencies = {}) {
 
       const participations = await tx.raceParticipant.findMany({
         where: { userId },
-        include: { race: { select: { id: true, status: true } } },
+        include: { race: { select: { id: true, status: true, rematchRootRaceId: true, seriesId: true } } },
       });
       const tournamentEntries = await tx.tournamentParticipant.findMany({
         where: { userId },
@@ -195,6 +195,9 @@ function buildDeleteUserAccount(dependencies = {}) {
             terminalReason: "CREATOR_ACCOUNT_DELETED",
           },
         });
+        for (const seriesId of creatorSeriesIds) {
+          await require('../../races/services/raceViewerStateInvalidation').seriesChanged(seriesId);
+        }
       }
 
       // Shared race-payout-double lock order: durable provider identity first,
@@ -233,6 +236,9 @@ function buildDeleteUserAccount(dependencies = {}) {
       // 1) Race participations: forfeit any held buy-ins into the pot, then
       //    detach the user from each race depending on race lifecycle.
       await require('../../races/services/raceCacheInvalidation').membershipChanged(participations);
+      await require('../../races/services/raceViewerStateInvalidation').raceLinksChanged(
+        participations.map(row => row.race),
+      );
       for (const raceId of new Set(participations.map((row) => row.raceId))) {
         await require('../../races/services/raceCacheInvalidation').raceChanged(raceId);
       }
@@ -331,6 +337,20 @@ function buildDeleteUserAccount(dependencies = {}) {
       }
 
       // 2) Anonymize Race creator/winner references so other users keep history.
+      // Ownership can outlive membership; invalidate these descriptors too.
+      if (require('../../../shared/cache/redisCache').isEnabled()) {
+        let afterId = null;
+        for (;;) {
+          const ownedRaceLinks = await tx.race.findMany({
+            where: { OR: [{ creatorId: userId }, { winnerUserId: userId }], ...(afterId ? { id: { gt: afterId } } : {}) },
+            select: { id: true, rematchRootRaceId: true, seriesId: true },
+            orderBy: { id: 'asc' }, take: 100,
+          });
+          await require('../../races/services/raceViewerStateInvalidation').raceLinksChanged(ownedRaceLinks);
+          if (ownedRaceLinks.length < 100) break;
+          afterId = ownedRaceLinks.at(-1).id;
+        }
+      }
       await tx.race.updateMany({
         where: { creatorId: userId },
         data: { creatorId: sentinelId },

@@ -384,6 +384,8 @@ async function invalidateRaceProgress(raceId) {
     // Release A fences late B publishers before deleting their payloads.
     await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([
       { domain: "race-effects", identity: raceId },
+      { domain: "participant-display", identity: `race:${raceId}` },
+      { domain: "race-summary", identity: raceId },
     ]);
     // The page projection shares this prefix but has generation-specific chunk
     // keys. Invalidate its known generation before deleting the legacy C3

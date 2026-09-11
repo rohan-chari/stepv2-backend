@@ -229,6 +229,9 @@ function buildCreateRaceRematch(dependencies = {}) {
           where: { id: created.id },
           data: { rematchSourceRaceId: source.id, rematchRootRaceId: rootRaceId },
         });
+        await require('../services/raceViewerStateInvalidation').raceLinksChanged([
+          { id: created.id, rematchRootRaceId: rootRaceId },
+        ]);
         // createRace establishes this row before its creator membership. Keep
         // the generation-zero row inert and explicit for auditability.
         await acquireRaceWriteFence(tx, created.id);

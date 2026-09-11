@@ -160,6 +160,7 @@ function buildSeededChallengeAdmission(dependencies = {}) {
             if (!race.seededBucketId) {
               await tx.seededRaceBucket.create({ data: { id: bucketId, seedId: seed.id, ...window, raceId, admissionVersion: 1, status: shell.status } });
               race = await tx.race.update({ where: { id: raceId }, data: { seededBucketId: bucketId } });
+              await require('./raceCacheInvalidation').raceChanged(raceId, { seededBucketId: true });
             }
             if (!['ACTIVE','PENDING'].includes(race.status) || race.endsAt <= decisionAt) throw retry();
             const accepted = await tx.raceParticipant.count({ where: { raceId, status: 'ACCEPTED' } });
@@ -173,12 +174,14 @@ function buildSeededChallengeAdmission(dependencies = {}) {
             participant = priorPruned?.raceId === raceId
               ? await tx.raceParticipant.update({where:{id:priorPruned.id},data:{...participantData,baselineSteps:0,rawSteps:0,boxProgressSteps:0}})
               : await tx.raceParticipant.create({data:participantData});
+            await require('./raceCacheInvalidation').membershipChanged([participant]);
             await tx.seededRaceBucketAssignment.upsert({where:{seedId_windowStart_userId:key},create:{bucketId,userId,seedId:seed.id,windowStart:window.windowStart,raceParticipantId:participant.id,matchSteps,state:'FINAL'},update:{bucketId,raceParticipantId:participant.id,matchSteps,state:'FINAL'}});
             if(priorPruned) await tx.seededChallengeTransfer.create({data:{id:requestId||randomUUID(),userId,seedId:seed.id,windowStart:window.windowStart,oldRaceId:priorPruned.raceId,newRaceId:raceId,oldParticipantId:priorPruned.id,newParticipantId:participant.id,priorAssignment:owned.race.seededBucketId,newAssignment:bucketId,sourceState:'PRUNED',reason:priorPruned.raceId===raceId?'MANUAL_REACTIVATION':'FULL_GROUP_TRANSFER'}});
             if (race.status === 'ACTIVE') await enrollIfGlobalEventActive(tx, { raceId, userIds: [userId], at: participant.joinedAt });
           }
           if (race.status === 'PENDING' && decisionAt >= window.windowStart) {
             race = await tx.race.update({ where: { id: raceId }, data: { status: 'ACTIVE', startedAt: window.windowStart } });
+            await require('./raceCacheInvalidation').raceChanged(raceId, { status: true, startedAt: true });
             if (race.seededBucketId) await tx.seededRaceBucket.update({ where: { id: race.seededBucketId }, data: { status: 'ACTIVE' } });
             await enrollIfGlobalEventActive(tx,{raceId,userIds:[userId],at:participant.joinedAt});
           }

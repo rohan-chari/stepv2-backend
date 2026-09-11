@@ -467,9 +467,10 @@ function createRacesRouter(dependencies = {}) {
 
   async function rejectTokenlessBucketDetail(req, res) {
     if (supportsSeededRaceBuckets(req.clientFeatures)) return false;
-    const race = typeof raceModel.findSeededBucketMarker === "function"
-      ? await raceModel.findSeededBucketMarker(req.params.raceId)
-      : await raceModel.findById(req.params.raceId);
+    const race = Object.hasOwn(req, 'raceOpenAccessContext') ? req.raceOpenAccessContext
+      : typeof raceModel.findSeededBucketMarker === "function"
+        ? await raceModel.findSeededBucketMarker(req.params.raceId)
+        : await raceModel.findById(req.params.raceId);
     if (!race?.seededBucketId) return false;
     res.status(404).json({ error: "Race not found", code: "RACE_NOT_FOUND" });
     return true;
@@ -552,6 +553,11 @@ function createRacesRouter(dependencies = {}) {
     const { isParticipantsView, participantsOffset, participantsLimit } =
       readParticipantsPagingQuery(req, { forceFullParticipants });
 
+    if (Object.hasOwn(req, 'raceOpenAccessContext')) {
+      resolvedContext ||= {};
+      resolvedContext.bootstrapReadContext ||= require('./services/raceBootstrapReadContext')
+        .createRaceBootstrapReadContext({ race: req.raceOpenAccessContext, userId: req.user.id });
+    }
     return getRaceProgress(
       req.user.id,
       req.params.raceId,
@@ -588,9 +594,10 @@ function createRacesRouter(dependencies = {}) {
   }
 
   async function loadBootstrapAccess(req) {
-    const context = typeof raceModel.findBootstrapAccessContext === "function"
-      ? await raceModel.findBootstrapAccessContext(req.params.raceId, req.user.id)
-      : null;
+    const context = Object.hasOwn(req, 'raceOpenAccessContext') ? req.raceOpenAccessContext
+      : typeof raceModel.findBootstrapAccessContext === "function"
+        ? await raceModel.findBootstrapAccessContext(req.params.raceId, req.user.id)
+        : null;
     if (!context) {
       const error = new Error("Race not found");
       error.statusCode = 404;
@@ -697,8 +704,30 @@ function createRacesRouter(dependencies = {}) {
   // Frozen five-slot renderers must never enter a larger board. Retained
   // membership escape, payout and acknowledgement controls remain available.
   router.param("raceId", async (req, res, next, raceId) => {
-    if (clientSupportsLargeTeamRaces(req.clientFeatures)) return next();
     const suffix = req.path.slice(req.path.indexOf(raceId) + raceId.length);
+    // Only these GETs share display inputs. Mutation and target-selection
+    // routes retain their uncached authorization/eligibility reads.
+    const displayGet = req.method === 'GET' && ['', '/', '/bootstrap', '/progress'].includes(suffix) &&
+      raceModel === defaultRaceModel && !dependencies.getRaceDetails && !dependencies.getRaceProgress;
+    if (displayGet) {
+      try {
+        if (!clientSupportsLargeTeamRaces(req.clientFeatures)) {
+          // Keep the frozen-client preflight followed by the handler's fresh
+          // access gate: a resize committed between them must be observed.
+          const marker = await routePrisma.race.findUnique({
+            where: { id: raceId }, select: { isTeamRace: true, teamSize: true },
+          });
+          assertLargeTeamSupport(marker, req.clientFeatures);
+        }
+        req.raceOpenAccessContext = await raceModel.findBootstrapAccessContext(raceId, req.user.id);
+        assertLargeTeamSupport(req.raceOpenAccessContext, req.clientFeatures);
+        return next();
+      } catch (error) {
+        if (error.code === 'UPDATE_REQUIRED') return res.status(400).json({ error: error.message, code: error.code });
+        return next(error);
+      }
+    }
+    if (clientSupportsLargeTeamRaces(req.clientFeatures)) return next();
     const escape = suffix === "/leave" || suffix === "/forfeit" ||
       (suffix === "/respond" && req.body?.accept === false) ||
       suffix === "/favorite" || suffix === "/chat/mute" ||
@@ -1526,7 +1555,7 @@ function createRacesRouter(dependencies = {}) {
           settings,
           "apiRaceBootstrapCompactV1Enabled"
         ));
-      const access = await capacity.measurePhase(
+      let access = await capacity.measurePhase(
         "access",
         () => loadBootstrapAccess(req),
       );
@@ -1541,7 +1570,7 @@ function createRacesRouter(dependencies = {}) {
         supportsSeededRaceBuckets(req.clientFeatures),
       ];
       const detailPaging = raceDetailsPagingOptions(req);
-      const readContext = require("./services/raceBootstrapReadContext")
+      let readContext = require("./services/raceBootstrapReadContext")
         .createRaceBootstrapReadContext({ race: access.race, userId: req.user.id });
       if (access.race.status !== "ACTIVE") {
         const race = await capacity.measurePhase(
@@ -1584,7 +1613,25 @@ function createRacesRouter(dependencies = {}) {
           error: inventoryResult.reason?.message || "unknown",
         });
       }
+      const statusChanged = progressResult.status === "fulfilled" &&
+        typeof progressResult.value?.status === "string" &&
+        progressResult.value.status !== access.race.status;
+      if (statusChanged) {
+        // Legacy reconciliation can complete the race during this request.
+        // Recheck access and compatibility, then reload all result fields and
+        // participants together; neither the earlier request memo nor its
+        // progress preload describes that completed result.
+        req.raceOpenAccessContext = await raceModel.findBootstrapAccessContext(
+          req.params.raceId, req.user.id,
+        );
+        assertLargeTeamSupport(req.raceOpenAccessContext, req.clientFeatures);
+        access = await loadBootstrapAccess(req);
+        readContext = null;
+        resolvedContext.race = await raceModel.findById(req.params.raceId);
+        delete resolvedContext.bootstrapReadContext;
+      }
       const omitParticipantPage = compactRequested &&
+        !statusChanged &&
         access.kind === "DIRECT_PARTICIPANT" && access.race.isTeamRace !== true &&
         detailPaging.pagination?.capable === true && detailPaging.pagination?.view === "participants-v1" &&
         progressResult.status === "fulfilled" && Array.isArray(progressResult.value?.participants);
@@ -1744,6 +1791,10 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/:raceId
   router.get("/:raceId", async (req, res) => {
     try {
+      const displayRace = Object.hasOwn(req, 'raceOpenAccessContext') ? req.raceOpenAccessContext
+        : typeof raceModel.findBootstrapAccessContext === 'function'
+          ? await raceModel.findBootstrapAccessContext(req.params.raceId, req.user.id) : null;
+      const readContext = require('./services/raceBootstrapReadContext').createRaceBootstrapReadContext({ race: displayRace, userId: req.user.id });
       const result = await getRaceDetails(
         req.user.id,
         req.params.raceId,
@@ -1754,7 +1805,7 @@ function createRacesRouter(dependencies = {}) {
         req.clientFeatures?.has("team_races") ?? false,
         supportsSeededRaceBuckets(req.clientFeatures),
         null,
-        raceDetailsPagingOptions(req)
+        { ...raceDetailsPagingOptions(req), readContext }
       );
       await attachRaceViewerState(result, req.user.id);
       res.json(result);

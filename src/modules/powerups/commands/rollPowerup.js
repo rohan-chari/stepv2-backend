@@ -218,6 +218,7 @@ function buildRollPowerup(dependencies = {}) {
             where: { id: participantId },
             data: { nextBoxAtSteps: currentThreshold },
           });
+          await require('../../races/services/raceCacheInvalidation').participantDisplayChanged([{ id: participantId, raceId, userId }], { nextBoxAtSteps: true });
         }
         return;
       }
@@ -358,6 +359,7 @@ function buildRollPowerup(dependencies = {}) {
           where: { id: participantId },
           data: { nextBoxAtSteps: currentThreshold },
         });
+        await require('../../races/services/raceCacheInvalidation').participantDisplayChanged([{ id: participantId, raceId, userId }], { nextBoxAtSteps: true });
       }
 
       // One summary feed row for all boxes forfeited this sync (see forfeitedCount).

@@ -969,7 +969,9 @@ function buildGetRaceProgress(deps = {}) {
       }
     }
     const raceActiveEffects = race.powerupsEnabled
-      ? await raceActiveEffectModel.findActiveForRace(raceId)
+      ? await (raceActiveEffectModel === RaceActiveEffect
+          ? require('../services/raceOpenDisplayCache').effects(raceId)
+          : raceActiveEffectModel.findActiveForRace(raceId))
       : [];
 
     const nowTime = scoredAt ? new Date(scoredAt) : now();
@@ -1158,7 +1160,9 @@ function buildGetRaceProgress(deps = {}) {
         try {
           const scoringParticipant =
             syncPowerups && typeof participantModel.findById === "function"
-              ? (await participantModel.findById(myParticipant.id)) || myParticipant
+              ? (participantModel === RaceParticipant
+            ? (race._bootstrapReadViewer === userId ? myParticipant : await require('../services/raceOpenDisplayCache').participant(raceId, myParticipant.id, userId))
+            : await participantModel.findById(myParticipant.id)) || myParticipant
               : myParticipant;
           const { baseAdjusted, hasSampleData } = await calculateBaseAdjusted({
             participant: scoringParticipant,
@@ -1257,7 +1261,9 @@ function buildGetRaceProgress(deps = {}) {
       const reusedLeaderboardBase = myEntry ? myEntry.baseAdjusted : null;
       const committedBoxParticipant = workerOwnedRefresh &&
         typeof participantModel.findById === "function"
-          ? (await participantModel.findById(myParticipant.id)) || myParticipant
+          ? (participantModel === RaceParticipant
+            ? (race._bootstrapReadViewer === userId ? myParticipant : await require('../services/raceOpenDisplayCache').participant(raceId, myParticipant.id, userId))
+            : await participantModel.findById(myParticipant.id)) || myParticipant
           : myParticipant;
       let myBoxBaseAdjusted;
       if (workerOwnedRefresh) {
@@ -1409,7 +1415,9 @@ function buildGetRaceProgress(deps = {}) {
         try {
           powerupData.trailMix = {
             uniqueTypesIfUsedNow: uniqueTypesIfTrailMixUsed(
-              await racePowerupModel.findUsedTypesByParticipant(myParticipant.id),
+              await (racePowerupModel === RacePowerup
+                ? require('../services/raceOpenDisplayCache').usedTypes(myParticipant.id, () => racePowerupModel.findUsedTypesByParticipant(myParticipant.id))
+                : racePowerupModel.findUsedTypesByParticipant(myParticipant.id)),
             ),
           };
         } catch {
@@ -1685,7 +1693,9 @@ function buildGetRaceProgress(deps = {}) {
       // single persisted summary instead of hydrating/replaying the roster.
       const persistedPreviewContext = race._pageProjection &&
         typeof participantModel.findMysteryBoxPreviewContext === "function"
-        ? await participantModel.findMysteryBoxPreviewContext(race.id, userId)
+        ? await (participantModel === RaceParticipant
+          ? require('../services/raceOpenDisplayCache').preview(race.id, userId, () => participantModel.findMysteryBoxPreviewContext(race.id, userId))
+          : participantModel.findMysteryBoxPreviewContext(race.id, userId))
         : null;
       if (!race._pageProjection || persistedPreviewContext) {
         const dropOdds = buildDropOdds({
@@ -1960,7 +1970,9 @@ function buildGetRaceProgress(deps = {}) {
       ? resolvedContext.bootstrapReadContext : null;
     const loadFullScoringContext = () => bootstrapContext
       ? bootstrapContext.fullScoringContext()
-      : raceModel.findProgressScoringContext(raceId);
+      : workerOwnedRefresh && raceModel === Race
+        ? require('../services/raceOpenDisplayCache').fullDisplayContext(raceId, { userId })
+        : raceModel.findProgressScoringContext(raceId);
     let race = bootstrapContext && (requestedPage || boundedLegacyContext)
       ? bootstrapContext.core()
       : requestedPage || boundedLegacyContext
@@ -2025,7 +2037,7 @@ function buildGetRaceProgress(deps = {}) {
     // context and reload every participant's user/accessory graph. Presentation
     // is hydrated after masking, just as on the unpaged lean team path.
     let usingLeanProjection =
-      (leanProjectionEnabled && (!requestedPage || race.isTeamRace === true) || pageScopedContext) &&
+      (leanProjectionEnabled && (!requestedPage || race.isTeamRace === true || (workerOwnedRefresh && raceModel === Race)) || pageScopedContext) &&
       race.status === "ACTIVE";
     if (leanProjectionEnabled && !usingLeanProjection) {
       race = await raceModel.findById(raceId);
@@ -2244,7 +2256,9 @@ function buildGetRaceProgress(deps = {}) {
       }
 
       const activeEffects = race.powerupsEnabled
-        ? await raceActiveEffectModel.findActiveForRace(raceId)
+        ? await (raceActiveEffectModel === RaceActiveEffect
+          ? require('../services/raceOpenDisplayCache').effects(raceId)
+          : raceActiveEffectModel.findActiveForRace(raceId))
         : [];
       if (
         privacySafeDisplayRanks &&

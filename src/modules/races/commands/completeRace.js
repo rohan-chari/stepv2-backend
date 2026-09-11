@@ -194,6 +194,8 @@ function buildCompleteRace(dependencies = {}) {
       });
     }
 
+    await require('../services/raceCacheInvalidation').participantDisplayChanged(
+      (race.participants || []).map(row => ({ ...row, raceId: race.id })), { payoutCoins: true });
     const totals = awards.reduce(
       (summary, award) => ({
         rawAwardCoins: summary.rawAwardCoins + Math.max(0, award.rawAwardCoins || 0),
@@ -276,6 +278,7 @@ function buildCompleteRace(dependencies = {}) {
             where: { id: raceId },
             select: {
               status: true, name: true, teamAName: true, teamBName: true,
+              id: true, rematchRootRaceId: true, seriesId: true,
             },
           });
           if (!lockedRace || lockedRace.status !== "ACTIVE") {
@@ -286,6 +289,7 @@ function buildCompleteRace(dependencies = {}) {
             data: completionData,
           });
           if (updated.count === 1) {
+            await require('../services/raceViewerStateInvalidation').raceLinksChanged([lockedRace]);
             if (!exposureRace?.tournamentId) {
               const completionParticipants = await tx.raceParticipant.findMany({
                 where: { raceId, status: "ACCEPTED" },

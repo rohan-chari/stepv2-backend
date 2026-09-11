@@ -135,7 +135,7 @@ describe("team race HTTP read performance and compatibility", () => {
     assert.equal(body.progress.pagination.total, 4);
     assert.equal(body.progress.pagination.hasMore, false);
     const coreReads = capturedQueries.filter(({ query }) => query.includes('FROM "public"."races"') && query.includes('"name"'));
-    assert.equal(coreReads.length, 2, `only access plus the lean scoring context should load race core; saw ${coreReads.length}`);
+    assert.equal(coreReads.length, 1, `access and the lean scoring context should share one descriptive race-core read; saw ${coreReads.length}`);
   });
 
   for (const paged of [true, false]) {

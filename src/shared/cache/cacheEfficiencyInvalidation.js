@@ -11,6 +11,8 @@ const MARKER_TTL_SECONDS = 172800;
 const DOMAINS = new Set([
   "list", "race-meta", "race-members", "race-effects", "invites", "summary", "milestones",
   "slots", "entitlement", "event", "presentation",
+  "participant-display", "race-summary", "participant-use-history", "race-effects-display",
+  "rematch-lineage", "series", "series-user",
 ]);
 const ADVANCE_LUA = `
 for i = 1, #KEYS do

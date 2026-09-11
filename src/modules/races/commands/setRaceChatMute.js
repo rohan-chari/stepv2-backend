@@ -15,10 +15,12 @@ async function setRaceChatMute({ userId, raceId, muted }) {
   if (!participant || (await prisma.race.findUnique({ where: { id: raceId }, select: { seededBucketId: true } }))?.seededBucketId && participant.status !== "ACCEPTED") {
     throw new SetRaceChatMuteError("Not a participant in this race", 403);
   }
-  return prisma.raceParticipant.update({
+  const result = await prisma.raceParticipant.update({
     where: { id: participant.id },
     data: { chatMuted: !!muted },
   });
+  await require('../services/raceCacheInvalidation').participantDisplayChanged([result], { chatMuted: true });
+  return result;
 }
 
 async function markRaceChatRead({ userId, raceId }) {
@@ -28,10 +30,12 @@ async function markRaceChatRead({ userId, raceId }) {
   if (!participant || (await prisma.race.findUnique({ where: { id: raceId }, select: { seededBucketId: true } }))?.seededBucketId && participant.status !== "ACCEPTED") {
     throw new SetRaceChatMuteError("Not a participant in this race", 403);
   }
-  return prisma.raceParticipant.update({
+  const result = await prisma.raceParticipant.update({
     where: { id: participant.id },
     data: { lastReadRaceChatAt: new Date() },
   });
+  await require('../services/raceCacheInvalidation').participantDisplayChanged([result], { lastReadRaceChatAt: true });
+  return result;
 }
 
 module.exports = { setRaceChatMute, markRaceChatRead, SetRaceChatMuteError };

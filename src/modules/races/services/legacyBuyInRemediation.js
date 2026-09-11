@@ -128,7 +128,9 @@ async function remediateLegacyBuyIns({ tx, plan, awardCoins = defaultAwardCoins 
   }
   const unchargedIds = validated.completedParticipants.filter((row) => !chargedRefs.has(`${row.raceId}:${row.userId}`)).map((row) => row.participantId);
   await tx.raceParticipant.updateMany({ where: { id: { in: [...unchargedIds, ...validated.pendingParticipants.map((row) => row.participantId)] } }, data: { buyInStatus: "NONE" } });
-  await tx.race.update({ where: { id: validated.pendingRaceId }, data: { status: "CANCELLED" } });
+  const cancelled = await tx.race.update({ where: { id: validated.pendingRaceId }, data: { status: "CANCELLED" } });
+  await require('./raceViewerStateInvalidation').raceLinksChanged([cancelled]);
+  await require('./raceCacheInvalidation').participantDisplayChanged([...validated.completedParticipants, ...validated.pendingParticipants].map(row => ({ id: row.participantId, raceId: row.raceId || validated.pendingRaceId, userId: row.userId })));
   await require("./raceCacheInvalidation").raceChanged(validated.pendingRaceId);
   return { alreadyApplied: false, refundedCoins: 830, refundedParticipants: 36, unchargedParticipants: 6 };
 }

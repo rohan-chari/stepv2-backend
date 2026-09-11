@@ -19,6 +19,11 @@ const {
   serializeTeamPayoutStamp,
 } = require("../services/teamWinnerReward");
 
+async function hydrateDisplayParticipants(rows) {
+  const people = await userPresentationCache.getMany(rows.map(row => row.userId), true);
+  return rows.map(row => ({ ...row, user: people.get(row.userId) || { id: row.userId, displayName: null, profilePhotoUrl: null, equippedAccessories: [] } }));
+}
+
 // The JS twin of the model's `detailsParticipantOrder` ([joinedAt asc, id asc]).
 // Used only when a page is sliced out of a preloaded race instead of taken by
 // the database, so both paths hand a client the same page for the same offset.
@@ -121,14 +126,16 @@ async function getRaceDetails(
   const sliceFromPreload = pagingRequested && preloadedRace != null;
 
   if (leanActive && !pagingRequested && !sliceFromPreload) {
-    race = await Race.findDetailsCore(raceId);
+    race = context ? context.core() : await Race.findDetailsCore(raceId);
     if (!race) throw notFound();
     if (race.seededBucketId && !supportsBuckets) {
       const error = notFound();
       error.code = "RACE_NOT_FOUND";
       throw error;
     }
-    const summaries = await Race.findDetailsParticipantSummaries(raceId);
+    const summaries = context && process.env.NODE_ENV === 'production'
+      ? (await context.fullScoringContext()).participants
+      : await Race.findDetailsParticipantSummaries(raceId);
     let presentations = new Map();
     try {
       presentations = await userPresentationCache.getMany(
@@ -168,7 +175,12 @@ async function getRaceDetails(
     participantSummary = summary;
     summaryRows = [];
   } else {
-    race = preloadedRace || (await Race.findById(raceId));
+    race = preloadedRace || (context && process.env.NODE_ENV === 'production'
+      ? await context.fullScoringContext() : await Race.findById(raceId));
+    if (race && !preloadedRace && context && process.env.NODE_ENV === 'production') {
+      const people = await userPresentationCache.getMany(race.participants.map(row => row.userId), true);
+      race = { ...race, participants: race.participants.map(row => ({ ...row, user: people.get(row.userId) || { id: row.userId, displayName: null, profilePhotoUrl: null, equippedAccessories: [] } })) };
+    }
     if (!race) throw notFound();
     if (race.seededBucketId && !supportsBuckets) {
       const error = notFound();
@@ -243,7 +255,9 @@ async function getRaceDetails(
         // exactly the rows findDetailsParticipantPage would have, cosmetics
         // included — the preload hydrates them for the whole field.
         summaryRows.slice(start, start + safeLimit)
-      : omitParticipantPage ? [] : await Race.findDetailsParticipantPage(raceId, {
+      : omitParticipantPage ? [] : context && process.env.NODE_ENV === 'production' && race.isTeamRace
+        ? await hydrateDisplayParticipants((await context.fullScoringContext()).participants.slice(start, start + safeLimit))
+        : await Race.findDetailsParticipantPage(raceId, {
           skip: start,
           take: safeLimit,
         });
@@ -429,7 +443,9 @@ async function getRaceDetails(
   if (race.isTeamRace === true && supportsLargeTeamRaces) {
     const acceptedRows = preloadedRace?.participants
       ? preloadedRace.participants.filter((p) => p.status === "ACCEPTED").slice(0, 20)
-      : await Race.findDetailsAcceptedTeamParticipants(raceId);
+      : context && process.env.NODE_ENV === 'production'
+        ? await hydrateDisplayParticipants((await context.fullScoringContext()).participants.filter(row => row.status === 'ACCEPTED').slice(0,20))
+        : await Race.findDetailsAcceptedTeamParticipants(raceId);
     result.teamAcceptedParticipants = acceptedRows.map(serializeParticipant);
     result.teamRosterComplete = acceptedRows.length === acceptedCount;
   }

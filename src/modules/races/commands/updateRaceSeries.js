@@ -78,6 +78,7 @@ function buildUpdateRaceSeries(dependencies = {}) {
           data: { active: false, unsubscribedAt: new Date() },
         });
       }
+      await require('../services/raceViewerStateInvalidation').seriesChanged(seriesId, userId);
       await deferUntilAfterCommit(async () => {
         await Promise.allSettled([
           invalidateRaceListUser(userId),
@@ -128,6 +129,7 @@ function buildUpdateRaceSeries(dependencies = {}) {
           data: { active: false, unsubscribedAt: endedAt },
         });
       }
+      await require('../services/raceViewerStateInvalidation').seriesChanged(seriesId);
       await deferUntilAfterCommit(async () => {
         await Promise.allSettled(
           affected.flatMap((id) => [

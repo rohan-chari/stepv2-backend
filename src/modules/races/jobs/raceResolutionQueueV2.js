@@ -2716,6 +2716,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
           attemptedPostTaskId = durableTask.id;
         }
+        await require('../../../shared/cache/cacheEfficiencyInvalidation').afterCommit([
+          { domain: 'participant-display', identity: `race:${job.raceId}` },
+          { domain: 'race-summary', identity: job.raceId },
+          // These are outputs of the fenced computation. Invalidate display
+          // rows without invalidating its own captured scoring-input proof.
+          ...(sideWrites.some(write => write.kind === 'effectUpdate') ? [{ domain: 'race-effects-display', identity: job.raceId }] : []),
+        ]);
         superseded = outcome.superseded;
         committedBoxSyncResults = attemptedBoxSyncResults;
         committedPowerupEvents = attemptedPowerupEvents;
