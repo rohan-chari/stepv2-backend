@@ -1010,6 +1010,7 @@ const Race = {
       stableRaces = null,
       stableSource = null,
       completedSummaryCache = defaultCompletedRaceSummaryCache,
+      cachedViewerRowsByRaceId = null,
     } = {},
   ) {
     const participantFilter = {
@@ -1092,7 +1093,13 @@ const Race = {
     }
     const ids = races.map((race) => race.id);
 
-    const raceSetKey = raceSqlSummaryBatchKey(races);
+    const cachedViewerComplete = cachedViewerRowsByRaceId instanceof Map &&
+      races.every((race) => cachedViewerRowsByRaceId.has(race.id));
+    // Keep cached and uncached viewer requests in separate coalescing queues.
+    // A queue's execute closure is shared by every waiter, so allowing a
+    // cached viewer to share it with another user could return the wrong
+    // participant row.
+    const raceSetKey = `${raceSqlSummaryBatchKey(races)}${cachedViewerComplete ? `\u0001cached:${userId}` : ""}`;
     const rows = await raceSqlSummaryReadBatch.load({
       prisma,
       raceSetKey,
@@ -1207,7 +1214,9 @@ const Race = {
               }]));
             },
           }),
-          prisma.raceParticipant.findMany({
+          cachedViewerComplete
+            ? Promise.resolve([...cachedViewerRowsByRaceId.values()].filter(Boolean))
+            : prisma.raceParticipant.findMany({
           where: {
             raceId: { in: ids },
             userId: { in: viewerUserIds },

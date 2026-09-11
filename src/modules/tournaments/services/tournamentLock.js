@@ -12,6 +12,7 @@ const {
   buildAppendTournamentDomainEvent,
 } = require("./appendTournamentDomainEvent");
 const appendTournamentDomainEvent = buildAppendTournamentDomainEvent();
+const cacheEfficiency = require("../../../shared/cache/cacheEfficiencyInvalidation");
 
 // Serialize every capacity-sensitive tournament mutation (join / accept / leave
 // / kick / invite / cancel / start) on the tournament id, so concurrent joins
@@ -53,6 +54,11 @@ async function withTournamentLock(
     }
     return value;
   });
+  // The Races-tab badge includes joinable tournament lobbies. Advance its
+  // shared discovery fence after every committed capacity-sensitive mutation;
+  // the value is viewer-aware, so fan-out deletion would be both expensive and
+  // unnecessary.
+  await cacheEfficiency.afterCommit([{ domain: "event", identity: "public-race-discovery" }]);
   return { result, deferred };
 }
 

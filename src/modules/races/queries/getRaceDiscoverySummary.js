@@ -7,6 +7,7 @@ const {
 const {
   getPublicTournaments: defaultGetPublicTournaments,
 } = require("../../tournaments/queries/getPublicTournaments");
+const defaultBadgeCache = require("../services/raceDiscoveryBadgeCache").raceDiscoveryBadgeCache;
 
 // GET /races/discovery-summary (§6.2): one compact request replacing the Races
 // screen's three background calls (public count, featured races, featured
@@ -27,6 +28,7 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
     dependencies.getFeaturedRaces || defaultGetFeaturedRaces;
   const getPublicTournaments =
     dependencies.getPublicTournaments || defaultGetPublicTournaments;
+  const badgeCache = dependencies.badgeCache || defaultBadgeCache;
   const logger = dependencies.logger || console;
 
   return async function getRaceDiscoverySummary({
@@ -44,8 +46,12 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
       featuredTournaments: true,
     };
 
+    const badgeRead = typeof badgeCache.read === "function"
+      ? await badgeCache.read({ userId, supportsTeamRaces, supportsLargeTeamRaces,
+          supportsTournaments, hiddenSeededWindows })
+      : { value: null, fence: null };
     const [countResult, featuredResult, tournamentsResult] = await Promise.allSettled([
-      getPublicRaceCount({
+      badgeRead.value != null ? Promise.resolve(badgeRead.value) : getPublicRaceCount({
         userId,
         supportsTeamRaces,
         supportsLargeTeamRaces,
@@ -110,7 +116,7 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
     // /races/public and getPublicRaceCount stay unchanged (the old-client
     // fallback path). Only add when the base count resolved — otherwise the field
     // is marked unresolved and the client keeps its last known value regardless.
-    if (resolved.publicRaceCount) {
+    if (resolved.publicRaceCount && badgeRead.value == null) {
       const joinableTournaments = [
         ...featuredTournaments,
         ...(Array.isArray(tournamentsResult.value?.tournaments)
@@ -120,6 +126,12 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
       publicRaceCount += joinableTournaments.filter(
         (t) => t && t.joinable === true
       ).length;
+      if (resolved.featuredTournaments &&
+          typeof badgeCache.write === "function") {
+        await badgeCache.write({ userId, supportsTeamRaces, supportsLargeTeamRaces,
+          supportsTournaments, hiddenSeededWindows, count: publicRaceCount,
+          fence: badgeRead.fence });
+      }
     }
 
     return {

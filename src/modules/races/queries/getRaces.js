@@ -18,6 +18,8 @@ const {
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 const { buildViewerDisplayPlacementMap } = require("../services/viewerDisplayPlacements");
 const defaultRaceListCache = require("../services/raceListCache");
+const defaultRaceListViewerCache = require("../services/raceListViewerCache").raceListViewerCache;
+const defaultRaceListPodiumCache = require("../services/raceListPodiumCache").raceListPodiumCache;
 const defaultRaceProgressPageProjection = require("../services/raceProgressPageProjection");
 const {
   serializeTeamPayoutStamp,
@@ -140,6 +142,9 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   const supportsCharacters = clientFeatures?.has("characters") ?? false;
   const supportsRemoteAssets = clientFeatures?.has("remote_assets") ?? false;
   const releaseChannel = options.releaseChannel || "prod";
+  let viewerCacheForWrite = null;
+  let viewerCacheReadForWrite = null;
+  let cachedViewerRowsForRead = null;
   // Lean list fetch (Phase B1): drops participant user/accessory relations the
   // summaries never read. Falls back to findForUser for injected minimal test
   // fakes that only provide the legacy method (capability detection, matching
@@ -170,6 +175,20 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         : Race.findRaceListStableForUser(
             userId, options.extraCompletedRaceIds || []),
     });
+    const viewerCache = options.raceListViewerCache || defaultRaceListViewerCache;
+    const viewerCacheRead = typeof viewerCache.readMany === "function"
+      ? await viewerCache.readMany({
+          userId,
+          raceIds: stable.races.map((race) => race.id),
+          variant: options.raceListVariant || "legacy",
+        })
+      : { values: new Map(), misses: stable.races.map((race) => race.id), fence: null };
+    const viewerRowsCached = viewerCacheRead.misses.length === 0
+      ? viewerCacheRead.values
+      : null;
+    viewerCacheForWrite = viewerCache;
+    viewerCacheReadForWrite = viewerCacheRead;
+    cachedViewerRowsForRead = viewerRowsCached;
     let sqlResult = null;
     const pageProjection = options.raceProgressPageProjection ||
       defaultRaceProgressPageProjection;
@@ -235,10 +254,11 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
               userId,
               options.extraCompletedRaceIds || [],
               {
-                stableRaces: residualRaces,
-                stableSource: stable.source,
-                completedSummaryCache: options.completedRaceSummaryCache,
-              },
+              stableRaces: residualRaces,
+              stableSource: stable.source,
+              completedSummaryCache: options.completedRaceSummaryCache,
+              cachedViewerRowsByRaceId: viewerRowsCached,
+            },
             )
           : { ambiguousFinisherOrder: false, races: [] };
         if (residual.ambiguousFinisherOrder !== true) {
@@ -267,15 +287,32 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
           stableRaces: stable.races,
           stableSource: stable.source,
           completedSummaryCache: options.completedRaceSummaryCache,
+          cachedViewerRowsByRaceId: viewerRowsCached,
         },
       );
     }
     // The legacy comparator has one anomalous duplicate-finisher case that no
     // total SQL order can reproduce. This is the sole deliberate dual-read
     // fallback; SQL errors are allowed to fail the request and never retry.
-    races = sqlResult?.ambiguousFinisherOrder === true
+      races = sqlResult?.ambiguousFinisherOrder === true
       ? await Race.findSummariesForUser(userId, options.extraCompletedRaceIds || [])
-      : sqlResult.races;
+        : sqlResult.races;
+    if (viewerCacheRead.misses.length > 0 && viewerCacheRead.fence &&
+        typeof viewerCache.writeMany === "function") {
+      const toWrite = new Map();
+      for (const race of races) {
+        if (!viewerCacheRead.misses.includes(race.id)) continue;
+        toWrite.set(race.id, race.participants?.find((participant) =>
+          participant.userId === userId) || null);
+      }
+      await viewerCache.writeMany({
+        userId,
+        variant: options.raceListVariant || "legacy",
+        rows: toWrite,
+        fence: viewerCacheRead.fence,
+        generation: viewerCacheRead.generation,
+      });
+    }
   } else if (
     options.sqlSummaryEnabled === true &&
     typeof Race.findSqlSummariesForUser === "function"
@@ -442,6 +479,37 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     }
   }
 
+  // Complete a cold viewer overlay fill after the effect batch is available so
+  // the next tab open can reuse the viewer's active-effect badges as well.
+  if (viewerCacheForWrite && viewerCacheReadForWrite?.misses?.length > 0 &&
+      viewerCacheReadForWrite.fence && typeof viewerCacheForWrite.writeMany === "function") {
+    const toWrite = new Map();
+    for (const race of races || []) {
+      if (!viewerCacheReadForWrite.misses.includes(race.id)) continue;
+      const participant = race.participants?.find((row) => row.userId === userId);
+      if (!participant) {
+        toWrite.set(race.id, null);
+        continue;
+      }
+      const effects = effectsByParticipant.get(participant.id) || [];
+      toWrite.set(race.id, {
+        ...participant,
+        _raceListMyActiveEffects: race.status === "ACTIVE" && race.powerupsEnabled
+          ? serializeMyActiveEffects(effects, features).filter((effect) =>
+              Number.isFinite(new Date(effect.expiresAt).getTime()) &&
+              new Date(effect.expiresAt).getTime() > Date.now())
+          : undefined,
+      });
+    }
+    await viewerCacheForWrite.writeMany({
+      userId,
+      variant: options.raceListVariant || "legacy",
+      rows: toWrite,
+      fence: viewerCacheReadForWrite.fence,
+      generation: viewerCacheReadForWrite.generation,
+    });
+  }
+
   // Batch 2026-08-08 item 4 (podium): the top-3 finishers of each COMPLETED
   // SOLO race, so the results popup can draw a podium without a second
   // round-trip to GET /races/:id.
@@ -459,7 +527,27 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     .filter((race) => race.status === "COMPLETED" && !race.isTeamRace)
     .map((race) => race.id);
   if (podiumRaceIds.length > 0 && typeof RaceParticipant.findPodiumForRaces === "function") {
-    for (const row of await RaceParticipant.findPodiumForRaces(podiumRaceIds)) {
+    const podiumCache = options.raceListPodiumCache || defaultRaceListPodiumCache;
+    const podiumRows = typeof podiumCache.getMany === "function"
+      ? await podiumCache.getMany({
+          races: visible.filter((race) => race.status === "COMPLETED" && !race.isTeamRace),
+          load: (ids) => RaceParticipant.findPodiumForRaces(ids),
+          hydrate: async (rows) => {
+            const userIds = [...new Set(rows.map((row) => row.userId).filter(Boolean))];
+            const presentations = typeof RaceParticipant.findPresentationsByUserIds === "function"
+              ? await RaceParticipant.findPresentationsByUserIds(userIds)
+              : [];
+            const byId = new Map((presentations || []).map((user) => [user.id, user]));
+            return rows.map((row) => ({ ...row, user: byId.get(row.userId) || null }));
+          },
+        })
+      : new Map((await RaceParticipant.findPodiumForRaces(podiumRaceIds)).reduce((map, row) => {
+          const list = map.get(row.raceId) || [];
+          list.push(row);
+          map.set(row.raceId, list);
+          return map;
+        }, new Map()));
+    for (const row of [...podiumRows.values()].flat()) {
       const list = podiumByRace.get(row.raceId) || [];
       list.push({
         userId: row.userId,
@@ -720,10 +808,13 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     // — omitted entirely otherwise, matching slotItems' semantics so snapshot
     // clients never see a shape change on non-powerup rows.
     if (powerupContext) {
-      summary.myActiveEffects = serializeMyActiveEffects(
-        effectsByParticipant.get(myParticipant.id) || [],
-        features
-      );
+      const cachedEffects = cachedViewerRowsForRead?.get(race.id)?.myActiveEffects;
+      summary.myActiveEffects = Array.isArray(cachedEffects)
+        ? cachedEffects.filter((effect) => new Date(effect.expiresAt).getTime() > Date.now())
+        : serializeMyActiveEffects(
+            effectsByParticipant.get(myParticipant.id) || [],
+            features,
+          );
     }
 
     if (supportsRaceLeave || supportsTeamRaces) {

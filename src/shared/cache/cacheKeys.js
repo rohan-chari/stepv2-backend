@@ -52,6 +52,9 @@ const PREFIX = {
   HOME_GIVEAWAY_BANNER: "v1:home:giveaway-banner",
   HOME_ACTIVE_GLOBAL_EVENT: "v1:user",
   RACE_LIST: "v1:user:races",
+  RACE_LIST_VIEWER: "v1:race-list:viewer",
+  RACE_LIST_PODIUM: "v1:race-list:podium",
+  PUBLIC_RACE_COUNT: "v1:public-race-count",
   COMPLETED_RACE_SUMMARY: "v1:race:completed-summary",
   DATABASE_POOL_TELEMETRY: "v1:ops:db-pool",
   STEP_INGESTION_HOUR: "v1:ops:step-ingestion-hour",
@@ -261,6 +264,27 @@ function raceListFragment(kind, userId, generation, variant) {
     throw new TypeError("invalid race list fragment kind");
   }
   return `${PREFIX.RACE_LIST}:${kind}:${userId}:${generation}:${variant}`;
+}
+
+function raceListViewer(userId, raceId, variant = "legacy") {
+  if (!userId || !raceId || typeof variant !== "string") {
+    throw new TypeError("invalid race list viewer key input");
+  }
+  return `${PREFIX.RACE_LIST_VIEWER}:${userId}:${raceId}:${variant}`;
+}
+
+function raceListPodium(raceId, resultVersion) {
+  if (!raceId || typeof resultVersion !== "string" || !resultVersion) {
+    throw new TypeError("invalid race list podium key input");
+  }
+  return `${PREFIX.RACE_LIST_PODIUM}:${raceId}:${encodeURIComponent(resultVersion)}`;
+}
+
+function publicRaceCount(userId, variant, seededVisibility) {
+  if (!userId || typeof variant !== "string" || typeof seededVisibility !== "string") {
+    throw new TypeError("invalid public race count key input");
+  }
+  return `${PREFIX.PUBLIC_RACE_COUNT}:${userId}:${variant}:${seededVisibility}`;
 }
 
 function completedRaceSummary(raceId, resultVersion) {
@@ -535,6 +559,9 @@ module.exports = {
   raceListGeneration,
   raceListMembership,
   raceListFragment,
+  raceListViewer,
+  raceListPodium,
+  publicRaceCount,
   completedRaceSummary,
   raceMessages,
   raceMessagesVersion,

@@ -23,6 +23,7 @@ async function raceChanged(raceId, fields = null) {
   await efficiency.afterCommit([
     ...(displayChanged ? [{ domain: 'race-meta', identity: raceId }] : []),
     ...(listChanged ? [{ domain: 'event', identity: raceId }] : []),
+    ...(listChanged ? [{ domain: 'event', identity: 'public-race-discovery' }] : []),
   ]);
   if (!listChanged) return;
   const { deferUntilAfterCommitBatch } = require("../../../db");
@@ -42,6 +43,9 @@ async function participantDisplayChanged(rows, fields = null) {
     if (row.raceId && (!fields || Object.keys(fields).some(key => summaryFields.has(key)))) entries.push({ domain: 'race-summary', identity: row.raceId });
   }
   await efficiency.afterCommit(entries);
+  if (!fields || Object.keys(fields).some((field) => MEMBERSHIP_FIELDS.has(field))) {
+    await efficiency.afterCommit([{ domain: 'event', identity: 'public-race-discovery' }]);
+  }
 }
 async function membershipChanged(rows, fields = null) {
   await participantDisplayChanged(rows, fields);
