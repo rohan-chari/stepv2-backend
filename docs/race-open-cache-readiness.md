@@ -1,6 +1,6 @@
 # Race opening display cache readiness
 
-Status: implementation and verification complete; ready for production deployment with existing-suite failures and the first-deploy freshness window documented below. Nothing deployed.
+Status: deployed to production on 2026-09-11 UTC. Runtime release `f9456a84b62ab85069513a4d5c11327831cc31e6` includes the exact live hotfix `b7f4e8325225bee2fc31e971e93a91fbb9be3ee1` and reviewed cache changes `92fa8f9`.
 
 ## Scope
 Cache the remaining race detail display fields covered in race-open-cache-requirements.md. HTTP contracts and both mobile platforms remain unchanged. Redis is reconstructible display storage; one narrow SQL gate continues to enforce access, with the original separate compatibility preflight retained for older clients. Mutations and scoring continue to use authoritative data. No migration, dependency, runtime flag, mobile build, or release configuration change is planned.
@@ -60,4 +60,14 @@ Lucky Horseshoe use adds four internal marker SETs and Fanny Pack use six, norma
 4. Verify health and authenticated cold/warm bootstrap, paged progress, legacy detail, powerup mutation refresh, and access denial. Observe SQL/Redis/error metrics with comparable traffic.
 5. Rollback runtime to the recorded previous commit with the same safe wrapper. Old readers ignore the new cache namespace; no data reversal is required. Avoid flushing Redis globally.
 
-Nothing has been deployed, uploaded, or started on staging as part of this task.
+## Production deployment verification — 2026-09-11 UTC
+The user explicitly authorized deployment and preservation of the just-deployed hotfix. Merged the exact hotfix commit without conflicts, fast-forwarded local/origin main, then fast-forwarded production and used the serialized safe reload wrapper. Independent interaction review found no blocker. Combined local integration verification passed **41/41** (35 cache tests plus six hotfix storage tests), log `/tmp/race-open-merged-release-tests.log`.
+
+No dependency, schema, generated-client, copy/catalog, or ecosystem changes were present relative to the live hotfix. All259 migration names have successful applications; two old rolled-back attempts each have a later successful record. No migration, seed, maintenance apply, or package install was needed. The server's pre-existing package-lock modification retained the same SHA256 before and after deploy.
+
+At03:32:14 UTC, both HTTP workers, resolution and cron were online; all four old PIDs were gone. The wrapper passed topology and final32-connection budget guards and saved PM2. Staging stayed stopped. Each production identity had a fresh pool heartbeat, and the bounded post-start log scan found no matched Prisma/unhandled/error-level errors. This is an initial deployment check, not a peak-load observation.
+
+Public health returned HTTP200 with API/Redis OK. Authenticated existing-owner checks at03:31:53 UTC returned200 for compact bootstrap (252ms), repeated bootstrap (76ms), paged progress (89ms), and legacy details (51ms). These are individual smoke timings, not a performance benchmark. No powerup or race mutation was manufactured in production; those paths were verified in local integration tests. Referral ledger dry-run reported zero missing raceActivities and zero reviewOwnership rows; no apply was needed.
+
+The first-deploy freshness window above still applies: allow approximately ten minutes after old writers exit (around03:41:15 UTC) before judging all display freshness. No cache flush was performed. No mobile upload or staging startup occurred. Deployment log: `/tmp/race-open-production-deploy.log`.
+
