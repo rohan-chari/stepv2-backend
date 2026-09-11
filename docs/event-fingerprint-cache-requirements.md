@@ -1,5 +1,10 @@
 # Event fingerprint cache requirements
 
+Production integration note: runtime `393edb4` uses deployed recap baseline
+`ee86200`. Preserve that baseline's event vector, which omits retired impact
+status and summary-attribution fields. The earlier implementation baseline
+below is historical; see `event-fingerprint-cache-production-release.md`.
+
 Implementation authorized September 11, 2026; baseline 136e682 includes receipt
 recovery. This refinement supersedes the timestamp completion-marker proposal.
 

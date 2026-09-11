@@ -1,5 +1,22 @@
 # Event fingerprint cache validation
 
+## Production-baseline integration supersedes the original test baseline
+
+Runtime commit `393edb4` integrates this cache onto deployed `ee86200`.
+The canonical SQL is its unchanged 2,993-character recap-era query, without
+retired attribution fields. Revision triggers no longer depend on retired
+impact status. The existing recap-aware integration runner is preserved.
+Prepared entitlement materialization projects its exact SQL input fields so
+database-only BigInt revisions cannot leak into JSON serialization.
+
+On this integrated release: **107/107 integration tests**, **49/49 retained
+schema/receipt tests**, and **3383/3383 unit tests** passed. Initial recap and
+BigInt regressions were reproduced before fixes. Local databases covered both
+the current retained schema and the future final-drop schema. No production
+cutover/final-drop script is part of this release. See
+[production release record](event-fingerprint-cache-production-release.md)
+for deployment status. The remainder records the earlier implementation tests.
+
 Status: implementation committed as `2e707a5`; not deployed. Baseline test
 failures remain documented below; this is not an all-green full-suite claim.
 
