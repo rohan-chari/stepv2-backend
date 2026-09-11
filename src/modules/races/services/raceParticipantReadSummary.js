@@ -3,7 +3,7 @@ const { prisma } = require("../../../db");
 // Exact scalar/array inputs for existing serializers. This is one database
 // aggregate, not a transferred participant roster. The all-member ID array is
 // deliberately retained for frozen invitation clients, including declined rows.
-async function loadRaceParticipantReadSummary(raceId) {
+async function loadSource(raceId) {
   const fragments = require("./raceDisplayFragments");
   const fence = await fragments.captureCounts(raceId);
   const [summary] = await prisma.$queryRawUnsafe(`
@@ -29,4 +29,12 @@ async function loadRaceParticipantReadSummary(raceId) {
   return summary;
 }
 
+const COUNT_FIELDS = ['totalCount','acceptedCount','teamACount','teamBCount','teamARecipients','teamBRecipients','heldPotCoins','activeFundedPlayerCount','activeExitRecipientCount','settlementPlayerCount','teamSettlementPlayerCount','quickQualifierCount','completedExitRecipientCount','completedQuickExitRecipientCount'];
+async function loadRaceParticipantReadSummary(raceId) {
+  const { fragment, marker } = require('./raceOpenDisplayCache');
+  return fragment('summary', raceId, [marker('race-summary', raceId), marker('race-members', raceId)], () => loadSource(raceId),
+    value => value && Object.keys(value).length === 17 && COUNT_FIELDS.every(key => Number.isSafeInteger(value[key]) && value[key] >= 0) &&
+      ['completedTeamPayouts','completedV1Payouts'].every(key => Array.isArray(value[key]) && value[key].every(n => Number.isSafeInteger(n) && n > 0)) &&
+      Array.isArray(value.participantUserIds) && value.participantUserIds.length <= 10000 && value.participantUserIds.every(id => typeof id === 'string'), 300000);
+}
 module.exports = { loadRaceParticipantReadSummary };

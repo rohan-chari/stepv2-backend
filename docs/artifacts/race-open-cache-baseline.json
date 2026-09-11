@@ -1,0 +1,458 @@
+{
+  "backendBaseline": "2a748a47ba76f4661baa4835ae53a573ccf75fc5",
+  "integration": {
+    "tests": 3363,
+    "passed": 3256,
+    "failed": 106,
+    "skipped": 1,
+    "cancelled": 0
+  },
+  "failures": [
+    {
+      "location": "test/integration/batch-0808-admin-version-stats.test.js:564:3",
+      "title": "counts private vs public races, total and active"
+    },
+    {
+      "location": "test/integration/batch-0808-admin-version-stats.test.js:594:3",
+      "title": "returns zeroed sections rather than omitting them when there is no data"
+    },
+    {
+      "location": "test/integration/batch-0808-completed-participants.test.js:238:3",
+      "title": "a completed TEAM race carries no participants array (team board, not podium)"
+    },
+    {
+      "location": "test/integration/billing/realm.test.js:91:1",
+      "title": "seeds a fresh reviewer and supporting cast in the same sandbox realm"
+    },
+    {
+      "location": "test/integration/box-raw-steps-position.test.js:301:3",
+      "title": "2. the quoted dropOdds.position equals the position the roll actually used, while the leaderboard still shows the boosted rank"
+    },
+    {
+      "location": "test/integration/box-raw-steps-worker-redis.test.js:305:3",
+      "title": "the persisted-columns fallback (Redis bypassed) quotes the same raw position"
+    },
+    {
+      "location": "test/integration/cache-efficiency-burst.test.js:1:1",
+      "title": "test/integration/cache-efficiency-burst.test.js"
+    },
+    {
+      "location": "test/integration/character-wardrobe-cache.test.js:14:3",
+      "title": "new wardrobe routes preserve warm public appearance and invalidate/bypass Redis (failed=true)"
+    },
+    {
+      "location": "test/integration/completed-race-summary-cache.test.js:465:3",
+      "title": "returns the same HTTP result when Redis throws"
+    },
+    {
+      "location": "test/integration/db-cpu-operational-counters.test.js:37:1",
+      "title": "HTTP late enrollment atomically persists multiple counters with one SQL write"
+    },
+    {
+      "location": "test/integration/db-cpu-operational-counters.test.js:57:1",
+      "title": "concurrent HTTP enrollments preserve every durable counter increment"
+    },
+    {
+      "location": "test/integration/db-cpu-work-accounting.test.js:78:1",
+      "title": "two HTTP workers accept a synchronized cohort and the real resolution worker commits exact totals"
+    },
+    {
+      "location": "test/integration/decoy-redirection-concurrency.test.js:325:3",
+      "title": "uses existing team eligibility, supports duplicate destinations, and does not chain Decoys"
+    },
+    {
+      "location": "test/integration/display-refresh-reproduction.test.js:92:28",
+      "title": "10 participants: compare fresh and >15s-old reads with unchanged source steps"
+    },
+    {
+      "location": "test/integration/display-refresh-reproduction.test.js:92:28",
+      "title": "100 participants: compare fresh and >15s-old reads with unchanged source steps"
+    },
+    {
+      "location": "test/integration/display-refresh-reproduction.test.js:113:1",
+      "title": "snapshot priority lane finishes an empty HTTP-generated task without a delivery pass"
+    },
+    {
+      "location": "test/integration/durable-global-event-capture.test.js:461:3",
+      "title": "runs bounded fact collection through the worker and can reconstruct a later capture"
+    },
+    {
+      "location": "test/integration/feature-batch-2026-07-24-discovery.test.js:78:3",
+      "title": "counts a featured race + bracket the viewer is NOT in, and excludes them once enrolled; /races/public unchanged"
+    },
+    {
+      "location": "test/integration/feature-batch-2026-07-26.test.js:355:5",
+      "title": "GET /races exposes teams.asOf for a team race"
+    },
+    {
+      "location": "test/integration/feature-batch-2026-07-26.test.js:372:5",
+      "title": "the home ACTIVE_RACES state emits isTeamRace + teams"
+    },
+    {
+      "location": "test/integration/feature-batch-2026-08-28b.test.js:165:3",
+      "title": "keeps conflicting favorite writes and cached viewer variants isolated with Redis fail-open"
+    },
+    {
+      "location": "test/integration/fixed-team-payout-redis.test.js:67:3",
+      "title": "preserves V1 stamps and amounts on a real DB15 hit and with Redis unset"
+    },
+    {
+      "location": "test/integration/funded-exposure-admission.test.js:199:3",
+      "title": "rejects funded race creation at the permanent five-membership ceiling"
+    },
+    {
+      "location": "test/integration/funded-exposure-admission.test.js:330:5",
+      "title": "does not restore funded exposure enforcement when the legacy control is false"
+    },
+    {
+      "location": "test/integration/funded-exposure-admission.test.js:330:5",
+      "title": "does not restore funded exposure enforcement when the legacy control is spoofed"
+    },
+    {
+      "location": "test/integration/funded-exposure-admission.test.js:340:3",
+      "title": "serializes concurrent boundary creates with the per-user guard"
+    },
+    {
+      "location": "test/integration/funded-exposure-admission.test.js:1172:3",
+      "title": "serializes mixed-null healing against a funded release"
+    },
+    {
+      "location": "test/integration/funded-exposure-admission.test.js:1337:3",
+      "title": "releases an ordinary race membership slot on leave"
+    },
+    {
+      "location": "test/integration/global-event-end-burst.test.js:77:30",
+      "title": "end cohort 10: bounded queue writes preserve HTTP totals and durable summaries"
+    },
+    {
+      "location": "test/integration/global-event-end-burst.test.js:77:30",
+      "title": "end cohort 40: bounded queue writes preserve HTTP totals and durable summaries"
+    },
+    {
+      "location": "test/integration/global-event-end-burst.test.js:112:1",
+      "title": "concurrent end schedulers and a fresh HTTP sync retain every participant and latest steps"
+    },
+    {
+      "location": "test/integration/global-event-end-burst.test.js:254:1",
+      "title": "in-challenge HTTP samples retain 2x scoring through end batching and summary capture"
+    },
+    {
+      "location": "test/integration/global-event-end-burst.test.js:284:1",
+      "title": "bounded concurrent end drains and timezone travel retain late-upload historical 2x for frozen and current clients"
+    },
+    {
+      "location": "test/integration/global-event-enrollment-query.test.js:1:1",
+      "title": "test/integration/global-event-enrollment-query.test.js"
+    },
+    {
+      "location": "test/integration/global-event-summary-expiry-v2.test.js:1123:3",
+      "title": "captures cross-user Leech/Hitchhike inputs and attributes the whole-race counterfactual"
+    },
+    {
+      "location": "test/integration/local-global-step-event-entitlements.test.js:1306:1",
+      "title": "HTTP step-sync dependency closure fails closed while that participant's local event is active"
+    },
+    {
+      "location": "test/integration/local-global-step-event-entitlements.test.js:1434:1",
+      "title": "enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary"
+    },
+    {
+      "location": "test/integration/local-global-step-event-entitlements.test.js:1504:1",
+      "title": "HTTP display artifact cannot cross a participant's local entitlement end fingerprint"
+    },
+    {
+      "location": "test/integration/notification-domain-isolation.test.js:711:3",
+      "title": "projects the real placement job's ending, team, slacker, and placement producers"
+    },
+    {
+      "location": "test/integration/notification-domain-isolation.test.js:1003:3",
+      "title": "projects eligible and deleted-recipient outcomes from the real daily-mover job"
+    },
+    {
+      "location": "test/integration/onboarding-revamp.test.js:171:3",
+      "title": "4. signup with zero seeded races does not crash and warns AUTO_ENROLL_EMPTY"
+    },
+    {
+      "location": "test/integration/onboarding-revamp.test.js:199:3",
+      "title": "5. signup enrolls in the most recent ACTIVE seeded race even when every seeded race is full"
+    },
+    {
+      "location": "test/integration/onboarding-revamp.test.js:224:3",
+      "title": "6. signup with a PENDING-only seeded race enrolls but grants no welcome boxes"
+    },
+    {
+      "location": "test/integration/onboarding-revamp.test.js:249:3",
+      "title": "7. starter reward is claimable when the only ACTIVE seeded race is not DAILY_10K"
+    },
+    {
+      "location": "test/integration/postgresql-coordinated-optimization-public-pipeline.test.js:60:3",
+      "title": "drives resolution, placement, post-task, event, schedule, Inbox, summary, expiry, and idempotent replay"
+    },
+    {
+      "location": "test/integration/powerups5-wave.test.js:632:5",
+      "title": "penalizes the target at expiry when the goal is missed"
+    },
+    {
+      "location": "test/integration/query-efficiency-enrollment.test.js:14:1",
+      "title": "real cron enrollment pages unique users in PostgreSQL"
+    },
+    {
+      "location": "test/integration/query-efficiency-scoring-lock.test.js:44:1",
+      "title": "public intake locks existing scoring state without an extra physical UPDATE"
+    },
+    {
+      "location": "test/integration/race-bootstrap-persisted-standings.test.js:61:3",
+      "title": "keeps exact finish/placement/steps/join/user ordering and global ranks across pages"
+    },
+    {
+      "location": "test/integration/race-bootstrap-persisted-standings.test.js:175:39",
+      "title": "uses a bounded indexed first page for 50 accepted participants"
+    },
+    {
+      "location": "test/integration/race-bootstrap-persisted-standings.test.js:175:39",
+      "title": "uses a bounded indexed first page for 500 accepted participants"
+    },
+    {
+      "location": "test/integration/race-bootstrap-persisted-standings.test.js:175:39",
+      "title": "uses a bounded indexed first page for 5000 accepted participants"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-cache.test.js:152:5",
+      "title": "COMPLETED snapshot failures stop repairing instead of creating an endless refresh loop"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-cache.test.js:152:5",
+      "title": "CANCELLED snapshot failures stop repairing instead of creating an endless refresh loop"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-cache.test.js:185:3",
+      "title": "pending historical snapshot failures drain once and HTTP start still publishes an active snapshot"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-cache.test.js:271:3",
+      "title": "a delayed older full snapshot cannot overwrite a newer generation in real Redis"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-cache.test.js:363:5",
+      "title": "COMPRESSION_SOCKS expires through scheduler and real worker with exact sample scoring"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-load.test.js:173:3",
+      "title": "coalesces 48 effects across 12 races while 2000 idle races stay untouched"
+    },
+    {
+      "location": "test/integration/race-effect-expiry-load.test.js:249:3",
+      "title": "one hundred simultaneous effects in a large race share one durable boundary job"
+    },
+    {
+      "location": "test/integration/race-leave-capability.test.js:189:3",
+      "title": "keeps pre-migration-stamped team leave and legacy forfeit controls visible to team clients"
+    },
+    {
+      "location": "test/integration/race-powerup-placement-performance.test.js:140:3",
+      "title": "preserves fresh-open/replay JSON while normal open repairs drift and oldest queued inventory"
+    },
+    {
+      "location": "test/integration/race-preview-before-join.test.js:701:3",
+      "title": "REDIS_URL unset (the persist:true branch)"
+    },
+    {
+      "location": "test/integration/race-preview-before-join.test.js:705:3",
+      "title": "test Redis db15 + redisStandingsEnabled (the rebuild-lock branch)"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:500:3",
+      "title": "records the identical actor-target participant set at selection and at the fenced recheck"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:916:3",
+      "title": "(ii) a non-closure crosser escalates to FULL with the mine still ACTIVE and zero partial writes"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:1022:3",
+      "title": "(iii) an in+out crosser pair escalates and the FULL rerun picks the lower-total victim"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:1101:3",
+      "title": "an effect created between the graph read and the fence rejects the closure and commits full state"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:1134:3",
+      "title": "an effect on a non-closure participant that becomes due between plan selection and the fence rejects the closure, and its stepsAtExpiry is still stamped"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:1232:3",
+      "title": "losing the lease mid-closure writes nothing"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-parity.test.js:1325:3",
+      "title": "a closure commit reaches onCommitted with the FULL roster"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-scaling.test.js:460:3",
+      "title": "keeps the 477-player production maximum below 15s transaction and 30s p99 attempt"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-scaling.test.js:611:3",
+      "title": "graph reads stay a bounded constant and writes stay O(C) as the field grows 35x"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-shadow.test.js:335:3",
+      "title": "flag off: a STEP_SYNC job logs every shadow field null and never enters the planner"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-shadow.test.js:351:3",
+      "title": "a stale flag cannot resurrect shadow planning for an unrelated SELF effect"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-shadow.test.js:376:3",
+      "title": "stale flag values leave persisted rows identical across an identical fixture"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-shadow.test.js:425:3",
+      "title": "a stale flag cannot shadow-plan a race-wide effect"
+    },
+    {
+      "location": "test/integration/race-queue-v2-closure-shadow.test.js:462:3",
+      "title": "a stale flag never invokes an injected shadow planner"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:266:3",
+      "title": "real watchdog exit rolls back, restarts, reclaims, and emails exactly once"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:779:3",
+      "title": "uses resolution-first locks when G+1 score commit overlaps G placement persistence"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:854:3",
+      "title": "public mutation durably reserves an exact nudge intent before queued handoff"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:1030:3",
+      "title": "public sync creates and inline-claims one durable snapshot task when the post runner is unhealthy"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:1188:3",
+      "title": "two users in the same two races sync concurrently: one job row per race, totals match a serial control, zero deadlocks over 50 iterations"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:1616:3",
+      "title": "a public step mutation before the STEP_SYNC fence falls back to FULL in the same run"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:1708:3",
+      "title": "settles source-input work without a retry loop for ended, cancelled, forfeited, and expired targets"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:1773:3",
+      "title": "N rapid syncs coalesce to <= 2 worker runs with correct totals, and EVERY triggering user's box state is processed"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:2181:3",
+      "title": "continuous generation bumps resolve at most once per RACE_RESOLVE_DEBOUNCE_MS"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:2215:3",
+      "title": "users who enqueue DURING a run are processed by the follow-up run"
+    },
+    {
+      "location": "test/integration/race-queue-v2-single-writer.test.js:2367:3",
+      "title": "a crashed run's triggering users are UNIONed back in on re-claim, never dropped"
+    },
+    {
+      "location": "test/integration/race-resolution-pending-scope.test.js:104:3",
+      "title": "publication preserves its failed attempt when HTTP advances generation before publication"
+    },
+    {
+      "location": "test/integration/race-resolution-pending-scope.test.js:104:3",
+      "title": "publication preserves its failed attempt when HTTP advances generation during Redis writes"
+    },
+    {
+      "location": "test/integration/race-resolution-pending-scope.test.js:159:1",
+      "title": "a Redis write failure without newer input retains the generic publication error"
+    },
+    {
+      "location": "test/integration/read-only-race-progress.test.js:98:1",
+      "title": "fresh, expired, and Redis-off progress/bootstrap reads never score or enqueue"
+    },
+    {
+      "location": "test/integration/redis-cache-c3-standings.test.js:450:3",
+      "title": "reuses the canonical pre-mine display while committing captured mine effects and feed"
+    },
+    {
+      "location": "test/integration/redis-cache-c3-standings.test.js:655:3",
+      "title": "matches for the requester AND for another viewer, with effects, teams, a finisher and a forfeiter"
+    },
+    {
+      "location": "test/integration/redis-cache-c3-standings.test.js:864:3",
+      "title": "20 concurrent cold requests produce exactly ONE replay and 20 valid responses"
+    },
+    {
+      "location": "test/integration/redis-cache-c3-standings.test.js:913:3",
+      "title": "serves a stale snapshot immediately while one background refresh runs"
+    },
+    {
+      "location": "test/integration/redis-cache-c3-standings.test.js:1015:3",
+      "title": "B's myPlacement/box/dropOdds are B's, never A's, off one warm snapshot"
+    },
+    {
+      "location": "test/integration/redis-cache-c3-standings.test.js:1115:3",
+      "title": "every request serves the cheap persisted read and the replay never runs"
+    },
+    {
+      "location": "test/integration/redis-social-http-fallbacks.test.js:150:3",
+      "title": "failed presentation invalidation bypasses a stale identity until retry succeeds"
+    },
+    {
+      "location": "test/integration/referral-contest-joined-dashboard.test.js:219:3",
+      "title": "records exact event-time activity for create, direct join, and invite acceptance"
+    },
+    {
+      "location": "test/integration/resolved-impact-events-v2.test.js:2486:3",
+      "title": "rolls back Drill Sergeant judgement with its v2 event, then retries once"
+    },
+    {
+      "location": "test/integration/team-race-read-performance.test.js:142:5",
+      "title": "serves a cold paged team bootstrap without polling for worker output"
+    },
+    {
+      "location": "test/integration/team-race-read-performance.test.js:142:5",
+      "title": "serves a cold frozen unpaged team bootstrap without polling for worker output"
+    },
+    {
+      "location": "test/integration/team-race-read-performance.test.js:169:5",
+      "title": "uses the worker's fresh lean team snapshot and hydrates names after masking"
+    },
+    {
+      "location": "test/integration/team-race-read-performance.test.js:169:5",
+      "title": "uses the worker's stale lean team snapshot and hydrates names after masking"
+    },
+    {
+      "location": "test/integration/tournaments.test.js:779:3",
+      "title": "inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward"
+    }
+  ],
+  "additionalEnvironmentReproductions": [
+    {
+      "file": "test/integration/admin-system-health.test.js",
+      "title": "returns the full ordered available envelope from real Redis and isolates one malformed process",
+      "cause": "REDIS_TEST_URL without /15 violates fixture db15 guard. Same failure on baseline; candidate passes with /15."
+    },
+    {
+      "file": "test/integration/api-contract-query-plans.test.js",
+      "title": "friend, compact profile, stats, race and 16-player tournament projections use indexed sets",
+      "cause": "Planner chooses race_participants_profile_stats_idx, while existing assertion enumerates other indexes. Same index and assertion failure reproduced on unchanged baseline."
+    },
+    {
+      "file": "test/integration/duplicate-leech-repair.test.js",
+      "title": "All seven duplicate live Leech repair CLI cases",
+      "cause": "Existing suite guard requires exact database name steps-tracker-integration_test. Baseline and candidate both fail before test behavior on differently named local test DB. Candidate passes all seven unchanged cases on the required dedicated local DB with isolated Redis."
+    },
+    {
+      "file": "test/integration/powerup-character-batch-2026-07-25.test.js",
+      "title": "stamps the new 1h base window for ladder + fixed-window powerups",
+      "cause": "Unchanged baseline focused test fails then passes: uploaded samples leave resolution queued and both participant totals zero with identical joinedAt. UPRISING eligibility sees tied persisted ranks; arbitrary ordering makes the assumed leader nondeterministic. Candidate fails at the same UPRISING 400 assertion (line 284); mutation/scoring reads are unchanged."
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 const { coordinatedOptimizationMetrics: metrics } = require("./coordinatedOptimizationMetrics");
 const SURFACES = new Set(["list", "equipment", "friends", "summary", "invites", "milestones", "race-meta", "race-members", "slots", "event", "standings", "writer"]);
+SURFACES.add('race-viewer-links');
+SURFACES.add('race-viewer-state');
+for (const surface of ['core','participant','summary','effects','preview','used-types','roster']) SURFACES.add(`race-open-${surface}`);
 const OUTCOMES = new Set(["hit", "missing", "generation", "timezone", "boundary", "expired", "malformed", "error", "bypass", "installed", "lost-fill", "fallback"]);
 function read(kind, outcome) {
   if (!SURFACES.has(kind) || !OUTCOMES.has(outcome)) throw new TypeError("Unbounded cache efficiency metric label");

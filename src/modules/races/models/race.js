@@ -334,28 +334,7 @@ const Race = {
   },
 
   async findBootstrapAccessContext(id, userId) {
-    const race = await require("../services/raceDisplayFragments").loadCore(id, {
-      where: { id },
-      include: {
-        ...detailsRelationInclude,
-        participants: {
-          where: { userId },
-          take: 1,
-        },
-        tournament: {
-          select: {
-            id: true, name: true, bracketSize: true,
-            participants: {
-              where: { userId, status: "ACCEPTED" },
-              select: { userId: true },
-              take: 1,
-            },
-          },
-        },
-      },
-    });
-    if (race) Object.defineProperty(race, "_bootstrapReadViewer", { value: userId });
-    return race;
+    return require('../services/raceOpenDisplayCache').accessContext(id, userId);
   },
 
   async findMessageAccessContext(id, userId) {
@@ -451,16 +430,7 @@ const Race = {
   // hydrates the race-wide participant relation: the request path only needs
   // race metadata and the authenticated viewer's membership row.
   async findProgressPageContext(id, userId) {
-    return prisma.race.findUnique({
-      where: { id },
-      include: {
-        participants: {
-          where: { userId },
-          take: 1,
-        },
-        tournament: { select: { id: true, name: true, bracketSize: true } },
-      },
-    });
+    return require('../services/raceOpenDisplayCache').accessContext(id, userId);
   },
 
   async findProgressStatus(id) {
@@ -752,6 +722,7 @@ const Race = {
       },
     });
     await raceChanged(result.id);
+    await require('../services/raceViewerStateInvalidation').raceLinksChanged([result]);
     return result;
   },
 
@@ -766,6 +737,7 @@ const Race = {
       },
     });
     await raceChanged(id, fields);
+    if (['status','rematchRootRaceId','rematchSourceRaceId','seriesId','seriesPredecessorRaceId'].some(key => Object.hasOwn(fields, key))) await require('../services/raceViewerStateInvalidation').raceLinksChanged([result]);
     return result;
   },
 
@@ -788,7 +760,13 @@ const Race = {
       where: { id, status: "ACTIVE" },
       data: fields,
     });
-    if (result.count > 0) await raceChanged(id, fields);
+    if (result.count > 0) {
+      await raceChanged(id, fields);
+      if (['status','rematchRootRaceId','rematchSourceRaceId','seriesId','seriesPredecessorRaceId'].some(key => Object.hasOwn(fields, key))) {
+        const links = await prisma.race.findUnique({ where: { id }, select: { id: true, rematchRootRaceId: true, seriesId: true } });
+        await require('../services/raceViewerStateInvalidation').raceLinksChanged([links]);
+      }
+    }
     return result;
   },
 
@@ -802,7 +780,13 @@ const Race = {
       where: { id, status: "PENDING" },
       data: fields,
     });
-    if (result.count > 0) await raceChanged(id, fields);
+    if (result.count > 0) {
+      await raceChanged(id, fields);
+      if (['status','rematchRootRaceId','rematchSourceRaceId','seriesId','seriesPredecessorRaceId'].some(key => Object.hasOwn(fields, key))) {
+        const links = await prisma.race.findUnique({ where: { id }, select: { id: true, rematchRootRaceId: true, seriesId: true } });
+        await require('../services/raceViewerStateInvalidation').raceLinksChanged([links]);
+      }
+    }
     return result;
   },
 

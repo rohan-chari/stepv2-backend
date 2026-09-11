@@ -167,7 +167,13 @@ describe('backend catalog authority — real HTTP, Postgres and Redis', () => {
           assert.deepEqual(paged.powerupData.dropOdds, full);
         }
       }
-      await lucky(f, f.alice);
+      // After warming Redis, activate through the application writer so this
+      // checks the real invalidation contract, not out-of-band fixture SQL.
+      const heldLucky = await item(f, f.alice, 'LUCKY_HORSESHOE');
+      const activated = await request(server.baseUrl, 'POST', `/races/${f.race.id}/powerups/${heldLucky.id}/use`, {
+        token: f.alice.token, headers: CURRENT, body: {},
+      });
+      assert.equal(activated.status, 200, JSON.stringify(await activated.json()));
       assert.equal((await get(f.alice, path)).progress.powerupData.dropOdds.reelPreviewAvailable, false);
       assert.equal((await get(f.bob, path)).progress.powerupData.dropOdds.reelPreviewAvailable, true);
     });

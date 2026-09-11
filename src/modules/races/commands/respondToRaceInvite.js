@@ -391,6 +391,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
                   },
                 });
               }
+              await require('../services/raceViewerStateInvalidation').seriesChanged(race.seriesId, userId);
               await deferUntilAfterCommit(async () => {
                 await Promise.allSettled([
                   invalidateRaceListUser(userId),

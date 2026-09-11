@@ -506,6 +506,7 @@ function buildRenewSeededRaces(dependencies = {}) {
           })
         : { count: 1, ...(await tx.race.update({ where: { id: race.id }, data })) };
       if (transition.count !== 1) return null;
+      await require('../services/raceCacheInvalidation').raceChanged(race.id, data);
       if (race.seededBucketId && tx.seededRaceBucket) {
         await tx.seededRaceBucket.updateMany({
           where: { id: race.seededBucketId, status: "PENDING" },
@@ -523,6 +524,8 @@ function buildRenewSeededRaces(dependencies = {}) {
             where: { id: { in: missingThresholdIds }, raceId: race.id, status: "ACCEPTED", nextBoxAtSteps: 0 },
             data: { nextBoxAtSteps: race.powerupStepInterval },
           });
+          await require('../services/raceCacheInvalidation').participantDisplayChanged(
+            rows.filter(row => !row.nextBoxAtSteps).map(row => ({ ...row, raceId: race.id })), { nextBoxAtSteps: true });
         }
       }
       if (rows.length) {

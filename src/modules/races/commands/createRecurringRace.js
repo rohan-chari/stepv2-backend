@@ -186,6 +186,9 @@ function buildCreateRecurringRace(dependencies = {}) {
         await tx.raceSeriesSubscription.create({
           data: { seriesId: series.id, userId, active: true },
         });
+        await require('../services/raceViewerStateInvalidation').raceLinksChanged([
+          { id: current.id, seriesId: series.id },
+        ]);
         const canonical = {
           race: { ...race, seriesId: series.id, seriesGeneration: 0 },
           series: {

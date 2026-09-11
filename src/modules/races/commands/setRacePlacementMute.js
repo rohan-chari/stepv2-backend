@@ -19,10 +19,12 @@ async function setRacePlacementMute({ userId, raceId, muted }) {
   if (!participant || (await prisma.race.findUnique({ where: { id: raceId }, select: { seededBucketId: true } }))?.seededBucketId && participant.status !== "ACCEPTED") {
     throw new SetRacePlacementMuteError("Not a participant in this race", 403);
   }
-  return prisma.raceParticipant.update({
+  const result = await prisma.raceParticipant.update({
     where: { id: participant.id },
     data: { placementAlertsMuted: !!muted },
   });
+  await require('../services/raceCacheInvalidation').participantDisplayChanged([result], { placementAlertsMuted: true });
+  return result;
 }
 
 module.exports = { setRacePlacementMute, SetRacePlacementMuteError };

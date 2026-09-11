@@ -1,4 +1,4 @@
-const { membershipChanged } = require("../services/raceCacheInvalidation");
+const { membershipChanged, participantDisplayChanged } = require("../services/raceCacheInvalidation");
 const { prisma } = require("../../../db");
 const {
   raceParticipantPresentationRead,
@@ -391,7 +391,7 @@ const RaceParticipant = {
   // — a downward re-sync of step_samples must never move a player's odds
   // position backwards.
   async updateStepTotals(id, { totalSteps, rawSteps } = {}) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       // Item 16 (2026-07-26): stamp WHEN the persisted total was written, in the
       // same UPDATE (no extra round-trip), so GET /races can serve `teams.asOf`
@@ -404,6 +404,8 @@ const RaceParticipant = {
           : {}),
       },
     });
+    await participantDisplayChanged([result], { totalSteps: true, rawSteps: true });
+    return result;
   },
 
   // Uploader-only generation fence. The version-row lock, current-generation
@@ -467,6 +469,7 @@ const RaceParticipant = {
           participant.raw_steps AS "rawSteps",
           participant.totals_updated_at AS "totalsUpdatedAt"
       `;
+      if (rows[0]) await participantDisplayChanged([{ id, raceId, userId }], { totalSteps: true, rawSteps: true });
       return rows[0]
         ? { status: "COMMITTED", participant: rows[0] }
         : { status: "NOT_ELIGIBLE" };
@@ -489,7 +492,7 @@ const RaceParticipant = {
       0,
       Math.round(Number(finishTotalSteps) || 0),
     );
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: {
         finishedAt,
@@ -498,17 +501,21 @@ const RaceParticipant = {
         status: "ACCEPTED",
       },
     });
+    await participantDisplayChanged([result], { finishedAt: true, totalSteps: true });
+    return result;
   },
 
   async setPlacement(id, placement) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: { placement },
     });
+    await participantDisplayChanged([result], { placement: true });
+    return result;
   },
 
   async addBonusSteps(id, amount) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       // Keep the cheap persisted display total aligned with the participant's
       // bonus delta immediately. The worker still recomputes the authoritative
@@ -518,6 +525,8 @@ const RaceParticipant = {
         totalSteps: { increment: amount },
       },
     });
+    await participantDisplayChanged([result], { bonusSteps: true, totalSteps: true });
+    return result;
   },
 
   // The sole immediate negative-bonus write seam. The one SQL statement both
@@ -555,6 +564,8 @@ const RaceParticipant = {
         participant.id,
         participant.total_steps AS "totalSteps",
         participant.bonus_steps AS "bonusSteps",
+        participant.race_id AS "raceId",
+        participant.user_id AS "userId",
         penalty.actual_penalty AS "actualPenalty"
     `;
     const updated = rows[0];
@@ -563,6 +574,7 @@ const RaceParticipant = {
       error.code = "P2025";
       throw error;
     }
+    await participantDisplayChanged([updated], { totalSteps: true, bonusSteps: true });
     return updated;
   },
 
@@ -571,24 +583,30 @@ const RaceParticipant = {
   },
 
   async updatePowerupSlots(id, powerupSlots) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: { powerupSlots },
     });
+    await participantDisplayChanged([result], { powerupSlots: true });
+    return result;
   },
 
   async updateNextBoxAtSteps(id, nextBoxAtSteps) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: { nextBoxAtSteps },
     });
+    await participantDisplayChanged([result], { nextBoxAtSteps: true });
+    return result;
   },
 
   async updateMaxBonusSteps(id, maxBonusSteps) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: { maxBonusSteps },
     });
+    await participantDisplayChanged([result], { maxBonusSteps: true });
+    return result;
   },
 
   async delete(id) {
@@ -598,10 +616,12 @@ const RaceParticipant = {
   },
 
   async incrementPayoutCoins(id, amount) {
-    return prisma.raceParticipant.update({
+    const result = await prisma.raceParticipant.update({
       where: { id },
       data: { payoutCoins: { increment: amount } },
     });
+    await participantDisplayChanged([result], { payoutCoins: true });
+    return result;
   },
 };
 

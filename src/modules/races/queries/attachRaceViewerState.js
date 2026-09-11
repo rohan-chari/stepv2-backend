@@ -16,7 +16,7 @@ function buildAttachRaceViewerState(dependencies = {}) {
     // One bounded viewer-overlay read for the whole response. Correlated EXISTS
     // checks avoid hydrating participant/scoring rosters and keep shared cache
     // fragments viewer-neutral.
-    const cores = await prisma.$queryRawUnsafe(`/* steps:prepared-read:v1 */
+    const loadRows = async (raceIds) => prisma.$queryRawUnsafe(`/* steps:prepared-read:v1 */
       SELECT r.id,
              r.creator_id AS "creatorId",
              r.seed_id AS "seedId",
@@ -61,7 +61,10 @@ function buildAttachRaceViewerState(dependencies = {}) {
         FROM races r
         LEFT JOIN race_series rs ON rs.id = r.series_id
        WHERE r.id = ANY($2::text[])
-    `, userId, ids);
+    `, userId, raceIds);
+    const cores = dependencies.prisma
+      ? await loadRows(ids)
+      : await require('../services/raceViewerStateCache').readMany({ ids, userId, loadRows });
     const coreById = new Map(cores.map((row) => [row.id, row]));
     for (const output of rows) {
       const core = coreById.get(output.id);

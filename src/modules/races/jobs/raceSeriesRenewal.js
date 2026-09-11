@@ -52,6 +52,7 @@ function buildRaceSeriesRenewalJob(dependencies = {}) {
       where: { seriesId: series.id, active: true },
       data: { active: false, unsubscribedAt: endedAt },
     });
+    await require('../services/raceViewerStateInvalidation').seriesChanged(series.id);
     await deferUntilAfterCommit(async () => {
       await Promise.allSettled(
         affected.flatMap((id) => [
@@ -342,6 +343,10 @@ function buildRaceSeriesRenewalJob(dependencies = {}) {
           where: { id: series.id },
           data: { currentRaceId: created.id, generation },
         });
+        await require('../services/raceViewerStateInvalidation').raceLinksChanged([
+          { id: created.id, seriesId: series.id },
+          { id: predecessor.id, seriesId: series.id },
+        ]);
         await tx.raceSeriesRenewalJob.update({
           where: { id: currentJob.id },
           data: {
