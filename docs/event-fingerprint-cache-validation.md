@@ -64,6 +64,9 @@ exact-vector design safe with revision/incarnation protection, database epoch,
 race-start keying, and canonical fallback for ambiguous ordering. Final SQL and
 settlement remain authoritative. Production savings remain unmeasured.
 
+Final independent code review of `2e707a5`: SHIP, no remaining blockers,
+issues, or nits. Owned local Redis was stopped and no test workers remain.
+
 Independent source check: the extracted FULL_EVENT_SQL is byte-identical to
 the 3,221-character event query in baseline 136e682. This is source parity,
 not proof of caller-path execution or final integration correctness.
