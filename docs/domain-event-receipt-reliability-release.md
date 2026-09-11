@@ -2,7 +2,33 @@
 
 ## Status
 
-**Cleared for the user-authorized deployment, pending live execution/verification.**
+**Deployed successfully on 2026-09-11.** Runtime release:
+`ee8620049adb96795b5d637f9e59035fdb4eebc6` (implementation `aeb0725`).
+
+All four additive migrations succeeded between 16:24:16 and 16:24:49 UTC;
+Prisma client regenerated. All four new indexes are valid and ready.
+The guarded reload completed with its final pool/topology checks and PM2 save:
+two HTTP workers (1628099, 1628111), resolution 1628209, cron 1628227;
+aggregate pool budget 32; staging stayed stopped. Internal and public health
+returned `ok`, Redis `ok`. No app upload or capacity change was needed.
+
+Automatic recovery initialized its independent cutoff at **16:26:04.819 UTC**.
+Its checkpoint progressed from 1,000 scanned/800 discovered to 1,500/1,300.
+A bounded 1,500-row queue observation contained 518 SUCCEEDED, 780 QUEUED and
+2 PROCESSING, with no error codes. This proves initial repair progress, not
+completion of the historical sweep or sustained production CPU improvement.
+Recent bounded cron log samples show the scheduler started and no receipt
+startup failures. The 24-hour post-deployment evidence remains follow-up, not
+a second deployment to remove the nightly scan.
+
+Powerup-copy sync found no changes. Referral audit/apply/audit all reported
+zero missing rows and zero rows applied. Balance drift retained the three
+already documented DECOY differences; no economy policy was changed.
+Private configuration/lockfile backups are under
+`/root/backups/receipt-recovery-20260911/`; the recap-compatible rollback anchor
+is tag `pre-receipt-recovery-20260911` at `2c2873b`. Do not roll back to the old
+pre-recap binary or reverse these additive migrations.
+
 The user explicitly authorized deployment if the remaining failures are unrelated.
 Both previously unresolved wrong-race tests subsequently reproduced on unchanged
 HEAD in `receipt-deploy-head-delta.log`; no test assertion was changed.
