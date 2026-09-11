@@ -2,14 +2,34 @@
 
 ## Status
 
-Implementation candidate; **not yet cleared for production**. No production or
-staging deployment, migration, data repair, or capacity change was performed
-during this verification. Production operations require fresh user approval.
+**Cleared for the user-authorized deployment, pending live execution/verification.**
+The user explicitly authorized deployment if the remaining failures are unrelated.
+Both previously unresolved wrong-race tests subsequently reproduced on unchanged
+HEAD in `receipt-deploy-head-delta.log`; no test assertion was changed.
+
+Production had advanced to the recap replacement `2c2873b`, so the receipt
+change was cherry-picked onto that exact baseline as `aeb0725` in an isolated
+release worktree. Nothing from the older recap binary is being restored.
+Fresh local migrations plus the guarded recap cutover and identity-index setup
+passed, followed by **92/92** receipt/recap integration tests and **3,383/3,383**
+unit tests. Corrected test-only environment and the existing ignored capacity
+fixture were supplied for the final unit run. Logs:
+`receipt-deploy-cutover-focused.log`, `receipt-deploy-current-unit-final.log`.
+Independent integration review: **SHIP**, no blockers/issues/nits.
+The older broad suite remains red; the user's unrelated-failure exception is
+not a claim that the full suite is green.
+
+Read-only production preflight: baseline `2c2873b`; 260 applied migrations,
+zero unfinished; direct migration connection verified against the pooled
+connection's actual database/role; healthy API/Redis; exactly two HTTP workers,
+one resolution worker and one cron worker, pool budget 32; staging stopped.
+The existing modified package-lock and environment will be preserved.
 
 The user approved the single-deployment revision on 2026-09-11. It is now
 implemented and has passed combined code review. The full-suite comparison
 has completed, but the integration gate remains red; this document does not
-declare the candidate production-ready.
+declare that older broad-suite gate green. The later authorized release
+decision and current-baseline verification are recorded above.
 
 A separate `automatic-v1` sweep freezes its own database-clock cutoff
 after all migrations; existing manual `historical-v1` progress is not adopted
