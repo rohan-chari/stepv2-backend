@@ -1857,6 +1857,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 RacePowerupEvent: capture.events,
                 now,
                 activeImpactEnabled: resolveTimedActiveImpacts,
+                useProcessScoringInputCache: true,
+                scoringInputVersionModel: defaultPrisma.userScoringInputVersion,
                 recordPhaseTiming: (name, durationMs) =>
                   addPhaseTiming(computePhaseMs, name, durationMs),
               });

@@ -2547,6 +2547,11 @@ describe("5d — explicit debounce", () => {
           priority: "COALESCE",
         },
       });
+      const { coordinatedOptimizationMetrics } = require("../../src/shared/observability/coordinatedOptimizationMetrics");
+      const cacheLookups = () => Object.entries(coordinatedOptimizationMetrics.snapshot().counters)
+        .filter(([key]) => /^race_scoring_input_cache_total\{outcome=(hit|miss_absent|miss_invalid)\}$/.test(key))
+        .reduce((sum, [, value]) => sum + value, 0);
+      const lookupsBefore = cacheLookups();
       const before = await participantVersions(raceId);
       const events = [];
       assert.ok(await makeWorker({
@@ -2559,6 +2564,21 @@ describe("5d — explicit debounce", () => {
         "STEP_SYNC_INCREMENTAL",
         `${type}: ${JSON.stringify(events)}`
       );
+      assert.ok(cacheLookups() > lookupsBefore,
+        `${type}: incremental scoring must consult the versioned input cache`);
+      const hitsBefore = coordinatedOptimizationMetrics.snapshot().counters[
+        "race_scoring_input_cache_total{outcome=hit}"] || 0;
+      await RaceResolutionJobV2.enqueue({
+        raceId, userId: alice.userId,
+        dirtyEnvelope: {
+          reason: "STEP_SYNC", dirtyUserIds: [alice.userId],
+          dirtyParticipantIds: [target.id], powerupTypes: [], priority: "COALESCE",
+        },
+      });
+      assert.ok(await makeWorker({ dependencyClosureEnabled: true }).processOne());
+      assert.ok((coordinatedOptimizationMetrics.snapshot().counters[
+        "race_scoring_input_cache_total{outcome=hit}"] || 0) > hitsBefore,
+        `${type}: unchanged scoring inputs must reuse the warm cache`);
       const after = await participantVersions(raceId);
       assert.equal(
         after.find((row) => row.userId === bob.userId).version,
