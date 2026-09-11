@@ -25,3 +25,5 @@ Explicitly authorized and deployed as runtime `0b9b1b7`, isolated on top of prod
 Guarded PM2 reload completed: two HTTP workers, one resolution worker, one cron worker, staging stopped, aggregate pool budget 32. Production health and Redis returned OK. No production migrations, dependency installation or configuration changes; existing environment and modified package lock preserved.
 
 Two authenticated live billing syncs for the affected account returned HTTP 200 / complete. Both retained the pre-verification balance of 8,474 coins; ledger total also 8,474, exactly two purchase-credit entries, and reconciliation last_error is null. The earlier recovery balance was 8,624; intervening account activity occurred before verification, not during either sync. No duplicate purchase credits were issued.
+
+Required referral catch-up audit/apply/audit reported zero missing rows throughout and zero writes. Final production health/Redis remained OK and environment/package-lock preservation checks passed.
