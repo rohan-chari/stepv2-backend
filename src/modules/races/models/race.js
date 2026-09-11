@@ -314,6 +314,7 @@ const powerupUseRaceScalars = {
 // full accepted roster to pick recipients.
 const stepSyncScopeParticipantSelect = {
   ...resolutionParticipantSelect,
+  boxProgressSteps: true,
   totalsUpdatedAt: true,
 };
 

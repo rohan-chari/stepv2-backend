@@ -1,5 +1,36 @@
 # Backend economy ledger
 
+## Mystery-box progress correction semantics
+
+**Code verified 2026-09-11 against incident runtime commit `340b405`; no live
+drop configuration, prices, or player distributions queried in this review.**
+
+- `src/modules/powerups/boxSteps.js` returns nonnegative race-window raw walked
+  steps. Timed effects and additive bonus steps contribute zero to this gate.
+- `src/modules/powerups/rawPosition.js:nextRawSteps` retains the maximum of
+  stored raw steps and the latest computed raw total because source samples
+  can be corrected downward. This high-water total controls odds ranking.
+- The FULL scorer in `raceStateResolution.js` computes box steps from current
+  source data in the race's canonical timezone, falling back to UTC. The
+  `raceResolutionStepSyncScope.js` committed shortcut instead uses stored
+  raw-step high-water. These inputs can disagree after source corrections or
+  when a null-timezone race's leaderboard uses a different caller timezone.
+- `raceResolutionQueueV2.js` persists computed box progress directly; it can
+  decrease. `rollPowerup.js` advances the next threshold for each grant,
+  duplicate milestone, or inventory-full forfeit. The cursor is therefore
+  consumed-threshold history, not merely the largest existing award row.
+- Award identity is `(participantId, earnedAtSteps)`. Default slot capacity is
+  three, queued-box capacity is one, and one roll crosses at most 50 thresholds
+  (code constants; these are not confirmations of individual live race values).
+- `getRaceProgress.js` caps the displayed distance at one race interval.
+  A corrected source total below an already-consumed threshold can therefore
+  display a full interval while requiring more walking before the next grant.
+
+For interval `I`, next threshold `T`, and canonical progress `C`, thresholds
+newly consumed by a roll are `min(50, max(0, floor((C-T)/I)+1))`. Actual granted
+boxes also depend on existing milestone rows and available inventory/queue
+capacity; consumed thresholds can be forfeited. No coin EV is inferred here.
+
 ## Hitchhike V3 immutable-summary scoring inputs
 
 **Code verified 2026-09-05; no production configuration or player distributions

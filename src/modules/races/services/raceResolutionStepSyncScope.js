@@ -149,6 +149,16 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
         emitDiagnostics("participant_mismatch");
         return null;
       }
+      // rawSteps is an odds-position high-water, not necessarily the current
+      // canonical walking total. After a source correction (or different box
+      // calendar), reusing it would replace correct box progress with an old
+      // peak and make the committed and full plans disagree. Recompute through
+      // the existing canonical path whenever the persisted quantities differ.
+      if (participant.boxProgressSteps != null &&
+          participant.boxProgressSteps !== participant.rawSteps) {
+        emitDiagnostics("canonical_box_input_differs");
+        return null;
+      }
       participantTokens[participant.id] = token.toISOString();
       participantUserIds[participant.id] = participant.userId;
       baseAdjustedByParticipantId[participant.id] = participant.rawSteps;

@@ -1496,6 +1496,41 @@ describe("5a — one bulk writer per race", () => {
     assert.deepEqual(merged.dirtyParticipantIds, [participant.id]);
   });
 
+  it("incident: legacy committed sync cannot replace canonical box progress with an older raw peak", async () => {
+    const alice = await createUser("Corrected Sync Alice");
+    const bob = await createUser("Corrected Sync Bob");
+    const raceId = await createActiveRace(alice, [bob], "Corrected committed sync");
+    const worker = makeWorker({ fixtureRaceId: raceId });
+    const sample = sampleAt(2, 5000);
+    assert.equal((await postSamples(alice, [sample])).status, 200);
+    await drain(worker);
+    assert.equal((await postSamples(alice, [{ ...sample, steps: 1000 }])).status, 200);
+    await drain(worker);
+    const participant = await prisma.raceParticipant.findFirstOrThrow({ where: { raceId, userId: alice.userId } });
+    assert.equal(participant.rawSteps, 5000);
+    assert.equal(participant.boxProgressSteps, 1000);
+    const beforeAwards = await prisma.racePowerup.count({ where: { raceId, userId: alice.userId } });
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    await RaceResolutionJobV2.enqueue({ raceId, userId: alice.userId, dirtyEnvelope: {
+      reason: "STEP_SYNC", dirtyUserIds: [alice.userId], dirtyParticipantIds: [participant.id],
+      powerupTypes: [], priority: "COALESCE",
+    } });
+    await drain(worker);
+    const after = await prisma.raceParticipant.findUniqueOrThrow({ where: { id: participant.id } });
+    assert.equal(after.boxProgressSteps, 1000, "the same source must produce the same box input through every plan");
+    assert.equal(after.nextBoxAtSteps, participant.nextBoxAtSteps, "consumed milestones must not be reset");
+    assert.equal(await prisma.racePowerup.count({ where: { raceId, userId: alice.userId } }), beforeAwards);
+    const response = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, { token: alice.token });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).progress.powerupData.stepsUntilNextPowerup, 2000);
+    assert.equal((await postSamples(alice, [{ ...sample, steps: 1100 }])).status, 200);
+    await drain(worker);
+    const walked = await prisma.raceParticipant.findUniqueOrThrow({ where: { id: participant.id } });
+    assert.equal(walked.boxProgressSteps, 1100);
+    assert.equal(walked.totalSteps, after.totalSteps + 100, "new walking must update race steps below the old peak");
+    assert.equal(walked.nextBoxAtSteps, participant.nextBoxAtSteps);
+  });
+
   it("pure STEP_SYNC uses committed uploader rows without rewriting participants", async () => {
     const alice = await createUser("Scoped Sync Alice");
     const bob = await createUser("Scoped Sync Bob");
