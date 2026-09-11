@@ -34,6 +34,12 @@ const APPROVED_METRICS = new Set([
   "durable_queue_cleanup_seconds",
   "domain_event_receipt_provisional_total",
   "domain_event_receipt_oldest_provisional_seconds",
+  "domain_event_receipt_created_total",
+  "domain_event_receipt_repaired_total",
+  "domain_event_receipt_failed_total",
+  "domain_event_receipt_quarantined_total",
+  "domain_event_receipt_recovery_claim_total",
+  "domain_event_receipt_recovery_age_seconds",
 ]);
 
 const APPROVED_LABELS = new Set([

@@ -1,5 +1,8 @@
 const crypto = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
+const {
+  coordinatedOptimizationMetrics: defaultMetrics,
+} = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
 const DIGEST_VERSION = 1;
 
@@ -50,7 +53,8 @@ function digestDomainEventEnvelope(input) {
     .digest("hex");
 }
 
-function buildDomainEventReceiptModel(prisma = defaultPrisma) {
+function buildDomainEventReceiptModel(prisma = defaultPrisma, dependencies = {}) {
+  const metrics = dependencies.metrics || defaultMetrics;
   const model = {
     async findByEventKey(eventKey, tx = prisma) {
       return tx.domainEventReceipt.findUnique({ where: { eventKey } });
@@ -85,10 +89,28 @@ function buildDomainEventReceiptModel(prisma = defaultPrisma) {
         }],
         skipDuplicates: true,
       });
-      if (inserted.count === 1) return { inserted: true, digest };
+      if (inserted.count === 1) {
+        metrics.increment("domain_event_receipt_created_total", { reason: "transactional_append" });
+        return { inserted: true, digest };
+      }
       const existing = await tx.domainEventReceipt.findUniqueOrThrow({
         where: { eventKey: canonical.eventKey },
       });
+      // During old/new binary overlap, the legacy trigger may have reserved a
+      // provisional row before this writer runs. Upgrade it using the exact
+      // canonical envelope instead of relying on the trigger as the writer.
+      if (existing.receiptState === "PROVISIONAL") {
+        const receipt = await model.finalize({
+          envelope: canonical,
+          domainEventId,
+          replaySourceType,
+          replaySourceId,
+          terminalStatus,
+          completedAt,
+        }, tx);
+        metrics.increment("domain_event_receipt_created_total", { reason: "transactional_append" });
+        return { inserted: true, digest, receipt };
+      }
       if (existing.receiptState !== "FINAL" || existing.envelopeDigest !== digest ||
           existing.domainEventId !== domainEventId ||
           existing.replaySourceType !== replaySourceType ||
@@ -145,6 +167,40 @@ function buildDomainEventReceiptModel(prisma = defaultPrisma) {
         terminalStatus: item.terminalStatus || null,
         completedAt: item.completedAt ? new Date(item.completedAt).toISOString() : null,
       }));
+      const itemByKey = new Map(items.map((item) => [item.envelope.eventKey, item]));
+      // New writers must not depend on the overlap trigger. Create missing
+      // FINAL rows set-wise, then use the guarded update below to upgrade
+      // provisional rows or validate already-final immutable receipts.
+      const inserted = tx.domainEventReceipt?.createMany ? await tx.domainEventReceipt.createMany({
+        // itemByKey is built once so bulk receipt creation remains linear.
+        data: input.map((item) => {
+          const source = itemByKey.get(item.eventKey).envelope;
+          return {
+            eventKey: item.eventKey,
+            domainEventId: item.domainEventId,
+            eventType: source.eventType,
+            schemaVersion: source.schemaVersion,
+            aggregateType: source.aggregateType,
+            aggregateId: source.aggregateId,
+            occurredAt: new Date(source.occurredAt),
+            availableAt: new Date(source.availableAt),
+            envelopeDigest: item.digest,
+            receiptState: "FINAL",
+            digestVersion: DIGEST_VERSION,
+            replaySourceType: item.replaySourceType,
+            replaySourceId: item.replaySourceId,
+            terminalStatus: item.terminalStatus,
+            completedAt: item.completedAt ? new Date(item.completedAt) : null,
+            finalizedAt: current,
+            createdAt: current,
+            updatedAt: current,
+          };
+        }),
+        skipDuplicates: true,
+      }) : { count: 0 };
+      if (inserted.count > 0) {
+        metrics.increment("domain_event_receipt_created_total", { reason: "transactional_append" }, inserted.count);
+      }
       const receipts = await tx.$queryRawUnsafe(
         `WITH input AS (
            SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(

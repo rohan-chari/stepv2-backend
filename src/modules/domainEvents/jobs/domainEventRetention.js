@@ -38,13 +38,11 @@ function buildDomainEventRetention(dependencies = {}) {
       lastRanFor,
     });
     if (!runKey || !(await JobRun.claimRun(JOB_NAME, runKey))) return null;
-    let eventReceiptsBackfilled = 0;
+    const eventReceiptsBackfilled = 0;
     let scheduleReceiptsBackfilled = 0;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const count = await eventReceipts.backfillPage({ limit: 500 });
-      eventReceiptsBackfilled += count;
-      if (count < 500) break;
-    }
+    // Domain-event history is discovered by the checkpointed recovery cron.
+    // Keep the legacy result field for internal report compatibility. Retention
+    // still requires a FINAL receipt before deleting any source payload.
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const count = await scheduleReceipts.backfillPage({ limit: 500 });
       scheduleReceiptsBackfilled += Number(count) || 0;

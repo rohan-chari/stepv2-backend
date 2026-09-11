@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "domain-events:replay": "node scripts/replay-domain-events.js",
+    "domain-events:receipts:audit": "node scripts/audit-domain-event-receipts.js",
+    "domain-events:receipts:discover": "node scripts/discover-domain-event-receipt-recovery.js",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "feedback:oauth:authorize": "node scripts/authorize-google-workspace-feedback.js",

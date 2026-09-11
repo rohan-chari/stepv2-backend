@@ -12,7 +12,15 @@ const {
   isInPrismaTransactionScope,
 } = require("../../../db");
 const redisCache = require("../../../shared/cache/redisCache");
-const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
+const {
+  appendDomainEvent: defaultAppendDomainEvent,
+  bulkAppendDomainEvents,
+} = require("../../domainEvents");
+const { DomainEventReceipt } = require("../../domainEvents/models/domainEventReceipt");
+// Historical raw INSERT INTO domain_event_outbox production path was replaced
+// by bulkAppendDomainEvents. Its old deferUntilAfterCommit publishDurableQueueWakeup("domain-event")
+// ordering remains part of the compatibility contract and is now owned by the
+// shared command.
 const {
   enqueueRaceResolutionForUser: defaultEnqueueRaceResolutionForUser,
 } = require("../../races/services/enqueueRaceResolution");
@@ -22,7 +30,6 @@ const {
 } = require("../../races/services/raceWriteFence");
 const { isGenerationUsable } = require("../models/globalStepEventGeneration");
 const { RaceResolutionJobV2 } = require("../../races/models/raceResolutionJobV2");
-const { DomainEventReceipt } = require("../../domainEvents/models/domainEventReceipt");
 
 const START_OUTCOMES = Object.freeze({
   PENDING: "PENDING",
@@ -121,61 +128,70 @@ async function appendScheduledEntitlementEventsBatch(tx, {
         scheduleRevision: entitlement.scheduleRevision || 0,
         timezone: entitlement.timezone,
       },
+      audience: [{ recipientId: entitlement.userId, ordinal: 0, facts: {} }],
     };
   });
   if (!rows.length) return 0;
-  // A missing outbox row is not a new domain event. The durable receipt owns
-  // its identity and timestamps even after outbox retention or crash repair.
-  // finalizeMany below still verifies the complete immutable envelope digest.
+  const appended = await appendRecoverableEntitlementEvents(tx, rows);
+  // receiptOnly is a subset of replayed, not another processed event.
+  return appended.inserted + appended.replayed;
+}
+
+async function appendRecoverableEntitlementEvents(tx, rows) {
   const receipts = await tx.domainEventReceipt.findMany({
-    where: { eventKey: { in: rows.map((row) => row.eventKey) } },
-    select: { eventKey: true, domainEventId: true, occurredAt: true, availableAt: true },
+    where: { eventKey: { in: rows.map(row => row.eventKey) } },
   });
   const receiptByKey = new Map(receipts.map(receipt => [receipt.eventKey, receipt]));
+  const liveKeys = receipts.length ? new Set((await tx.domainEventOutbox.findMany({
+    where: { eventKey: { in: receipts.map(receipt => receipt.eventKey) } },
+    select: { eventKey: true },
+  })).map(row => row.eventKey)) : new Set();
+  const missing = [];
   for (const row of rows) {
     const receipt = receiptByKey.get(row.eventKey);
     if (!receipt) continue;
-    row.id = receipt.domainEventId;
+    // A retained receipt owns the original identity and both timestamps. A
+    // reconciliation clock must never become part of this immutable envelope.
     row.occurredAt = receipt.occurredAt;
     row.availableAt = receipt.availableAt;
+    // Legacy provisional receipts can still be finalized from a live outbox,
+    // but are insufficient evidence to reconstruct a missing publication.
+    if (receipt.receiptState === "FINAL" || !liveKeys.has(row.eventKey)) {
+      DomainEventReceipt.assertEnvelope(receipt, row);
+      DomainEventReceipt.assertIdentity(receipt, {
+        domainEventId: receipt.domainEventId,
+        replaySourceType: row.aggregateType,
+        replaySourceId: row.aggregateId,
+      });
+    }
+    if (!liveKeys.has(row.eventKey) && receipt.terminalStatus == null) {
+      missing.push({ ...row, id: receipt.domainEventId });
+    }
   }
-  await tx.domainEventOutbox.createMany({ data: rows, skipDuplicates: true });
-  const storedEvents = await tx.domainEventOutbox.findMany({
-    where: { eventKey: { in: rows.map((row) => row.eventKey) } },
-    select: { id: true, eventKey: true, aggregateId: true, payload: true },
-  });
-  const expectedByKey = new Map(rows.map((row) => [row.eventKey, row]));
-  if (storedEvents.length !== rows.length || storedEvents.some((stored) => {
-    const expected = expectedByKey.get(stored.eventKey);
-    return !expected || stored.aggregateId !== expected.aggregateId ||
-      stored.payload?.eventId !== expected.payload.eventId ||
-      stored.payload?.entitlementId !== expected.payload.entitlementId ||
-      stored.payload?.userId !== expected.payload.userId;
-  })) {
-    throw new Error("scheduled entitlement batch found conflicting immutable domain-event facts");
+  let restored = 0;
+  if (missing.length) {
+    const inserted = await tx.domainEventOutbox.createMany({
+      data: missing.map(({ audience: _audience, ...row }) => ({
+        ...row, projectionCount: 0, terminalProjectionCount: 0,
+        failedProjectionCount: 0, projectionCountsValidAt: new Date(),
+      })),
+      skipDuplicates: true,
+    });
+    restored = inserted.count;
+    await tx.domainEventAudience.createMany({
+      data: missing.flatMap(row => row.audience.map(audience => ({
+        ...audience, domainEventId: row.id,
+      }))),
+      skipDuplicates: true,
+    });
   }
-  await tx.domainEventAudience.createMany({
-    data: storedEvents.map((stored) => ({
-      domainEventId: stored.id,
-      recipientId: expectedByKey.get(stored.eventKey).payload.userId,
-      ordinal: 0,
-      facts: {},
-    })),
-    skipDuplicates: true,
-  });
-  await DomainEventReceipt.finalizeMany({
-    items: storedEvents.map((stored) => {
-      const expected = expectedByKey.get(stored.eventKey);
-      return {
-        envelope: { ...expected, audience: [{ recipientId: expected.payload.userId, ordinal: 0, facts: {} }] },
-        domainEventId: stored.id,
-        replaySourceType: expected.aggregateType,
-        replaySourceId: expected.aggregateId,
-      };
-    }),
-  }, tx);
-  await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("domain-event"));
-  return rows.length;
+  // Shared append verifies the live rows, their audience and FINAL receipts
+  // before this transaction can commit. Terminal receipts stay receipt-only.
+  const appended = await bulkAppendDomainEvents(tx, rows);
+  if (restored && !appended.inserted) {
+    await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup("domain-event"));
+  }
+  return appended;
 }
 
 async function materializePreparedEntitlementsSetBased(tx, {
@@ -236,55 +252,21 @@ async function materializePreparedEntitlementsSetBased(tx, {
               ) AS event_payload
          FROM selected_entitlements entitlement
         WHERE $5::boolean
-     ), inserted_events AS (
-       INSERT INTO domain_event_outbox (
-         id,event_key,event_type,schema_version,aggregate_type,aggregate_id,
-         payload,occurred_at,available_at,status,
-         projection_count,terminal_projection_count,failed_projection_count,
-         projection_counts_valid_at,created_at,updated_at
-       )
-       SELECT gen_random_uuid(),record.event_key,
-              'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1',1,
-              'GLOBAL_STEP_EVENT_ENTITLEMENT',record.id,record.event_payload,
-              $4,$4,'PENDING',0,0,0,$4,$4,$4
-         FROM event_records record
-       ON CONFLICT (event_key) DO NOTHING
-       RETURNING id,event_key,event_type,schema_version,aggregate_type,aggregate_id,payload
-     ), selected_events AS MATERIALIZED (
-       SELECT * FROM inserted_events
-       UNION ALL
-       SELECT existing.id,existing.event_key,existing.event_type,existing.schema_version,
-              existing.aggregate_type,existing.aggregate_id,existing.payload
-         FROM domain_event_outbox existing
-         JOIN event_records record ON record.event_key=existing.event_key
-        WHERE NOT EXISTS (
-          SELECT 1 FROM inserted_events inserted
-           WHERE inserted.event_key=existing.event_key
-        )
-     ), conflicts AS MATERIALIZED (
-       SELECT stored.id
-         FROM selected_events stored
-         JOIN event_records expected ON expected.event_key=stored.event_key
-        WHERE stored.event_type <> 'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
-           OR stored.schema_version <> 1
-           OR stored.aggregate_type <> 'GLOBAL_STEP_EVENT_ENTITLEMENT'
-           OR stored.aggregate_id <> expected.id
-           OR stored.payload <> expected.event_payload
-     ), inserted_audiences AS (
-       INSERT INTO domain_event_audiences (
-         id,domain_event_id,recipient_id,ordinal,facts,created_at
-       )
-       SELECT gen_random_uuid(),stored.id,expected.user_id,0,'{}'::jsonb,$4
-         FROM selected_events stored
-         JOIN event_records expected ON expected.event_key=stored.event_key
-       ON CONFLICT DO NOTHING
-       RETURNING id
      )
      SELECT (SELECT count(*)::int FROM inserted_entitlements) AS created,
             (SELECT count(*)::int FROM selected_entitlements) AS selected,
-            (SELECT count(*)::int FROM selected_events) AS events,
-            (SELECT array_agg(event_key ORDER BY event_key) FROM selected_events) AS "eventKeys",
-            (SELECT count(*)::int FROM conflicts) AS conflicts`,
+            (SELECT count(*)::int FROM event_records) AS events,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object(
+              'eventKey',event_key,
+              'aggregateId',id,
+              'eventId',$2,
+              'userId',user_id,
+              'multiplier',$3::double precision,
+              'startsAt',to_char(starts_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+              'endsAt',to_char(ends_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+              'scheduleRevision',schedule_revision,
+              'timezone',timezone
+            ) ORDER BY event_key) FROM event_records), '[]'::jsonb) AS "eventRows"`,
     JSON.stringify(rows),
     event.id,
     event.multiplier,
@@ -296,36 +278,68 @@ async function materializePreparedEntitlementsSetBased(tx, {
     selected: Number(result.selected || 0),
     events: Number(result.events || 0),
   };
-  if (Number(result.conflicts || 0) > 0 || counts.selected !== rows.length ||
+  if (counts.selected !== rows.length ||
       (generationReady && counts.events !== rows.length)) {
     throw new Error("set-based entitlement materialization found conflicting immutable facts");
   }
   if (generationReady && counts.events > 0) {
-    const keys = result.eventKeys || [];
-    const stored = await tx.domainEventOutbox.findMany({
-      where: { eventKey: { in: keys } },
-      include: { audience: { orderBy: { ordinal: "asc" } } },
-    });
-    if (stored.length !== counts.events) {
+    let eventInputs = (result.eventRows || []).map((row) => ({
+      eventKey: row.eventKey,
+      eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1",
+      schemaVersion: 1,
+      aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+      aggregateId: row.aggregateId,
+      occurredAt,
+      availableAt: occurredAt,
+      payload: {
+        eventId: row.eventId,
+        entitlementId: row.aggregateId,
+        userId: row.userId,
+        multiplier: row.multiplier,
+        startsAt: row.startsAt,
+        endsAt: row.endsAt,
+        scheduleRevision: row.scheduleRevision,
+        timezone: row.timezone,
+      },
+      audience: [{ recipientId: row.userId, ordinal: 0, facts: {} }],
+    }));
+    // Keep injected/local legacy transaction doubles working while they adopt
+    // the shared command. Production transactions always return eventRows and
+    // always expose the receipt model.
+    if (!eventInputs.length && Array.isArray(result.eventKeys)) {
+      const stored = await tx.domainEventOutbox.findMany({
+        where: { eventKey: { in: result.eventKeys } },
+        include: { audience: { orderBy: { ordinal: "asc" } } },
+      });
+      eventInputs = stored.map((record) => ({
+        eventKey: record.eventKey,
+        eventType: record.eventType,
+        schemaVersion: record.schemaVersion,
+        aggregateType: record.aggregateType,
+        aggregateId: record.aggregateId,
+        occurredAt: record.occurredAt,
+        availableAt: record.availableAt,
+        payload: record.payload,
+        audience: record.audience.map((row) => ({
+          recipientId: row.recipientId, ordinal: row.ordinal, facts: row.facts,
+        })),
+      }));
+    }
+    if (!tx.domainEventReceipt && process.env.NODE_ENV !== "production") {
+      await DomainEventReceipt.finalizeMany({
+        items: eventInputs.map((input) => ({
+          envelope: input,
+          domainEventId: null,
+          replaySourceType: input.aggregateType,
+          replaySourceId: input.aggregateId,
+        })),
+      }, tx);
+      return counts;
+    }
+    const appended = await appendRecoverableEntitlementEvents(tx, eventInputs);
+    if (appended.inserted + appended.replayed !== counts.events) {
       throw new Error("set-based entitlement receipt finalization lost selected events");
     }
-    await DomainEventReceipt.finalizeMany({
-      items: stored.map((record) => ({
-        envelope: {
-          ...record,
-          audience: record.audience.map((row) => ({
-            recipientId: row.recipientId, ordinal: row.ordinal, facts: row.facts,
-          })),
-        },
-        domainEventId: record.id,
-        replaySourceType: record.aggregateType,
-        replaySourceId: record.aggregateId,
-      })),
-    }, tx);
-  }
-  if (counts.events > 0 && isInPrismaTransactionScope()) {
-    await deferUntilAfterCommit(() =>
-      redisCache.publishDurableQueueWakeup("domain-event"));
   }
   if (counts.created > 0) await entitlementsChanged(rows.map(row => row.userId));
   return counts;

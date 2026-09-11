@@ -54,6 +54,7 @@ test("a failed evidence gate latches the whole cleanup run across table families
 test("retention shares one ten-page destructive budget across every cleanup family", async () => {
   let pages = 0;
   let eventPages = 0;
+  let eventReceiptBackfillPages = 0;
   let schedulePayloadPages = 0;
   let eventReceiptPages = 0;
   let scheduleReceiptPages = 0;
@@ -76,7 +77,10 @@ test("retention shares one ten-page destructive budget across every cleanup fami
       },
     },
     eventReceipts: {
-      async backfillPage() { return 0; },
+      async backfillPage() {
+        eventReceiptBackfillPages += 1;
+        return eventReceiptBackfillPages === 1 ? 500 : 0;
+      },
       async cleanupDeletedSources() { eventReceiptPages += 1; return 500; },
     },
     scheduleReceipts: {
@@ -89,6 +93,7 @@ test("retention shares one ten-page destructive budget across every cleanup fami
   await run();
   assert.equal(pages, MAX_PAGES);
   assert.equal(eventPages, 4);
+  assert.equal(eventReceiptBackfillPages, 0, "the approved single-deployment workflow replaces broad event backfill with bounded recovery discovery");
   assert.equal(schedulePayloadPages, 6);
   assert.equal(eventReceiptPages, 0);
   assert.equal(scheduleReceiptPages, 0);

@@ -19,6 +19,8 @@ const TABLES_IN_ORDER = [
   "global_event_recovery_seed",
   "global_event_recovery_event_refresh",
   "global_event_recovery_orphan_cursor",
+  "domain_event_receipt_recovery",
+  "domain_event_receipt_discovery",
   // Keep this complete and child-to-parent ordered. TRUNCATE ... CASCADE walks
   // the whole FK graph and takes AccessExclusive locks on every discovered
   // table/index; on the local integration DB that turned an empty cleanup into

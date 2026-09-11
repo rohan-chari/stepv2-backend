@@ -34,6 +34,8 @@ const lazyExports = {
   scheduleDomainEventProjection: ["./jobs/domainEventProjection", "scheduleDomainEventProjection"],
   buildDomainEventRetention: ["./jobs/domainEventRetention", "buildDomainEventRetention"],
   scheduleDomainEventRetention: ["./jobs/domainEventRetention", "scheduleDomainEventRetention"],
+  buildDomainEventReceiptRecoveryWorker: ["./jobs/domainEventReceiptRecovery", "buildDomainEventReceiptRecoveryWorker"],
+  scheduleDomainEventReceiptRecovery: ["./jobs/domainEventReceiptRecovery", "scheduleDomainEventReceiptRecovery"],
 };
 
 for (const [exportName, [modulePath, memberName]] of Object.entries(lazyExports)) {

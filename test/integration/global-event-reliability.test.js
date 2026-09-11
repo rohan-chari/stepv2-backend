@@ -966,6 +966,10 @@ describe("global-event reliability v2 contract", () => {
     assert.equal(await prisma.domainEventOutbox.count({
       where: { eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlement.id}:1` },
     }), 1);
+    const scheduledReceipt = await prisma.domainEventReceipt.findUniqueOrThrow({
+      where: { eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlement.id}:1` },
+    });
+    assert.equal(scheduledReceipt.receiptState, "FINAL", "the public /auth/me timezone handler path creates the receipt transactionally");
     assert.ok(statements.length <= 8, `application SQL (${statements.length}): ${statements.join(",")}`);
 
     const project = buildDomainEventProjectionJob({ now: () => current, logger: { log() {}, error() {} } });

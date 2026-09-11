@@ -136,6 +136,16 @@ function buildAppendDomainEvent(dependencies = {}) {
 
   return async function appendDomainEvent(tx, input) {
     if (!tx || typeof tx !== "object") throw new TypeError("transaction client is required");
+    // The scoped proxy (and Prisma 7 nested clients) can expose $transaction.
+    // Enter the append body directly so owning a root transaction never recurses.
+    if (!dependencies.repository && !isInPrismaTransactionScope() &&
+        typeof tx.$transaction === "function") {
+      return tx.$transaction(client => appendInTransaction(client, input));
+    }
+    return appendInTransaction(tx, input);
+  };
+
+  async function appendInTransaction(tx, input) {
     const event = normalizeDomainEvent(input);
     if (!dependencies.repository && isInPrismaTransactionScope()) {
       await require("../../races/services/raceEventCacheInvalidation").invalidateEvent(event);
@@ -143,6 +153,12 @@ function buildAppendDomainEvent(dependencies = {}) {
     const replaySourceType = input.replaySourceType || event.aggregateType;
     const replaySourceId = input.replaySourceId || event.aggregateId;
     const receiptsAvailable = Boolean(receiptModel && tx.domainEventReceipt);
+    if (!receiptsAvailable && !dependencies.repository &&
+        tx.domainEventOutbox && typeof tx.$queryRawUnsafe === "function") {
+      const error = new Error("domain event receipts are required for production writes");
+      error.code = "DOMAIN_EVENT_RECEIPTS_UNAVAILABLE";
+      throw error;
+    }
     if (receiptsAvailable) {
       const receipt = await receiptModel.findByEventKey(event.eventKey, tx);
       if (receipt?.receiptState === "FINAL") {
@@ -189,7 +205,7 @@ function buildAppendDomainEvent(dependencies = {}) {
       if (!result.inserted) logger.log?.("[DOMAIN_EVENT] idempotent append replay", {
         eventId: result.event.id, eventType: result.event.eventType,
       });
-      if (receiptsAvailable) await receiptModel.finalize({
+      if (receiptsAvailable) await receiptModel.reserve({
         envelope: event,
         domainEventId: result.event.id,
         replaySourceType,
@@ -229,6 +245,14 @@ function buildBulkAppendDomainEvents(dependencies = {}) {
     : publishWake();
   return async function bulkAppendDomainEvents(tx, inputs) {
     if (!tx || typeof tx !== "object") throw new TypeError("transaction client is required");
+    if (!dependencies.repository && !isInPrismaTransactionScope() &&
+        typeof tx.$transaction === "function") {
+      return tx.$transaction(client => appendInTransaction(client, inputs));
+    }
+    return appendInTransaction(tx, inputs);
+  };
+
+  async function appendInTransaction(tx, inputs) {
     if (!Array.isArray(inputs)) throw new TypeError("events must be an array");
     // All envelopes are normalized before the first SQL write. A malformed
     // event can therefore never leave an earlier event/baseline committed.
@@ -259,6 +283,12 @@ function buildBulkAppendDomainEvents(dependencies = {}) {
     const receiptOnlyKeys = new Set();
     const receiptByKey = new Map();
     const receiptsAvailable = Boolean(receiptModel && tx.domainEventReceipt);
+    if (!receiptsAvailable && !dependencies.repository &&
+        tx.domainEventOutbox && typeof tx.$queryRawUnsafe === "function") {
+      const error = new Error("domain event receipts are required for production writes");
+      error.code = "DOMAIN_EVENT_RECEIPTS_UNAVAILABLE";
+      throw error;
+    }
     if (receiptsAvailable) {
       const receipts = await tx.domainEventReceipt.findMany({
         where: { eventKey: { in: events.map((event) => event.eventKey) } },

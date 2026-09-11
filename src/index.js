@@ -87,6 +87,7 @@ const {
 const {
   scheduleDomainEventProjection,
   scheduleDomainEventRetention,
+  scheduleDomainEventReceiptRecovery,
 } = require("./modules/domainEvents");
 
 function configureHttpServer(server) {
@@ -127,6 +128,7 @@ function startServer({
   scheduleInboxDelivery: scheduleInboxDeliveryJob = scheduleInboxDelivery,
   scheduleDomainEventProjection: scheduleDomainEventProjectionJob = scheduleDomainEventProjection,
   scheduleDomainEventRetention: scheduleDomainEventRetentionJob = scheduleDomainEventRetention,
+  scheduleDomainEventReceiptRecovery: scheduleDomainEventReceiptRecoveryJob = scheduleDomainEventReceiptRecovery,
   scheduleNotificationScheduleRelease:
     scheduleNotificationScheduleReleaseJob = scheduleNotificationScheduleRelease,
   scheduleNotificationCompletenessReconciler:
@@ -338,6 +340,7 @@ function startServer({
         retainStopHandle(scheduleDeviceTokenCleanupJob());
       }
       retainStopHandle(scheduleDomainEventRetentionJob());
+      retainStopHandle(scheduleDomainEventReceiptRecoveryJob());
       if (!destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED")) {
         scheduleActivationCleanup();
       }

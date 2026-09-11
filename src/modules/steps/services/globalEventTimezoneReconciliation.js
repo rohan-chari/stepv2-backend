@@ -1,12 +1,14 @@
 const { entitlementsChanged } = require('./eventDisplayCacheInvalidation');
 const {
   prisma: defaultPrisma,
-  deferUntilAfterCommit,
-  isInPrismaTransactionScope,
 } = require("../../../db");
 const timezoneCache = require("../../users/services/timezoneStateCache");
 const redisCache = require("../../../shared/cache/redisCache");
-const { DomainEventReceipt } = require("../../domainEvents/models/domainEventReceipt");
+const { bulkAppendDomainEvents } = require("../../domainEvents");
+// Historical raw INSERT INTO domain_event_outbox production path was replaced
+// by bulkAppendDomainEvents. Its old deferUntilAfterCommit publishDurableQueueWakeup("domain-event")
+// ordering remains part of the compatibility contract and is now owned by the
+// shared command.
 const {
   canonicalIanaTimeZone,
   immediateGlobalEventTimezoneMutation,
@@ -296,7 +298,12 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
           const source = eligibleRows.find((row) => row.id === entitlement.id);
           return {
             eventKey: `GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1:${entitlement.id}:${entitlement.scheduleRevision}`,
+            eventType: "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1",
+            schemaVersion: 1,
+            aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
             aggregateId: entitlement.id,
+            occurredAt: current,
+            availableAt: current,
             recipientId: entitlement.userId,
             payload: {
               eventId: entitlement.eventId,
@@ -310,56 +317,11 @@ function buildGlobalEventTimezoneReconciliation(dependencies = {}) {
             },
           };
         });
-        await statement("schedule-event-append", () => tx.$executeRawUnsafe(
-          `WITH input AS (
-             SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(
-               "eventKey" text, "aggregateId" text, "recipientId" text, payload jsonb
-             )
-           ), inserted AS (
-             INSERT INTO domain_event_outbox (
-               id,event_key,event_type,schema_version,aggregate_type,aggregate_id,
-               payload,occurred_at,available_at,status,
-               projection_count,terminal_projection_count,failed_projection_count,
-               projection_counts_valid_at,created_at,updated_at
-             )
-             SELECT gen_random_uuid(),input."eventKey",
-                    'GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1',1,
-                    'GLOBAL_STEP_EVENT_ENTITLEMENT',input."aggregateId",input.payload,
-                    $2,$2,'PENDING',0,0,0,$2,$2,$2
-               FROM input ON CONFLICT (event_key) DO NOTHING
-             RETURNING id,event_key
-           )
-           INSERT INTO domain_event_audiences (
-             id,domain_event_id,recipient_id,ordinal,facts,created_at
-           )
-           SELECT gen_random_uuid(),inserted.id,input."recipientId",0,'{}'::jsonb,$2
-             FROM inserted JOIN input ON input."eventKey"=inserted.event_key`,
-          JSON.stringify(eventInputs), current,
-        ));
-        const stored = await tx.domainEventOutbox.findMany({
-          where: { eventKey: { in: eventInputs.map((row) => row.eventKey) } },
-          include: { audience: { orderBy: { ordinal: "asc" } } },
-        });
-        if (stored.length !== eventInputs.length || stored.some((row) => row.audience.length !== 1)) {
-          throw new Error("timezone reconciliation receipt finalization lost selected events");
-        }
-        await DomainEventReceipt.finalizeMany({
-          items: stored.map((record) => ({
-            envelope: {
-              ...record,
-              audience: record.audience.map((row) => ({
-                recipientId: row.recipientId, ordinal: row.ordinal, facts: row.facts,
-              })),
-            },
-            domainEventId: record.id,
-            replaySourceType: record.aggregateType,
-            replaySourceId: record.aggregateId,
-          })),
-        }, tx);
-        if (isInPrismaTransactionScope()) {
-          await deferUntilAfterCommit(() =>
-            redisCache.publishDurableQueueWakeup("domain-event"));
-        }
+        await statement("schedule-event-append", () => bulkAppendDomainEvents(tx,
+          eventInputs.map(({ recipientId, ...input }) => ({
+            ...input,
+            audience: [{ recipientId, ordinal: 0, facts: {} }],
+          }))));
       }
         return relocated;
       }

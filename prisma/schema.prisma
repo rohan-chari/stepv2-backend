@@ -3785,6 +3785,7 @@ model DomainEventOutbox {
   @@index([status, availableAt, occurredAt])
   @@index([aggregateType, aggregateId, occurredAt])
   @@index([leaseToken])
+  @@index([createdAt, id], map: "domain_event_outbox_created_at_id_receipt_recovery_idx")
   @@map("domain_event_outbox")
 }
 
@@ -3810,6 +3811,43 @@ model DomainEventReceipt {
 
   @@index([replaySourceType, replaySourceId, eventKey])
   @@map("domain_event_receipts")
+}
+
+// Bounded, durable repair work for historical or exceptional receipt gaps.
+// This table intentionally has no foreign key to the outbox: SOURCE_DELETED
+// candidates are retained as terminal evidence after event retention.
+model DomainEventReceiptRecovery {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domainEventId  String    @unique @map("domain_event_id") @db.Uuid
+  eventKey       String    @unique @map("event_key") @db.VarChar(255)
+  reason         String    @db.VarChar(64)
+  status         String    @default("QUEUED") @db.VarChar(32)
+  attemptCount  Int       @default(0) @map("attempt_count")
+  availableAt   DateTime  @default(now()) @map("available_at")
+  leaseUntil    DateTime? @map("lease_until")
+  leaseToken    String?   @map("lease_token") @db.VarChar(64)
+  lastErrorCode String?   @map("last_error_code") @db.VarChar(128)
+  lastErrorAt   DateTime? @map("last_error_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  @@index([availableAt, id], map: "domain_event_receipt_recovery_due_idx")
+  @@index([leaseUntil, id], map: "domain_event_receipt_recovery_lease_idx")
+  @@map("domain_event_receipt_recovery")
+}
+
+model DomainEventReceiptDiscovery {
+  id              String    @id
+  cutoff          DateTime
+  cursorCreatedAt DateTime? @map("cursor_created_at")
+  cursorId        String?   @map("cursor_id") @db.Uuid
+  scanned         BigInt    @default(0)
+  discovered      BigInt    @default(0)
+  completedAt     DateTime? @map("completed_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+
+  @@map("domain_event_receipt_discovery")
 }
 
 model DomainEventAudience {
