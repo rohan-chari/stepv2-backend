@@ -19,7 +19,7 @@ ${EVENT_PROOF_CTE}, local_candidates AS MATERIALIZED (
   WHERE impact.race_id=$1
     AND entitlement.start_outcome IN ('ACTIVATED_ON_TIME','ACTIVATED_LATE_JOIN')
     AND entitlement.ends_at > race.started_at AND entitlement.starts_at <= $2
-  ORDER BY entitlement.starts_at, impact.event_id LIMIT ${cache.MAX_ROWS + 1}
+  ORDER BY entitlement.starts_at, impact.event_id, entitlement.id, impact.id, entitlement.user_id LIMIT ${cache.MAX_ROWS + 1}
 ), local_events AS (
   SELECT event.id, candidate."startsAt", candidate."endsAt", event.multiplier, event.label,
     event.schedule_mode AS "scheduleMode",
@@ -35,11 +35,11 @@ ${EVENT_PROOF_CTE}, local_candidates AS MATERIALIZED (
     "entitlementId" text, "impactId" text, "userId" text)
 )
 SELECT event.*, ${PROOF_COLUMNS},
-  COUNT(*) OVER (PARTITION BY event."startsAt", event.id) AS "f_orderTies",
+  COUNT(*) OVER (PARTITION BY event."startsAt", event.id, event."entitlementId", event."impactId", event."userId") AS "f_orderTies",
   (event.id IS NULL OR (event."startsAt"=date_trunc('milliseconds',event."startsAt") AND
     event."endsAt"=date_trunc('milliseconds',event."endsAt"))) AS "f_eventPrecisionSafe"
 FROM event_proof proof
-LEFT JOIN local_events event ON TRUE ORDER BY event."startsAt", event.id`;
+LEFT JOIN local_events event ON TRUE ORDER BY event."startsAt", event.id, event."entitlementId", event."impactId", event."userId"`;
 
 // One statement stamps rows AND cursor/witnesses from the same MVCC snapshot.
 // The nested deployed query keeps its precise ordering and half-open predicates.
@@ -48,7 +48,7 @@ WITH ${EVENT_PROOF_CTE}, event_rows AS MATERIALIZED (
   ${FULL_EVENT_SQL} LIMIT ${cache.MAX_ROWS + 1}
 )
 SELECT event.*, ${PROOF_COLUMNS},
-  COUNT(*) OVER (PARTITION BY event."startsAt", event.id) AS "f_orderTies",
+  COUNT(*) OVER (PARTITION BY event."startsAt", event.id, event."entitlementId", event."impactId", event."userId") AS "f_orderTies",
   (event.id IS NULL OR (event."startsAt"=date_trunc('milliseconds',event."startsAt") AND
     event."endsAt"=date_trunc('milliseconds',event."endsAt"))) AS "f_eventPrecisionSafe",
   (event."startsAt", event.id, 'START'::text) >
@@ -56,7 +56,7 @@ SELECT event.*, ${PROOF_COLUMNS},
   (event."endsAt", event.id, 'END'::text) >
     (proof."boundaryAt", proof."cursorEventId", proof."boundaryKind"::text) AS "f_endPending"
 FROM event_rows event
-CROSS JOIN event_proof proof ORDER BY event."startsAt", event.id`;
+CROSS JOIN event_proof proof ORDER BY event."startsAt", event.id, event."entitlementId", event."impactId", event."userId"`;
 
 async function readRaceFingerprintEvents({ client, raceId, now, horizon, proof }) {
   const fallback = () => {
@@ -80,9 +80,8 @@ async function readRaceFingerprintEvents({ client, raceId, now, horizon, proof }
   const loadedProof = proofFromRow(loaded[0], raceId);
   if (!matches(proof, loadedProof)) { cache.count('revision_mismatch'); return fallback(); }
   const events = loaded.filter(row => row.id);
-  // The deployed ORDER BY is not total for multiple same-window local users.
-  // Preserve its original plan/order by bypassing, not by silently choosing a
-  // new tie-breaker that could change mixed-version fingerprint digests.
+  // The full and cached queries share a total order, including per-user rows.
+  // Retain a fail-closed guard for duplicate complete identities.
   if (events.some(row => Number(row.f_orderTies) !== 1)) { cache.count('missing_proof'); return fallback(); }
   if (loaded.some(row => row.f_eventPrecisionSafe !== true)) { cache.count('missing_proof'); return fallback(); }
   if (events.length > cache.MAX_ROWS) { cache.count('oversize'); return fallback(); }

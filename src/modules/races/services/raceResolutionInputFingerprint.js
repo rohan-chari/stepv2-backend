@@ -73,8 +73,7 @@ async function buildRaceResolutionInputFingerprint({
        ${includePresentation ? "LEFT JOIN users person ON person.id=participant.user_id" : ""}
        WHERE race.id=$1
        ORDER BY participant.id`,
-      raceId,
-      ...(eventCacheRead ? [horizon] : [])
+      raceId
     ),
     client.$queryRawUnsafe(
       `/* steps:prepared-read:v1 */ WITH members AS (
@@ -183,10 +182,9 @@ async function buildRaceResolutionInputFingerprint({
     row.status === "EXPIRED" && !["LEECH", "HITCHHIKE"].includes(row.type));
   const activeEffects = allEffects.filter((row) => row.status !== "EXPIRED");
   const payload = {
-    // Schema 4 protects the complete lean roster and historical scoring
-    // effects reused by the compute adapters. Older display-artifact digests
-    // mismatch and fall back to fresh computation during rolling deployment.
-    schema: 4,
+    // Schema 5 adds deterministic per-entitlement event ordering. Older display
+    // artifact digests mismatch and safely fall back during rolling deployment.
+    schema: 5,
     race: raceRow.race,
     // Names are presentation data: artifact commands rebind them at commit.
     // A rename must not invalidate an otherwise identical scoring artifact.

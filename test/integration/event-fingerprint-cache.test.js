@@ -95,7 +95,7 @@ const planning = result => result.reads.find(r => !r.transaction);
 const eventQueries = read => read.queries.filter(q => !q.includes('AS "r_id"') &&
   /global_step_events|global_step_event_entitlements|global_event_race_impacts/.test(q));
 const json = value => JSON.parse(JSON.stringify(value));
-async function cacheKeys(kind = '*') { return redis.keys(`event-fingerprint-test:event-fingerprint:v2:${kind}:*`); }
+async function cacheKeys(kind = '*') { return redis.keys(`event-fingerprint-test:event-fingerprint:v3:${kind}:*`); }
 
 for (const mode of ['LEGACY_GLOBAL', 'LOCAL_ENTITLEMENTS']) {
   it(`real HTTP + worker cold/warm parity and measured query budget: ${mode}`, async t => {
@@ -248,7 +248,7 @@ for (const pauseCommand of ['MGET', 'SET']) {
     const f = await fixture();
     await upload(f, 50);
     const proxy = await holdRedisCommand({ target: redisUrl.toString(), matches: args =>
-      args[0].toUpperCase() === pauseCommand && args.some(a => a.includes('event-fingerprint:v2:')) });
+      args[0].toUpperCase() === pauseCommand && args.some(a => a.includes('event-fingerprint:v3:')) });
     const worker = spawnTick({ REDIS_URL: proxy.url });
     try {
       await Promise.race([proxy.waiting, delay(5000).then(() => { throw new Error('cache command was never observed'); })]);
@@ -305,12 +305,12 @@ it('SQL text collation, duplicate IDs, and impact history for inactive members s
   const cold = await run(f, 50);
   const warm = await run(f, 60);
   assert.equal(warm.score, 120);
-  assert.equal(planning(cold).queries.length, 4, 'tied windows must go directly to canonical SQL without a failed fill');
-  assert.equal(planning(warm).queries.length, 4, 'repeated tied windows must not add a planning SELECT');
+  assert.equal(planning(cold).queries.length, 4, 'cold tied windows populate the canonical cache');
+  assert.equal(planning(warm).queries.length, 3, 'warm tied windows reuse the canonical cache');
   assert.deepEqual(json(planning(warm).value.globalEvents), json(planning(cold).value.globalEvents));
   assert.equal(planning(warm).value.globalEvents.filter(e => e.id === f.event.id).length, 2);
   assert.ok(planning(warm).value.globalEvents.some(e => e.userId === other.user.id));
-  assert.ok(eventQueries(planning(warm)).length > 0, 'ambiguous SQL ties must bypass cache rather than invent a stable order');
+  assert.equal(eventQueries(planning(warm)).length, 0, 'unique entitlement/impact keys resolve tied event windows');
   assert.deepEqual(json(planning(warm).value.globalEvents), json(warm.reads.find(r => r.transaction).value.globalEvents));
 });
 
@@ -455,4 +455,69 @@ it('DB tuple accounting includes trigger costs: local stamp updates no other row
     }
   } finally { await client.query('ROLLBACK'); await client.end(); }
   t.diagnostic(JSON.stringify(reports));
+});
+
+it('tied local events reuse a canonical cache vector through sync, refresh, and final scoring', async () => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  const other = await createTestUser({ timezone: 'UTC' });
+  await prisma.raceParticipant.create({ data: {
+    raceId: f.race.id, userId: other.user.id, status: 'ACCEPTED', joinedAt: f.race.startedAt,
+  } });
+  await prisma.globalStepEventEntitlement.create({ data: {
+    eventId: f.event.id, userId: other.user.id, timezone: 'UTC',
+    localDate: f.event.startsAt.toISOString().slice(0, 10), startsAt: f.event.startsAt,
+    endsAt: f.event.endsAt, startOutcome: 'ACTIVATED_ON_TIME',
+  } });
+  await prisma.globalEventRaceImpact.create({ data: {
+    eventId: f.event.id, raceId: f.race.id, userId: other.user.id,
+  } });
+  const cold = await run(f, 50);
+  const warm = await run(f, 60);
+  assert.equal(cold.score, 100);
+  assert.equal(warm.score, 120);
+  assert.equal(eventQueries(planning(warm)).length, 0, 'tied participants must hit the event cache');
+  assert.equal(planning(warm).queries.length, 3);
+  assert.equal(planning(warm).value.globalEvents.length, 2);
+  assert.deepEqual(json(planning(warm).value.globalEvents), json(warm.reads.find(r => r.transaction).value.globalEvents));
+  const expected = await prisma.$queryRawUnsafe(`SELECT entitlement.id AS "entitlementId"
+    FROM global_step_event_entitlements entitlement
+    JOIN global_event_race_impacts impact ON impact.event_id=entitlement.event_id AND impact.user_id=entitlement.user_id
+    WHERE impact.race_id=$1 ORDER BY entitlement.starts_at,entitlement.event_id,
+      entitlement.id,impact.id,entitlement.user_id`, f.race.id);
+  assert.deepEqual(planning(warm).value.globalEvents.map(e => e.entitlementId), expected.map(e => e.entitlementId));
+  await redis.del(...await cacheKeys('local'));
+  const refreshed = await run(f, 70);
+  assert.equal(refreshed.score, 140);
+  assert.equal(eventQueries(planning(refreshed)).length, 1);
+  assert.match(eventQueries(planning(refreshed))[0], /event-fingerprint:local/);
+  assert.deepEqual(json(planning(refreshed).value.globalEvents), json(refreshed.reads.find(r => r.transaction).value.globalEvents));
+  let changed = false;
+  const raced = await run(f, 80, async () => {
+    if (changed) return;
+    changed = true;
+    await prisma.$executeRawUnsafe('UPDATE global_step_events SET multiplier=3 WHERE id=$1', f.event.id);
+  });
+  assert.equal(changed, true);
+  assert.equal(raced.score, 240, 'the final fence must reject the old cached multiplier');
+  assert.equal(await score(f, { 'X-Client-Features': 'race-display-clock-v1' }), 240);
+});
+
+it('versioned event ordering ignores old cache vectors even with valid checksums', async () => {
+  const f = await fixture();
+  await run(f, 50);
+  const keys = await cacheKeys();
+  assert.ok(keys.length);
+  for (const key of keys) {
+    const { checksum, ...payload } = JSON.parse(await redis.get(key));
+    assert.equal(payload.schema, 3, 'ordered event vectors require a new cache schema');
+    payload.schema = 2;
+    payload.events = payload.events.map(row => ({ ...row, multiplier: 99 }));
+    payload.checksum = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    await redis.set(key.replace('event-fingerprint:v3:', 'event-fingerprint:v2:'), JSON.stringify(payload), 'PX', 30000);
+    await redis.del(key);
+  }
+  const result = await run(f, 60);
+  assert.equal(result.score, 120);
+  assert.ok(eventQueries(planning(result)).length > 0, 'the v2 namespace must not warm v3');
+  assert.ok((await cacheKeys()).every(key => key.includes('event-fingerprint:v3:')));
 });

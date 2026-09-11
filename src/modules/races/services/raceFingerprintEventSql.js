@@ -1,5 +1,5 @@
 // The deployed recap event query, extracted verbatim. Final transaction fences
-// retain PostgreSQL authority. Preserve eligibility, ordering, and row shape.
+// retain PostgreSQL authority. Versioned fingerprints use a total event order.
 const FULL_EVENT_SQL = `/* steps:prepared-read:v1 */ WITH race_window AS (
          SELECT started_at FROM races WHERE id=$1
        ), schedule AS (
@@ -58,6 +58,6 @@ const FULL_EVENT_SQL = `/* steps:prepared-read:v1 */ WITH race_window AS (
          event.user_id AS "userId",
          schedule.current AS "globalBoundaryScheduleCurrent"
        FROM schedule LEFT JOIN candidate_events event ON TRUE
-       ORDER BY event.starts_at, event.id`;
+       ORDER BY event.starts_at, event.id, event.entitlement_id, event.impact_id, event.user_id`;
 
 module.exports = { FULL_EVENT_SQL };

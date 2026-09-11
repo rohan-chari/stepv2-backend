@@ -149,7 +149,7 @@ const canonical = (value) =>
       : JSON.stringify(value);
 for (const team of [false, true])
   test(
-    `typed fingerprint preserves legacy payload/digest and HTTP results: team=${team}`,
+    `typed fingerprint preserves payload/HTTP results and versions its digest: team=${team}`,
     { timeout: 45000 },
     async () => {
       await cleanDatabase();
@@ -184,7 +184,7 @@ for (const team of [false, true])
         assert.deepEqual(first.value.participants, legacy.participants);
         const v = first.value;
         const payload = {
-          schema: 4,
+          schema: 5,
           race: legacy.race,
           participants: legacy.participants.map(({ user, ...p }) => p),
           inputs: v.inputs,
@@ -200,7 +200,12 @@ for (const team of [false, true])
         assert.equal(
           v.digest,
           crypto.createHash("sha256").update(canonical(payload)).digest("hex"),
-          "same immutable facts retain the deployed digest",
+          "same immutable facts use the current versioned digest",
+        );
+        assert.notEqual(
+          v.digest,
+          crypto.createHash("sha256").update(canonical({ ...payload, schema: 4 })).digest("hex"),
+          "old artifact fingerprints must mismatch after the ordering version change",
         );
         await waitFor(() => committed(race, job.generation));
         const typed = w.messages.filter(
@@ -208,14 +213,15 @@ for (const team of [false, true])
             m.query?.includes('AS "r_id"') && m.query.includes('AS "p_id"'),
         );
         assert.ok(typed.length, "real worker must request typed roster rows");
-        assert.ok(
-          typed.every(
-            (m) =>
-              !m.query.includes("jsonb_build_object") &&
-              !m.query.includes("jsonb_agg"),
-          ),
-          "roster JSON assembly leaves PostgreSQL",
-        );
+        for (const { query } of typed) {
+          const rosterStart = query.indexOf('SELECT race.id AS "r_id"');
+          assert.ok(rosterStart >= 0, "typed roster SELECT must be present");
+          const proofPrefix = query.slice(0, rosterStart);
+          assert.doesNotMatch(proofPrefix, /race_participants|\busers\b/,
+            "proof CTE must not hide roster JSON assembly");
+          assert.doesNotMatch(query.slice(rosterStart), /jsonb_build_object|jsonb_agg/,
+            "roster JSON assembly leaves PostgreSQL");
+        }
         const read = async () => {
           const r = await request(
             server.baseUrl,
