@@ -30,3 +30,29 @@ All frozen iOS and Android clients retain their existing API and normal push/inb
 This branch is based on `f562902` from origin/main, which includes other previously committed work. It is not a declaration that all preceding origin/main changes are authorized for deployment. The runtime change here is limited to the single reconciler file. Production deployment requires fresh user approval and a release based on the verified production ancestry; cherry-pick this scoped change if other main-branch work is not approved.
 
 Independent code review returned SHIP with no blockers, issues or nits. Flutter analysis was clean; no frontend source changed. The accompanying verification evidence records final checks. Production has not been changed by this implementation.
+
+## Authorized production deployment — 2026-09-12
+
+The user explicitly approved deployment after main reconciliation. Runtime
+`5e04f54733c38afc3d269524c19fc22dd46acf61` replaced verified production
+`f5629025e8a3d7be9e305dae7231556ded97bc27`. Only the reconciler runtime file
+changed; other changes are tests and documentation. No migration, dependency
+installation, environment change, native build or app upload was required.
+
+The serialized PM2 wrapper completed, saved the verified process list and
+confirmed two HTTP workers, one resolution worker, one cron worker and the
+32-connection budget. Staging remained stopped. At 22:42:42 UTC, all production
+processes had new PIDs, the retired scan had zero active database executions,
+and no committed migrations were unapplied. Public health returned API and
+Redis OK. This confirms deployment, not a measured CPU improvement.
+
+Required referral audit/apply showed zero missing rows and zero applied rows.
+Powerup-copy dry run already matched; no copy write was needed. Balance drift
+reported three existing Decoy differences between the committed snapshot and
+live settings; these were preserved. Production's pre-existing package-lock
+peer-metadata diff was backed up and retained. Rollback anchor:
+`pre-notification-repair-retirement-20260912`.
+
+Evidence: [deployment verification](evidence/notification-snapshot-repair-20260912/deployment-verification.json).
+This deployment supersedes the pending-backend status in the earlier main
+reconciliation report. Frontend app releases remain pending.

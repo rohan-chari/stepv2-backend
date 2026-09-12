@@ -1,0 +1,52 @@
+{
+  "time": "2026-09-12T22:42:42.373Z",
+  "commit": "5e04f54733c38afc3d269524c19fc22dd46acf61",
+  "activeRetiredScan": 0,
+  "unappliedMigrations": [],
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "status": "stopped",
+      "startedAt": "2026-09-02T18:17:59.797Z"
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "pid": 1726641,
+      "status": "online",
+      "startedAt": "2026-09-12T22:41:32.285Z"
+    },
+    {
+      "name": "steps-tracker-cron",
+      "pid": 1726659,
+      "status": "online",
+      "startedAt": "2026-09-12T22:41:32.621Z"
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1726482,
+      "status": "online",
+      "startedAt": "2026-09-12T22:40:53.668Z"
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1726494,
+      "status": "online",
+      "startedAt": "2026-09-12T22:40:55.269Z"
+    }
+  ],
+  "health": {
+    "status": "ok",
+    "redis": "ok"
+  },
+  "poolBudget": 32,
+  "referralCatchUp": {
+    "before": 0,
+    "applied": 0,
+    "after": 0
+  },
+  "copyCatalog": "already matches",
+  "balanceDrift": "Existing Decoy differences retained; no economic configuration changes",
+  "runtimeDiffFromPreviousProduction": [
+    "src/modules/notifications/jobs/notificationCompletenessReconciler.js"
+  ]
+}
