@@ -1636,7 +1636,7 @@ describe("global-event reliability v2 contract", () => {
       "intentional terminal payload cleanup never becomes repair work");
   });
 
-  it("leaves completed materialization untouched while repairing overdue outbox, snapshot, and terminal-target gaps", async () => {
+  it("leaves retired materialization and snapshot repairs idle while repairing overdue outboxes and terminal targets", async () => {
     const startsAt = new Date("2098-08-26T10:00:00.000Z");
     const current = new Date(startsAt.getTime() + 60_000);
     const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
@@ -1697,7 +1697,8 @@ describe("global-event reliability v2 contract", () => {
     })();
     assert.equal(repaired.materializationGapsRearmed, 0);
     assert.equal(repaired.overdueOutboxesRearmed, 1);
-    assert.equal(repaired.missingSnapshotsRearmed, 1);
+    assert.equal(repaired.missingSnapshotsRearmed, 0,
+      "delivery claims own target snapshots; the historical snapshot sweep is retired");
     assert.equal(repaired.terminalTargetsRepaired, 1);
     assert.equal(
       Object.hasOwn(repaired, "released"),

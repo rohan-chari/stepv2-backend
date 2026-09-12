@@ -1,0 +1,30 @@
+{
+  "change": "retire missingSnapshotsRearmed historical scan",
+  "base": "f562902",
+  "testsFirst": {
+    "pass": 3,
+    "fail": 2,
+    "failure": "expected missingSnapshotsRearmed=0, actual1 before implementation"
+  },
+  "after": {
+    "tests": 70,
+    "pass": 70,
+    "fail": 0,
+    "skipped": 0,
+    "suites": 4
+  },
+  "testDatabase": "bara_notification_retirement_20260912_test",
+  "testServer": "loopback",
+  "migrationCheck": "passed",
+  "review": {
+    "verdict": "SHIP",
+    "blockers": 0,
+    "issues": 0,
+    "nits": 0
+  },
+  "productionDeployed": false,
+  "frontendCodeChanged": false,
+  "migrationAdded": false,
+  "flagAdded": false,
+  "flutterAnalyze": "No issues found"
+}

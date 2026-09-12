@@ -1,0 +1,13 @@
+{
+  "runtime": "0b9b1b7513170abbf6d5207a5b57881f3da667c4",
+  "testDatabase": "bara_notification_research_20260912_test",
+  "testServer": "loopback",
+  "migrations": "passed",
+  "existingDeliveryAdmissionTests": 26,
+  "targetedReliabilityTests": 5,
+  "failuresAfterTestConfiguration": 0,
+  "initialHarnessFailure": "missing test-only SESSION_TOKEN_SECRET; corrected for rerun",
+  "applicationChanges": false,
+  "productionWrites": false,
+  "liveProviderSendTested": false
+}

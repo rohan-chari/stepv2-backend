@@ -175,30 +175,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
          FROM candidates WHERE attempt.id=candidates.id`,
       current, pageSize,
     );
-    const missingSnapshotsRearmed = await prisma.$executeRawUnsafe(
-      `WITH candidates AS (
-         SELECT outbox.id
-           FROM inbox_delivery_outbox outbox
-           JOIN inbox_alerts alert ON alert.id=outbox.alert_id
-           JOIN notification_schedules schedule
-             ON schedule.recipient_user_id=alert.user_id
-            AND schedule.delivery_key=alert.source_key
-          WHERE schedule.type='GLOBAL_EVENT_STARTED'
-            AND outbox.status IN ('RETRY','LEASED','DELIVERED','EXHAUSTED')
-            AND (outbox.expires_at IS NULL OR outbox.expires_at > $1)
-            AND NOT EXISTS (
-              SELECT 1 FROM inbox_delivery_device_attempts attempt
-               WHERE attempt.outbox_id=outbox.id
-            )
-          ORDER BY outbox.updated_at,outbox.id LIMIT $2
-       )
-       UPDATE inbox_delivery_outbox outbox
-          SET status='RETRY',available_at=$1,retry_at=$1,
-              lease_until=NULL,lease_token=NULL,delivered_at=NULL,updated_at=$1,
-              last_error_code='TARGET_SNAPSHOT_RECONCILED'
-         FROM candidates WHERE outbox.id=candidates.id`,
-      current, pageSize,
-    );
     const expired = await prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRawUnsafe(
       `WITH candidates AS MATERIALIZED (
@@ -222,8 +198,7 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       return rows.length;
     });
     if (Number(unknownReset) + Number(projectionsRearmed) > 0) await publishDomainWake();
-    if (Number(overdueOutboxesRearmed) +
-        Number(missingSnapshotsRearmed) > 0) await publishNotificationWake();
+    if (Number(overdueOutboxesRearmed) > 0) await publishNotificationWake();
     return {
       unknownEventsReset: Number(unknownReset),
       projectionsRearmed: Number(projectionsRearmed),
@@ -232,12 +207,15 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       materializationGapsRearmed: 0,
       overdueOutboxesRearmed: Number(overdueOutboxesRearmed),
       terminalTargetsRepaired: Number(terminalTargetsRepaired),
-      missingSnapshotsRearmed: Number(missingSnapshotsRearmed),
+      // Delivery claims create targets (including NO_DEVICE) and recover
+      // expired leases. Retain the diagnostic field without scanning history
+      // or reopening terminal outboxes whose target records are missing.
+      missingSnapshotsRearmed: 0,
       expired: Number(expired),
       fullPage: Number(unknownReset) === pageSize || Number(projectionsRearmed) === pageSize ||
         Number(linkedDormant) === pageSize ||
         Number(overdueOutboxesRearmed) === pageSize || Number(terminalTargetsRepaired) === pageSize ||
-        Number(missingSnapshotsRearmed) === pageSize || Number(expired) === pageSize,
+        Number(expired) === pageSize,
     };
   };
 }
