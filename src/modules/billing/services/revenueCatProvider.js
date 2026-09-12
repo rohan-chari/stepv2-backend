@@ -22,8 +22,8 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
  return {async getCustomerHistory(identity){
   const observedAt=new Date().toISOString();
   const customer=`${prefix}customers/${encodeURIComponent(identity.id)}`;
-  // Do not filter environment upstream: observing an unexpected realm must fail
-  // visibly instead of making an SDK purchase appear mysteriously missing.
+  // Fetch every page: one provider identity can retain both TestFlight and
+  // live purchases. Validate ownership and realm before selecting local benefits.
   const [rawPurchases,rawSubscriptions]=await Promise.all([list(`${customer}/purchases?limit=100`),list(`${customer}/subscriptions?limit=100`)]);
   const productCache=new Map();
   async function resolve(productId,store,storeIdentifier) {
@@ -36,10 +36,11 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
   }
   function ownership(row) {
    if(row.customer_id!==identity.id||row.original_customer_id!==identity.id||row.ownership!=='purchased')throw new AppError('Purchase belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
-   if(row.environment!==identity.environment)throw new AppError('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
+   if(!['production','sandbox'].includes(row.environment)||!['production','sandbox'].includes(identity.environment))throw new AppError('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
+   return row.environment===identity.environment;
   }
   const purchases=[],subscriptions=[];
-  for(const row of rawPurchases){ownership(row);const {mapped,appId}=await resolve(row.product_id,row.store);
+  for(const row of rawPurchases){if(!ownership(row))continue;const {mapped,appId}=await resolve(row.product_id,row.store);
    if(!['coins','non_consumable'].includes(mapped.kind))throw fail('Unexpected non-subscription product');
    if(typeof row.status!=='string'||!row.status)throw fail('Missing purchase status');
    if(mapped.kind==='non_consumable'&&row.quantity!==1)throw fail('Invalid non-consumable quantity');
@@ -48,7 +49,7 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
    const transactionId=String(row.store_purchase_identifier??'');if(!transactionId)throw fail('Missing transaction identifier');
    purchases.push({transactionId,providerId:row.id,productId:mapped.id,appId,store:row.store,environment:row.environment,purchasedAt:date(row.purchased_at),expiresAt:null,quantity,paid:Number(row.revenue_in_usd?.gross)>0&&['owned','refunded'].includes(row.status),purchaseStatus:row.status,refunded:row.status==='refunded',subscriptionId:null});
   }
-  for(const row of rawSubscriptions){ownership(row);const {mapped,appId}=await resolve(row.product_id,row.store);if(mapped.kind!=='subscription')throw fail('Unexpected subscription product');
+  for(const row of rawSubscriptions){if(!ownership(row))continue;const {mapped,appId}=await resolve(row.product_id,row.store);if(mapped.kind!=='subscription')throw fail('Unexpected subscription product');
    const transactions=await list(`${prefix}subscriptions/${encodeURIComponent(row.id)}/transactions?limit=100`);
    for(const transaction of transactions){const product=await resolve(row.product_id,row.store,transaction.product_store_identifier);
     if(product.mapped.kind!=='subscription'||!transaction.id)throw fail('Invalid subscription transaction');
