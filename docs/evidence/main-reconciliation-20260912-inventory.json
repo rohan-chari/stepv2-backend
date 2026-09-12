@@ -1,0 +1,1398 @@
+{
+  "repo": "backend",
+  "main": "9b08e5f9b50250cae431177e67e73e24dd6b2b34",
+  "originMain": "f5629025e8a3d7be9e305dae7231556ded97bc27",
+  "head": "a45dc89fc82d825c8a5e14b5dc1430108ed5c227",
+  "branches": [
+    {
+      "sha": "5ab0e0db81c3432042379f9d2826ccb7724376ba",
+      "refs": [
+        "1.4.2",
+        "origin/1.4.2"
+      ],
+      "date": "2026-06-30 20:38:15 -0400",
+      "subject": "1.4.2: box over-grant fix, expired-race powerup guard, mirror silent, ranked pause, hide-from-leaderboard",
+      "inMain": true
+    },
+    {
+      "sha": "83fefed6506e2e997167d9f065c2b527ce987da2",
+      "refs": [
+        "1.7.0",
+        "origin/1.7.0"
+      ],
+      "date": "2026-07-17 15:39:38 -0400",
+      "subject": "Feature batch 2026-07-17 (backend)",
+      "inMain": true
+    },
+    {
+      "sha": "179516527147a29d1caf5be68002c8470743d1cc",
+      "refs": [
+        "2.2.0",
+        "feature/batch-2026-08-08",
+        "origin/2.2.0",
+        "origin/feature/batch-2026-08-08"
+      ],
+      "date": "2026-08-09 13:47:17 -0400",
+      "subject": "Code-review BLOCKER 1: validate reroll localDate and widen the consume window",
+      "inMain": true
+    },
+    {
+      "sha": "c1b8df0d2e574005867fed1244bd049fca4ba24f",
+      "refs": [
+        "2.2.4",
+        "origin/2.2.4"
+      ],
+      "date": "2026-08-10 22:30:32 -0400",
+      "subject": "Batch 2026-08-10b: reroll-batch endpoint, discard cap visibility, Rainstorm halving",
+      "inMain": true
+    },
+    {
+      "sha": "af892b1da07f34b6d8373b0be7dec0694e4a7e1f",
+      "refs": [
+        "2.3.9",
+        "origin/2.3.9"
+      ],
+      "date": "2026-08-18 22:41:51 -0400",
+      "subject": "perf: optimize request paths and payloads",
+      "inMain": true
+    },
+    {
+      "sha": "2e41514087102bfa1a86e596b1d5e797ba9974b2",
+      "refs": [
+        "android-release",
+        "origin/android-release"
+      ],
+      "date": "2026-06-16 11:54:31 -0400",
+      "subject": "Privacy policy: add Android / Health Connect + Google Sign-In coverage",
+      "inMain": true
+    },
+    {
+      "sha": "a2f575a7326355bf187cd6256d1f980343d574bd",
+      "refs": [
+        "archive/pre-event-main-sync-20260910"
+      ],
+      "date": "2026-09-09 18:06:52 -0400",
+      "subject": "docs: record green unit suite and isolated fixture repairs",
+      "inMain": false,
+      "behind": 87,
+      "ahead": 11,
+      "uniquePatches": [
+        "577b43991cfaf76f2a56f599f8aba32c2d3208d6 Add compatible character wardrobe writers and additive schema (release A)",
+        "5c5fdbc78029f22eebee5265f7719c43a8d487ad test: align legacy fixtures with current device and worker contracts"
+      ],
+      "equivalentPatches": 9
+    },
+    {
+      "sha": "d47b309964a7e120182c56b3492efc88706ff944",
+      "refs": [
+        "archive/pre-integrated-refund-d47b309"
+      ],
+      "date": "2026-08-20 11:44:22 -0400",
+      "subject": "fix: refund rejected redeemed powerups",
+      "inMain": false,
+      "behind": 337,
+      "ahead": 1,
+      "uniquePatches": [],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "68865a074b52c5e195f383884ec1475dbf38b693",
+      "refs": [
+        "backup/pre-flatten-20260903"
+      ],
+      "date": "2026-09-03 23:28:47 -0400",
+      "subject": "Cover batched daily mover participant reads",
+      "inMain": false,
+      "behind": 169,
+      "ahead": 55,
+      "uniquePatches": [
+        "c0c9a942396b3bf40dbc6275fe0c204d9bdacca0 Add guarded cron load harness",
+        "56727e8fc5a6f2b112a4fe8d359ad4c5e1ca498b Handle restored cron candidates safely",
+        "0e68fd05f7adef2b63cb1a0f595c5ad553a0c72a Scope cron smoke settling to owned races",
+        "6e1ca56c5f298a0fd1c904c7f3ca4c7b195feaa9 Quarantine restored cron queues before capacity workers start",
+        "e5343f5357f66e8f53d6fe692dcbb1349e13a8d6 Use correct queue identifier types",
+        "f60d47972c81a46def405fd22ec547a385fada55 Match queue quarantine enum states",
+        "0f9611bfb5fbf16939f435ac66c6c18091381768 Bound cron smoke prewarm to foreground rate",
+        "9fde414b720c308a725315bff248946da9091095 Allow rate-selected cron smoke runs",
+        "a2df208ee9b42010409cfe0bd80d9b235d001ef8 Enable query diagnostics in isolated capacity VM",
+        "da1a59c9d842bec969ad93afc5178bc709fe086c Harden capacity query diagnostic identity check",
+        "25bd834c1deaa3b38094ecb05e08b7257f01e9a9 Allow query diagnostics across isolated worker ports",
+        "5ec81855ec5b51704964519a8bcf787c26ffccc1 Retain cron smoke top SQL evidence",
+        "40a2e206a0f8882de2c4d687884c19e21d03a38d Revert \"Retain cron smoke top SQL evidence\"",
+        "95bc72554dce82d2c7e807fbb68531d1d36245ee Revert \"Allow query diagnostics across isolated worker ports\"",
+        "f5feace2a4dc4a911cd900c1482f8f82c4af5c80 Revert \"Harden capacity query diagnostic identity check\"",
+        "709108bf402d21ae7017da33594e544845c28130 Revert \"Enable query diagnostics in isolated capacity VM\"",
+        "de67cdb4d34df3d98a8eab5d4fc31522593e7466 Revert \"Allow rate-selected cron smoke runs\"",
+        "db677b4e9e78775f1fcf11167d9a4c137e4d934e Revert \"Bound cron smoke prewarm to foreground rate\"",
+        "85063d52779bf29088161beaf45ba3e146cac8e7 Revert \"Match queue quarantine enum states\"",
+        "4f7d982c2f1f61b61e497eea26e6208bff9da17e Revert \"Use correct queue identifier types\"",
+        "79c3bc2a691cef9ea298b094ef71c45e4d8c7857 Revert \"Quarantine restored cron queues before capacity workers start\"",
+        "f0b4ef74068a3c99b824eca9e878437ce9db7ee0 Revert \"Scope cron smoke settling to owned races\"",
+        "a4aeb2f5ddc1c9a5b83d12a7a3ee0460a96818ef Revert \"Handle restored cron candidates safely\"",
+        "f0f687114fa848ed0eb7a5b8758f677849b24b1d Revert \"Add guarded cron load harness\"",
+        "df641efcad32ddb8ebc6677349694aa23220f7a9 Add focused daily mover cron benchmark",
+        "91e29753059074ab2a500e85437c1b9b82f67a7f Exercise durable daily mover path",
+        "ee1730091214377960e75964b7988225088cd1fa Capture VM CPU during daily mover benchmark",
+        "e6b70fbcac3d472fac3eb3149f56eb126b8bbe54 Optimize daily mover participant reads",
+        "c29f7a6f64457f7631d51bc692b4c10ffaf22f6e Revert daily mover participant join optimization",
+        "78bc611bbc57f8c4bb62e686a5ed3252daf190d4 Batch daily mover participant reads",
+        "5a8cb6c059af656cd072531c9694214ac3349351 Revert incomplete daily mover batch read",
+        "e1f71c4ba15adfb347d1f0fa929e63867250af96 Compute daily mover ranks in SQL",
+        "aad26ea9148f5ec8d098b4f04889a7f00f8dab5c Revert \"Compute daily mover ranks in SQL\"",
+        "5a1d88a8ad3ff117d56279b1a2161cdc8a0363b6 Use stored race status in daily mover SQL ranking",
+        "5791f14190f008fd42cb25f12bf89cbd86cd3492 Revert \"Use stored race status in daily mover SQL ranking\"",
+        "3c7bb2fee86b9c4b4c89f43e9d38b639570bca7f Batch daily mover reads with complete fields",
+        "cdfac47f2e68c0e41b8de929b2e631a87c0f752f Revert \"Batch daily mover reads with complete fields\"",
+        "3caa0517d3bcee24138ebfb8d7caa678c7f8ab7a Skip fresh daily mover event readback",
+        "c54766e3b21813dba11abbb06460ceb47c1c0772 Revert \"Skip fresh daily mover event readback\"",
+        "1fee8ccc255f4555af9327fd7a5635bc13b1485f Batch daily mover reads in bounded chunks",
+        "68e11beacfb81dcccfd4cabaf7a4171f30660f02 Revert \"Batch daily mover reads in bounded chunks\"",
+        "12f8ea9d10b92fb2f1729cb0359a9a2d6aa1a341 Time daily mover event persistence phases",
+        "d0ab3eae95955f155c8a67709de4e0ff1b9fcdb6 Avoid redundant fresh daily mover validation",
+        "28c215ba28b82b0659d78cd0a2ac0fffc857a116 Revert \"Avoid redundant fresh daily mover validation\"",
+        "5371806f5063aaff3a831e7474619727e6139ccd Drop duplicate domain event audience index",
+        "3bb4458ed88113bc9155a27127d489f0bf5b810f Revert \"Drop duplicate domain event audience index\"",
+        "c9464de598d81e2a8ad395403450b7a1ae0ece26 Skip receipt lookup for daily mover append",
+        "cda678d3af7290c98387019a08c8ee50d0bdca96 Revert \"Skip receipt lookup for daily mover append\"",
+        "11a611aa550a4e70672da8544ed809e823d57e0d Separate daily mover benchmark phases and cleanup",
+        "6bd240e6521d88058bb95e7d0a445eb57ecca2de Isolate cron benchmark measurement window",
+        "f68c74df4ba5d75914d169cd5e0567950766bf28 Remove redundant audience ordering index",
+        "4962c87ee754820e3ef141dea8122762462cc23d Select only required fields on event readback",
+        "a9e01b58327696fc2fb2fab9650232a29cd29a2a Batch daily mover participant reads",
+        "92697c8e7d533d0b2810316ee0f3a51329e3a87d Restore full event readback validation",
+        "68865a074b52c5e195f383884ec1475dbf38b693 Cover batched daily mover participant reads"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "f0d0b8d57ccdff277922cebeb3e0515a68b885da",
+      "refs": [
+        "cleanup/permanent-funded-exposure-v2-20260820"
+      ],
+      "date": "2026-08-20 12:04:22 -0400",
+      "subject": "feat: make funded exposure v2 permanent",
+      "inMain": true
+    },
+    {
+      "sha": "94f8273d97e088259c8b40d3fc6e73938b958cb3",
+      "refs": [
+        "cleanup/permanent-request-api-20260820"
+      ],
+      "date": "2026-08-20 14:23:20 -0400",
+      "subject": "refactor: graduate request API controls",
+      "inMain": true
+    },
+    {
+      "sha": "45501de5834745c70ce5a4afadb3106ae60f0c6a",
+      "refs": [
+        "cleanup/remaining-feature-controls-20260820"
+      ],
+      "date": "2026-08-20 15:48:45 -0400",
+      "subject": "refactor: retire remaining release controls",
+      "inMain": true
+    },
+    {
+      "sha": "049500e84cdcbb7a5985737a2862f78b8256237c",
+      "refs": [
+        "codex/capacity-campaign-20260819"
+      ],
+      "date": "2026-08-19 10:41:43 -0400",
+      "subject": "perf: support isolated resolution worker role",
+      "inMain": false,
+      "behind": 348,
+      "ahead": 2,
+      "uniquePatches": [
+        "6fa8ab2ca131bfb577e7a25f8b3806fe1e083782 perf: make database pool budget configurable",
+        "049500e84cdcbb7a5985737a2862f78b8256237c perf: support isolated resolution worker role"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "cc2d9f526d2f3fb1f2f11dc0d608d8dd212d6740",
+      "refs": [
+        "codex/capacity-greenlit-20260819",
+        "origin/codex/capacity-greenlit-20260819"
+      ],
+      "date": "2026-08-19 10:18:00 -0400",
+      "subject": "fix: converge concurrent daily step creates",
+      "inMain": true
+    },
+    {
+      "sha": "14d2ddeb08df7aaec6e51ee0d4c04e80cab78ee8",
+      "refs": [
+        "codex/db-cpu-remediation-20260910",
+        "origin/codex/db-cpu-remediation-20260910"
+      ],
+      "date": "2026-09-10 14:20:26 -0400",
+      "subject": "perf(db): reduce capture maintenance churn and repeated query planning",
+      "inMain": true
+    },
+    {
+      "sha": "442b749cd29f50efc0be3028e129193bc624882e",
+      "refs": [
+        "codex/event-ends-timezone-20260909",
+        "origin/codex/event-ends-timezone-20260909"
+      ],
+      "date": "2026-09-09 01:13:12 -0400",
+      "subject": "Drain event ends in bounded passes and reconcile timezone changes immediately",
+      "inMain": true
+    },
+    {
+      "sha": "4348cd68c89d899ec5e449441222d469ac75fdce",
+      "refs": [
+        "codex/home-race-card-snapshot-opt",
+        "origin/codex/home-race-card-snapshot-opt"
+      ],
+      "date": "2026-08-19 15:41:45 -0400",
+      "subject": "perf: reuse current standings on home",
+      "inMain": true
+    },
+    {
+      "sha": "80074cff7500a18ae655368efe48bb1882035232",
+      "refs": [
+        "codex/step-sync-write-opt"
+      ],
+      "date": "2026-08-19 16:24:55 -0400",
+      "subject": "perf: streamline step sync post-write work",
+      "inMain": true
+    },
+    {
+      "sha": "11a2e87ef1d5e2d79ba290cc966dca45f6476099",
+      "refs": [
+        "deploy/balance-config-2026-07-20",
+        "origin/deploy/balance-config-2026-07-20"
+      ],
+      "date": "2026-07-20 22:35:36 -0400",
+      "subject": "Fix account deletion 500 for users with tournament participation",
+      "inMain": true
+    },
+    {
+      "sha": "46bf07645d84ced8703ac07f885ea33b4738e623",
+      "refs": [
+        "deploy/batch-2026-07-26",
+        "origin/deploy/batch-2026-07-26"
+      ],
+      "date": "2026-07-26 20:33:23 -0400",
+      "subject": "Batch 2026-07-26: character powers removed, position-aware drops, onboarding v3",
+      "inMain": true
+    },
+    {
+      "sha": "7d1cdcb0de0a454bf5b4605710154738019ba45d",
+      "refs": [
+        "deploy/quick-race-cap-5-2026-08-13",
+        "origin/deploy/quick-race-cap-5-2026-08-13"
+      ],
+      "date": "2026-08-13 10:10:30 -0400",
+      "subject": "Raise quick race membership cap to five",
+      "inMain": true
+    },
+    {
+      "sha": "3288eba7435d6d237c37ca222df2fb92061569cb",
+      "refs": [
+        "deploy/turtle-character-2026-07-24",
+        "origin/deploy/turtle-character-2026-07-24"
+      ],
+      "date": "2026-07-24 23:27:11 -0400",
+      "subject": "Ship app-funded prize pools ON; pin buy-in suites; turtle is 8 frames",
+      "inMain": true
+    },
+    {
+      "sha": "907fa7f66c50a69a68857a73e91dd67bf907de8c",
+      "refs": [
+        "event-traffic-efficiency-release",
+        "origin/event-traffic-efficiency-release"
+      ],
+      "date": "2026-09-10 00:21:52 -0400",
+      "subject": "Record completed event efficiency TestFlight release",
+      "inMain": true
+    },
+    {
+      "sha": "15b1341e6ac250fd812c174d97b5f445eee47279",
+      "refs": [
+        "event-traffic-source-ablation"
+      ],
+      "date": "2026-09-09 23:41:44 -0400",
+      "subject": "Diagnostic ablation: retain production source loading for comparison",
+      "inMain": false,
+      "behind": 61,
+      "ahead": 1,
+      "uniquePatches": [
+        "15b1341e6ac250fd812c174d97b5f445eee47279 Diagnostic ablation: retain production source loading for comparison"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "7606ad5c45367e79bf74d216ce25eee2af6017c9",
+      "refs": [
+        "experiment/powerup-command-queue",
+        "origin/experiment/powerup-command-queue"
+      ],
+      "date": "2026-09-08 10:44:23 -0400",
+      "subject": "Compare direct powerups with isolated ordered queue prototypes",
+      "inMain": false,
+      "behind": 117,
+      "ahead": 1,
+      "uniquePatches": [
+        "7606ad5c45367e79bf74d216ce25eee2af6017c9 Compare direct powerups with isolated ordered queue prototypes"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "ef2f613d5aaca4dcbd307b7aefcd948ae5a5a14e",
+      "refs": [
+        "feat/live-placement"
+      ],
+      "date": "2026-06-24 14:08:59 -0400",
+      "subject": "Add Open Graph tags to homepage so barastep.com link previews show the share card",
+      "inMain": true
+    },
+    {
+      "sha": "488f8b1480ed33d370fca118eaca36946b17466b",
+      "refs": [
+        "feat/redis-cache-efficiency-20260910"
+      ],
+      "date": "2026-09-10 01:35:42 -0400",
+      "subject": "Reuse fenced Redis display fragments and 30-second race standings",
+      "inMain": true
+    },
+    {
+      "sha": "2c2873be112d36ad0d8fa2086da173f91952edc0",
+      "refs": [
+        "feat/simple-event-recap",
+        "origin/feat/simple-event-recap"
+      ],
+      "date": "2026-09-11 07:00:03 -0400",
+      "subject": "Record successful recap production cutover and follow-up",
+      "inMain": true
+    },
+    {
+      "sha": "b40bf3a3138feb69972b9a322ff053982fb17170",
+      "refs": [
+        "feature/batch-2026-08-09-backend"
+      ],
+      "date": "2026-08-10 09:13:05 -0400",
+      "subject": "Fix structural-guard regression: no bracketed cost ladder in a code comment",
+      "inMain": true
+    },
+    {
+      "sha": "db9cd34de7c1ead230cd85124be408b61aad59cc",
+      "refs": [
+        "feature/event-fingerprint-cache"
+      ],
+      "date": "2026-09-11 13:07:43 -0400",
+      "subject": "Record final cache review and test cleanup",
+      "inMain": false,
+      "behind": 28,
+      "ahead": 4,
+      "uniquePatches": [
+        "2e707a58d719ba76bdf0e896656f21d4b866925d Cache worker event fingerprints with PostgreSQL revision witnesses"
+      ],
+      "equivalentPatches": 3
+    },
+    {
+      "sha": "b9725582955aaaf03c3150d96ce4961be9fc9225",
+      "refs": [
+        "feature/immediate-challenge-join",
+        "origin/feature/immediate-challenge-join"
+      ],
+      "date": "2026-09-09 17:19:20 -0400",
+      "subject": "Record authorized immediate challenge backend deployment",
+      "inMain": false,
+      "behind": 80,
+      "ahead": 1,
+      "uniquePatches": [
+        "b9725582955aaaf03c3150d96ce4961be9fc9225 Record authorized immediate challenge backend deployment"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "bb9582e9564ba1d5e410fd9bc9127a45c3ab19b4",
+      "refs": [
+        "feature/marketing-site-rebuild",
+        "origin/feature/marketing-site-rebuild"
+      ],
+      "date": "2026-08-10 18:05:53 -0400",
+      "subject": "Marketing site rebuild (Vue + shadcn-vue) + Android waitlist",
+      "inMain": true
+    },
+    {
+      "sha": "3eb21d16cab09684a0481dd3b4cfc84332c96f70",
+      "refs": [
+        "feature/notification-domain-isolation"
+      ],
+      "date": "2026-08-25 17:35:00 -0400",
+      "subject": "Isolate global event boundary processing",
+      "inMain": true
+    },
+    {
+      "sha": "b8a2969ff977734a0a4ffde18f23749bbb803fb6",
+      "refs": [
+        "fix/coin-pack-amounts",
+        "origin/fix/coin-pack-amounts"
+      ],
+      "date": "2026-09-10 17:48:01 -0400",
+      "subject": "Merge remote-tracking branch 'origin/main' into fix/coin-pack-amounts",
+      "inMain": true
+    },
+    {
+      "sha": "f5629025e8a3d7be9e305dae7231556ded97bc27",
+      "refs": [
+        "fix/event-fingerprint-ordering-20260911",
+        "origin",
+        "origin/main",
+        "origin/release/leech-cache-20260912"
+      ],
+      "date": "2026-09-12 17:52:37 -0400",
+      "subject": "Report aggregate historical cache use for production monitoring",
+      "inMain": true
+    },
+    {
+      "sha": "7e27dc137426e29613fbf182510afadc46d2b0ad",
+      "refs": [
+        "fix/ios-only-billing-setup",
+        "origin/fix/ios-only-billing-setup"
+      ],
+      "date": "2026-09-08 18:27:44 -0400",
+      "subject": "Allow billing checkout and recovery with a single configured store",
+      "inMain": true
+    },
+    {
+      "sha": "9b368854cf8dc6cde83350967972bc98da9a1e42",
+      "refs": [
+        "fix/paged-box-preview"
+      ],
+      "date": "2026-09-10 17:54:48 -0400",
+      "subject": "Apply released 500 3000 7500 coin pack quantities",
+      "inMain": false,
+      "behind": 44,
+      "ahead": 2,
+      "uniquePatches": [],
+      "equivalentPatches": 2
+    },
+    {
+      "sha": "9b2cfb8eb650df053ed5a556a17e4659ddc8b595",
+      "refs": [
+        "fix/powerup-lock-scopes",
+        "origin/fix/powerup-lock-scopes"
+      ],
+      "date": "2026-09-08 09:58:32 -0400",
+      "subject": "Narrow powerup participant locks with HTTP concurrency coverage",
+      "inMain": true
+    },
+    {
+      "sha": "ad3e0cb3f02a81d3d9ade6710a0de4a4ffeebe5c",
+      "refs": [
+        "fix/prod-step-incident-20260911",
+        "origin/fix/prod-step-incident-20260911"
+      ],
+      "date": "2026-09-10 23:41:15 -0400",
+      "subject": "docs: record step incident deployment and remaining investigation",
+      "inMain": false,
+      "behind": 29,
+      "ahead": 1,
+      "uniquePatches": [
+        "ad3e0cb3f02a81d3d9ade6710a0de4a4ffeebe5c docs: record step incident deployment and remaining investigation"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "4fa80a601730a1bfb46faadedf4977be61481471",
+      "refs": [
+        "fix/queue-convergence-20260907",
+        "origin/fix/queue-convergence-20260907"
+      ],
+      "date": "2026-09-07 08:14:37 -0400",
+      "subject": "Record queue fix validation and concurrency comparison",
+      "inMain": true
+    },
+    {
+      "sha": "2679cb61be3c62dcd6cf070f145d5959f6596892",
+      "refs": [
+        "fix/race-effect-expiry",
+        "origin/fix/race-effect-expiry"
+      ],
+      "date": "2026-09-06 22:22:17 -0400",
+      "subject": "Reset complete cache and start receipt fixtures in integration tests",
+      "inMain": true
+    },
+    {
+      "sha": "adbae07a4b699f5048dfda85e2ceed4d897452b3",
+      "refs": [
+        "fix/read-only-race-progress",
+        "origin/fix/read-only-race-progress"
+      ],
+      "date": "2026-09-07 23:39:00 -0400",
+      "subject": "fix: keep race progress reads out of scoring queue",
+      "inMain": true
+    },
+    {
+      "sha": "9f9cd939aa474cf365722efe7eda94d46300f9fb",
+      "refs": [
+        "fix/retire-notification-snapshot-repair-20260912",
+        "origin/fix/retire-notification-snapshot-repair-20260912"
+      ],
+      "date": "2026-09-12 18:29:10 -0400",
+      "subject": "Retire historical notification target snapshot repair",
+      "inMain": false,
+      "behind": 0,
+      "ahead": 1,
+      "uniquePatches": [
+        "9f9cd939aa474cf365722efe7eda94d46300f9fb Retire historical notification target snapshot repair"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "9a4eaf87dfb089de8d7ed2438b9413af2214d4bf",
+      "refs": [
+        "fix/seeded-bucket-enrollment-2026-08-15",
+        "ship/participants-paging-and-funnel-2026-08-15",
+        "origin/ship/participants-paging-and-funnel-2026-08-15"
+      ],
+      "date": "2026-08-15 19:03:26 -0400",
+      "subject": "feat: paginate race.participants on GET /races/:id and /races/:id/bootstrap",
+      "inMain": true
+    },
+    {
+      "sha": "eb52ce5f2c46823964b4e60a7d1edc5ccc977e1c",
+      "refs": [
+        "fix/shared-powerup-race-guards",
+        "origin/fix/shared-powerup-race-guards"
+      ],
+      "date": "2026-09-08 12:54:28 -0400",
+      "subject": "Record verified shared powerup guard production rollout",
+      "inMain": false,
+      "behind": 115,
+      "ahead": 1,
+      "uniquePatches": [
+        "eb52ce5f2c46823964b4e60a7d1edc5ccc977e1c Record verified shared powerup guard production rollout"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "eaea1e842813bec5da868aaca2e32007cd6c610e",
+      "refs": [
+        "fix/snapshot-success-indexes"
+      ],
+      "date": "2026-09-07 13:44:47 -0400",
+      "subject": "Index successful snapshot history lookups concurrently",
+      "inMain": true
+    },
+    {
+      "sha": "bf3a85621eae6b4479458345c98b5dd1d76270d8",
+      "refs": [
+        "fix/team-box-countdown",
+        "fix/team-race-read-latency",
+        "origin/fix/team-race-read-latency"
+      ],
+      "date": "2026-09-06 11:51:05 -0400",
+      "subject": "Avoid redundant roster reads and cold waits for team races",
+      "inMain": true
+    },
+    {
+      "sha": "ba6149d3e25307a5663fac0e2dde373b70917872",
+      "refs": [
+        "hotfix/completed-race-snapshot-repair",
+        "origin/hotfix/completed-race-snapshot-repair"
+      ],
+      "date": "2026-09-06 22:55:09 -0400",
+      "subject": "Stop snapshot repair loops after races end",
+      "inMain": true
+    },
+    {
+      "sha": "14cef94a74efa9c8a9d82e94ad8fb3782dc5d2e4",
+      "refs": [
+        "hotfix/dependency-closure-boundary-sql",
+        "origin/hotfix/dependency-closure-boundary-sql"
+      ],
+      "date": "2026-08-19 23:53:00 -0400",
+      "subject": "fix: qualify global event boundary cursor columns",
+      "inMain": false,
+      "behind": 343,
+      "ahead": 1,
+      "uniquePatches": [],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "ab5088ca06c1f72c33ef9cb86031d925e39bd740",
+      "refs": [
+        "hotfix/local-event-cutover-20260819",
+        "origin/hotfix/local-event-cutover-20260819"
+      ],
+      "date": "2026-08-19 21:25:59 -0400",
+      "subject": "fix: preserve events during local schedule cutover",
+      "inMain": true
+    },
+    {
+      "sha": "d1b4a9cd2db27b0e312045f86bb81b26f9ec579e",
+      "refs": [
+        "hotfix/pending-only-race-removal"
+      ],
+      "date": "2026-08-28 22:39:22 -0400",
+      "subject": "Lock race participant removal after start",
+      "inMain": true
+    },
+    {
+      "sha": "86d239c4cc06e4b679084f03f996ff0334af6473",
+      "refs": [
+        "hotfix/pending-snapshot-repair"
+      ],
+      "date": "2026-09-08 00:00:03 -0400",
+      "subject": "fix: stop snapshot repair loops for pending races",
+      "inMain": true
+    },
+    {
+      "sha": "6b812374aa80b6908e495b142c45caaf137153a6",
+      "refs": [
+        "hotfix/race-payout-double-ad-unit",
+        "origin/hotfix/race-payout-double-ad-unit"
+      ],
+      "date": "2026-08-15 10:33:39 -0400",
+      "subject": "fix: race payout double SSV callback rejected every ad unit",
+      "inMain": true
+    },
+    {
+      "sha": "409154a390a4bf3ef002fe9aed142ff887835352",
+      "refs": [
+        "hotfix/summary-notification-cpu"
+      ],
+      "date": "2026-09-08 08:05:22 -0400",
+      "subject": "fix: avoid empty summary wakes and reuse notification queue plans",
+      "inMain": true
+    },
+    {
+      "sha": "4f7b31632462d061b219d0f3c8d7957b799bc90a",
+      "refs": [
+        "instrument-resolution-deep-timers-20260819",
+        "origin/instrument-resolution-deep-timers-20260819"
+      ],
+      "date": "2026-08-19 07:01:52 -0400",
+      "subject": "fix: restore race participant cosmetics",
+      "inMain": true
+    },
+    {
+      "sha": "91e4841365eac05b2a5b3d16df3a3cce4e42c4dd",
+      "refs": [
+        "instrument-resolution-queue-20260819",
+        "origin/instrument-resolution-queue-20260819"
+      ],
+      "date": "2026-08-19 00:04:20 -0400",
+      "subject": "chore: instrument race resolution phases",
+      "inMain": true
+    },
+    {
+      "sha": "c94651c85880c1361bf85e8ed7fc29683648f58c",
+      "refs": [
+        "integration/feature-control-cleanup-phase2-20260820",
+        "origin/integration/feature-control-cleanup-phase2-20260820"
+      ],
+      "date": "2026-08-20 11:24:04 -0400",
+      "subject": "feat: integrate phase 2 control cleanup",
+      "inMain": true
+    },
+    {
+      "sha": "6ac5ddbe1d67e15b79904605d30273c5a1c66c31",
+      "refs": [
+        "integration/powerup-refund-funded-v2-20260820"
+      ],
+      "date": "2026-08-20 13:28:54 -0400",
+      "subject": "fix: make rejected powerup refunds race-safe",
+      "inMain": true
+    },
+    {
+      "sha": "4e4ac857514153e2fbbe5d327fc6745002811727",
+      "refs": [
+        "investigation/queue-concurrency-20260907",
+        "perf/race-resolution-input-reuse",
+        "origin/perf/race-resolution-input-reuse"
+      ],
+      "date": "2026-09-07 00:06:04 -0400",
+      "subject": "test: record isolated release checks and changed-sample profile",
+      "inMain": true
+    },
+    {
+      "sha": "6444cc4bed925f6ab21c6e81157abf4e05eaf765",
+      "refs": [
+        "investigation/queue-fix-scaling-20260907"
+      ],
+      "date": "2026-09-07 07:54:07 -0400",
+      "subject": "Preserve pending uploader scope and classify publication generation conflicts",
+      "inMain": true
+    },
+    {
+      "sha": "9c2d2bb95ad6d36b508289c3e4729a7d61180382",
+      "refs": [
+        "invite-landing-trail-theme"
+      ],
+      "date": "2026-07-01 10:55:34 -0400",
+      "subject": "Race share landing: Bara trail theme + disable Google Play",
+      "inMain": true
+    },
+    {
+      "sha": "9b08e5f9b50250cae431177e67e73e24dd6b2b34",
+      "refs": [
+        "main"
+      ],
+      "date": "2026-09-11 00:43:48 -0400",
+      "subject": "Cache Races tab viewer data and public badge count",
+      "inMain": true
+    },
+    {
+      "sha": "08fd2982b863c1ff8185ac87f962944f581bc086",
+      "refs": [
+        "perf/bounded-notification-parent-completion",
+        "origin/perf/bounded-notification-parent-completion"
+      ],
+      "date": "2026-09-07 17:38:19 -0400",
+      "subject": "perf: bound notification completion checks to batch parents",
+      "inMain": true
+    },
+    {
+      "sha": "3466f771522872b6b4de93990d268c62bd328300",
+      "refs": [
+        "perf/display-refresh-reproduction",
+        "origin/perf/display-refresh-reproduction"
+      ],
+      "date": "2026-09-07 22:39:35 -0400",
+      "subject": "test: reproduce repeated unchanged display resolution work",
+      "inMain": false,
+      "behind": 124,
+      "ahead": 1,
+      "uniquePatches": [
+        "3466f771522872b6b4de93990d268c62bd328300 test: reproduce repeated unchanged display resolution work"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "1483b8993684048651e891d03f9c1f393ac832dc",
+      "refs": [
+        "perf/event-badge-indexed-lookup",
+        "origin/perf/event-badge-indexed-lookup"
+      ],
+      "date": "2026-09-07 15:27:30 -0400",
+      "subject": "perf: bound active event lookups by viewer and eligible race",
+      "inMain": true
+    },
+    {
+      "sha": "0feb327cbc0042bbeb3d45e6a9fb9e39d28a4d0b",
+      "refs": [
+        "perf/fingerprint-typed-rows",
+        "origin/perf/fingerprint-typed-rows"
+      ],
+      "date": "2026-09-07 19:10:11 -0400",
+      "subject": "perf: assemble race fingerprint roster JSON in Node",
+      "inMain": true
+    },
+    {
+      "sha": "3cb21eaf51c8c1e17890e0ade621fa54a746bc06",
+      "refs": [
+        "perf/guarded-display-experiment",
+        "origin/perf/guarded-display-experiment"
+      ],
+      "date": "2026-09-07 23:00:12 -0400",
+      "subject": "perf: evaluate guarded display calculation reuse",
+      "inMain": false,
+      "behind": 124,
+      "ahead": 2,
+      "uniquePatches": [
+        "3466f771522872b6b4de93990d268c62bd328300 test: reproduce repeated unchanged display resolution work",
+        "3cb21eaf51c8c1e17890e0ade621fa54a746bc06 perf: evaluate guarded display calculation reuse"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "f22dee76b8c55a12c6a4ae14d3979d27ae99adc1",
+      "refs": [
+        "perf/home-races-refresh"
+      ],
+      "date": "2026-07-17 21:05:58 -0400",
+      "subject": "perf(home/races): complete C4 locking, gzip, and perf benchmark",
+      "inMain": true
+    },
+    {
+      "sha": "bc7491b877028b830034ce03465cd818dd003cfe",
+      "refs": [
+        "perf/post-task-empty-intents",
+        "origin/perf/post-task-empty-intents"
+      ],
+      "date": "2026-09-07 19:47:44 -0400",
+      "subject": "docs: record post-task production monitoring results",
+      "inMain": true
+    },
+    {
+      "sha": "29e3d5b8c84e31868e1d62993a260fa6456f506e",
+      "refs": [
+        "perf/prepared-plan-experiment"
+      ],
+      "date": "2026-09-07 21:55:20 -0400",
+      "subject": "perf: reuse prepared plans for selected race reads",
+      "inMain": false,
+      "behind": 125,
+      "ahead": 4,
+      "uniquePatches": [
+        "bfab4fed53172e728c137e3d1ba27c95cdddc49e docs: record scoring lock production monitoring",
+        "cf71cc12783f76b2931e1178d7fb9f9ec8feaf10 docs: record broad database load investigation",
+        "ef69b723aff46b88517352b7f0dd9556c7944bb7 perf: measure prepared query reuse through local transaction pool"
+      ],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "588aeeab49291f10ae6da875dbd7a07a52c27486",
+      "refs": [
+        "perf/prepared-read-release",
+        "origin/perf/prepared-read-release"
+      ],
+      "date": "2026-09-07 22:24:00 -0400",
+      "subject": "docs: attribute repeated display refresh database workload",
+      "inMain": false,
+      "behind": 124,
+      "ahead": 2,
+      "uniquePatches": [
+        "fdd4901f1635ec481ec175eae80f58087fe7498c docs: record prepared read production verification",
+        "588aeeab49291f10ae6da875dbd7a07a52c27486 docs: attribute repeated display refresh database workload"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "e582ed06b336e2ddde84d002a66f5836e02385b8",
+      "refs": [
+        "perf/query-efficiency"
+      ],
+      "date": "2026-09-07 14:54:41 -0400",
+      "subject": "perf: reduce redundant race and event query work with integration evidence",
+      "inMain": true
+    },
+    {
+      "sha": "a45dc89fc82d825c8a5e14b5dc1430108ed5c227",
+      "refs": [
+        "perf/race-display-boundary-20260911"
+      ],
+      "date": "2026-09-11 19:28:31 -0400",
+      "subject": "Fix billing reconciliation for mixed sandbox and production history",
+      "inMain": false,
+      "behind": 28,
+      "ahead": 2,
+      "uniquePatches": [],
+      "equivalentPatches": 2
+    },
+    {
+      "sha": "f9456a84b62ab85069513a4d5c11327831cc31e6",
+      "refs": [
+        "perf/race-open-display-cache"
+      ],
+      "date": "2026-09-10 23:29:32 -0400",
+      "subject": "Merge commit 'b7f4e8325225bee2fc31e971e93a91fbb9be3ee1' into perf/race-open-display-cache",
+      "inMain": true
+    },
+    {
+      "sha": "2b0fe1e1a49b4a449a824d46f683cb6af49eab9c",
+      "refs": [
+        "perf/race-resolution-efficiency-20260820"
+      ],
+      "date": "2026-08-19 22:58:14 -0400",
+      "subject": "perf: improve race resolution queue throughput",
+      "inMain": false,
+      "behind": 345,
+      "ahead": 1,
+      "uniquePatches": [],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "ba58dd4f13f371d8d377d65d6a2a62287f1cd7d3",
+      "refs": [
+        "perf/reduce-empty-resolution-claims",
+        "origin/perf/reduce-empty-resolution-claims"
+      ],
+      "date": "2026-09-07 18:36:40 -0400",
+      "subject": "perf: share empty resolution claims within each tick",
+      "inMain": true
+    },
+    {
+      "sha": "0e02fd1521964cf06342badcdef53324c9e7a607",
+      "refs": [
+        "perf/resolution-read-reuse",
+        "origin/perf/resolution-read-reuse"
+      ],
+      "date": "2026-09-07 23:16:40 -0400",
+      "subject": "perf: finish empty priority snapshots without requeueing",
+      "inMain": true
+    },
+    {
+      "sha": "cf71cc12783f76b2931e1178d7fb9f9ec8feaf10",
+      "refs": [
+        "perf/scoring-state-lock",
+        "origin/perf/scoring-state-lock"
+      ],
+      "date": "2026-09-07 20:50:44 -0400",
+      "subject": "docs: record broad database load investigation",
+      "inMain": false,
+      "behind": 125,
+      "ahead": 2,
+      "uniquePatches": [
+        "bfab4fed53172e728c137e3d1ba27c95cdddc49e docs: record scoring lock production monitoring",
+        "cf71cc12783f76b2931e1178d7fb9f9ec8feaf10 docs: record broad database load investigation"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "4a84d60d302da2790ad4ea51c9604c2f725d6566",
+      "refs": [
+        "perf/step-sample-range-lookup",
+        "origin/perf/step-sample-range-lookup"
+      ],
+      "date": "2026-09-07 20:07:06 -0400",
+      "subject": "docs: record empty sample cache production verification",
+      "inMain": true
+    },
+    {
+      "sha": "336587bfd0f01d5e5c081a3231a4e4b020bca547",
+      "refs": [
+        "performance/powerup-placement-2026-08-13"
+      ],
+      "date": "2026-08-14 23:31:03 -0400",
+      "subject": "fix: paging must not blank the powerup rail or slice a team race",
+      "inMain": true
+    },
+    {
+      "sha": "856923e3a39487b4dae252b6234a465a71c8a403",
+      "refs": [
+        "powerup-15min-ladder"
+      ],
+      "date": "2026-08-15 11:44:08 -0400",
+      "subject": "Extend the 15-min powerup upgrade ladder to Runner's High, Stealth Mode, Detour Sign",
+      "inMain": true
+    },
+    {
+      "sha": "f2a516e93c0228583766f5c5a3af4e2dabe893b6",
+      "refs": [
+        "referral-link-config"
+      ],
+      "date": "2026-06-29 17:27:22 -0400",
+      "subject": "Referral links: real IOS_APP_ID + Android upload-key fingerprint",
+      "inMain": true
+    },
+    {
+      "sha": "263452c285e0523028b3f029358db4042af7c733",
+      "refs": [
+        "referral-program",
+        "origin/referral-program"
+      ],
+      "date": "2026-06-29 14:07:21 -0400",
+      "subject": "Race finish rewards (field-scaled), powerup shield precedence, friend-request gate",
+      "inMain": true
+    },
+    {
+      "sha": "df344d1d1f674077ee250b9c3762b9f52ca22a04",
+      "refs": [
+        "release-admin-dau-engagement",
+        "origin/release-admin-dau-engagement"
+      ],
+      "date": "2026-08-24 21:36:27 -0400",
+      "subject": "Add admin DAU engagement metrics",
+      "inMain": true
+    },
+    {
+      "sha": "ae31298cf0746c4fde3072baf8e7ed150e2b44ea",
+      "refs": [
+        "release-referral-giveaway",
+        "origin/release-referral-giveaway"
+      ],
+      "date": "2026-08-25 12:20:31 -0400",
+      "subject": "Add referral giveaway workflow",
+      "inMain": true
+    },
+    {
+      "sha": "cd672f3f9bb6c4a9896c977f63efea64b7472d3f",
+      "refs": [
+        "release-referral-giveaway-prizes",
+        "origin/release-referral-giveaway-prizes"
+      ],
+      "date": "2026-08-25 13:21:06 -0400",
+      "subject": "Make giveaway prizes configurable",
+      "inMain": true
+    },
+    {
+      "sha": "aa14b996046161f6eb62a7a05749b2a10e93ae66",
+      "refs": [
+        "release/backend-catalog-authority-20260910",
+        "origin/release/backend-catalog-authority-20260910"
+      ],
+      "date": "2026-09-10 16:10:15 -0400",
+      "subject": "Make backend authoritative for inventory visibility and reel previews",
+      "inMain": true
+    },
+    {
+      "sha": "926bd61409dbf24177a9399a50f1db27d4120c25",
+      "refs": [
+        "release/backend-feature-batch-20260819",
+        "origin/release/backend-feature-batch-20260819"
+      ],
+      "date": "2026-08-19 16:57:22 -0400",
+      "subject": "feat: add active impact notices and local step events",
+      "inMain": true
+    },
+    {
+      "sha": "2a140c26af3fadb05a66772fbcc236b36ef59b68",
+      "refs": [
+        "release/billing-mixed-history",
+        "origin/release/billing-mixed-history"
+      ],
+      "date": "2026-09-11 19:42:34 -0400",
+      "subject": "Record final billing deployment convergence checks",
+      "inMain": true
+    },
+    {
+      "sha": "1f3ddf4c3a17971f2c15fd100ee50492df6f4c58",
+      "refs": [
+        "release/enrollment-query",
+        "origin/release/enrollment-query"
+      ],
+      "date": "2026-09-08 14:20:56 -0400",
+      "subject": "Record production enrollment query deployment measurements",
+      "inMain": true
+    },
+    {
+      "sha": "452c50fd9f687b7c3df14e7bbfa89f645f423fca",
+      "refs": [
+        "release/event-end-batch-20260909",
+        "origin/release/event-end-batch-20260909"
+      ],
+      "date": "2026-09-08 23:34:50 -0400",
+      "subject": "docs: record end-cohort production deployment and verification",
+      "inMain": false,
+      "behind": 100,
+      "ahead": 2,
+      "uniquePatches": [],
+      "equivalentPatches": 2
+    },
+    {
+      "sha": "ef0926fa9f9584baa1e93606e6eb96ab202907b6",
+      "refs": [
+        "release/event-fingerprint-cache-20260911",
+        "origin/release/event-fingerprint-cache-20260911"
+      ],
+      "date": "2026-09-11 13:39:52 -0400",
+      "subject": "Record verified event fingerprint cache production deployment",
+      "inMain": true
+    },
+    {
+      "sha": "fa8e8b511cbe322a52f62ee81786c3311cd96d10",
+      "refs": [
+        "release/feature-control-cleanup-20260820",
+        "origin/release/feature-control-cleanup-20260820"
+      ],
+      "date": "2026-08-20 09:14:13 -0400",
+      "subject": "fix: batch seeded race finalization",
+      "inMain": false,
+      "behind": 339,
+      "ahead": 3,
+      "uniquePatches": [
+        "22eec2e074a28fa50aa7e7c51aa63c524ae2e038 feat: retire feature controls safely",
+        "939822b953d4ef2652381cceb2db659c9304320c fix: allow query events only on staging runtime",
+        "fa8e8b511cbe322a52f62ee81786c3311cd96d10 fix: batch seeded race finalization"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "13c165561515614ba757a06fc6a5f0792c56b7ab",
+      "refs": [
+        "release/feature-control-cleanup-phase2-20260820",
+        "origin/release/feature-control-cleanup-phase2-20260820"
+      ],
+      "date": "2026-08-20 10:29:07 -0400",
+      "subject": "feat: prepare phase 2 control cleanup safety",
+      "inMain": false,
+      "behind": 339,
+      "ahead": 1,
+      "uniquePatches": [
+        "13c165561515614ba757a06fc6a5f0792c56b7ab feat: prepare phase 2 control cleanup safety"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "f349fb310f9596eb5af4513f4f8982d4a48c6631",
+      "refs": [
+        "release/feature-control-cleanup-phase2-final-20260820",
+        "origin/release/feature-control-cleanup-phase2-final-20260820"
+      ],
+      "date": "2026-08-20 10:45:37 -0400",
+      "subject": "feat: prepare production-boundary phase 2 safety",
+      "inMain": false,
+      "behind": 341,
+      "ahead": 1,
+      "uniquePatches": [
+        "f349fb310f9596eb5af4513f4f8982d4a48c6631 feat: prepare production-boundary phase 2 safety"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "b6354825ff9e73b63437a0e755bc896aaeb1e68a",
+      "refs": [
+        "release/global-event-notifications-20260826"
+      ],
+      "date": "2026-08-26 21:08:29 -0400",
+      "subject": "Stop refreshing legacy global event owner",
+      "inMain": true
+    },
+    {
+      "sha": "1632727e477763b6c9ada5aa3192c28a0d6e5b22",
+      "refs": [
+        "release/postgresql-coordinated-optimization"
+      ],
+      "date": "2026-09-02 13:56:49 -0400",
+      "subject": "Fix post-task qualification recovery scheduler",
+      "inMain": true
+    },
+    {
+      "sha": "3b241ffbb3bfcbaeea5153d18f1efd6e69a293a4",
+      "refs": [
+        "release/power-outage-2000",
+        "origin/release/power-outage-2000"
+      ],
+      "date": "2026-09-08 09:12:56 -0400",
+      "subject": "Clarify standalone benchmark test environment",
+      "inMain": true
+    },
+    {
+      "sha": "361eafadb007a83397ac131bf876d60546894977",
+      "refs": [
+        "release/race-experience-identity-2026-08-12",
+        "origin/release/race-experience-identity-2026-08-12"
+      ],
+      "date": "2026-08-12 10:38:18 -0400",
+      "subject": "Race experience identity and scoring release",
+      "inMain": true
+    },
+    {
+      "sha": "b9a5a22f9f36dc35c4a92d7826a1a98000732b78",
+      "refs": [
+        "release/race-resolution-efficiency-20260820",
+        "origin/release/race-resolution-efficiency-20260820"
+      ],
+      "date": "2026-08-19 22:58:22 -0400",
+      "subject": "perf: improve race resolution queue throughput",
+      "inMain": true
+    },
+    {
+      "sha": "2be7773cb56bb596813565e2d955ac7ded7bee11",
+      "refs": [
+        "release/receipt-recovery-20260911",
+        "origin/release/receipt-recovery-20260911"
+      ],
+      "date": "2026-09-11 12:28:40 -0400",
+      "subject": "Record successful receipt recovery production deployment",
+      "inMain": true
+    },
+    {
+      "sha": "9b9a60bdfb04d3ed1ac09d7b669a33370e381261",
+      "refs": [
+        "release/referral-contest-dashboard-20260826",
+        "origin/release/referral-contest-dashboard-20260826"
+      ],
+      "date": "2026-08-25 22:41:52 -0400",
+      "subject": "Add joined referral contest dashboard data",
+      "inMain": true
+    },
+    {
+      "sha": "6a0f6c39df749f0abbabe59e935d1341d1347379",
+      "refs": [
+        "release/shop-decoy-accessories-20260910",
+        "origin/release/shop-decoy-accessories-20260910"
+      ],
+      "date": "2026-09-10 15:36:23 -0400",
+      "subject": "Restore Decoy shop purchases and enforce cooldown after consumption",
+      "inMain": true
+    },
+    {
+      "sha": "8dbcca0e0c343842f3d878c2879762386a63a2e8",
+      "refs": [
+        "release/summary-lease-fix",
+        "origin/release/summary-lease-fix"
+      ],
+      "date": "2026-09-08 15:14:20 -0400",
+      "subject": "fix: recover summary processing work without leases",
+      "inMain": false,
+      "behind": 114,
+      "ahead": 1,
+      "uniquePatches": [],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "430a28968c192ab68f1f063da993dcf665030932",
+      "refs": [
+        "release/trail-preview-21",
+        "origin/release/trail-preview-21"
+      ],
+      "date": "2026-09-10 17:40:12 -0400",
+      "subject": "Add read-only accessory previews and owner Trail Mine placement",
+      "inMain": false,
+      "behind": 45,
+      "ahead": 1,
+      "uniquePatches": [],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "dfa7deb4c93395c716559c50d33d4ca947bbdefb",
+      "refs": [
+        "release/trail-preview-current-20260910"
+      ],
+      "date": "2026-09-10 18:05:23 -0400",
+      "subject": "Record Trail Mine and accessory preview deployment verification",
+      "inMain": true
+    },
+    {
+      "sha": "5a1ac5771a7b8226e49a7e4266acba24d5c6a549",
+      "refs": [
+        "shop-wardrobe-deployment-evidence",
+        "origin/shop-wardrobe-deployment-evidence"
+      ],
+      "date": "2026-09-09 19:24:36 -0400",
+      "subject": "docs: record authorized wardrobe A-to-B production deployment",
+      "inMain": false,
+      "behind": 63,
+      "ahead": 1,
+      "uniquePatches": [
+        "5a1ac5771a7b8226e49a7e4266acba24d5c6a549 docs: record authorized wardrobe A-to-B production deployment"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "00baf02b29e30ccb7c964c493d2d4d76405c2b4a",
+      "refs": [
+        "shop-wardrobe-release-a",
+        "origin/shop-wardrobe-release-a"
+      ],
+      "date": "2026-09-09 18:49:58 -0400",
+      "subject": "fix(social): fall back to durable presentation when cache lookup throws",
+      "inMain": true
+    },
+    {
+      "sha": "2f021c2698f41071e526308127ddaf2b6050c35e",
+      "refs": [
+        "shop-wardrobe-release-candidate",
+        "origin/shop-wardrobe-release-candidate"
+      ],
+      "date": "2026-09-09 18:58:45 -0400",
+      "subject": "docs: record production-based wardrobe candidate validation and residual gates",
+      "inMain": true
+    },
+    {
+      "sha": "1fcea300a77f5d07124cb913edabe213cf34bfdf",
+      "refs": [
+        "wip/admin-metrics-reconcile-20260819"
+      ],
+      "date": "2026-08-19 00:09:31 -0400",
+      "subject": "wip: preserve backend tree before main reconciliation",
+      "inMain": false,
+      "behind": 357,
+      "ahead": 1,
+      "uniquePatches": [
+        "1fcea300a77f5d07124cb913edabe213cf34bfdf wip: preserve backend tree before main reconciliation"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "72771a0bb6d08f6b630504b0a90e221d9ac75042",
+      "refs": [
+        "origin/1.1.5"
+      ],
+      "date": "2026-05-25 17:09:08 -0400",
+      "subject": "1.1.5: add Retro Sunglasses cosmetic (active=false until App Store ships)",
+      "inMain": true
+    },
+    {
+      "sha": "986927ed581baa3eefcba0951b18815b16216943",
+      "refs": [
+        "origin/1.1.6"
+      ],
+      "date": "2026-06-01 15:30:05 -0400",
+      "subject": "fix: include equipped accessories in podium APIs",
+      "inMain": true
+    },
+    {
+      "sha": "5367924308a56668772e3716b3989de3be797d96",
+      "refs": [
+        "origin/1.1.7"
+      ],
+      "date": "2026-06-24 13:51:47 -0400",
+      "subject": "Domain split (barastep.com): share-card image, support email, deploy docs",
+      "inMain": true
+    },
+    {
+      "sha": "226fd2cc71d706890eefd3e7f1513bd21bfdbfb0",
+      "refs": [
+        "origin/feature/race-preview-and-cleanse-power-outage"
+      ],
+      "date": "2026-08-16 09:42:25 -0400",
+      "subject": "Add race/tournament preview-before-joining; Cleanse no longer removes Power Outage",
+      "inMain": false,
+      "behind": 375,
+      "ahead": 2,
+      "uniquePatches": [
+        "226fd2cc71d706890eefd3e7f1513bd21bfdbfb0 Add race/tournament preview-before-joining; Cleanse no longer removes Power Outage"
+      ],
+      "equivalentPatches": 1
+    },
+    {
+      "sha": "c76580b63c4909072fc206817139df5d3f0114f5",
+      "refs": [
+        "origin/fix/event-fingerprint-ordering-20260911"
+      ],
+      "date": "2026-09-11 16:38:24 -0400",
+      "subject": "Reuse event fingerprint cache for tied participant windows",
+      "inMain": true
+    },
+    {
+      "sha": "3f427fc998194ce6376072671971ba930d890a1c",
+      "refs": [
+        "origin/fix/home-step-sync-deadlock"
+      ],
+      "date": "2026-09-08 22:59:15 -0400",
+      "subject": "fix: serialize Home sync cooldown behind scoring lock",
+      "inMain": true
+    },
+    {
+      "sha": "a5a3ddb6b65925da57db5998cf016099bb846416",
+      "refs": [
+        "origin/fix/seeded-bucket-enrollment-2026-08-15"
+      ],
+      "date": "2026-08-15 01:12:49 -0400",
+      "subject": "fix: seeded-race renewal retries every tick; exclude private buckets from signup auto-enroll",
+      "inMain": true
+    },
+    {
+      "sha": "ef69b723aff46b88517352b7f0dd9556c7944bb7",
+      "refs": [
+        "origin/perf/prepared-plan-experiment"
+      ],
+      "date": "2026-09-07 21:34:45 -0400",
+      "subject": "perf: measure prepared query reuse through local transaction pool",
+      "inMain": false,
+      "behind": 125,
+      "ahead": 3,
+      "uniquePatches": [
+        "bfab4fed53172e728c137e3d1ba27c95cdddc49e docs: record scoring lock production monitoring",
+        "cf71cc12783f76b2931e1178d7fb9f9ec8feaf10 docs: record broad database load investigation",
+        "ef69b723aff46b88517352b7f0dd9556c7944bb7 perf: measure prepared query reuse through local transaction pool"
+      ],
+      "equivalentPatches": 0
+    },
+    {
+      "sha": "5949604cb6e227775f1a5d5248974fa68d1f51fc",
+      "refs": [
+        "origin/performance/powerup-placement-2026-08-13"
+      ],
+      "date": "2026-08-13 17:31:46 -0400",
+      "subject": "docs: record production performance rollout",
+      "inMain": true
+    },
+    {
+      "sha": "a3801608976b01e7be49908f66320af086b42d1b",
+      "refs": [
+        "origin/release/prepared-workers-20260909"
+      ],
+      "date": "2026-09-08 22:18:27 -0400",
+      "subject": "docs: record prepared-worker deployment and production watch",
+      "inMain": true
+    }
+  ]
+}
