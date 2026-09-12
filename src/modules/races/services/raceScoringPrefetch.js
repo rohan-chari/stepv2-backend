@@ -1,3 +1,5 @@
+const { processHistoricalScoringWindowCache } = require("./historicalScoringWindowCache");
+const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../../../shared/time/week");
 const { SETTLEMENT_EFFECT_TYPES } = require("./raceScoringEffectTypes");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -7,6 +9,7 @@ const {
 } = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const historicalWindowDemand = new WeakMap();
 const MAX_USERS_PER_CHUNK = 25;
 const MAX_SAMPLE_ROWS_PER_CHUNK = 50_000;
 const MAX_RETAINED_SAMPLE_ROWS_PER_USER = 50_000;
@@ -128,6 +131,7 @@ class CompactSampleTimeline {
   constructor() {
     this.segments = [];
     this.length = 0;
+    this.revision = 0;
   }
 
   append(rows) {
@@ -147,11 +151,13 @@ class CompactSampleTimeline {
       ends[index] = endOffset;
       steps[index] = Number(row.steps) || 0;
     }
+    this.revision++;
     this.segments.push({ baseMs, starts, ends, steps });
     this.length += rows.length;
   }
 
   appendTimeline(other) {
+    this.revision++;
     this.segments.push(...other.segments);
     this.length += other.length;
   }
@@ -549,6 +555,32 @@ async function prefetchRaceScoringModelsImpl({
   }
 
   const currentTime = new Date(now);
+  // Use the earliest yesterday boundary of all races sharing this adapter, so
+  // every race's today/yesterday remains live even across timezones and DST.
+  const historicalBeforeMs = Math.min(...started.map(race => {
+    const timezone = typeof race.timezone === "string" ? race.timezone.trim() : "";
+    // User-created races can use the request timezone, which this shared
+    // adapter does not receive. Two complete UTC days conservatively cover
+    // yesterday even in UTC+14; reuse a little less in that case.
+    if (!timezone) return Math.floor(currentTime.getTime() / DAY_MS) * DAY_MS - 2 * DAY_MS;
+    const { year, month, day } = getTimeZoneParts(currentTime, timezone);
+    const today = formatDateString(year, month, day);
+    const yesterday = parseDateString(addDaysToDateString(today, -1));
+    return zonedDateTimeToUtc({ ...yesterday, hour: 0, minute: 0, second: 0 }, timezone).getTime();
+  }));
+  const admitHistoricalBatch = (timeline, windows) => {
+    if (timeline.isPaged || timeline.length < 512) return false;
+    const previous = historicalWindowDemand.get(timeline);
+    const reads = Math.min(64, (previous?.revision === timeline.revision ? previous.reads : 0) +
+      windows.filter(window => window.endMs <= historicalBeforeMs).length);
+    historicalWindowDemand.set(timeline, { revision: timeline.revision, reads });
+    // Benchmark admission: fingerprinting a fresh timeline costs more than a
+    // handful of canonical sums. Amortize it over at least 64 old-window reads.
+    return reads >= 64;
+  };
+  const historicalSum = (timeline, userId, window, closedAtMs = null) =>
+    processHistoricalScoringWindowCache.sum({ timeline, userId, ...window, closedAtMs, historicalBeforeMs,
+      compute: () => timeline.sum(window.startMs, window.endMs, closedAtMs) });
   const earliestStartMs = Math.min(
     ...started.map((race) => new Date(race.startedAt).getTime())
   );
@@ -1025,7 +1057,10 @@ async function prefetchRaceScoringModelsImpl({
         startMs: new Date(window.start).getTime(), endMs: new Date(window.end).getTime(),
       }));
       if (typeof timeline.sumMany === "function") return timeline.sumMany(normalized);
-      return Promise.all(normalized.map((window) => timeline.sum(window.startMs, window.endMs)));
+      const cacheHistorical = admitHistoricalBatch(timeline, normalized);
+      return Promise.all(normalized.map((window) => cacheHistorical
+        ? historicalSum(timeline, userId, window)
+        : timeline.sum(window.startMs, window.endMs)));
     },
     async sumStepsInWindow(userId, start, end) {
       const [sum] = await this.sumStepsInWindows(userId, [{ start, end }]);
@@ -1055,9 +1090,10 @@ async function prefetchRaceScoringModelsImpl({
         startMs: new Date(window.start).getTime(), endMs: new Date(window.end).getTime(),
       }));
       if (typeof timeline.sumMany === "function") return timeline.sumMany(normalized, closedAtMs);
-      return Promise.all(normalized.map((window) => timeline.sum(
-        window.startMs, window.endMs, closedAtMs,
-      )));
+      const cacheHistorical = admitHistoricalBatch(timeline, normalized);
+      return Promise.all(normalized.map((window) => cacheHistorical
+        ? historicalSum(timeline, userId, window, closedAtMs)
+        : timeline.sum(window.startMs, window.endMs, closedAtMs)));
     },
     async sumClosedStepsInWindow(userId, start, end, closedAt) {
       const [sum] = await this.sumClosedStepsInWindows(

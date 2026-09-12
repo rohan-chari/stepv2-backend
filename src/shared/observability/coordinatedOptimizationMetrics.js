@@ -15,6 +15,7 @@ const APPROVED_METRICS = new Set([
   "race_resolution_batch_array_buffer_bytes",
   "race_scoring_batch_fallback_total",
   "race_scoring_input_cache_total",
+  "race_scoring_historical_window_cache_total",
   "race_scoring_input_cache_users",
   "race_scoring_input_cache_sample_rows",
   "race_resolution_query_seconds",
