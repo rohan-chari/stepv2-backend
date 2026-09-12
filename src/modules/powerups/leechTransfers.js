@@ -15,6 +15,30 @@
 //     victim (floored at zero) and crediting each attacker the SAME amount
 //     (zero-sum).
 
+function frozenLeechAmount(effect) {
+  const stamp = effect?.metadata?.leechFinalV1;
+  return stamp?.version === 1 && Number.isSafeInteger(stamp.amount) && stamp.amount >= 0
+    ? stamp.amount : null;
+}
+
+function finalMetadata(effect, amount) {
+  return { ...(effect.metadata || {}), leechFinalV1: {
+    version: 1, amount, expiresAt: new Date(effect.leechFinalBoundaryAt || effect.expiresAt).toISOString(),
+  } };
+}
+
+function leechExpiryBoundary(effect, stepSampleModel) {
+  const context = stepSampleModel?.leechBoundaryContext;
+  const race = context?.races?.find(row => row.id === effect.raceId);
+  const people = (race?.participants || []).filter(row =>
+    row.id === effect.targetParticipantId || row.userId === effect.sourceUserId);
+  const values = [effect.expiresAt, race?.endsAt,
+    ...people.flatMap(row => [row.finishedAt, row.forfeitedAt]),
+    ...(context?.terminalEffectIds?.has(effect.id) ? [context.terminalAt] : [])]
+    .filter(Boolean).map(value => new Date(value).getTime()).filter(Number.isFinite);
+  return values.length ? new Date(Math.min(...values)) : null;
+}
+
 const HOUR_MS = 60 * 60 * 1000;
 
 // Default conversion ratio when an effect row carries no (or malformed)
@@ -33,6 +57,20 @@ function resolveLeechDrain(earnedTransfer, victimRemaining) {
   return Math.max(0, Math.min(earnedTransfer || 0, victimRemaining));
 }
 
+// Frozen amounts are immutable debit/credit entries. A later correction can
+// exhaust the victim's displayed balance, but cannot claw back the credit or
+// unlock unused potential. Keep zero distinct from an absent capture.
+function hasFrozenTransfer(transfer) {
+  return Number.isSafeInteger(transfer.frozenTransfer) && transfer.frozenTransfer >= 0;
+}
+
+function resolveTransferAmount(transfer, victimRemaining) {
+  if (hasFrozenTransfer(transfer)) {
+    return transfer.frozenTransfer;
+  }
+  return resolveLeechDrain(transfer.earnedTransfer, victimRemaining);
+}
+
 // earnedTransfer for ONE leech = floor(attackerWindowSteps / ratio), no cap.
 //
 // attackerWindowSteps = the leecher's (sourceUserId) eligible steps in
@@ -49,11 +87,22 @@ function resolveLeechDrain(earnedTransfer, victimRemaining) {
 // that only implement sumStepsInWindow fall back to the legacy top-of-current-hour
 // clamp so their assertions (and the "in-progress hour bucket is excluded" test)
 // stay valid.
-async function computeLeechEarnedTransfer(effect, stepSampleModel, now) {
+async function computeLeechEarnedTransfer(effect, stepSampleModel, now, { resolveExpiry = true } = {}) {
   if (!effect || !effect.sourceUserId) return 0;
   const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
   const windowStart = new Date(effect.startsAt).getTime();
-  const rawEnd = effect.expiresAt ? new Date(effect.expiresAt).getTime() : nowMs;
+  const alreadyFrozen = frozenLeechAmount(effect);
+  if (alreadyFrozen != null) return alreadyFrozen;
+  const cutoff = leechExpiryBoundary(effect, stepSampleModel);
+  const rawEnd = cutoff ? cutoff.getTime() : nowMs;
+  if (rawEnd <= nowMs && effect.expiresAt) {
+    const frozen = frozenLeechAmount(effect);
+    if (frozen != null) return frozen;
+    if (resolveExpiry && typeof stepSampleModel.resolveLeechExpiry === "function") {
+      const finalized = await stepSampleModel.resolveLeechExpiry(effect, now, stepSampleModel);
+      if (finalized != null) return finalized;
+    }
+  }
 
   let steps;
   if (typeof stepSampleModel.sumClosedStepsInWindow === "function") {
@@ -90,14 +139,17 @@ async function computeLeechEarnedTransfer(effect, stepSampleModel, now) {
 // Only NON-frozen participants (active racers) should be passed in; finished /
 // forfeited participants keep their frozen totals and neither drain nor credit.
 //
-// Returns Map(participantId -> finalTotal). For each leech, resolved in
-// (startsAt, effectId) order: actualTransfer = min(earnedTransfer, victimRemaining),
+// Returns Map(participantId -> finalTotal). Frozen debit/credit amounts are
+// reserved first. Live claims resolve in (startsAt, effectId) order:
+// actualTransfer = min(earnedTransfer, victimRemaining),
 // victimRemaining -= actualTransfer, attacker credit += actualTransfer. The
-// victim never goes negative; the attacker is credited exactly what was drained
-// (zero-sum). Attacker credit lands only on a participant present in `entries`
+// displayed victim total never goes negative. A frozen debit may exceed a later
+// corrected balance without clawing back its attacker credit. Incoming credits
+// remain non-drainable, preserving the existing credit-after-floor rule.
+// Attacker credit lands only on a participant present in `entries`
 // (a finished/absent attacker's credit is dropped, matching the frozen-total rule);
 // the victim is still drained either way.
-function applyLeechTransfers(entries, { onTransfer = null } = {}) {
+function applyLeechTransfers(entries, { onTransfer = null, frozenVictimTransfers = [] } = {}) {
   const remaining = new Map(); // participantId -> drainable balance (pre-leech)
   const credit = new Map(); // userId -> steps credited as attacker
   const participantIdByUser = new Map(); // userId -> participantId (first seen)
@@ -109,14 +161,17 @@ function applyLeechTransfers(entries, { onTransfer = null } = {}) {
     }
   }
 
-  const all = [];
+  const all = frozenVictimTransfers.filter(hasFrozenTransfer).map(row => ({ ...row }));
   for (const e of entries) {
     for (const t of e.leechTransfers || []) {
       all.push({ victimParticipantId: e.participantId, ...t });
     }
   }
-  // Deterministic order so live display and settlement always agree.
+  // Reserve immutable debits first; live claims cannot spend already committed
+  // balance. Each group retains the canonical chronological order.
   all.sort((a, b) => {
+    const frozenOrder = Number(hasFrozenTransfer(b)) - Number(hasFrozenTransfer(a));
+    if (frozenOrder !== 0) return frozenOrder;
     const sa = new Date(a.startsAt).getTime();
     const sb = new Date(b.startsAt).getTime();
     if (sa !== sb) return sa - sb;
@@ -125,7 +180,7 @@ function applyLeechTransfers(entries, { onTransfer = null } = {}) {
 
   for (const t of all) {
     const victimRemaining = remaining.get(t.victimParticipantId) ?? 0;
-    const actual = resolveLeechDrain(t.earnedTransfer, victimRemaining);
+    const actual = resolveTransferAmount(t, victimRemaining);
     if (typeof onTransfer === "function") {
       onTransfer({
         effectId: t.effectId,
@@ -143,13 +198,54 @@ function applyLeechTransfers(entries, { onTransfer = null } = {}) {
   }
 
   const finals = new Map();
-  for (const e of entries) finals.set(e.participantId, remaining.get(e.participantId));
+  for (const e of entries) finals.set(e.participantId, Math.max(0, remaining.get(e.participantId)));
   for (const [userId, amount] of credit) {
     const pid = participantIdByUser.get(userId);
     if (pid == null) continue; // attacker not among active participants — drop credit
     finals.set(pid, (finals.get(pid) || 0) + amount);
   }
   return finals;
+}
+
+// Metadata writes follow the caller's existing ownership: captured by the
+// queue, discarded by read-only scoring, or persisted by fenced settlement.
+async function applyLeechTransfersAndFinalize(entries, { effectModel, persist = false, onTransfer = null, race = null } = {}) {
+  let frozenVictimTransfers = [];
+  const frozenIds = new Set((race?.participants || []).filter(row => row.finishedAt || row.forfeitedAt).map(row => row.id));
+  if (frozenIds.size && typeof effectModel?.findRaceEffectsByType === "function") {
+    const rows = await effectModel.findRaceEffectsByType(race.id, "LEECH");
+    frozenVictimTransfers = rows.filter(row => frozenIds.has(row.targetParticipantId) && frozenLeechAmount(row) != null)
+      .map(row => ({ effectId: row.id, startsAt: row.startsAt, sourceUserId: row.sourceUserId,
+        victimParticipantId: row.targetParticipantId, frozenTransfer: frozenLeechAmount(row),
+        earnedTransfer: frozenLeechAmount(row) }));
+  }
+  const pending = new Map();
+  const collect = (effect, transfer = null) => {
+    if (transfer && frozenLeechAmount(effect) != null) transfer.frozenTransfer = frozenLeechAmount(effect);
+    if (pending.has(effect.id)) { if (transfer) pending.set(effect.id, transfer); return; }
+    for (const previous of effect.leechAdditionalFinalizations || []) collect(previous);
+    const row = transfer || { effectId: effect.id, expiryFinalization: effect };
+    const amount = frozenLeechAmount(effect);
+    if (amount != null) row.frozenTransfer = amount;
+    pending.set(effect.id, row);
+  };
+  for (const entry of entries) for (const transfer of entry.leechTransfers || []) {
+    if (transfer.expiryFinalization) collect(transfer.expiryFinalization, transfer);
+  }
+  if (!persist || !pending.size) return applyLeechTransfers(entries, { onTransfer, frozenVictimTransfers });
+  const amounts = new Map();
+  applyLeechTransfers(entries, { frozenVictimTransfers, onTransfer: row => amounts.set(row.effectId, row.actualTransfer) });
+  if (persist && pending.size) {
+    for (const [id, transfer] of pending) {
+      const metadata = finalMetadata(transfer.expiryFinalization, frozenLeechAmount(transfer.expiryFinalization) ?? amounts.get(id) ?? 0);
+      const saved = await effectModel.update(id, { metadata });
+      // The database preserves an existing immutable stamp if a concurrent
+      // legacy reader already finalized it. Score from that winning value.
+      transfer.frozenTransfer = frozenLeechAmount(saved) ?? metadata.leechFinalV1.amount;
+      transfer.expiryFinalization.leechFinalizationPending = false;
+    }
+  }
+  return applyLeechTransfers(entries, { onTransfer, frozenVictimTransfers });
 }
 
 // Incremental form of applyLeechTransfers for chronological attribution. A
@@ -189,6 +285,8 @@ function createIncrementalLeechTransferState(entries = []) {
       actualByEffect.delete(row.effectId);
     }
     rows.sort((a, b) => {
+      const frozenOrder = Number(hasFrozenTransfer(b)) - Number(hasFrozenTransfer(a));
+      if (frozenOrder !== 0) return frozenOrder;
       const at = new Date(a.startsAt).getTime();
       const bt = new Date(b.startsAt).getTime();
       if (at !== bt) return at - bt;
@@ -197,10 +295,7 @@ function createIncrementalLeechTransferState(entries = []) {
     let remaining = preLeech.get(participantId) || 0;
     let drained = 0;
     for (const row of rows) {
-      const actual = Math.max(
-        0,
-        Math.min(Number(row.earnedTransfer) || 0, remaining),
-      );
+      const actual = resolveTransferAmount(row, remaining);
       actualByEffect.set(row.effectId, actual);
       addCredit(row.sourceUserId, actual);
       remaining -= actual;
@@ -229,7 +324,7 @@ function createIncrementalLeechTransferState(entries = []) {
         const userId = userIdByParticipant.get(participantId);
         totals.set(
           participantId,
-          total - (drainedByVictim.get(participantId) || 0) +
+          Math.max(0, total - (drainedByVictim.get(participantId) || 0)) +
             (creditByUser.get(userId) || 0),
         );
       }
@@ -239,6 +334,10 @@ function createIncrementalLeechTransferState(entries = []) {
 }
 
 module.exports = {
+  leechExpiryBoundary,
+  frozenLeechAmount,
+  finalMetadata,
+  applyLeechTransfersAndFinalize,
   LEECH_DEFAULT_RATIO,
   leechRatio,
   resolveLeechDrain,

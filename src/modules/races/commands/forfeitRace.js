@@ -382,7 +382,7 @@ function buildForfeitRace(dependencies = {}) {
         return { alreadyForfeited: true };
       }
 
-      const frozenTotal = Math.max(
+      let frozenTotal = Math.max(
         0,
         await computeParticipantEffectiveTotal({
           race,
@@ -390,6 +390,29 @@ function buildForfeitRace(dependencies = {}) {
           at: forfeitedAt,
         })
       );
+      // Finalize both sides before freezing the forfeiting participant. The
+      // full scorer retains incoming credits and clips active links to forfeit.
+      if (!dependencies.computeParticipantEffectiveTotal && tx.raceActiveEffect?.findMany) {
+        const leeches = await tx.raceActiveEffect.findMany({
+          where: { raceId, type: "LEECH", OR: [
+            { targetParticipantId: lockedParticipant.id }, { sourceUserId: lockedParticipant.userId },
+          ] }, select: { id: true },
+        });
+        if (leeches.length) {
+          const computed = await computeState({ raceId, timeZone: raceTimeZone(race, "UTC"),
+            dependencies: { now: () => forfeitedAt, evaluateConsequences: false,
+              activeImpactFreezeSourceIds: leeches.map(row => row.id) },
+          });
+          const total = computed.totalsByParticipantId?.get(lockedParticipant.id);
+          if (!Number.isFinite(total)) throw new Error("LEECH_FORFEIT_SCORE_UNAVAILABLE");
+          frozenTotal = Math.max(0, total);
+          for (const write of computed.writes || []) {
+            if (write.kind === "effectUpdate" && write.fields?.metadata?.leechFinalV1) {
+              await tx.raceActiveEffect.update({ where: { id: write.id }, data: write.fields });
+            }
+          }
+        }
+      }
       let frozenImpactWork = [];
       let terminalImpactSourceCount = 0;
       if (await activeImpactEnabled(tx)) {

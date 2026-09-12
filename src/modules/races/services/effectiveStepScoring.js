@@ -1,5 +1,5 @@
 const { computeGlobalEventBoost } = require("../../steps/globalStepEvent");
-const { computeLeechEarnedTransfer } = require("../../powerups/leechTransfers");
+const { computeLeechEarnedTransfer, frozenLeechAmount, leechExpiryBoundary } = require("../../powerups/leechTransfers");
 const {
   signedMultiplierAt,
   multiplierBoundaries,
@@ -412,17 +412,21 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   const leechTransfers = [];
   for (const effect of leeches) {
     if (!effect.sourceUserId) continue;
+    const needsFinalization = effect.expiresAt && leechExpiryBoundary(effect, stepSampleModel) <= nowDate &&
+      (frozenLeechAmount(effect) == null || effect.leechFinalizationPending === true);
     const earnedTransfer = await computeLeechEarnedTransfer(
       effect,
       stepSampleModel,
       nowDate
     );
-    if (earnedTransfer > 0) {
+    if (earnedTransfer > 0 || needsFinalization) {
       leechTransfers.push({
         effectId: effect.id,
         startsAt: effect.startsAt,
         sourceUserId: effect.sourceUserId,
         earnedTransfer,
+        frozenTransfer: frozenLeechAmount(effect),
+        ...(needsFinalization ? { expiryFinalization: effect } : {}),
       });
     }
   }

@@ -2,7 +2,7 @@ const {
   calculateCurrentTotal,
 } = require("./raceStateResolution");
 const {
-  applyLeechTransfers,
+  applyLeechTransfersAndFinalize,
 } = require("../../powerups/leechTransfers");
 const {
   applyHitchhikeCopies,
@@ -103,7 +103,9 @@ async function scoreWholeRaceTotals({
       })
     : [];
   const active = evaluated.filter((entry) => !entry.frozen);
-  const activeTotals = applyLeechTransfers(applyHitchhikeCopies(active, copies));
+  const activeTotals = await applyLeechTransfersAndFinalize(applyHitchhikeCopies(active, copies), {
+    race: { id: raceId, participants }, effectModel: raceActiveEffectModel, persist: false,
+  });
   const totals = new Map(evaluated.map((entry) => [entry.participantId, entry.preLeechTotal]));
   for (const [participantId, total] of activeTotals) totals.set(participantId, total);
   for (const [participantId, total] of frozenTotals) totals.set(participantId, total);

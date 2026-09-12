@@ -1,5 +1,37 @@
 # Backend economy ledger
 
+## Expired cross-player powerup scoring audit
+
+**Verified 2026-09-12 against runtime source `b20ad0b`; production aggregate
+counts supplied by the parent investigation's read-only query.** This entry
+describes existing behavior, not a balance or payout change.
+
+- Leech's candidate transfer is `floor(attackerWindowSteps / metadata.ratio)`;
+  the input window ends at `expiresAt`. However, actual transfer is replayed
+  against the victim's current race-wide pre-Leech balance on every resolution
+  (`src/modules/powerups/leechTransfers.js:52,127`). Production active races
+  retained 41 expired Leech effects, all with stored ratio 2. A fixed candidate
+  of 500 therefore drains 100 at victim balance 100 and 500 at balance 1,000,
+  even if the added balance was earned after expiry. A direct pure-function
+  evaluation confirmed both values; these are examples, not measured player EV.
+- Production active races retained 99 expired Hitchhike effects, all scoring
+  version 3, all with frozen attribution captures. V3 returns a frozen signed
+  contribution immediately (`hitchhikeCopies.js:145`), and its coarse daily
+  fallback cannot advance after the effect boundary (`:254`). Capture
+  `frozen_at` is terminal (`models/hitchhikeAttributionCapture.js:183`).
+- Legacy Hitchhike V1/V2 and unfrozen V3 exact samples remain expiry-clipped
+  (`hitchhikeCopies.js:62`); a delayed/corrected sample overlapping that window
+  differs from accepting newly walked post-expiry steps. No V1/V2 effects were
+  present in the queried active-race aggregate.
+- A fixed negative Hitchhike contribution can continue offsetting the caster's
+  later raw total through `max(0, preLeechTotal + copiedSteps)` (`:80,499`).
+  This does not grow the copy amount. For a fixed -500 copy, an own total of
+  100 scores 0 and an own total of 600 scores 100.
+
+No coin prices, drop odds, or payouts were changed. Population incidence,
+median-player score impact, and payout redistribution were not measured by
+these counts; an expired effect count is not a count of affected users.
+
 ## Mystery-box progress correction semantics
 
 **Code verified 2026-09-11 against incident runtime commit `340b405`; no live

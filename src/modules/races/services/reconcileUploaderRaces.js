@@ -18,7 +18,7 @@ const {
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 const { nextRawSteps } = require("../../powerups/rawPosition");
 const { raceTimeZone } = require("../raceTimeZone");
-const { applyLeechTransfers } = require("../../powerups/leechTransfers");
+const { applyLeechTransfersAndFinalize } = require("../../powerups/leechTransfers");
 const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
@@ -150,7 +150,7 @@ function buildReconcileUploaderRaces(dependencies = {}) {
           })
         )
       : [];
-    const leechFinals = applyLeechTransfers(
+    const leechFinals = await applyLeechTransfersAndFinalize(
       applyHitchhikeCopies(
         [{
           participantId: participant.id,
@@ -159,7 +159,8 @@ function buildReconcileUploaderRaces(dependencies = {}) {
           leechTransfers,
         }],
         hitchhikeCopies
-      )
+      ),
+      { race, effectModel: raceActiveEffectModel, persist: false }
     );
     const finalTotal = leechFinals.get(participant.id) ?? total;
     const boxTz = raceTimeZone(race, "UTC");

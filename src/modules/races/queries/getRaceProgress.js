@@ -60,7 +60,7 @@ const {
 } = require("../services/teamWinnerReward");
 const {
   computeLeechEarnedTransfer,
-  applyLeechTransfers,
+  applyLeechTransfersAndFinalize,
 } = require("../../powerups/leechTransfers");
 const {
   collectRaceHitchhikeCopies,
@@ -661,7 +661,7 @@ function buildGetRaceProgress(deps = {}) {
       : [];
 
     // Phase B: resolve every leech across the race against actual availability.
-    const leechFinals = applyLeechTransfers(
+    const leechFinals = await applyLeechTransfersAndFinalize(
       applyHitchhikeCopies(
         preLeech
           .filter((e) => !e.frozen)
@@ -672,7 +672,8 @@ function buildGetRaceProgress(deps = {}) {
             leechTransfers: e.leechTransfers,
           })),
         hitchhikeCopies
-      )
+      ),
+      { race, effectModel: scoringEffectModel, persist }
     );
 
     const stepTotals = preLeech.map((e) => {

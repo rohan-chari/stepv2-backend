@@ -1,3 +1,4 @@
+const { lockScoringInputState } = require("../../steps/services/scoringInputVersion");
 const { slotsChanged } = require('../services/raceSlotCacheInvalidation');
 const { RacePowerup } = require("../models/racePowerup");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
@@ -4891,10 +4892,20 @@ function buildUsePowerup(dependencies = {}) {
           return await runInPrismaTransaction(async (tx) => {
             // This read only chooses the guard mode. Ownership, status and
             // type are checked again after the item lock, before any mutation.
-            const candidate = attempt < 2 ? await tx.racePowerup.findUnique({
+            const candidate = await tx.racePowerup.findUnique({
               where: { id: args.powerupId }, select: { type: true },
-            }) : null;
-            const shared = !requireExclusiveGuard && SHARED_RACE_GUARD_TYPES.has(candidate?.type);
+            });
+            // Leech initialization must observe every earlier accepted daily
+            // input. Match intake's user-source -> race-job lock order. Invalid
+            // targets still reach the existing public validation below.
+            if (candidate?.type === "LEECH" && args.targetUserId) {
+              const target = await tx.raceParticipant.findUnique({
+                where: { raceId_userId: { raceId: args.raceId, userId: args.targetUserId } },
+                select: { userId: true },
+              });
+              if (target) await lockScoringInputState(tx, target.userId);
+            }
+            const shared = attempt < 2 && !requireExclusiveGuard && SHARED_RACE_GUARD_TYPES.has(candidate?.type);
             if (shared) {
               const guards = await tx.$queryRaw`
                 SELECT race_id FROM race_resolution_jobs_v2

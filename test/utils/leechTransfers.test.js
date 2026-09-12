@@ -133,3 +133,64 @@ test("a leech whose attacker is not an active participant still drains the victi
   ]);
   assert.equal(finals.get("v"), 700);
 });
+
+// Expired transfers are ledger amounts, not fresh claims on today's balance.
+// Pure full/incremental parity is algorithmic; the endpoint regression lives
+// in test/integration/leech-expiry-boundary.test.js.
+test("frozen Leech debit and credit survive downward corrections and later recovery", () => {
+  const { createIncrementalLeechTransferState } = require("../../src/modules/powerups/leechTransfers");
+  for (const victimBalance of [0, 50, 100, 1000]) {
+    const transfer = { effectId: "expired", startsAt: new Date(0), sourceUserId: "attacker",
+      earnedTransfer: 500, frozenTransfer: 100 };
+    const entries = [
+      { participantId: "victim", userId: "victim", preLeechTotal: victimBalance, leechTransfers: [transfer] },
+      { participantId: "attacker", userId: "attacker", preLeechTotal: 1000, leechTransfers: [] },
+    ];
+    const expected = new Map([["victim", Math.max(0, victimBalance - 100)], ["attacker", 1100]]);
+    assert.deepEqual(applyLeechTransfers(entries), expected);
+    const incremental = createIncrementalLeechTransferState(entries);
+    incremental.addTransfer({ ...transfer, victimParticipantId: "victim" });
+    assert.deepEqual(incremental.getFinalTotals(), expected);
+  }
+});
+
+test("a valid frozen zero never regains unused Leech potential", () => {
+  const totals = applyLeechTransfers([
+    { participantId: "v", userId: "v", preLeechTotal: 1000,
+      leechTransfers: [{ effectId: "zero", startsAt: new Date(0), sourceUserId: "s", earnedTransfer: 500, frozenTransfer: 0 }] },
+    { participantId: "s", userId: "s", preLeechTotal: 1000, leechTransfers: [] },
+  ]);
+  assert.equal(totals.get("v"), 1000);
+  assert.equal(totals.get("s"), 1000);
+});
+
+
+test("immutable Leech debits reserve balance before earlier live claims", () => {
+  const { createIncrementalLeechTransferState } = require("../../src/modules/powerups/leechTransfers");
+  const transfers = [
+    { effectId: "live", startsAt: new Date(0), sourceUserId: "live-user", earnedTransfer: 100 },
+    { effectId: "frozen", startsAt: new Date(1000), sourceUserId: "frozen-user", earnedTransfer: 100, frozenTransfer: 100 },
+  ];
+  for (const balance of [0, 50, 100, 150, 200]) {
+    const entries = [
+      { participantId: "victim", userId: "victim", preLeechTotal: balance, leechTransfers: transfers },
+      { participantId: "live-user", userId: "live-user", preLeechTotal: 0 },
+      { participantId: "frozen-user", userId: "frozen-user", preLeechTotal: 0 },
+    ];
+    const expected = new Map([["victim", 0], ["live-user", Math.max(0, balance - 100)], ["frozen-user", 100]]);
+    assert.deepEqual(applyLeechTransfers(entries), expected);
+    const incremental = createIncrementalLeechTransferState(entries);
+    for (const transfer of transfers) incremental.addTransfer({ ...transfer, victimParticipantId: "victim" });
+    assert.deepEqual(incremental.getFinalTotals(), expected);
+  }
+});
+
+test("a frozen victim's finalized debit keeps crediting an active attacker", () => {
+  const totals = applyLeechTransfers([
+    { participantId: "attacker", userId: "attacker", preLeechTotal: 1000 },
+  ], { frozenVictimTransfers: [
+    { effectId: "expired", victimParticipantId: "forfeited", sourceUserId: "attacker",
+      startsAt: new Date(0), frozenTransfer: 100, earnedTransfer: 100 },
+  ] });
+  assert.deepEqual(totals, new Map([["attacker", 1100]]));
+});

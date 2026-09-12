@@ -177,6 +177,9 @@ async function findRowsForUserRangesOn(
 }
 
 const StepSample = {
+  async resolveLeechExpiry(effect, now, scoringSamples) {
+    return require("../../powerups/leechExpiry").calculateLeechExpiry(effect, scoringSamples, now);
+  },
   // Granularity-aware overlap resolution (§3.3). Replaces the old blind
   // upsert-on-(user, period_start): with mixed hourly/5-min data a blind upsert
   // silently double-counts. Behaviorally a NO-OP for pure-hourly traffic

@@ -27,7 +27,8 @@ const { calculateSubsequentSteps } = require("../raceSteps");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 const { raceTimeZone } = require("../raceTimeZone");
 const {
-  applyLeechTransfers,
+  applyLeechTransfersAndFinalize,
+  frozenLeechAmount,
   computeLeechEarnedTransfer,
   createIncrementalLeechTransferState,
 } = require("../../powerups/leechTransfers");
@@ -1080,13 +1081,14 @@ async function captureIncrementalRacePrefixTerms({
       );
     }
 
-    if (effect.type === "LEECH" && localParticipantId) {
+    if (effect.type === "LEECH" && (localParticipantId || frozenLeechAmount(effect) != null)) {
       leechState.addTransfer({
         effectId: effect.id,
         startsAt: effect.startsAt,
         sourceUserId: effect.sourceUserId,
-        victimParticipantId: localParticipantId,
+        victimParticipantId: localParticipantId || effect.targetParticipantId,
         earnedTransfer: earnedLeechById.get(effect.id) || 0,
+        frozenTransfer: frozenLeechAmount(effect),
       });
     }
 
@@ -1512,9 +1514,19 @@ function buildResolveRaceState(dependencies = {}) {
         );
       }
       const scoringStepsModel = prefetched?.stepsModel || stepsModel;
-      const scoringStepSampleModel =
-        prefetched?.stepSampleModel || stepSampleModel;
+      const scoringStepSampleModel = {
+        ...(prefetched?.stepSampleModel || stepSampleModel),
+        leechBoundaryContext: {
+          ...(prefetched?.stepSampleModel?.leechBoundaryContext || {}),
+          races: [race], raceActiveEffectModel: prefetched?.raceActiveEffectModel || raceActiveEffectModel,
+          stepsModel: scoringStepsModel,
+        },
+      };
       generationSampleModel = scoringStepSampleModel;
+      if (scoringStepSampleModel.leechBoundaryContext && activeImpactFreezeSourceIds) {
+        scoringStepSampleModel.leechBoundaryContext.terminalEffectIds = activeImpactFreezeSourceIds;
+        scoringStepSampleModel.leechBoundaryContext.terminalAt = currentTime;
+      }
       const prefetchedEffectModel =
         prefetched?.raceActiveEffectModel || raceActiveEffectModel;
       // Bound Phase A2's copy work to links whose CASTER is in the closure.
@@ -1801,7 +1813,7 @@ function buildResolveRaceState(dependencies = {}) {
       let resultLeechResolutions = [];
       await measureResolutionPhase("leechAndCapture", async () => {
         const leechResolutions = [];
-        const leechFinals = applyLeechTransfers(
+        const leechFinals = await applyLeechTransfersAndFinalize(
           applyHitchhikeCopies(
             preLeech
               .filter((e) => e && !e.frozen)
@@ -1813,7 +1825,7 @@ function buildResolveRaceState(dependencies = {}) {
               })),
             hitchhikeCopies
           ),
-          { onTransfer: (resolution) => leechResolutions.push(resolution) }
+          { race, effectModel: scoringEffectModel, persist: true, onTransfer: (resolution) => leechResolutions.push(resolution) }
         );
 
         for (let index = 0; index < preLeech.length; index++) {
@@ -1956,7 +1968,7 @@ function buildResolveRaceState(dependencies = {}) {
         }
       }
 
-      const drillSergeantImpacts = race.powerupsEnabled
+      const drillSergeantImpacts = race.powerupsEnabled && dependencies.evaluateConsequences !== false
         ? (await measureResolutionPhase(
             "activeEffects",
             () => judgeDrillSergeantEffects({
@@ -1985,7 +1997,7 @@ function buildResolveRaceState(dependencies = {}) {
       }));
 
       let trailMineImpacts = [];
-      if (race.powerupsEnabled) {
+      if (race.powerupsEnabled && dependencies.evaluateConsequences !== false) {
         trailMineImpacts = (await measureResolutionPhase(
           "trailMines",
           () => triggerTrailMines({

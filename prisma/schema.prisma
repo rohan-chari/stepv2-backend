@@ -2480,6 +2480,7 @@ model RaceActiveEffect {
   targetParticipant           RaceParticipant              @relation(fields: [targetParticipantId], references: [id], onDelete: Cascade)
   powerup                     RacePowerup                  @relation(fields: [powerupId], references: [id], onDelete: Cascade)
   hitchhikeAttributionCapture HitchhikeAttributionCapture?
+  leechExpiryCheckpoints LeechExpiryCheckpoint[]
 
   // One effect per (powerup, victim). AoE powerups (Rainstorm) fan one powerup
   // out to N victims, so powerupId alone can't be unique — but the same storm
@@ -2489,6 +2490,26 @@ model RaceActiveEffect {
   @@index([raceId, status])
   @@index([targetParticipantId, type, decoyConsumedAt], map: "race_active_effects_decoy_cooldown_idx")
   @@map("race_active_effects")
+}
+
+// Separate source rows avoid reversing intake's user -> race lock order when
+// bonus or Hitchhike writes already own the race fence.
+model LeechExpiryCheckpoint {
+  effectId String @map("effect_id")
+  kind String
+  raceId String @map("race_id")
+  targetParticipantId String @map("target_participant_id")
+  targetUserId String @map("target_user_id")
+  expiresAt DateTime @map("expires_at")
+  bonusSteps Int @map("bonus_steps")
+  dailyTotals Json @default("{}") @map("daily_totals")
+  hitchhikeCaptures Json @default("{}") @map("hitchhike_captures")
+  effect RaceActiveEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
+
+  @@id([effectId, kind])
+  @@index([targetUserId, expiresAt], map: "leech_expiry_checkpoints_user_expiry_idx")
+  @@index([targetParticipantId], map: "leech_expiry_checkpoints_participant_idx")
+  @@map("leech_expiry_checkpoints")
 }
 
 // Immutable-id capture used only by Hitchhike scoringVersion 3. Release A

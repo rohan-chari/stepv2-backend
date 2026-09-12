@@ -115,7 +115,13 @@ async function buildRaceResolutionInputFingerprint({
            WHEN 'expired_effect' THEN 'EXPIRED' ELSE UPPER(status::text) END AS status,
          starts_at AS "startsAt",
          expires_at AS "expiresAt", metadata, updated_at AS "updatedAt",
-         race_id AS "raceId", created_at AS "createdAt"
+         race_id AS "raceId", created_at AS "createdAt",
+         (SELECT jsonb_object_agg(checkpoint.kind, to_jsonb(checkpoint))
+          FROM leech_expiry_checkpoints checkpoint
+          WHERE checkpoint.effect_id=race_active_effects.id
+            AND NOT (COALESCE(race_active_effects.metadata, '{}'::jsonb) ? 'leechFinalV1')
+            AND LEAST(race_active_effects.expires_at,
+              (SELECT ends_at FROM races WHERE races.id=race_active_effects.race_id)) <= $3) AS "leechCheckpoint"
        FROM race_active_effects
        WHERE race_id=$1
          AND (status='active_effect'
@@ -123,7 +129,8 @@ async function buildRaceResolutionInputFingerprint({
                   AND UPPER(type::text) = ANY($2::text[])))
        ORDER BY id`,
       raceId,
-      [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"]
+      [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"],
+      now
     ),
     eventCacheRead ? Promise.resolve(null) : client.$queryRawUnsafe(
       FULL_EVENT_SQL, raceId, horizon, now.getTime()
@@ -182,9 +189,9 @@ async function buildRaceResolutionInputFingerprint({
     row.status === "EXPIRED" && !["LEECH", "HITCHHIKE"].includes(row.type));
   const activeEffects = allEffects.filter((row) => row.status !== "EXPIRED");
   const payload = {
-    // Schema 5 adds deterministic per-entitlement event ordering. Older display
+    // Schema 6 binds expiry checkpoints used by unresolved Leech transfers. Older display
     // artifact digests mismatch and safely fall back during rolling deployment.
-    schema: 5,
+    schema: 6,
     race: raceRow.race,
     // Names are presentation data: artifact commands rebind them at commit.
     // A rename must not invalidate an otherwise identical scoring artifact.

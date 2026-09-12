@@ -121,6 +121,7 @@ async function computeRaceState({
   const capture = createWriteCapture({ participantModel, effectModel, eventModel });
   const resolve = buildResolveRaceState({
     Race: raceModel,
+    evaluateConsequences: dependencies.evaluateConsequences !== false,
     RaceParticipant: capture.participants,
     RaceActiveEffect: capture.effects,
     RacePowerupEvent: capture.events,

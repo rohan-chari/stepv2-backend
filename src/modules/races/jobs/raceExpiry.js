@@ -22,7 +22,7 @@ const {
   prefetchRaceScoringModels,
 } = require("../services/raceScoringPrefetch");
 const { raceTimeZone } = require("../raceTimeZone");
-const { applyLeechTransfers } = require("../../powerups/leechTransfers");
+const { applyLeechTransfersAndFinalize } = require("../../powerups/leechTransfers");
 const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
@@ -39,6 +39,7 @@ const {
   chronologicalAttributionRows,
   scoreWholeRaceTotals,
 } = require("../services/wholeRaceAttributionScoring");
+const { buildRaceResolutionInputFingerprint } = require("../services/raceResolutionInputFingerprint");
 const redisCache = require("../../../shared/cache/redisCache");
 
 // Settlement acquires the race through the SAME fence-first ownership protocol
@@ -373,6 +374,13 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
       // getRaceProgress showed live; user races keep UTC (legacy).
       const settlementTz = raceTimeZone(race, "UTC");
 
+      // Legacy source rows may predate the intake generation baseline. Seed
+      // absent versions as one bounded write before capturing the source fence.
+      await prisma.$executeRawUnsafe(`INSERT INTO user_scoring_input_versions (user_id, generation, updated_at)
+        SELECT user_id, 1, CURRENT_TIMESTAMP FROM race_participants
+        WHERE race_id=$1 AND status='accepted'
+        ON CONFLICT (user_id) DO NOTHING`, race.id);
+      const settlementInput = await buildRaceResolutionInputFingerprint({ raceId: race.id, now: settlementTime });
       const standings = [];
       trace("scoring-begin", phaseStartedAt, { participants: acceptedParticipants.length });
 
@@ -544,7 +552,8 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
         : [];
 
       // Phase B: resolve every leech race-wide (zero-sum, deterministic).
-      const leechFinals = applyLeechTransfers(
+      const leechWrites = [];
+      const leechFinals = await applyLeechTransfersAndFinalize(
         applyHitchhikeCopies(
           preLeech.map((e) => ({
             participantId: e.participant.id,
@@ -553,7 +562,11 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
             leechTransfers: e.leechTransfers,
           })),
           hitchhikeCopies
-        )
+        ),
+        { race, persist: true, effectModel: { ...settlementEffectModel, async update(id, fields) {
+          leechWrites.push({ id, fields });
+          return { id, ...fields };
+        } } }
       );
 
       // Phase C: compute each active participant's FINAL total and its reached-at
@@ -617,6 +630,15 @@ async function resolveExpiredRaces({ now = new Date() } = {}) {
           acceptedParticipants.some((row) => !lockedIds.has(row.id))
         ) {
           return false;
+        }
+        if (leechWrites.length) {
+          const currentInput = await buildRaceResolutionInputFingerprint({
+            raceId: race.id, now: settlementTime, client: tx,
+          });
+          if (!settlementInput || currentInput?.digest !== settlementInput.digest) return false;
+        }
+        for (const write of leechWrites) {
+          await tx.raceActiveEffect.update({ where: { id: write.id }, data: write.fields });
         }
         for (const row of finalTotals) {
           await tx.raceParticipant.update({

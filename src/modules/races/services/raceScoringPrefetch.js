@@ -922,7 +922,8 @@ async function prefetchRaceScoringModelsImpl({
   ]);
   const failedInput = inputResults.find(result => result.status === "rejected");
   if (failedInput) throw failedInput.reason;
-  const [, dailyRows, prefetchedEffects, powerupEvents] = inputResults.map(result => result.value);
+  const [, dailyRows, loadedEffects, powerupEvents] = inputResults.map(result => result.value);
+  const prefetchedEffects = structuredClone(loadedEffects);
 
   dailyByUser = new Map(
     [...cachedByUser].map(([userId, entry]) => [userId, entry.dailyRows])
@@ -958,11 +959,25 @@ async function prefetchRaceScoringModelsImpl({
     return operation();
   }
 
+  const sampleUserLeases = new Map([...preparedSampleUsers].map(id => [id, 1]));
   const scopedStepSamples = {
     ...stepSampleModel,
-    prepareUsers: prepareSampleUsers,
+    async prepareUsers(userIds) {
+      const ids = [...new Set(userIds || [])];
+      for (const id of ids) sampleUserLeases.set(id, (sampleUserLeases.get(id) || 0) + 1);
+      try { await prepareSampleUsers(ids); }
+      catch (error) { this.releaseUsers(ids); throw error; }
+    },
+    async acquireAdditionalUsers(userIds) {
+      const ids = [...new Set(userIds || [])];
+      await this.prepareUsers(ids);
+      return () => this.releaseUsers(ids);
+    },
     releaseUsers(requestedUserIds) {
-      for (const userId of requestedUserIds || []) {
+      for (const userId of new Set(requestedUserIds || [])) {
+        const leases = sampleUserLeases.get(userId) || 0;
+        if (leases > 1) { sampleUserLeases.set(userId, leases - 1); continue; }
+        sampleUserLeases.delete(userId);
         // Exceptional users are generation-scoped, not phase-scoped. Base
         // scoring, Hitchhike/Leech/impact attribution, and expiry finish
         // crossing may ask for the same user after an intermediate
@@ -1183,6 +1198,10 @@ async function prefetchRaceScoringModelsImpl({
       }
       return updated;
     },
+  };
+
+  scopedStepSamples.leechBoundaryContext = {
+    races: started, raceActiveEffectModel: scopedEffects, stepsModel: scopedSteps,
   };
 
   const eventsByRaceId = new Map(
