@@ -81,4 +81,11 @@ function createHistoricalScoringWindowCache({ maxEntries = 50_000, ttlMs = 10 * 
   };
 }
 const processHistoricalScoringWindowCache = createHistoricalScoringWindowCache({ metrics: coordinatedOptimizationMetrics });
+// Aggregate-only heartbeat makes cache use observable in each live process.
+// No user/race identifiers, SQL writes or extra database reads are emitted.
+const telemetryTimer = setInterval(() => {
+  console.info(JSON.stringify({ event: "historical_scoring_window_cache", pid: process.pid,
+    ...processHistoricalScoringWindowCache.snapshot() }));
+}, 60_000);
+telemetryTimer.unref();
 module.exports = { createHistoricalScoringWindowCache, processHistoricalScoringWindowCache };
