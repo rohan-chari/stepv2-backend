@@ -49,5 +49,22 @@ regression run; the baseline failures remain unresolved.
 Local evidence logs: /tmp/bara-midnight-red.log, /tmp/bara-midnight-baseline-full.log,
 /tmp/bara-midnight-five.log, /tmp/bara-midnight-regression.log, and
 /tmp/bara-midnight-flutter-analyze.log. These are ephemeral local logs, not production
-measurements. Production CPU savings remain unmeasured; this change has not been
-deployed. Removing the observed repair chain does not establish its exact CPU share.
+measurements. Production CPU savings remain unmeasured; deployment verification follows. Removing the observed repair chain does not establish its exact CPU share.
+
+## Production deployment — September 13, 2026
+
+User authorized deployment after the baseline failures were disclosed. Runtime
+92b8f4b was fast-forwarded to main and deployed with the serialized PM2 wrapper.
+Verified at 04:56:26 UTC: two HTTP workers, one resolution worker, one cron worker,
+and staging stopped. Final application pool budget 32; managed transaction pool
+40 and PostgreSQL maximum 50. No migrations, dependency installs, or configuration
+changes were needed. Environment and pre-existing package-lock edit were preserved.
+Powerup copy already matched; the three existing Decoy balance differences remained.
+Referral catch-up audit/apply/audit found zero rows. Local and public health both
+returned status=ok and redis=ok.
+
+The new worker recorded 20 commits; the updated repair guard executed three times.
+Zero overdue queued jobs and zero pending elapsed-race repairs were observed. There
+were no elapsed ACTIVE races during verification, so this does not measure the
+midnight workload reduction. No new database errors appeared in the bounded log
+sample; pre-existing BILLING_UNAVAILABLE warnings continued. No monitor remains active.
