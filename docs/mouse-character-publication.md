@@ -1,6 +1,18 @@
 # Test-only mouse character publication — 2026-09-13
 
-## Current revision: layered body motion and complete client-compatible loop
+## Current revision: corgi-inspired head/chest motion and front-leg depth
+
+User requested the corgi's head/body movement and clearer depth between the mouse's two front legs. Both bundled corgi sheets were inspected. Asset commit `753dbfb` is deployed; current CDN file: https://steptracker-api.org/assets/characters/mouse@4278119fd764.png . SHA-256: `4278119fd764316ae5d15e9c97102668f05017b81c66c850bbe59e92fc426d99`.
+
+The head and torso are now separate generated-art layers. Torso bob/pitch is stronger and the head nods independently with a phase offset, following the observed corgi chest-rise/head-nod relationship rather than treating the mouse as one rigid body. The far foreleg is darker, slimmer and recessed; the fuller near foreleg overlaps the chest. At the 96-pixel art scale their source widths are 8 and 12 pixels, shoulder positions differ by 5 pixels, and the far paw's ground line is 1.5 pixels higher for depth. Neck attachment edges are feathered only over opaque torso pixels, preserving exposed pixel-art contours. Generated parts and motion are editable in a seven-layer Aseprite source.
+
+Published sheet remains six 96×96 poses (576×96), uniformly sampled from a 24-frame periodic master, with the same 720 ms standard preview loop. This preserves fixed-six client compatibility. Final first/last seam difference is 12.79 versus maximum interior 15.14; all six poses are distinct and contained. Reviewer rechecked the sampled poses and resolved neck join: SHIP, no issues. Correlated head/body and front-leg depth can be compared with the corgi in the local `output/imagegen/mouse-v4/corgi-mouse-comparison.gif` artifact.
+
+Admin PATCH changed only assetVersion. Every other item field and render metadata, including six frames and baselineOffset -0.03125, was verified unchanged; the same Rohan ownership row remains. CDN checksum verified before PATCH, peer mirroring succeeded, and first/repeated live current TestFlight, production, and legacy-capability catalog/manifest checks passed. No app code/build, economy, configuration, restart, coin or equipment changes. Production retained two HTTP workers and staging remained stopped.
+
+Manual checks: reopen TestFlight and inspect all six poses in Mouse's wardrobe for neck continuity and consistent near/far front-leg overlap. Watch five Home/Shop loops for connected chest/head motion and no wrap reset. Check race cards (fixed-six playback), race detail, leaderboard and available team/podium surfaces at their smaller display sizes. Test both platforms where a test-channel build is available. Demo/tab fixtures omit Mouse, the wardrobe tutorial uses the default capybara, and profile-photo avatars are independent. Device playback remains manual.
+
+## Previous revision: layered body motion and complete client-compatible loop
 
 The user requested slightly more pixel texture, whole-body motion, and removal of the visible leg/reset discontinuity. Current asset commit: `8dcc4a7`. Current CDN file: https://steptracker-api.org/assets/characters/mouse@8e0f2159b0db.png . SHA-256: `8e0f2159b0db1ab58116f77d146d9e3a4d72ef9ac54a810d723d72bd38b7ab98`.
 
