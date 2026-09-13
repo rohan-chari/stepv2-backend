@@ -20,7 +20,7 @@ The independent six-fixture comparison passed with identical persisted and publi
 
 The migration adds one proof update per affected race per effect mutation statement (and a proof row when a race is created). No-op effect updates and checkpoint-only/step-sync changes add no proof updates. Existing Leech checkpoint reads remain where required. Snapshots opt out above 20,000 rows or 2 MiB and expire within 30 seconds or an earlier effect/race boundary. Missing/mismatched proofs reload canonically.
 
-Architect and code reviewer approved. Frontend `flutter analyze --no-pub` and Prisma validation passed. Final combined integration verification passed **112/112**: 27 new effect-reuse cases, 56 event-cache cases, 11 planning-reuse cases, 16 Leech-boundary cases, and 2 settlement-parity cases. No failures or skips. New tests failed on the original 2/3 full reads before implementation. Database CPU and production latency have not been measured for this change. Production has not been deployed.
+Architect and code reviewer approved. Frontend `flutter analyze --no-pub` and Prisma validation passed. Final combined integration verification passed **112/112**: 27 new effect-reuse cases, 56 event-cache cases, 11 planning-reuse cases, 16 Leech-boundary cases, and 2 settlement-parity cases. No failures or skips. New tests failed on the original 2/3 full reads before implementation. Database CPU and production latency have not been measured for this change. Production deployment is recorded below.
 
 
 ## Release
@@ -31,3 +31,11 @@ Backend-only, additive migration `20260913040000_effect_fingerprint_versions`. O
 - [After measurements](evidence/effect-fingerprint-reuse/after.json)
 - [Final query plan check](evidence/effect-fingerprint-reuse/plan-check.json)
 - [Integration tests](../test/integration/effect-fingerprint-reuse.test.js)
+
+
+## Production deployment — 2026-09-13
+Merged to main and deployed runtime `2dba77b`. The additive migration finished at04:19:38UTC; guarded reload completed with two HTTPworkers, one resolutionworker and one cronworker, poolceiling32, stagingstopped. All2029races had effectproof rows; allfive prooftriggers enabled. Environment and the existing serverlockfile edit were preserved. Referral audit/apply/audit reportedzero missing rows; copy alreadymatched; three known Decoybalance differences retained.
+
+At04:23:23UTC the newworker had63successfulcommits (50closure,13FULL), queueclear. PostgreSQL recorded59full-effectloads and59final-effectreuseproofqueries, consistent with the intended one-load path. These are aggregate query counts, not per-job hit-rate tracing or a CPU savings measurement. Local/public health andRedis wereOK; marketing/privacy/support returned200. No sampled newdatabase errors; the existing BILLING_UNAVAILABLE messages remained.
+
+[Production evidence](evidence/effect-fingerprint-reuse/production-verification.json)

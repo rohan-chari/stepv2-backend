@@ -1,0 +1,160 @@
+{
+  "at": "2026-09-13T04:23:23.978Z",
+  "commit": "2dba77b813f79c2df253303084ff7f027ca313ff",
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "status": "stopped",
+      "startedAt": "2026-09-02T18:17:59.797Z"
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "pid": 1749823,
+      "status": "online",
+      "startedAt": "2026-09-13T04:20:58.136Z"
+    },
+    {
+      "name": "steps-tracker-cron",
+      "pid": 1749841,
+      "status": "online",
+      "startedAt": "2026-09-13T04:20:58.438Z"
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1749692,
+      "status": "online",
+      "startedAt": "2026-09-13T04:20:21.795Z"
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1749704,
+      "status": "online",
+      "startedAt": "2026-09-13T04:20:23.383Z"
+    }
+  ],
+  "errorCounts": {
+    "BILLING_UNAVAILABLE": 114
+  },
+  "worker": {
+    "commits": 63,
+    "plans": {
+      "DEPENDENCY_CLOSURE": 50,
+      "FULL": 13
+    }
+  },
+  "migration": [
+    {
+      "migration_name": "20260913040000_effect_fingerprint_versions",
+      "finished_at": "2026-09-13T04:19:38.936Z",
+      "rolled_back_at": null
+    }
+  ],
+  "proofs": {
+    "races": 2029,
+    "stamped": 2029,
+    "changed": 3
+  },
+  "triggers": [
+    {
+      "tgname": "effect_fingerprint_delete",
+      "tgenabled": "O"
+    },
+    {
+      "tgname": "effect_fingerprint_insert",
+      "tgenabled": "O"
+    },
+    {
+      "tgname": "effect_fingerprint_race_created",
+      "tgenabled": "O"
+    },
+    {
+      "tgname": "effect_fingerprint_truncated",
+      "tgenabled": "O"
+    },
+    {
+      "tgname": "effect_fingerprint_update",
+      "tgenabled": "O"
+    }
+  ],
+  "queryWork": [
+    {
+      "queryid": "2120184176468756888",
+      "calls": "59",
+      "total_exec_time": 1101.374525,
+      "rows": "2833",
+      "shared_blks_hit": "18516",
+      "shared_blks_read": "120",
+      "stats_since": "2026-09-13T04:22:15.016Z",
+      "work": "full_effect_read"
+    },
+    {
+      "queryid": "3663896701081831062",
+      "calls": "6",
+      "total_exec_time": 50.93513,
+      "rows": "165",
+      "shared_blks_hit": "1049",
+      "shared_blks_read": "0",
+      "stats_since": "2026-09-13T04:22:29.817Z",
+      "work": "final_effect_reuse_proof"
+    },
+    {
+      "queryid": "-3180106531743894948",
+      "calls": "53",
+      "total_exec_time": 514.869405,
+      "rows": "2153",
+      "shared_blks_hit": "10594",
+      "shared_blks_read": "0",
+      "stats_since": "2026-09-13T04:22:15.286Z",
+      "work": "final_effect_reuse_proof"
+    }
+  ],
+  "queue": [
+    {
+      "state": "succeeded",
+      "count": 1771
+    }
+  ],
+  "statsInfo": [
+    {
+      "dealloc": "247",
+      "stats_reset": "2026-09-01T23:25:56.323Z"
+    }
+  ],
+  "pool": {
+    "max_connections": "50"
+  },
+  "configPreserved": true,
+  "health": {
+    "local": {
+      "status": "ok",
+      "redis": "ok"
+    },
+    "public": {
+      "status": "ok",
+      "redis": "ok"
+    },
+    "marketingStatuses": {
+      "/": 200,
+      "/privacy": 200,
+      "/support": 200
+    }
+  },
+  "deployment": {
+    "guardedReload": "passed",
+    "productionPoolBudget": 32,
+    "managedPool": {
+      "mode": "transaction",
+      "size": 40
+    },
+    "stagingPoolSize": 3,
+    "referralCatchUp": {
+      "auditBefore": 0,
+      "applied": 0,
+      "auditAfter": 0
+    },
+    "powerupCopy": "already matched",
+    "balanceDrift": "three pre-existing Decoy differences preserved",
+    "runtimeCommit": "2dba77b813f79c2df253303084ff7f027ca313ff"
+  },
+  "interpretation": "59 full effect query calls and59 final reuse-proof calls observed since new query entries began04:22:15UTC; consistent with one full read per protected calculation, not an individually correlated cache hit rate or CPU measurement. Worker63commits since its new startup. No new sampled database error codes; BILLING_UNAVAILABLE was pre-existing."
+}
