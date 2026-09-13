@@ -1,4 +1,4 @@
-const { SETTLEMENT_EFFECT_TYPES } = require("./raceScoringEffectTypes");
+const effectRead = require("./raceFingerprintEffectRead");
 const { prisma: defaultPrisma } = require("../../../db");
 const { FULL_EVENT_SQL } = require("./raceFingerprintEventSql");
 const { EVENT_PROOF_CTE, PROOF_COLUMNS, proofFromRow } = require("./raceFingerprintEventProof");
@@ -33,9 +33,11 @@ async function buildRaceResolutionInputFingerprint({
   const GLOBAL_EVENT_LOOKAHEAD_MS = 10 * 60 * 1000;
   const horizon = new Date(now.getTime() + GLOBAL_EVENT_LOOKAHEAD_MS);
   const readProof = eventCacheRead || hasReusableEventRead(reuseEventsFrom);
-  const [raceRows, inputs, effects, rawEventRows] = await Promise.all([
+  const effectCandidate = effectRead.effectReadCandidate(reuseEventsFrom, { raceId, now, balanceConfigVersion });
+  const ctes = [readProof ? EVENT_PROOF_CTE : null, effectCandidate ? effectRead.CHECKPOINT_CTE : null].filter(Boolean);
+  const [raceRows, inputs, loadedEffects, rawEventRows] = await Promise.all([
     client.$queryRawUnsafe(
-      `/* steps:prepared-read:v1 */ ${readProof ? `WITH ${EVENT_PROOF_CTE}` : ""} SELECT race.id AS "r_id",
+      `/* steps:prepared-read:v1 */ ${ctes.length ? `WITH ${ctes.join(", ")}` : ""} SELECT race.id AS "r_id",
        race.name AS "r_name",
        (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS "r_scheduledStartAt",
        race.team_a_name AS "r_teamAName",
@@ -70,13 +72,16 @@ async function buildRaceResolutionInputFingerprint({
        (EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000)::float8 AS "p_totalsUpdatedAt"
        ${includePresentation ? ', person.id AS "u_id", person.display_name AS "u_displayName"' : ""}
        ${readProof ? `, ${PROOF_COLUMNS}` : ""}
+       ${effectCandidate ? `, ${effectRead.FINAL_COLUMNS}` : ""}
        FROM races race
        ${readProof ? 'LEFT JOIN event_proof proof ON proof."raceId"=race.id' : ""}
+       ${effectCandidate ? effectRead.FINAL_JOINS : ""}
        LEFT JOIN race_participants participant ON participant.race_id=race.id
        ${includePresentation ? "LEFT JOIN users person ON person.id=participant.user_id" : ""}
        WHERE race.id=$1
        ORDER BY participant.id`,
-      raceId
+      raceId,
+      ...(effectCandidate ? [effectCandidate.checkpointJson, now] : [])
     ),
     client.$queryRawUnsafe(
       `/* steps:prepared-read:v1 */ WITH members AS (
@@ -107,40 +112,19 @@ async function buildRaceResolutionInputFingerprint({
       raceId,
       now
     ),
-    // Load the complete scoring effect input once for this protected attempt.
-    // Expired local modifiers still affect steps earned during their windows;
-    // expired Leech/Hitchhike links additionally remain part of the graph.
-    client.$queryRawUnsafe(
-      `/* steps:prepared-read:v1 */ SELECT id, target_participant_id AS "targetParticipantId",
-         target_user_id AS "targetUserId", source_user_id AS "sourceUserId",
-         powerup_id AS "powerupId", UPPER(type::text) AS type,
-         CASE status WHEN 'active_effect' THEN 'ACTIVE'
-           WHEN 'expired_effect' THEN 'EXPIRED' ELSE UPPER(status::text) END AS status,
-         starts_at AS "startsAt",
-         expires_at AS "expiresAt", metadata, updated_at AS "updatedAt",
-         race_id AS "raceId", created_at AS "createdAt",
-         (SELECT jsonb_object_agg(checkpoint.kind, to_jsonb(checkpoint))
-          FROM leech_expiry_checkpoints checkpoint
-          WHERE checkpoint.effect_id=race_active_effects.id
-            AND NOT (COALESCE(race_active_effects.metadata, '{}'::jsonb) ? 'leechFinalV1')
-            AND LEAST(race_active_effects.expires_at,
-              (SELECT ends_at FROM races WHERE races.id=race_active_effects.race_id)) <= $3) AS "leechCheckpoint"
-       FROM race_active_effects
-       WHERE race_id=$1
-         AND (status='active_effect'
-              OR (status='expired_effect'
-                  AND UPPER(type::text) = ANY($2::text[])))
-       ORDER BY id`,
-      raceId,
-      [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"],
-      now
-    ),
+    effectCandidate ? Promise.resolve(null) : effectRead.loadEffects(client, raceId, now),
     readProof ? Promise.resolve(null) : client.$queryRawUnsafe(
       FULL_EVENT_SQL, raceId, horizon, now.getTime()
     ),
   ]);
 
   if (!raceRows[0]?.r_id) return null;
+  let finalLoadedEffects = loadedEffects;
+  let effects = effectCandidate ? effectRead.reuseEffects(effectCandidate, raceRows[0]) : loadedEffects.effects;
+  if (!effects) {
+    finalLoadedEffects = await effectRead.loadEffects(client, raceId, now);
+    effects = finalLoadedEffects.effects;
+  }
   let eventRows = rawEventRows;
   if (eventCacheRead) {
     eventRows = await readRaceFingerprintEvents({
@@ -218,7 +202,7 @@ async function buildRaceResolutionInputFingerprint({
       ? "code-default"
       : String(balanceConfigVersion),
   };
-  return bindEventReadSnapshot({
+  const fingerprint = bindEventReadSnapshot({
     digest: digestPayload(payload),
     race: raceRow.race,
     participantCount: raceRow.participants.length,
@@ -245,6 +229,8 @@ async function buildRaceResolutionInputFingerprint({
     // clock, while the immutable scoring facts must still hash identically.
     scoringReadSnapshot: { schema: 1, raceId, asOf: now.getTime(), through: horizon.getTime(), effectsComplete: true, raceComplete: true },
   }, eventRows);
+  return eventCacheRead ? effectRead.bindEffectReadSnapshot(fingerprint, finalLoadedEffects,
+    { raceId, now, balanceConfigVersion }) : fingerprint;
 }
 
 module.exports = { buildRaceResolutionInputFingerprint };

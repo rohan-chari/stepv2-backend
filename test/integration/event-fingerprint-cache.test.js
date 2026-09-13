@@ -796,7 +796,7 @@ for (const mode of ['LEGACY_GLOBAL','LOCAL_ENTITLEMENTS']) {
       const final = result.reads.find(r => r.transaction);
       assert.ok(final);
       assert.equal(eventQueries(final).length, 0, 'unchanged event data must not be reloaded inside the commit transaction');
-      assert.equal(final.queries.length, 3);
+      assert.equal(final.queries.length, 2);
       assert.ok(final.queries.some(q => q.includes('race_event_fingerprint_versions') && q.includes('AS "r_id"')));
       assert.deepEqual(json(final.value.globalEvents), json(planning(result).value.globalEvents));
     }

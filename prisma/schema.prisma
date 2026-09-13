@@ -1548,6 +1548,7 @@ model FundedExposureGuard {
 
 model Race {
   eventFingerprintVersion RaceEventFingerprintVersion?
+  effectFingerprintVersion RaceEffectFingerprintVersion?
   economicRealm String @default("production") @map("economic_realm")
   effectDeadlines RaceEffectDeadline[]
   snapshotRepairIntents RaceSnapshotRepairIntent[]
@@ -4335,4 +4336,13 @@ model EventFingerprintPairVersion {
   @@id([eventId,userId])
   @@index([userId], map: "event_fingerprint_pair_versions_user_idx")
   @@map("event_fingerprint_pair_versions")
+}
+
+// Transactional proof of base effect rows; checkpoints intentionally unversioned.
+model RaceEffectFingerprintVersion {
+  raceId String @id @map("race_id")
+  incarnation String @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revision BigInt @default(0)
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  @@map("race_effect_fingerprint_versions")
 }

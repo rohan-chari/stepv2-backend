@@ -1,0 +1,167 @@
+{
+  "environment": "dedicated loopback PostgreSQL bara_effect_research_test",
+  "sourceCommit": "4261964",
+  "method": "real HTTP sync-v2 with old client header, real resolution worker, passive SQL observation; persisted scores compared with GET progress",
+  "cases": [
+    {
+      "kind": "none",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 0
+        },
+        {
+          "transaction": true,
+          "effectReads": 1,
+          "rows": 0
+        }
+      ],
+      "effectSqlCount": 2,
+      "nonFingerprintEffectSql": [],
+      "persisted": 100
+    },
+    {
+      "kind": "RUNNERS_HIGH",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 1
+        },
+        {
+          "transaction": true,
+          "effectReads": 1,
+          "rows": 1
+        }
+      ],
+      "effectSqlCount": 2,
+      "nonFingerprintEffectSql": [],
+      "persisted": 200
+    },
+    {
+      "kind": "RAINSTORM",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 1
+        },
+        {
+          "transaction": true,
+          "effectReads": 1,
+          "rows": 1
+        }
+      ],
+      "effectSqlCount": 2,
+      "nonFingerprintEffectSql": [],
+      "persisted": 50
+    },
+    {
+      "kind": "team",
+      "plan": "FULL",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 0
+        },
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 0
+        },
+        {
+          "transaction": true,
+          "effectReads": 1,
+          "rows": 0
+        }
+      ],
+      "effectSqlCount": 3,
+      "nonFingerprintEffectSql": [],
+      "persisted": 100
+    }
+  ],
+  "cpuMeasured": false,
+  "denseHistory": {
+    "source": "isolated git archive4261964, shared dependencies, dedicated loopback test DB",
+    "effectsPerRace": 200,
+    "cases": [
+      {
+        "kind": "history",
+        "plan": "DEPENDENCY_CLOSURE",
+        "reasons": [
+          "STEP_INPUT_CHANGED"
+        ],
+        "scope": "not_attempted",
+        "fingerprints": [
+          {
+            "transaction": false,
+            "effectReads": 1,
+            "rows": 200,
+            "statementCount": 4
+          },
+          {
+            "transaction": true,
+            "effectReads": 1,
+            "rows": 200,
+            "statementCount": 4
+          }
+        ],
+        "effectSqlCount": 2,
+        "nonFingerprintEffectSql": [],
+        "persisted": 100
+      },
+      {
+        "kind": "team",
+        "plan": "FULL",
+        "reasons": [
+          "STEP_INPUT_CHANGED"
+        ],
+        "scope": "not_attempted",
+        "fingerprints": [
+          {
+            "transaction": false,
+            "effectReads": 1,
+            "rows": 200,
+            "statementCount": 4
+          },
+          {
+            "transaction": false,
+            "effectReads": 1,
+            "rows": 200,
+            "statementCount": 4
+          },
+          {
+            "transaction": true,
+            "effectReads": 1,
+            "rows": 200,
+            "statementCount": 4
+          }
+        ],
+        "effectSqlCount": 3,
+        "nonFingerprintEffectSql": [],
+        "persisted": 100
+      }
+    ]
+  }
+}

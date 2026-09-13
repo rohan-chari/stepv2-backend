@@ -1,0 +1,60 @@
+{
+  "method": "EXPLAIN ANALYZE BUFFERS on actual observed final roster SQL and parameters, dedicated local test database",
+  "purpose": "verify checkpoint aggregation once per race and one proof PK lookup, no full effect relation read; empty checkpoint fixture does not establish large checkpoint-table cost",
+  "cases": [
+    {
+      "fixture": "history",
+      "checkpointRowsInFixture": 0,
+      "finalRosterPlanNodes": [
+        {
+          "Node Type": "Aggregate",
+          "Subplan Name": "CTE effect_checkpoints",
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 0
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Relation Name": "leech_expiry_checkpoints",
+          "Actual Rows": 0,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 0
+        },
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "race_effect_fingerprint_versions",
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 2
+        }
+      ]
+    },
+    {
+      "fixture": "team",
+      "checkpointRowsInFixture": 0,
+      "finalRosterPlanNodes": [
+        {
+          "Node Type": "Aggregate",
+          "Subplan Name": "CTE effect_checkpoints",
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 0
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Relation Name": "leech_expiry_checkpoints",
+          "Actual Rows": 0,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 0
+        },
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "race_effect_fingerprint_versions",
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 2
+        }
+      ]
+    }
+  ]
+}

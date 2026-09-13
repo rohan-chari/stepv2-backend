@@ -1,0 +1,16 @@
+{
+  "environment": "loopback PostgreSQL bara_effect_regression_test and dedicated loopback Redis16441",
+  "command": "npm run test:integration -- test/integration/effect-fingerprint-reuse.test.js test/integration/event-fingerprint-cache.test.js test/integration/race-resolution-planning-input-reuse.test.js test/integration/leech-expiry-boundary.test.js test/integration/race-queue-v2-settlement-parity.test.js",
+  "tests": 112,
+  "passed": 112,
+  "failed": 0,
+  "skipped": 0,
+  "newTests": 27,
+  "testsFirst": "initial unchanged normal/team HTTPworker assertions failed with2/3fullreads where1required",
+  "frontendAnalyze": "flutter analyze --no-pub: no issues",
+  "prismaValidate": "passed with explicit localtestURL",
+  "architectReview": "APPROVE",
+  "codeReview": "SHIP, no findings after private expiry timestamp alias was corrected and tested",
+  "productionDeployed": false,
+  "cpuSavingsMeasured": false
+}

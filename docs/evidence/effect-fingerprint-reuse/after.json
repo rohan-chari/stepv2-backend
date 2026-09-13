@@ -1,0 +1,150 @@
+{
+  "environment": "dedicated loopback PostgreSQL bara_effect_research_test",
+  "source": "perf/effect-fingerprint-reuse; final implementation reviewed SHIP and112integrationtests passed",
+  "method": "same real HTTP/worker fixtures as baseline; private reused rows appear in fingerprint but do not represent a second SQL effect read",
+  "cases": [
+    {
+      "kind": "history",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 200,
+          "statementCount": 4
+        },
+        {
+          "transaction": true,
+          "effectReads": 0,
+          "rows": 200,
+          "statementCount": 3
+        }
+      ],
+      "effectSqlCount": 1,
+      "nonFingerprintEffectSql": [],
+      "persisted": 100
+    },
+    {
+      "kind": "team",
+      "plan": "FULL",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 200,
+          "statementCount": 4
+        },
+        {
+          "transaction": true,
+          "effectReads": 0,
+          "rows": 200,
+          "statementCount": 3
+        }
+      ],
+      "effectSqlCount": 1,
+      "nonFingerprintEffectSql": [],
+      "persisted": 100
+    },
+    {
+      "kind": "none",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 0
+        },
+        {
+          "transaction": true,
+          "effectReads": 0,
+          "rows": 0
+        }
+      ],
+      "effectSqlCount": 1,
+      "nonFingerprintEffectSql": [],
+      "persisted": 100
+    },
+    {
+      "kind": "RUNNERS_HIGH",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 1
+        },
+        {
+          "transaction": true,
+          "effectReads": 0,
+          "rows": 1
+        }
+      ],
+      "effectSqlCount": 1,
+      "nonFingerprintEffectSql": [],
+      "persisted": 200
+    },
+    {
+      "kind": "RAINSTORM",
+      "plan": "DEPENDENCY_CLOSURE",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 1
+        },
+        {
+          "transaction": true,
+          "effectReads": 0,
+          "rows": 1
+        }
+      ],
+      "effectSqlCount": 1,
+      "nonFingerprintEffectSql": [],
+      "persisted": 50
+    },
+    {
+      "kind": "team",
+      "plan": "FULL",
+      "reasons": [
+        "STEP_INPUT_CHANGED"
+      ],
+      "scope": "not_attempted",
+      "fingerprints": [
+        {
+          "transaction": false,
+          "effectReads": 1,
+          "rows": 0
+        },
+        {
+          "transaction": true,
+          "effectReads": 0,
+          "rows": 0
+        }
+      ],
+      "effectSqlCount": 1,
+      "nonFingerprintEffectSql": [],
+      "persisted": 100
+    }
+  ],
+  "cpuMeasured": false
+}

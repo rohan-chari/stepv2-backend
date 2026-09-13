@@ -1479,6 +1479,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // the single gate every closure behavior below reads.
     let closurePlan = null;
     let planningFingerprint = null;
+    let planningCapture = null;
     let closureSelectionInvariant = null;
     // bool when a closure plan was evaluated, null when the envelope is not
     // candidate-shaped or the planner said FULL.
@@ -1508,6 +1509,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 // a test can only ever see one of them.
                 buildInputFingerprint: async (options) => {
                   planningFingerprint = await buildInputFingerprint({ ...options, eventCacheRead: true });
+                  planningCapture = { capturedAt: new Date(options.now), balanceConfigVersion: options.balanceConfigVersion };
                   return planningFingerprint;
                 },
               })
@@ -1697,15 +1699,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             };
           } else {
             const config = await balanceConfig.getSnapshot();
-            const capturedAt = now();
-            const fingerprint = await buildInputFingerprint({
-              eventCacheRead: true,
-              raceId: job.raceId,
-              now: capturedAt,
-              balanceConfigVersion: config.version,
-            });
-            planningFingerprint = fingerprint;
-            const validUntil = fingerprint && computeArtifactReuseDeadline({
+            const deadlineFor = (fingerprint, capturedAt) => fingerprint && computeArtifactReuseDeadline({
               asOf: capturedAt,
               timeZone: fingerprint.race?.timezone || job.processingTimeZone || "UTC",
               raceEndsAt: fingerprint.race?.endsAt || null,
@@ -1713,6 +1707,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               activeEffects: fingerprint.activeEffects,
               globalEvents: fingerprint.globalEvents,
             });
+            const originalDeadline = planningCapture && deadlineFor(planningFingerprint, planningCapture.capturedAt);
+            const currentAt = now();
+            const reusePlanning = !forceFull && planningFingerprint?.digest && planningCapture &&
+              String(planningCapture.balanceConfigVersion ?? "code-default") === String(config.version ?? "code-default") &&
+              currentAt.getTime() >= planningCapture.capturedAt.getTime() && originalDeadline &&
+              currentAt.getTime() < new Date(originalDeadline).getTime();
+            const capturedAt = reusePlanning ? planningCapture.capturedAt : currentAt;
+            const fingerprint = reusePlanning ? planningFingerprint : await buildInputFingerprint({
+              eventCacheRead: true, raceId: job.raceId, now: capturedAt, balanceConfigVersion: config.version,
+            });
+            planningFingerprint = fingerprint;
+            planningCapture = { capturedAt, balanceConfigVersion: config.version };
+            const validUntil = reusePlanning ? originalDeadline : deadlineFor(fingerprint, capturedAt);
             sourceInputTerminal = sourceInputTargetIsTerminal(
               fingerprint,
               job.processingTriggeredByUserIds,
