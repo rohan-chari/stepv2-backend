@@ -5,7 +5,7 @@ const { coordinatedOptimizationMetrics: metrics } = require('../../../shared/obs
 // Revision keys are immutable identities, not a Redis-owned 'current version'.
 // An old in-flight loader can only populate its old, unreachable key. Coverage
 // is checked independently so a narrower same-revision fill is only a miss.
-const PREFIX = 'event-fingerprint:v3';
+const PREFIX = 'event-fingerprint:v4';
 const MAX_ROWS = 8192;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_TTL_MS = 30000;
@@ -38,7 +38,7 @@ function validProof(proof) {
     /^[a-f0-9]{64}$/.test(proof.localWitnessDigest) && Number.isFinite(proof.startedAt);
 }
 function valid(payload, kind, proof, now, horizon) {
-  if (!payload || payload.schema !== 3 || payload.kind !== kind || payload.catalogRevision !== proof.catalogRevision ||
+  if (!payload || payload.schema !== 4 || payload.kind !== kind || payload.catalogRevision !== proof.catalogRevision ||
       payload.databaseEpoch !== proof.databaseEpoch ||
       (kind === 'global' ? payload.cursorDigest !== proof.cursorDigest :
         payload.localWitnessDigest !== proof.localWitnessDigest || payload.raceId !== proof.raceId) ||
@@ -84,7 +84,7 @@ async function write(kind, proof, rows, { coversThrough, now, cursor = null, pen
   if (!events.every(row => validRow(row, kind === 'global' ? kind : row.scheduleMode === 'LEGACY_GLOBAL' ? 'global' : 'local'))) { count('invalid'); return; }
   const boundaries = events.flatMap(row => [Date.parse(row.startsAt), Date.parse(row.endsAt)]).filter(t => t > now.getTime());
   const ttlMs = Math.min(MAX_TTL_MS, ...boundaries.map(t => t - now.getTime()));
-  const payload = { schema: 3, kind, catalogRevision: proof.catalogRevision, databaseEpoch: proof.databaseEpoch,
+  const payload = { schema: 4, kind, catalogRevision: proof.catalogRevision, databaseEpoch: proof.databaseEpoch,
     ...(kind === 'global' ? { cursorDigest: proof.cursorDigest, cursor, pendingBoundaries } :
       { localWitnessDigest: proof.localWitnessDigest, raceId: proof.raceId }),
     coversFrom: proof.startedAt, coversThrough: coversThrough.getTime(), asOf: now.getTime(),

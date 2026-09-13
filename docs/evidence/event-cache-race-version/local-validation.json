@@ -1,0 +1,128 @@
+{
+  "baselineCommit": "7d38ce9",
+  "status": "local-only",
+  "focusedIntegration": {
+    "tests": 66,
+    "passed": 66,
+    "failed": 0
+  },
+  "broaderClosureParity": {
+    "tests": 21,
+    "passed": 16,
+    "failed": 5,
+    "baselineFailed": 8,
+    "allFiveReproducedOnBaseline": true
+  },
+  "metrics": [
+    {
+      "mode": "LEGACY_GLOBAL",
+      "coldFingerprintSelects": [
+        4,
+        4
+      ],
+      "warmFingerprintSelects": [
+        3,
+        4
+      ],
+      "coldEventReads": [
+        1,
+        1
+      ],
+      "warmEventReads": [
+        0,
+        1
+      ],
+      "coldWorkerRoundTrips": 30,
+      "warmWorkerRoundTrips": 28,
+      "coldRosterJsonBytes": 1206,
+      "warmRosterJsonBytes": 1215
+    },
+    {
+      "mode": "LOCAL_ENTITLEMENTS",
+      "coldFingerprintSelects": [
+        4,
+        4
+      ],
+      "warmFingerprintSelects": [
+        3,
+        4
+      ],
+      "coldEventReads": [
+        1,
+        1
+      ],
+      "warmEventReads": [
+        0,
+        1
+      ],
+      "coldWorkerRoundTrips": 29,
+      "warmWorkerRoundTrips": 28,
+      "coldRosterJsonBytes": 1206,
+      "warmRosterJsonBytes": 1215
+    },
+    {
+      "bulkImpacts": 25,
+      "raceVersionUpdates": 1,
+      "pairGuardWrites": 25
+    },
+    {
+      "writeCost": [
+        {
+          "table": "event_fingerprint_pair_versions",
+          "inserts": 0,
+          "updates": 1
+        },
+        {
+          "table": "global_step_event_entitlements",
+          "inserts": 0,
+          "updates": 1
+        },
+        {
+          "table": "race_event_fingerprint_versions",
+          "inserts": 0,
+          "updates": 1
+        }
+      ],
+      "executionMs": 3.182,
+      "triggers": [
+        {
+          "Trigger Name": "event_fingerprint_entitlement_update",
+          "Relation": "global_step_event_entitlements",
+          "Time": 0.966,
+          "Calls": 1
+        },
+        {
+          "Trigger Name": "global_event_recovery_entitlement_changed",
+          "Relation": "global_step_event_entitlements",
+          "Time": 1.469,
+          "Calls": 1
+        },
+        {
+          "Trigger Name": "global_step_event_entitlements_fingerprint_stamp",
+          "Relation": "global_step_event_entitlements",
+          "Time": 0.114,
+          "Calls": 1
+        }
+      ]
+    },
+    {
+      "impacts": 513,
+      "rosterParticipants": 1,
+      "matchedProofRead": {
+        "legacy": {
+          "executionMs": 1.629,
+          "buffers": 510
+        },
+        "version": {
+          "executionMs": 0.048,
+          "buffers": 20
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Synthetic local fixtures; not a production CPU estimate.",
+    "One query timed outside representative production traffic cannot predict whole-worker latency.",
+    "Counter/guard writes are included; no claim of zero-cost invalidation."
+  ]
+}

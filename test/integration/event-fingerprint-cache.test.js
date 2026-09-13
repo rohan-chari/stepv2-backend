@@ -95,7 +95,7 @@ const planning = result => result.reads.find(r => !r.transaction);
 const eventQueries = read => read.queries.filter(q => !q.includes('AS "r_id"') &&
   /global_step_events|global_step_event_entitlements|global_event_race_impacts/.test(q));
 const json = value => JSON.parse(JSON.stringify(value));
-async function cacheKeys(kind = '*') { return redis.keys(`event-fingerprint-test:event-fingerprint:v3:${kind}:*`); }
+async function cacheKeys(kind = '*') { return redis.keys(`event-fingerprint-test:event-fingerprint:v4:${kind}:*`); }
 
 for (const mode of ['LEGACY_GLOBAL', 'LOCAL_ENTITLEMENTS']) {
   it(`real HTTP + worker cold/warm parity and measured query budget: ${mode}`, async t => {
@@ -108,8 +108,8 @@ for (const mode of ['LEGACY_GLOBAL', 'LOCAL_ENTITLEMENTS']) {
     assert.deepEqual(json(planning(warm).value.globalEvents), json(warm.reads.find(r => r.transaction).value.globalEvents),
       'cached rows must match the deployed recap canonical transaction row shape exactly');
     assert.equal(eventQueries(planning(warm)).length, 0, 'warm planning must reuse the complete vector with DB revision proof');
-    assert.equal(planning(warm).queries.filter(q => q.includes('AS "r_id"') && q.includes('global_event_race_impacts')).length, 1,
-      'warm planning still performs an authoritative bounded impact/entitlement witness read');
+    assert.equal(planning(warm).queries.filter(q => q.includes('AS "r_id"') && q.includes('race_event_fingerprint_versions')).length, 1,
+      'warm planning reads the authoritative race version in the roster statement');
     assert.equal(planning(warm).queries.length, 3, 'revisions piggyback on roster; no extra revision SELECT');
     assert.ok(warm.reads.some(r => r.transaction && eventQueries(r).some(q => q.includes('WITH race_window AS'))),
       'final PostgreSQL event fence remains in the real write transaction');
@@ -248,7 +248,7 @@ for (const pauseCommand of ['MGET', 'SET']) {
     const f = await fixture();
     await upload(f, 50);
     const proxy = await holdRedisCommand({ target: redisUrl.toString(), matches: args =>
-      args[0].toUpperCase() === pauseCommand && args.some(a => a.includes('event-fingerprint:v3:')) });
+      args[0].toUpperCase() === pauseCommand && args.some(a => a.includes('event-fingerprint:v4:')) });
     const worker = spawnTick({ REDIS_URL: proxy.url });
     try {
       await Promise.race([proxy.waiting, delay(5000).then(() => { throw new Error('cache command was never observed'); })]);
@@ -351,7 +351,7 @@ for (const model of ['globalEventRaceImpact', 'globalStepEventEntitlement']) {
   });
 }
 
-it('bounded witness is hashed once and its returned bytes do not grow with impact history', async t => {
+it('maintained witness count and version bytes do not grow with impact history', async t => {
   const f = await fixture('LOCAL_ENTITLEMENTS');
   const more = Array.from({ length: 100 }, (_, i) => ({ id: randomUUID(), appleId: randomUUID(), displayName: 'Witness '+i }));
   await prisma.user.createMany({ data: more });
@@ -360,7 +360,8 @@ it('bounded witness is hashed once and its returned bytes do not grow with impac
   const first = await run(f, 50);
   const observed = planning(first);
   assert.equal(observed.witnesses[0].count, 101);
-  assert.equal(typeof observed.witnesses[0].digest, 'string');
+  assert.match(observed.witnesses[0].incarnation, /^[0-9a-f-]{36}$/);
+  assert.match(observed.witnesses[0].revision, /^\d+$/);
   assert.ok(observed.witnessJsonBytes < 110 * 101, 'returned witness is a fixed digest/count, not impact_count × participant_count');
   assert.ok(observed.witnesses.every(w => !Array.isArray(w)));
   t.diagnostic(JSON.stringify({ participants: 101, impacts: 101, rosterJsonBytes: observed.rosterJsonBytes,
@@ -509,15 +510,276 @@ it('versioned event ordering ignores old cache vectors even with valid checksums
   assert.ok(keys.length);
   for (const key of keys) {
     const { checksum, ...payload } = JSON.parse(await redis.get(key));
-    assert.equal(payload.schema, 3, 'ordered event vectors require a new cache schema');
+    assert.equal(payload.schema, 4, 'race-version proofs require an isolated cache schema');
     payload.schema = 2;
     payload.events = payload.events.map(row => ({ ...row, multiplier: 99 }));
     payload.checksum = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-    await redis.set(key.replace('event-fingerprint:v3:', 'event-fingerprint:v2:'), JSON.stringify(payload), 'PX', 30000);
+    await redis.set(key.replace('event-fingerprint:v4:', 'event-fingerprint:v2:'), JSON.stringify(payload), 'PX', 30000);
     await redis.del(key);
   }
   const result = await run(f, 60);
   assert.equal(result.score, 120);
-  assert.ok(eventQueries(planning(result)).length > 0, 'the v2 namespace must not warm v3');
-  assert.ok((await cacheKeys()).every(key => key.includes('event-fingerprint:v3:')));
+  assert.ok(eventQueries(planning(result)).length > 0, 'the v2 namespace must not warm v4');
+  assert.ok((await cacheKeys()).every(key => key.includes('event-fingerprint:v4:')));
+});
+
+
+it('warm event proof reads one durable race version without traversing impacts or entitlements', async () => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  await run(f, 50);
+  const warm = await run(f, 60);
+  assert.equal(warm.score, 120);
+  const roster = planning(warm).queries.find(q => q.includes('AS "r_id"'));
+  assert.match(roster, /race_event_fingerprint_versions/);
+  assert.doesNotMatch(roster, /global_event_race_impacts|global_step_event_entitlements|jsonb_agg|sha256/);
+  assert.equal(planning(warm).queries.length, 3);
+  assert.ok(warm.reads.some(r => r.transaction && eventQueries(r).length === 1));
+});
+
+
+const raceVersion = async raceId => (await prisma.$queryRawUnsafe(
+  'SELECT incarnation::text,revision::text,impact_count::int AS count FROM race_event_fingerprint_versions WHERE race_id=$1', raceId))[0];
+
+it('bulk impact writes advance each race once, maintain counts, and ignore lease/no-op changes', async t => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  const users = Array.from({ length: 25 }, () => ({ id: randomUUID(), appleId: randomUUID(), displayName: 'Version '+randomUUID() }));
+  await prisma.user.createMany({ data: users });
+  const before = await raceVersion(f.race.id);
+  await prisma.globalEventRaceImpact.createMany({ data: users.map(u => ({ eventId: f.event.id, raceId: f.race.id, userId: u.id })) });
+  const after = await raceVersion(f.race.id);
+  assert.equal(BigInt(after.revision), BigInt(before.revision) + 1n);
+  assert.equal(after.count, 26);
+  await prisma.$executeRawUnsafe('UPDATE global_event_race_impacts SET updated_at=CURRENT_TIMESTAMP WHERE race_id=$1', f.race.id);
+  await prisma.$executeRawUnsafe('UPDATE global_step_event_entitlements SET updated_at=CURRENT_TIMESTAMP WHERE event_id=$1', f.event.id);
+  assert.deepEqual(await raceVersion(f.race.id), after);
+  await assert.rejects(prisma.$transaction(async tx => {
+    await tx.$executeRawUnsafe('DELETE FROM global_event_race_impacts WHERE race_id=$1', f.race.id);
+    throw new Error('version rollback');
+  }), /version rollback/);
+  assert.deepEqual(await raceVersion(f.race.id), after);
+  const result = await run(f, 60);
+  assert.equal(result.score, 120);
+  t.diagnostic(JSON.stringify({ bulkImpacts: 25, raceVersionUpdates: 1, pairGuardWrites: 25 }));
+});
+
+it('impact relocation invalidates both races and maintains their exact counts', async () => {
+  const a = await fixture('LOCAL_ENTITLEMENTS');
+  const b = await fixture('LOCAL_ENTITLEMENTS');
+  await run(a, 50);
+  await run(b, 50);
+  const beforeA = await raceVersion(a.race.id), beforeB = await raceVersion(b.race.id);
+  await prisma.$executeRawUnsafe('UPDATE global_event_race_impacts SET race_id=$1 WHERE id=$2', b.race.id, a.impact.id);
+  assert.equal((await raceVersion(a.race.id)).count, 0);
+  assert.equal((await raceVersion(b.race.id)).count, 2);
+  assert.equal(BigInt((await raceVersion(a.race.id)).revision), BigInt(beforeA.revision) + 1n);
+  assert.equal(BigInt((await raceVersion(b.race.id)).revision), BigInt(beforeB.revision) + 1n);
+  const result = await run(a, 60);
+  assert.equal(result.score, 60);
+  assert.equal(eventQueries(planning(result)).length, 1);
+});
+
+it('missing race-version state falls back to SQL and never treats a missing version as an empty event vector', async () => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  await run(f, 50);
+  await prisma.$executeRawUnsafe('DELETE FROM race_event_fingerprint_versions WHERE race_id=$1', f.race.id);
+  const result = await run(f, 60);
+  assert.equal(result.score, 120);
+  assert.equal(eventQueries(planning(result)).length, 1);
+});
+
+for (const first of ['impact', 'entitlement']) {
+  it(`concurrent ${first}-first mutation cannot miss race invalidation during pair discovery`, async () => {
+    const { Client } = require('pg');
+    const f = await fixture('LOCAL_ENTITLEMENTS');
+    await prisma.globalEventRaceImpact.delete({ where: { id: f.impact.id } });
+    await run(f, 50);
+    const clients = [new Client({ connectionString: process.env.DATABASE_URL }), new Client({ connectionString: process.env.DATABASE_URL })];
+    await Promise.all(clients.map(c => c.connect()));
+    const statements = {
+      impact: ['INSERT INTO global_event_race_impacts (id,event_id,race_id,user_id,created_at,updated_at) VALUES ($1,$2,$3,$4,now(),now())', [randomUUID(), f.event.id, f.race.id, f.account.user.id]],
+      entitlement: ["UPDATE global_step_event_entitlements SET start_outcome='PENDING' WHERE id=$1", [f.entitlement.id]],
+    };
+    let pending;
+    try {
+      await clients[0].query('BEGIN'); await clients[1].query('BEGIN');
+      await clients[0].query(...statements[first]);
+      const [pid] = (await clients[1].query('SELECT pg_backend_pid() AS pid')).rows;
+      pending = clients[1].query(...statements[first === 'impact' ? 'entitlement' : 'impact']);
+      let blocked = false;
+      for (let i=0; i<100; i++) {
+        const [state] = await prisma.$queryRawUnsafe('SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1', pid.pid);
+        if (state.wait_event_type === 'Lock') { blocked = true; break; }
+        await delay(10);
+      }
+      assert.ok(blocked, 'the overlapping pair must serialize, not silently miss an uncommitted impact');
+      await clients[0].query('COMMIT');
+      await pending;
+      const beforeSecondCommit = await raceVersion(f.race.id);
+      await clients[1].query('COMMIT');
+      assert.ok(BigInt((await raceVersion(f.race.id)).revision) > BigInt(beforeSecondCommit.revision));
+      assert.equal((await raceVersion(f.race.id)).count, 1);
+      const result = await run(f, 60);
+      assert.equal(result.score, 60);
+      assert.equal(eventQueries(planning(result)).length, 1, 'planning must invalidate, not merely rely on the final fence');
+    } finally {
+      await clients[0].query('ROLLBACK');
+      await pending?.catch(() => {});
+      await clients[1].query('ROLLBACK');
+      await Promise.all(clients.map(c => c.end()));
+    }
+  });
+}
+
+
+it('repeatable-read pair discovery fails with serialization conflict rather than missing a committed impact', async () => {
+  const { Client } = require('pg');
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  await prisma.globalEventRaceImpact.delete({ where: { id: f.impact.id } });
+  const a = new Client({ connectionString: process.env.DATABASE_URL });
+  const b = new Client({ connectionString: process.env.DATABASE_URL });
+  await Promise.all([a.connect(), b.connect()]);
+  try {
+    await b.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    await b.query('SELECT count(*) FROM global_event_race_impacts');
+    await a.query('INSERT INTO global_event_race_impacts (id,event_id,race_id,user_id,created_at,updated_at) VALUES ($1,$2,$3,$4,now(),now())', [randomUUID(),f.event.id,f.race.id,f.account.user.id]);
+    await assert.rejects(b.query("UPDATE global_step_event_entitlements SET start_outcome='PENDING' WHERE id=$1", [f.entitlement.id]), { code: '40001' });
+    await b.query('ROLLBACK');
+    await b.query("UPDATE global_step_event_entitlements SET start_outcome='PENDING' WHERE id=$1", [f.entitlement.id]);
+    const result = await run(f, 60);
+    assert.equal(result.score, 60);
+  } finally { await b.query('ROLLBACK'); await Promise.all([a.end(), b.end()]); }
+});
+
+it('set-based entitlement changes account for pair guards and exactly one version update per affected race', async t => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  const { Client } = require('pg');
+  const c = new Client({ connectionString: process.env.DATABASE_URL });
+  await c.connect();
+  try {
+    await c.query('BEGIN');
+    const stats = async () => (await c.query("SELECT relname,n_tup_ins::int AS ins,n_tup_upd::int AS upd FROM pg_stat_xact_user_tables WHERE relname IN ('global_step_event_entitlements','event_fingerprint_pair_versions','race_event_fingerprint_versions') ORDER BY relname")).rows;
+    const before = await stats();
+    const plan = (await c.query('EXPLAIN (ANALYZE,BUFFERS,WAL,FORMAT JSON) UPDATE global_step_event_entitlements SET schedule_revision=schedule_revision+1 WHERE id=$1', [f.entitlement.id])).rows[0]['QUERY PLAN'][0];
+    const delta = (await stats()).map((r,i) => ({ table:r.relname, inserts:r.ins-before[i].ins, updates:r.upd-before[i].upd }));
+    assert.deepEqual(delta.map(r => r.updates), [1,1,1]);
+    t.diagnostic(JSON.stringify({ writeCost: delta, executionMs: plan['Execution Time'], triggers: plan.Triggers }));
+  } finally { await c.query('ROLLBACK'); await c.end(); }
+});
+
+it('matched roster plans eliminate history-dependent buffer accesses while preserving the HTTP score', async t => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  const users = Array.from({ length: 512 }, () => ({ id: randomUUID(), appleId: randomUUID(), displayName: randomUUID() }));
+  await prisma.user.createMany({ data: users });
+  await prisma.globalEventRaceImpact.createMany({ data: users.map(u => ({ eventId:f.event.id, raceId:f.race.id, userId:u.id })) });
+  await run(f, 50);
+  const result = await run(f, 60);
+  assert.equal(result.score, 120);
+  const statement = planning(result).statements.find(s => s.sql.includes('AS "r_id"'));
+  const oldCte = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fixtures/event-fingerprint-legacy-proof.sql'), 'utf8');
+  const oldSql = 'WITH '+oldCte+' '+statement.sql.slice(statement.sql.indexOf('SELECT race.id AS "r_id"'));
+  const plans = {};
+  for (const [kind,sql] of [['legacy',oldSql],['version',statement.sql]]) {
+    const [row] = await prisma.$queryRawUnsafe('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+sql, ...statement.params);
+    const plan = row['QUERY PLAN'][0];
+    plans[kind] = { executionMs:plan['Execution Time'], buffers:plan.Plan['Shared Hit Blocks']+plan.Plan['Shared Read Blocks'] };
+  }
+  assert.ok(plans.version.buffers < plans.legacy.buffers, 'the new read must actually access fewer blocks');
+  t.diagnostic(JSON.stringify({ impacts:513, rosterParticipants:1, matchedProofRead:plans }));
+});
+
+for (const parent of ['races','global_step_events','users']) {
+  it(`parent ${parent} identity relocation preserves guard discovery and exact race counts`, async () => {
+    const f = await fixture('LOCAL_ENTITLEMENTS');
+    await run(f, 50);
+    const previous = parent === 'races' ? f.race.id : parent === 'users' ? f.account.user.id : f.event.id;
+    const replacement = randomUUID();
+    if (parent !== 'global_step_events') {
+      // Existing immutable-source FK contracts already reject these identities.
+      const before = await raceVersion(f.race.id);
+      await assert.rejects(prisma.$executeRawUnsafe(`UPDATE ${parent} SET id=$1 WHERE id=$2`, replacement, previous),
+        error => error.message.includes(parent === 'races' ? 'race_accepted_participant_counts_race_id_fkey' : 'user_scoring_input_versions_user_id_fkey'));
+      assert.deepEqual(await raceVersion(f.race.id), before);
+      assert.equal((await run(f, 60)).score, 120);
+      return;
+    }
+    await prisma.$executeRawUnsafe(`UPDATE ${parent} SET id=$1 WHERE id=$2`, replacement, previous);
+    if (parent === 'races') f.race.id = replacement;
+    if (parent === 'global_step_events') f.event.id = replacement;
+    if (parent === 'users') {
+      // The old authentication subject is intentionally invalid after identity
+      // relocation. Verify the database invariant, then restore for HTTP proof.
+      await prisma.$executeRawUnsafe('UPDATE users SET id=$1 WHERE id=$2', previous, replacement);
+    }
+    assert.equal((await raceVersion(f.race.id)).count, 1);
+    const result = await run(f, 60);
+    assert.equal(result.score, 120);
+  });
+}
+
+for (const table of ['global_event_race_impacts','global_step_event_entitlements']) {
+  it(`${table} maintenance truncation invalidates warm vectors`, async () => {
+    const f = await fixture('LOCAL_ENTITLEMENTS');
+    await run(f, 50);
+    const before = await raceVersion(f.race.id);
+    await prisma.$executeRawUnsafe(`TRUNCATE ${table} CASCADE`);
+    const after = await raceVersion(f.race.id);
+    assert.ok(BigInt(after.revision) > BigInt(before.revision));
+    assert.equal(after.count, table === 'global_event_race_impacts' ? 0 : 1);
+    const result = await run(f, 60);
+    assert.equal(result.score, 60);
+    assert.equal(eventQueries(planning(result)).length, 1);
+  });
+}
+
+it('account deletion cleans only its pair guards and leaves another account cache usable', async () => {
+  const a = await fixture('LOCAL_ENTITLEMENTS'), b = await fixture('LOCAL_ENTITLEMENTS');
+  await run(a, 50); await run(b, 50);
+  const beforeB = await raceVersion(b.race.id);
+  const deleted = await request(baseUrl, 'DELETE', '/auth/account', { token:a.account.token });
+  assert.equal(deleted.status, 204);
+  assert.deepEqual(await prisma.$queryRawUnsafe('SELECT user_id FROM event_fingerprint_pair_versions WHERE user_id=$1', a.account.user.id), []);
+  assert.equal((await raceVersion(a.race.id)).count, 0);
+  assert.deepEqual(await raceVersion(b.race.id), beforeB);
+  const result = await run(b, 60);
+  assert.equal(result.score, 120);
+  assert.equal(eventQueries(planning(result)).length, 0);
+});
+
+it('overlapping impact deletion and entitlement change recover from a real database deadlock without version drift', async () => {
+  const { Client } = require('pg');
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  const a = new Client({ connectionString:process.env.DATABASE_URL }), b = new Client({ connectionString:process.env.DATABASE_URL });
+  await Promise.all([a.connect(),b.connect()]);
+  let second;
+  try {
+    await a.query('BEGIN'); await b.query('BEGIN');
+    await a.query("SET LOCAL deadlock_timeout='100ms'"); await b.query("SET LOCAL deadlock_timeout='100ms'");
+    await a.query('DELETE FROM global_event_race_impacts WHERE id=$1', [f.impact.id]);
+    const pid = (await b.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+    second = b.query("UPDATE global_step_event_entitlements SET start_outcome='PENDING' WHERE id=$1", [f.entitlement.id]).then(() => null, e => e);
+    let blocked = false;
+    for (let i=0;i<100;i++) {
+      const [state] = await prisma.$queryRawUnsafe('SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1', pid);
+      if (state.wait_event_type === 'Lock') { blocked=true; break; }
+      await delay(10);
+    }
+    assert.ok(blocked);
+    const firstError = await a.query('DELETE FROM global_step_event_entitlements WHERE id=$1',[f.entitlement.id]).then(() => null, e => e);
+    await a.query(firstError ? 'ROLLBACK' : 'COMMIT');
+    const secondError = await second;
+    await b.query(secondError ? 'ROLLBACK' : 'COMMIT');
+    assert.equal([firstError,secondError].filter(Boolean).length,1);
+    assert.equal((firstError || secondError).code,'40P01');
+    if (firstError) {
+      await a.query('BEGIN');
+      await a.query('DELETE FROM global_event_race_impacts WHERE id=$1',[f.impact.id]);
+      await a.query('DELETE FROM global_step_event_entitlements WHERE id=$1',[f.entitlement.id]);
+      await a.query('COMMIT');
+    }
+    assert.equal((await raceVersion(f.race.id)).count,0);
+    assert.equal((await run(f,60)).score,60);
+  } finally {
+    await a.query('ROLLBACK'); await second;
+    await b.query('ROLLBACK'); await Promise.all([a.end(),b.end()]);
+  }
 });

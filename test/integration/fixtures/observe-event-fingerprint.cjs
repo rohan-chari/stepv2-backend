@@ -5,24 +5,30 @@ const context = new AsyncLocalStorage();
 const reads = [];
 const { prisma } = require('../../../src/db');
 prisma.$on('query', query => context.getStore()?.queries.push(query.query));
-const originalQuery = prisma.$queryRawUnsafe;
-prisma.$queryRawUnsafe = async function(...args) {
-  const result = await originalQuery.apply(this, args);
-  const observation = context.getStore();
-  if (observation) (observation.statements ||= []).push({ sql: args[0], params: args.slice(1) });
-  if (observation && args[0].includes('AS "r_id"')) {
-    observation.rosterJsonBytes = Buffer.byteLength(JSON.stringify(result));
-    observation.witnessJsonBytes = Buffer.byteLength(JSON.stringify(result.map(r => r.f_witness ?? null)));
-    observation.witnesses = result.map(r => r.f_witness);
-  }
-  return result;
-};
 const moduleUnderObservation = require('../../../src/modules/races/services/raceResolutionInputFingerprint');
 const original = moduleUnderObservation.buildRaceResolutionInputFingerprint;
 moduleUnderObservation.buildRaceResolutionInputFingerprint = async function(options) {
   const observation = { transaction: !!options.client, queries: [], now: options.now };
   return context.run(observation, async () => {
-    try { observation.value = await original(options); }
+    try {
+      const client = options.client || prisma;
+      // Wrap this call's client, never overwrite the root Prisma method: root
+      // methods are bound by src/db and would escape an interactive transaction.
+      const observedClient = new Proxy(client, { get(target, key) {
+        if (key !== '$queryRawUnsafe') return Reflect.get(target, key);
+        return async (...args) => {
+          const result = await target.$queryRawUnsafe(...args);
+          (observation.statements ||= []).push({ sql: args[0], params: args.slice(1) });
+          if (args[0].includes('AS "r_id"')) {
+            observation.rosterJsonBytes = Buffer.byteLength(JSON.stringify(result));
+            observation.witnessJsonBytes = Buffer.byteLength(JSON.stringify(result.map(r => r.f_witness ?? null)));
+            observation.witnesses = result.map(r => r.f_witness);
+          }
+          return result;
+        };
+      } });
+      observation.value = await original({ ...options, client: observedClient });
+    }
     catch (error) { console.error('Observed fingerprint failure:', error); throw error; }
     reads.push(observation);
     return observation.value;
