@@ -1,6 +1,10 @@
 # Test-only mouse character publication — 2026-09-13
 
-## Current revision: corgi-inspired head/chest motion and front-leg depth
+## Current: previous artwork restored at user request
+
+The user rejected the independent-head/front-leg-depth revision and explicitly requested the immediately previous artwork. Restored CDN version `8e0f2159b0db` through the existing admin PATCH, changing only assetVersion. Public PNG checksum, first/repeated current TestFlight and production/legacy catalogs, and manifest were verified. Test-only/remote-only policy, all render metadata, price and the existing Rohan ownership row are unchanged; peer mirroring succeeded. The canonical local Aseprite sources were restored from revision 3. No restart, app build, coin or equipment change. Rejected version `4278119fd764` remains an immutable historical file but is no longer referenced by the catalog.
+
+## Rejected revision: corgi-inspired head/chest motion and front-leg depth
 
 User requested the corgi's head/body movement and clearer depth between the mouse's two front legs. Both bundled corgi sheets were inspected. Asset commit `753dbfb` is deployed; current CDN file: https://steptracker-api.org/assets/characters/mouse@4278119fd764.png . SHA-256: `4278119fd764316ae5d15e9c97102668f05017b81c66c850bbe59e92fc426d99`.
 
