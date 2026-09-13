@@ -1,0 +1,62 @@
+{
+  "baselineCommit": "01f7c20",
+  "status": "local-only",
+  "testsFirst": {
+    "tests": 2,
+    "originalFailed": 2,
+    "reason": "unconditional final history SELECT"
+  },
+  "focusedIntegration": {
+    "eventCache": {
+      "passed": 53,
+      "failed": 0
+    },
+    "planningInputs": {
+      "passed": 11,
+      "failed": 0
+    }
+  },
+  "artifactIntegration": {
+    "passed": 3,
+    "failed": 2,
+    "sameBaselineFailures": true
+  },
+  "closureIntegration": {
+    "passed": 16,
+    "failed": 5,
+    "allFailuresReproducedOnBaseline": true,
+    "baselineFullRun": {
+      "passed": 15,
+      "failed": 6
+    },
+    "actorTargetBaselineRepeatFailed": true,
+    "note": "Unscoped worker claim makes actor-target fixture scheduling-sensitive; isolated baseline runs both passed and failed."
+  },
+  "fingerprintSelects": {
+    "beforeCold": [
+      4,
+      4
+    ],
+    "afterCold": [
+      4,
+      3
+    ],
+    "beforeWarm": [
+      3,
+      4
+    ],
+    "afterWarm": [
+      3,
+      3
+    ],
+    "afterFinalHistoryReads": 0,
+    "fallbackFinalSelects": 4
+  },
+  "flutterAnalyze": "passed",
+  "codeReview": "SHIP; no blockers",
+  "productionDeployed": false,
+  "limitations": [
+    "Local synthetic query counts are not production CPU savings.",
+    "Broader existing test failures remain unchanged."
+  ]
+}

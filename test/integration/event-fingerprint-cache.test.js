@@ -111,8 +111,9 @@ for (const mode of ['LEGACY_GLOBAL', 'LOCAL_ENTITLEMENTS']) {
     assert.equal(planning(warm).queries.filter(q => q.includes('AS "r_id"') && q.includes('race_event_fingerprint_versions')).length, 1,
       'warm planning reads the authoritative race version in the roster statement');
     assert.equal(planning(warm).queries.length, 3, 'revisions piggyback on roster; no extra revision SELECT');
-    assert.ok(warm.reads.some(r => r.transaction && eventQueries(r).some(q => q.includes('WITH race_window AS'))),
-      'final PostgreSQL event fence remains in the real write transaction');
+    assert.ok(warm.reads.some(r => r.transaction && eventQueries(r).length === 0 &&
+      r.queries.some(q => q.includes('race_event_fingerprint_versions'))),
+      'final PostgreSQL version fence replaces redundant history loading');
     assert.ok((await cacheKeys('global')).length);
     assert.ok((await cacheKeys('local')).length);
     t.diagnostic(JSON.stringify({ mode, coldFingerprintSelects: cold.reads.map(r => r.queries.length),
@@ -178,7 +179,7 @@ for (const mutation of ['catalog', 'entitlement', 'impact', 'late-impact', 'boun
     });
     assert.equal(changed, true);
     assert.equal(result.score, mutation === 'catalog' ? 180 : ['entitlement', 'late-impact'].includes(mutation) ? 60 : mutation === 'input' ? 140 : 120);
-    assert.ok(result.reads.some(r => r.transaction && eventQueries(r).length));
+    assert.ok(result.reads.some(r => r.transaction && eventQueries(r).length === (mutation === 'input' ? 0 : 1)));
     const again = await run(f, 80);
     assert.equal(again.score, mutation === 'catalog' ? 240 : ['entitlement', 'late-impact'].includes(mutation) ? 80 : 160);
   });
@@ -234,7 +235,7 @@ for (const failedCommands of [['MGET'], ['SET']]) {
       assert.equal(result.count, 1);
       assert.ok(proxy.failedCount() > 0);
       assert.ok(eventQueries(planning(result)).length >= 1);
-      assert.ok(result.reads.some(r => r.transaction && eventQueries(r).length === 1));
+      assert.ok(result.reads.some(r => r.transaction && eventQueries(r).length === (failedCommands[0] === 'MGET' ? 1 : 0)));
       assert.equal(await score(f), 120);
       assert.equal(await score(f, { 'X-Client-Features': 'team_races,team_races_10v10_v1' }), 120);
       if (failedCommands[0] === 'SET') assert.equal((await cacheKeys()).length, 0);
@@ -533,7 +534,8 @@ it('warm event proof reads one durable race version without traversing impacts o
   assert.match(roster, /race_event_fingerprint_versions/);
   assert.doesNotMatch(roster, /global_event_race_impacts|global_step_event_entitlements|jsonb_agg|sha256/);
   assert.equal(planning(warm).queries.length, 3);
-  assert.ok(warm.reads.some(r => r.transaction && eventQueries(r).length === 1));
+  assert.ok(warm.reads.some(r => r.transaction && eventQueries(r).length === 0 &&
+    r.queries.some(q => q.includes('race_event_fingerprint_versions'))));
 });
 
 
@@ -782,4 +784,72 @@ it('overlapping impact deletion and entitlement change recover from a real datab
     await a.query('ROLLBACK'); await second;
     await b.query('ROLLBACK'); await Promise.all([a.end(),b.end()]);
   }
+});
+
+
+for (const mode of ['LEGACY_GLOBAL','LOCAL_ENTITLEMENTS']) {
+  it(`final transaction reuses this attempt's verified event vector with no history reload: ${mode}`, async () => {
+    const f = await fixture(mode);
+    for (const steps of [50,60]) {
+      const result = await run(f, steps);
+      assert.equal(result.score, steps*2);
+      const final = result.reads.find(r => r.transaction);
+      assert.ok(final);
+      assert.equal(eventQueries(final).length, 0, 'unchanged event data must not be reloaded inside the commit transaction');
+      assert.equal(final.queries.length, 3);
+      assert.ok(final.queries.some(q => q.includes('race_event_fingerprint_versions') && q.includes('AS "r_id"')));
+      assert.deepEqual(json(final.value.globalEvents), json(planning(result).value.globalEvents));
+    }
+  });
+}
+
+for (const reason of ['event-end', 'expired-attempt', 'horizon-entry']) {
+  it(`final event reuse respects time without a database mutation: ${reason}`, async () => {
+    const f = await fixture();
+    let boundary;
+    let upcoming;
+    if (reason === 'event-end') {
+      boundary = Date.now() + 1500;
+      await prisma.globalStepEvent.update({ where: { id: f.event.id }, data: { endsAt: new Date(boundary) } });
+    }
+    if (reason === 'horizon-entry') {
+      boundary = Date.now() + 1500;
+      upcoming = await prisma.globalStepEvent.create({ data: {
+        startsAt: new Date(boundary + 600000), endsAt: new Date(boundary + 3600000),
+        scheduleMode: 'LEGACY_GLOBAL', multiplier: 3,
+      } });
+    }
+    let waited = false;
+    const result = await run(f, 60, async () => {
+      if (waited) return;
+      waited = true;
+      await delay(reason === 'expired-attempt' ? 30100 : Math.max(0, boundary - Date.now() + 50));
+    });
+    assert.equal(result.score, 120);
+    const firstPlan = planning(result);
+    const final = result.reads.find(r => r.transaction);
+    assert.ok(firstPlan && final);
+    if (upcoming) {
+      assert.ok(!firstPlan.value.globalEvents.some(e => e.id === upcoming.id));
+      assert.ok(final.value.globalEvents.some(e => e.id === upcoming.id), 'extra coverage must be refiltered at the final horizon');
+      assert.equal(eventQueries(final).length, 0);
+      assert.notEqual(final.value.digest, firstPlan.value.digest, 'the old plan must be rejected when the event enters the horizon');
+    } else {
+      assert.equal(eventQueries(final).length, 1, 'crossed boundaries and expired attempts require canonical SQL');
+    }
+  });
+}
+
+it('caller mutation cannot change the privately retained event vector', async () => {
+  const f = await fixture();
+  const result = await run(f, 60, async () => {
+    const plan = reads.find(r => !r.transaction);
+    plan.value.globalEvents[0].multiplier = 99;
+    plan.value.globalEvents[0].startsAt.setTime(0);
+  });
+  assert.equal(result.score, 120);
+  const final = result.reads.find(r => r.transaction);
+  assert.equal(eventQueries(final).length, 0);
+  assert.equal(final.value.globalEvents[0].multiplier, 2);
+  assert.equal(final.value.globalEvents[0].startsAt.getTime(), f.event.startsAt.getTime());
 });

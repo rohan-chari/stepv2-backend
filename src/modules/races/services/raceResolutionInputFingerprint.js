@@ -2,7 +2,7 @@ const { SETTLEMENT_EFFECT_TYPES } = require("./raceScoringEffectTypes");
 const { prisma: defaultPrisma } = require("../../../db");
 const { FULL_EVENT_SQL } = require("./raceFingerprintEventSql");
 const { EVENT_PROOF_CTE, PROOF_COLUMNS, proofFromRow } = require("./raceFingerprintEventProof");
-const { readRaceFingerprintEvents } = require("./readRaceFingerprintEvents");
+const { readRaceFingerprintEvents, bindEventReadSnapshot, hasReusableEventRead, reuseRaceFingerprintEvents } = require("./readRaceFingerprintEvents");
 const { digestPayload } = require("./raceResolutionDisplayArtifact");
 
 async function buildRaceResolutionInputFingerprint({
@@ -15,6 +15,8 @@ async function buildRaceResolutionInputFingerprint({
   // Internal, explicit worker planning admission. No HTTP caller or final
   // transaction opts in. This is call-site selection, never a runtime flag.
   eventCacheRead = false,
+  // Only the current worker attempt may supply a privately stamped snapshot.
+  reuseEventsFrom = null,
 } = {}) {
   if (!raceId || !client || typeof client.$queryRawUnsafe !== "function") return null;
   // Global-event lookahead. This was `now + 5s`, which selected only events
@@ -30,9 +32,10 @@ async function buildRaceResolutionInputFingerprint({
   // exclusion (`ends_at > race.started_at`) is unchanged.
   const GLOBAL_EVENT_LOOKAHEAD_MS = 10 * 60 * 1000;
   const horizon = new Date(now.getTime() + GLOBAL_EVENT_LOOKAHEAD_MS);
+  const readProof = eventCacheRead || hasReusableEventRead(reuseEventsFrom);
   const [raceRows, inputs, effects, rawEventRows] = await Promise.all([
     client.$queryRawUnsafe(
-      `/* steps:prepared-read:v1 */ ${eventCacheRead ? `WITH ${EVENT_PROOF_CTE}` : ""} SELECT race.id AS "r_id",
+      `/* steps:prepared-read:v1 */ ${readProof ? `WITH ${EVENT_PROOF_CTE}` : ""} SELECT race.id AS "r_id",
        race.name AS "r_name",
        (EXTRACT(EPOCH FROM race.scheduled_start_at) * 1000)::float8 AS "r_scheduledStartAt",
        race.team_a_name AS "r_teamAName",
@@ -66,9 +69,9 @@ async function buildRaceResolutionInputFingerprint({
        (EXTRACT(EPOCH FROM participant.high_multiplier_notified_at) * 1000)::float8 AS "p_highMultiplierNotifiedAt",
        (EXTRACT(EPOCH FROM participant.totals_updated_at) * 1000)::float8 AS "p_totalsUpdatedAt"
        ${includePresentation ? ', person.id AS "u_id", person.display_name AS "u_displayName"' : ""}
-       ${eventCacheRead ? `, ${PROOF_COLUMNS}` : ""}
+       ${readProof ? `, ${PROOF_COLUMNS}` : ""}
        FROM races race
-       ${eventCacheRead ? 'LEFT JOIN event_proof proof ON proof."raceId"=race.id' : ""}
+       ${readProof ? 'LEFT JOIN event_proof proof ON proof."raceId"=race.id' : ""}
        LEFT JOIN race_participants participant ON participant.race_id=race.id
        ${includePresentation ? "LEFT JOIN users person ON person.id=participant.user_id" : ""}
        WHERE race.id=$1
@@ -132,15 +135,25 @@ async function buildRaceResolutionInputFingerprint({
       [...SETTLEMENT_EFFECT_TYPES, "HITCHHIKE"],
       now
     ),
-    eventCacheRead ? Promise.resolve(null) : client.$queryRawUnsafe(
+    readProof ? Promise.resolve(null) : client.$queryRawUnsafe(
       FULL_EVENT_SQL, raceId, horizon, now.getTime()
     ),
   ]);
 
   if (!raceRows[0]?.r_id) return null;
-  const eventRows = eventCacheRead ? await readRaceFingerprintEvents({
-    client, raceId, now, horizon, proof: proofFromRow(raceRows[0], raceId),
-  }) : rawEventRows;
+  let eventRows = rawEventRows;
+  if (eventCacheRead) {
+    eventRows = await readRaceFingerprintEvents({
+      client, raceId, now, horizon, proof: proofFromRow(raceRows[0], raceId),
+    });
+  } else if (readProof) {
+    eventRows = reuseRaceFingerprintEvents({
+      fingerprint: reuseEventsFrom, raceId, now, horizon, proof: proofFromRow(raceRows[0], raceId),
+    });
+    if (!eventRows) {
+      eventRows = await client.$queryRawUnsafe(FULL_EVENT_SQL, raceId, horizon, now.getTime());
+    }
+  }
   // Keep race + roster in one SQL snapshot, but assemble their JSON in Node.
   // Explicit SQL aliases define the same payload keys as the former jsonb
   // projection. Epoch expressions are float8, so Prisma returns JSON numbers
@@ -205,7 +218,7 @@ async function buildRaceResolutionInputFingerprint({
       ? "code-default"
       : String(balanceConfigVersion),
   };
-  return {
+  return bindEventReadSnapshot({
     digest: digestPayload(payload),
     race: raceRow.race,
     participantCount: raceRow.participants.length,
@@ -231,7 +244,7 @@ async function buildRaceResolutionInputFingerprint({
     // Provenance is deliberately outside the digest: fence reads use a later
     // clock, while the immutable scoring facts must still hash identically.
     scoringReadSnapshot: { schema: 1, raceId, asOf: now.getTime(), through: horizon.getTime(), effectsComplete: true, raceComplete: true },
-  };
+  }, eventRows);
 }
 
 module.exports = { buildRaceResolutionInputFingerprint };

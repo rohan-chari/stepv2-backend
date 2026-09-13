@@ -4,13 +4,14 @@ process.env.RACE_RESOLVE_DEBOUNCE_MS = "0";
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { before, beforeEach, it } = require("node:test");
+const { reads } = require("./fixtures/observe-event-fingerprint.cjs");
 const { prisma, cleanDatabase, createTestUser, getSharedServer, request } = require("./setup");
 const { buildRaceResolutionWorkerV2 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 let baseUrl;
 let observed = null;
 prisma.$on("query", event => observed?.push(event.query));
 before(async () => { baseUrl = (await getSharedServer()).baseUrl; });
-beforeEach(cleanDatabase);
+beforeEach(async () => { await cleanDatabase(); reads.length = 0; });
 
 for (const scenario of [
   { name: "no event", eventMode: null, expected: 50 },
@@ -89,8 +90,15 @@ for (const scenario of [
     assert.equal(body.progress.participants.find(row => row.userId === account.user.id).totalSteps, scenario.expected);
     const completed = logs.find(row => row.event === "race_resolution_v2" && row.computePhaseQueryCount);
     assert.ok(completed, "worker must emit real phase query telemetry");
-    assert.ok(queries.filter(q => q.includes("WITH race_window AS")).length >= 2,
-      "planning reuse must not eliminate the fresh transaction fingerprint");
+    const fences = reads.filter(read => read.transaction);
+    assert.ok(fences.length > 0, "planning reuse must retain a fresh transaction fingerprint");
+    for (const fence of fences) {
+      assert.ok(fence.queries.some(q => q.includes('AS "r_id"')));
+      assert.ok(fence.queries.some(q => q.includes('user_scoring_input_versions')));
+      assert.ok(fence.queries.some(q => q.includes('race_event_fingerprint_versions')) ||
+        fence.queries.some(q => q.includes('WITH race_window AS')),
+      "each final transaction must validate fresh event proof or load canonical history");
+    }
     assert.equal(completed.computePhaseQueryCount.globalEvents, 0,
       "computation must use protected planning eligibility instead of reloading the same events and impacts");
     if (scenario.mutateBeforeFence || scenario.syncBeforeFence) {

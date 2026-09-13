@@ -1769,6 +1769,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                   String(loaded.balanceConfigVersion ?? "code-default")
               ) {
                 artifactPayload = loaded;
+                planningFingerprint = fingerprint;
               } else {
                 artifactFallbackReason = "input_or_config_mismatch";
               }
@@ -2146,6 +2147,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             now: sourceFenceNow,
             balanceConfigVersion: sourceFenceConfig.version,
             client: tx,
+            reuseEventsFrom: planningFingerprint,
             includePresentation: false,
           });
           const deadline = sourceInputFingerprint?.validUntil
@@ -2173,6 +2175,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             now: now(),
             balanceConfigVersion: currentConfig.version,
             client: tx,
+            reuseEventsFrom: planningFingerprint,
           });
           if (
             Number(fenced.generation) !== Number(fenced.processingGeneration) ||
@@ -2260,6 +2263,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               now: fenceNow,
               balanceConfigVersion: currentConfig.version,
               client: tx,
+              reuseEventsFrom: planningFingerprint,
             });
           const deadline = closurePlan.validUntil
             ? new Date(closurePlan.validUntil).getTime()

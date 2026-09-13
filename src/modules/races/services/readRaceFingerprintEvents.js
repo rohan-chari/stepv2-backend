@@ -58,6 +58,39 @@ SELECT event.*, ${PROOF_COLUMNS},
 FROM event_rows event
 CROSS JOIN event_proof proof ORDER BY event."startsAt", event.id, event."entitlementId", event."impactId", event."userId"`;
 
+// Private, attempt-local provenance. Never trust caller-visible event objects or
+// serialized fingerprints as proof that a complete vector was read.
+const snapshots = new WeakMap();
+function remember(global, local, proof, now, horizon, coversThrough, expiresAt) {
+  const rows = cache.materialize(global, local, proof, now, horizon);
+  const data = { global: { cursor: global.cursor, pendingBoundaries: global.pendingBoundaries }, local };
+  const encoded = JSON.stringify(data);
+  if (Buffer.byteLength(encoded) > 2 * 1024 * 1024) return rows;
+  let deadline = Math.min(expiresAt, now.getTime() + 30000);
+  for (const event of local.events) {
+    for (const time of [Date.parse(event.startsAt), Date.parse(event.endsAt)]) {
+      if (time > now.getTime()) deadline = Math.min(deadline, time);
+    }
+  }
+  snapshots.set(rows, { ...JSON.parse(encoded), proof: { ...proof },
+    asOf: now.getTime(), coversThrough, deadline });
+  return rows;
+}
+function bindEventReadSnapshot(fingerprint, rows) {
+  const snapshot = snapshots.get(rows);
+  if (snapshot) snapshots.set(fingerprint, snapshot);
+  return fingerprint;
+}
+function hasReusableEventRead(fingerprint) { return !!fingerprint && snapshots.has(fingerprint); }
+function reuseRaceFingerprintEvents({ fingerprint, proof, raceId, now, horizon }) {
+  const snapshot = fingerprint && snapshots.get(fingerprint);
+  if (!snapshot || snapshot.proof.raceId !== raceId || !cache.validProof(proof) ||
+      !matches(snapshot.proof, proof) || !Number.isFinite(now.getTime()) ||
+      now.getTime() < snapshot.asOf || now.getTime() >= snapshot.deadline ||
+      Date.now() >= snapshot.deadline || horizon.getTime() > snapshot.coversThrough) return null;
+  return cache.materialize(snapshot.global, snapshot.local, proof, now, horizon);
+}
+
 async function readRaceFingerprintEvents({ client, raceId, now, horizon, proof }) {
   const fallback = () => {
     cache.count('sql_fallback');
@@ -68,7 +101,9 @@ async function readRaceFingerprintEvents({ client, raceId, now, horizon, proof }
   if (!cached) return fallback();
   if (cached.global && cached.local) {
     cache.count('hit');
-    return cache.materialize(cached.global, cached.local, proof, now, horizon);
+    return remember(cached.global, cached.local, proof, now, horizon,
+      Math.min(cached.global.coversThrough, cached.local.coversThrough),
+      Math.min(cached.global.expiresAt, cached.local.expiresAt));
   }
   // Minute-rounded extra coverage lets the next request's moving ten-minute
   // horizon reuse this exact vector. Filtering restores the caller's horizon.
@@ -102,8 +137,9 @@ async function readRaceFingerprintEvents({ client, raceId, now, horizon, proof }
     'id', 'startsAt', 'endsAt', 'multiplier', 'label', 'scheduleMode',
     'entitlementId', 'impactId', 'userId',
   ].map(k => [k, row[k] instanceof Date ? row[k].toISOString() : row[k]])));
-  return cache.materialize(localOnly ? cached.global : {
+  return remember(localOnly ? cached.global : {
     events: clean(events.filter(row => row.scheduleMode === 'LEGACY_GLOBAL')), cursor: loadedProof.cursor, pendingBoundaries,
-  }, { events: clean(events) }, proof, now, horizon);
+  }, { events: clean(events) }, proof, now, horizon, completeThrough.getTime(),
+    Math.min(now.getTime() + 30000, localOnly ? cached.global.expiresAt : Infinity));
 }
-module.exports = { readRaceFingerprintEvents };
+module.exports = { readRaceFingerprintEvents, bindEventReadSnapshot, hasReusableEventRead, reuseRaceFingerprintEvents };
