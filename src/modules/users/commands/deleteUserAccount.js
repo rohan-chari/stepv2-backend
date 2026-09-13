@@ -21,6 +21,12 @@ const {
 } = require("../../steps/services/globalEventEnrollment");
 
 const MEMBERSHIP_SCOPE_DRIFT = "MEMBERSHIP_SCOPE_DRIFT";
+const DATABASE_CONFLICT_CODES = new Set(['40P01', '40001', 'P2034']);
+function isDatabaseConflict(error) {
+  return [error?.code, error?.meta?.code, error?.cause?.code, error?.cause?.originalCode,
+    error?.meta?.driverAdapterError?.cause?.originalCode]
+    .some(code => DATABASE_CONFLICT_CODES.has(code));
+}
 
 class DeleteUserAccountError extends Error {
   constructor(message, statusCode) {
@@ -455,7 +461,11 @@ function buildDeleteUserAccount(dependencies = {}) {
         }, { timeout: 15_000, maxWait: 10_000 });
         deletionComplete = true;
       } catch (error) {
-        if (error?.code !== MEMBERSHIP_SCOPE_DRIFT || attempt === 2) throw error;
+        // Re-run the whole transaction: a database conflict rolls back all
+        // source deletes and version invalidations. Never retry one SQL command
+        // inside an already-aborted transaction. Preserve the three-attempt cap.
+        if ((error?.code !== MEMBERSHIP_SCOPE_DRIFT && !isDatabaseConflict(error)) || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));
       }
     }
     // C2 invalidation (spec §3): drop the user's presentation bundle. Note the
