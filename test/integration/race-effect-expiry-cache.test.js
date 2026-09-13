@@ -148,6 +148,96 @@ describe("deadline cache and API compatibility with production worker ownership"
     await redis.close();
     await liveRedis?.close();
   });
+  it("elapsed ACTIVE races stop snapshot repair across repeated scheduler ticks", async () => {
+    const f = await fixture();
+    await prisma.race.update({ where: { id: f.race.id }, data: { endsAt: new Date(Date.now() - 60000) } });
+    // A failed task from the previous release must also retire, not just tasks
+    // created by the fixed worker. Keep the real DB trigger and scheduler.
+    const { RaceResolutionPostTask } = require("../../src/modules/races/models/raceResolutionPostTask");
+    const historical = await RaceResolutionPostTask.create({
+      raceId: f.race.id, sourceGeneration: 100,
+      snapshotCommand: { raceId: f.race.id, timeZone: "UTC" }, intents: [],
+    });
+    await prisma.raceResolutionPostTask.update({ where: { id: historical.id }, data: {
+      snapshotState: "failed_no_retry", snapshotErrorCode: "DISPLAY_PROOF_MISSING",
+    } });
+    const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+    const scheduler = buildRaceEffectDeadlineScheduler();
+    for (let i = 0; i < 3; i++) { await scheduler.recover(); await scheduler.tick(); }
+    const after = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+    assert.equal(after.generation, before.generation, "elapsed ACTIVE repair must not enqueue a new generation");
+    assert.ok((await prisma.raceSnapshotRepairIntent.findUniqueOrThrow({ where: { taskId: historical.id } })).terminalAt);
+    assert.equal((await prisma.race.findUniqueOrThrow({ where: { id: f.race.id } })).status, "ACTIVE", "settlement retains ownership");
+    assert.ok(await read(f));
+  });
+  it("elapsed ACTIVE worker preserves expiry cleanup without failed snapshot publications", async () => {
+    const f = await fixture();
+    await prisma.race.update({ where: { id: f.race.id }, data: { endsAt: new Date(Date.now() - 60000) } });
+    await prisma.raceActiveEffect.update({ where: { id: f.effect.id }, data: { startsAt: new Date(Date.now() - 120000), expiresAt: new Date(Date.now() - 30000) } });
+    const worker = buildRaceResolutionWorkerV2({ bootAt: 0, processRole: "resolution" });
+    const post = buildRaceResolutionPostTaskRunner();
+    const scheduler = buildRaceEffectDeadlineScheduler();
+    await scheduler.tick();
+    await worker.processRace({ raceId: f.race.id });
+    await post.snapshotTick(); await post.tick();
+    assert.equal(await prisma.raceResolutionPostTask.count({ where: {
+      raceId: f.race.id, snapshotState: { in: ["failed_no_retry", "ambiguous_at_most_once"] },
+    } }), 0, "skipped live scoring must not create failed publication work");
+    assert.equal((await prisma.raceActiveEffect.findUniqueOrThrow({ where: { id: f.effect.id } })).status, "EXPIRED", "durable effect cleanup still runs");
+    const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+    for (let i = 0; i < 3; i++) {
+      await scheduler.recover(); await scheduler.tick(); await worker.processOne();
+      await post.snapshotTick(); await post.tick();
+    }
+    const after = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+    assert.equal(after.generation, before.generation);
+    assert.equal(await prisma.raceSnapshotRepairIntent.count({ where: { raceId: f.race.id, terminalAt: null } }), 0);
+    assert.ok(await read(f));
+  });
+  it("elapsed ACTIVE display-only work creates no post task and settlement still completes", async () => {
+    const f = await fixture();
+    await prisma.race.update({ where: { id: f.race.id }, data: { endsAt: new Date(Date.now() - 60000) } });
+    await prisma.raceResolutionJobV2.update({ where: { raceId: f.race.id }, data: {
+      dirtyReasons: ["DISPLAY_REFRESH"], notBeforeAt: new Date(0),
+    } });
+    const worker = buildRaceResolutionWorkerV2({ bootAt: 0, processRole: "resolution" });
+    const post = buildRaceResolutionPostTaskRunner();
+    const scheduler = buildRaceEffectDeadlineScheduler();
+    await worker.processRace({ raceId: f.race.id });
+    const before = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+    for (let i = 0; i < 3; i++) {
+      await scheduler.recover(); await scheduler.tick(); await worker.processOne();
+      await post.snapshotTick(); await post.tick();
+    }
+    assert.equal((await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } })).generation, before.generation);
+    assert.equal(await prisma.raceResolutionPostTask.count({ where: { raceId: f.race.id } }), 0);
+    assert.equal(await prisma.raceResolutionPostTaskReceipt.count({ where: { raceId: f.race.id } }), 0);
+    assert.ok(await read(f));
+    await require("../../src/modules/races/jobs/raceExpiry").resolveExpiredRaces();
+    assert.equal((await prisma.race.findUniqueOrThrow({ where: { id: f.race.id } })).status, "COMPLETED");
+    assert.ok(await read(f));
+  });
+  for (const endsAt of [null, "future"])
+    it(`live snapshot repair remains admitted with ${endsAt || "open-ended"} end time`, async () => {
+      const f = await fixture();
+      await prisma.race.update({ where: { id: f.race.id }, data: { endsAt: endsAt ? new Date(Date.now() + 86400000) : null } });
+      const { RaceResolutionPostTask } = require("../../src/modules/races/models/raceResolutionPostTask");
+      const historical = await RaceResolutionPostTask.create({
+        raceId: f.race.id, sourceGeneration: 100,
+        snapshotCommand: { raceId: f.race.id, timeZone: "UTC" }, intents: [],
+      });
+      await prisma.raceResolutionPostTask.update({ where: { id: historical.id }, data: {
+        snapshotState: "failed_no_retry", snapshotErrorCode: "DISPLAY_PROOF_MISSING",
+      } });
+      await buildRaceEffectDeadlineScheduler().tick();
+      const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId: f.race.id } });
+      assert.ok(job.generation > 100, "a genuinely live race still requires fresh publication");
+      await buildRaceResolutionWorkerV2({ bootAt: 0, processRole: "resolution" }).processRace({ raceId: f.race.id });
+      const post = buildRaceResolutionPostTaskRunner();
+      await post.snapshotTick(); await post.tick();
+      assert.ok(await prisma.raceResolutionPostTask.findFirst({ where: { raceId: f.race.id, snapshotState: "succeeded" } }));
+      assert.ok(await read(f));
+    });
   for (const status of ["COMPLETED", "CANCELLED"])
     it(`${status} snapshot failures stop repairing instead of creating an endless refresh loop`, async () => {
       // Real HTTP powerup intake queues the race; it ends before the worker

@@ -224,6 +224,19 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     return intentClaims;
   }
 
+  // Live scoring deliberately skips this interval. Settlement owns the final
+  // result even though the status still says ACTIVE. Only probe on a missing
+  // scoring result/proof; successful live generations incur no extra read.
+  async function awaitingSettlement(raceId) {
+    const db = dependencies.prisma || require("../../../db").prisma;
+    const rows = await db.$queryRawUnsafe(
+      `SELECT 1 FROM races WHERE id=$1 AND status='active'
+       AND ends_at <= (statement_timestamp() AT TIME ZONE 'UTC')`,
+      raceId,
+    );
+    return rows.length > 0;
+  }
+
   /** SET (never DEL) the race's shared standings snapshot. */
   async function publishSnapshot({
     raceId,
@@ -238,7 +251,12 @@ function buildRaceProgressPostCommit(dependencies = {}) {
       // Old durable commands/artifacts remain executable, but cannot certify a
       // new display snapshot without their original scoring-input fence.
       const input = displayBoundaryInput || result?.displayBoundaryInput;
-      if (!boundaryProof.validInput(input)) return { status: 'failed', errorCode: 'DISPLAY_PROOF_MISSING' };
+      if (!boundaryProof.validInput(input)) {
+        // The task may still be needed for durable effect-expiry consequences.
+        // Those run before publication; settlement supersedes its live snapshot.
+        if (await awaitingSettlement(raceId)) return { status: "superseded" };
+        return { status: 'failed', errorCode: 'DISPLAY_PROOF_MISSING' };
+      }
       if (
         !allowSupersededComplete &&
         sourceGeneration != null &&
@@ -361,6 +379,10 @@ function buildRaceProgressPostCommit(dependencies = {}) {
       sourceGeneration: job?.processingGeneration ?? null,
       strict: prepareOnly,
     });
+    if (!result && !recoverEffectExpiry && intentClaims.length === 0 &&
+        await awaitingSettlement(raceId)) {
+      return { snapshotCommand: null, intentClaims: [] };
+    }
     // A newer generation arrived while this one ran. Its mutation already
     // invalidated the snapshot; do not overwrite that DEL with older committed
     // totals while the follow-up worker is waiting in the quiet period.

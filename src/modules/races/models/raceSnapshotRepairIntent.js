@@ -61,9 +61,10 @@ async function drainSnapshotRepairs() {
       // Live snapshots exist only for active races. Pending races cannot
       // publish one either: retrying their historical failures creates the
       // same endless generation loop as a race that has already ended.
-      // Retire this attempt; a later race start queues its own new generation.
+      // ACTIVE races past ends_at also cannot live-score while settlement is
+      // pending. Retire this attempt; a later start queues its own generation.
       const inapplicable = await prisma.$queryRawUnsafe(
-        `SELECT 1 FROM races WHERE id=$1 AND status <> 'active'`,
+        `SELECT 1 FROM races WHERE id=$1 AND (status <> 'active' OR ends_at <= (statement_timestamp() AT TIME ZONE 'UTC'))`,
         row.race_id,
       );
       if (inapplicable.length) {
