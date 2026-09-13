@@ -1,0 +1,230 @@
+{
+  "verifiedAt": "2026-09-13T00:53:32.376761+00:00",
+  "runtimeCommit": "ab58a550bb7d37513f2f3e59a6a1478f513d4c75",
+  "previousCommit": "8a03ee6",
+  "before": [
+    {
+      "missingMigrations": [],
+      "unfinishedMigrations": 0
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "participants-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "participants-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "compact-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 1.0000000000000002
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "compact-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 1.0000000000000002
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "participants-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "participants-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "compact-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 0.9999999999999999
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "compact-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": false,
+      "types": 20,
+      "probabilityTotal": 0.9999999999999999
+    },
+    {
+      "guaranteeStillActive": true
+    }
+  ],
+  "after": [
+    {
+      "missingMigrations": [],
+      "unfinishedMigrations": 0
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "participants-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "participants-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "compact-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 1.0000000000000002
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "current",
+      "view": "compact-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 1.0000000000000002
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "participants-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "participants-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 1
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "compact-v1",
+      "pass": "first",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 0.9999999999999999
+    },
+    {
+      "activeHorseshoeFound": true,
+      "client": "legacy",
+      "view": "compact-v1",
+      "pass": "repeat",
+      "status": 200,
+      "preview": true,
+      "types": 20,
+      "probabilityTotal": 0.9999999999999999
+    },
+    {
+      "guaranteeStillActive": true
+    }
+  ],
+  "health": {
+    "status": "ok",
+    "redis": "ok",
+    "httpWorkers": 2,
+    "resolutionWorkers": 1,
+    "cronWorkers": 1,
+    "staging": "stopped",
+    "poolBudget": 32,
+    "marketingStatus": {
+      "/": 200,
+      "/privacy": 200,
+      "/support": 200
+    }
+  },
+  "preserved": {
+    "environment": true,
+    "preexistingModifiedPackageLock": true
+  },
+  "databaseMigrationsRun": false,
+  "dependencyInstallRun": false,
+  "productionBoxOpenedForVerification": false,
+  "referralCatchUp": {
+    "before": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    },
+    "results": [
+      {
+        "phase": "apply",
+        "counts": {
+          "raceActivities": 0,
+          "reviewOwnership": 0
+        },
+        "applied": {
+          "raceActivities": 0,
+          "reviewOwnership": 0
+        }
+      },
+      {
+        "phase": "after",
+        "counts": {
+          "raceActivities": 0,
+          "reviewOwnership": 0
+        }
+      }
+    ]
+  }
+}

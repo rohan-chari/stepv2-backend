@@ -1,6 +1,8 @@
 # Lucky Horseshoe preview correction — September 12, 2026
 
-Status: implemented and reviewed; production deployment awaits explicit approval.
+Status: deployed with explicit user approval on September 12, 2026. Runtime
+commit `ab58a550bb7d37513f2f3e59a6a1478f513d4c75`, release tag
+`deploy/horseshoe-preview-20260912-ab58a55`.
 
 An active Lucky Horseshoe previously caused `reelPreviewAvailable` to be false,
 replacing all decorative reel items with neutral mystery-box placeholders. The
@@ -59,3 +61,27 @@ No layout moves. The demo race tutorial and tab tutorial independently disable
 their fake preview data and are unaffected by this backend correction. Open All
 is hidden in demo mode. The daily reward accessory reel uses a separate path.
 Manual device checks have not been executed as part of this local change.
+
+## Production verification
+
+Before the reload, live authenticated requests for an active Horseshoe returned
+`reelPreviewAvailable: false` despite a complete 20-type probability map. After
+the guarded rolling reload, the same checks returned `true` and 20 types on
+both paginated and compact progress, with current and legacy feature headers,
+on first and repeated reads. Every request returned HTTP 200. A read-only
+database check confirmed the selected guarantee remained active after each
+verification sequence; no production box was opened or effect activated.
+
+API/Redis health passed. Exactly two HTTP workers plus one resolution worker
+and one cron worker are online; staging remains stopped. The reload's final
+pool check passed at 32. Environment and the pre-existing modified package lock
+were preserved and hash-verified. No dependency install, migration, config,
+copy synchronization or native build was necessary for this code-only change.
+The marketing home, privacy and support pages returned HTTP 200.
+
+The prior production commit is tagged `pre-horseshoe-preview-20260912` for
+rollback through the same guarded reload procedure. Aggregate-only before/after
+evidence is in [verification.json](evidence/horseshoe-preview-20260912/verification.json).
+
+Required referral catch-up audit/apply/audit completed: both missing-row counts
+and both applied counts were zero throughout.
