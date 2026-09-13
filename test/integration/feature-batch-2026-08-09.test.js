@@ -1,3 +1,4 @@
+require("./adminRedisFixture.cjs");
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { prisma, cleanDatabase, request, getSharedServer } = require("./setup");

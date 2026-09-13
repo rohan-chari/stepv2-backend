@@ -1,3 +1,4 @@
+require("./adminRedisFixture.cjs");
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const {

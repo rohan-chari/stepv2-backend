@@ -14,9 +14,6 @@ const {
   PERMANENT_FLAGS,
 } = require("../../shared/config/appSettings");
 const {
-  getAdminStats: defaultGetAdminStats,
-} = require("./getAdminStats");
-const {
   balanceConfig: defaultBalanceConfig,
 } = require("../economy/balanceConfig");
 const {
@@ -252,7 +249,8 @@ function createAdminRouter(dependencies = {}) {
   router.use(requireAuth, requireAdmin);
 
   const settings = dependencies.appSettings || defaultAppSettings;
-  const getAdminStats = dependencies.getAdminStats || defaultGetAdminStats;
+  const getAdminStats = dependencies.getAdminStats || require("./services/adminAnalyticsSnapshots").buildAdminAnalyticsSnapshots(dependencies);
+  const listAdminPurchases = require("./queries/listAdminPurchases").buildListAdminPurchases({prisma:db,now:dependencies.adminAnalyticsNow});
   const balance = dependencies.balanceConfig || defaultBalanceConfig;
   const listSuggestions =
     dependencies.listSuggestions || defaultListSuggestions;
@@ -536,7 +534,7 @@ function createAdminRouter(dependencies = {}) {
     }
   });
 
-  // Product-health snapshot for the admin Statistics card (read-only SQL).
+  // Admin-gated shared snapshots; analytics rebuilds are serialized globally.
   //
   // `?sections=economy,ads` (batch 2026-08-09 item 10) adds opt-in aggregate
   // blocks. ABSENT means exactly today's payload and exactly today's query set,
@@ -556,10 +554,17 @@ function createAdminRouter(dependencies = {}) {
       if (error.statusCode === 400 && error.code) {
         return res.status(400).json({ error: error.message, code: error.code });
       }
+      if (error.statusCode === 503 && error.code === "ADMIN_ANALYTICS_UNAVAILABLE") {
+        return res.status(503).set("Retry-After", "15").json({error:error.message,code:error.code});
+      }
       console.error("Admin stats error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  router.get("/purchases", asyncHandler(async (req, res) => {
+    res.json(await listAdminPurchases(req.query));
+  }));
 
   router.get("/system-health", asyncHandler(async (req, res) => {
     res.json(await getSystemHealth({ window: req.query?.window || "60m" }));

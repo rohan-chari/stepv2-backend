@@ -56,7 +56,9 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
   async function coverage(generatedAt, start, end) {
     // Production is iOS-only, but iOS accounts may use Apple or Google Sign-In.
     // Authentication provider is never a platform predicate in v2 queries.
-    const [row] = await prisma.$queryRaw`
+    const [row] = dependencies.adminRelationalSummary
+      ? [dependencies.adminRelationalSummary.windows[start].coverage]
+      : await prisma.$queryRaw`
       WITH epoch AS (
         SELECT id,started_at FROM admin_metrics_collection_epochs
         WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1
@@ -256,7 +258,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     };
     return {
       foregroundActivitySince: collectingSince,
-      boxOpenOperationalSince: byMetric.boxOpen?.operationalAt?.toISOString() ?? null,
+      boxOpenOperationalSince: byMetric.boxOpen?.operationalAt ? new Date(byMetric.boxOpen.operationalAt).toISOString() : null,
       metricCoverage: {
         observedForegroundDau: capable("epoch_covers_dau","capable_d1"),
         observedForegroundWau: capable("epoch_covers_wau","capable_d7"),
@@ -275,6 +277,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
   }
 
   async function foregroundCounts(start, end) {
+    if (dependencies.adminRelationalSummary) return dependencies.adminRelationalSummary.windows[start].foreground;
     const rows = await prisma.$queryRaw`
       WITH epoch AS (
         SELECT id FROM admin_metrics_collection_epochs
@@ -313,6 +316,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
   }
 
   async function observedRetention(end, includeCohorts = false, start = end) {
+    if (dependencies.adminRelationalSummary) return dependencies.adminRelationalSummary.retention.filter(row => row.signup_date <= end && (!includeCohorts || row.signup_date >= start));
     const rows = await prisma.$queryRaw`
       WITH cohort AS (
         SELECT u.id,
@@ -662,7 +666,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     const byDate=Object.fromEntries(rows.map(row=>[row.signup_date,row]));
     const dates=[]; for(let d=new Date(`${start}T00:00:00Z`);d<=new Date(`${end}T00:00:00Z`);d=new Date(d.getTime()+86400000)) dates.push(d.toISOString().slice(0,10));
     const mature=(date,horizon)=>new Date(`${date}T00:00:00Z`).getTime()+horizon*86400000<new Date(`${end}T00:00:00Z`).getTime();
-    const repeat=await prisma.$queryRaw`
+    const repeat=dependencies.adminRelationalSummary ? [dependencies.adminRelationalSummary.windows[start].repeat] : await prisma.$queryRaw`
       WITH ranked AS (
         SELECT rp.user_id,r.id race_id,r.completed_at,r.status,
           rp.finished_at,rp.forfeited_at,
@@ -702,27 +706,51 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
 
   async function loadEngagement({ start, end, coverageData, generatedAt }) {
     const rows = await prisma.$queryRaw`
-      WITH dates AS (SELECT generate_series(CAST(${start} AS date),CAST(${end} AS date),interval '1 day')::date d), er AS (
-        SELECT r.* FROM races r JOIN users c ON c.id=r.creator_id
+      WITH bounds AS (
+        SELECT
+          (CAST(${start} AS date)::timestamp AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' start_utc,
+          ((CAST(${end} AS date)+1)::timestamp AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC' end_utc
+      ), dates AS (SELECT generate_series(CAST(${start} AS date),CAST(${end} AS date),interval '1 day')::date d), er AS (
+        SELECT r.id,r.created_at,r.started_at,r.completed_at FROM races r JOIN users c ON c.id=r.creator_id
         WHERE r.seed_id IS NULL AND r.tournament_id IS NULL
           AND r.status<>'cancelled'
           AND c.is_review_account=false
       ), em AS (
-        SELECT rp.* FROM race_participants rp JOIN er r ON r.id=rp.race_id
+        SELECT rp.user_id,rp.race_id,rp.joined_at FROM race_participants rp JOIN er r ON r.id=rp.race_id
           JOIN users u ON u.id=rp.user_id
         WHERE rp.status='accepted'
           AND u.is_review_account=false
+      ), power_daily AS (
+        SELECT (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date d,
+          COUNT(*)::bigint powers
+        FROM race_powerup_events e JOIN em rp ON rp.race_id=e.race_id AND rp.user_id=e.actor_user_id
+          CROSS JOIN bounds b
+        WHERE e.event_type='POWERUP_USED' AND e.created_at>=b.start_utc AND e.created_at<b.end_utc
+        GROUP BY 1
+      ), coin_daily AS (
+        SELECT (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date d,
+          SUM(GREATEST(ct.amount,0))::bigint credits,
+          SUM(GREATEST(-ct.amount,0))::bigint debits
+        FROM coin_transactions ct JOIN users u ON u.id=ct.user_id CROSS JOIN bounds b
+        WHERE u.is_review_account=false AND ct.created_at>=b.start_utc AND ct.created_at<b.end_utc
+        GROUP BY 1
+      ), claim_daily AS (
+        SELECT (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date d,
+          COUNT(*)::bigint claims, COUNT(DISTINCT c.user_id)::bigint claimers
+        FROM daily_reward_claims c JOIN users u ON u.id=c.user_id CROSS JOIN bounds b
+        WHERE u.is_review_account=false AND c.created_at>=b.start_utc AND c.created_at<b.end_utc
+        GROUP BY 1
       )
       SELECT to_char(d.d,'YYYY-MM-DD') date,
         (SELECT COUNT(*) FROM er r WHERE (r.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint created,
         (SELECT COUNT(*) FROM er r WHERE (r.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint started,
         (SELECT COUNT(DISTINCT rp.user_id) FROM em rp WHERE (rp.joined_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint new_participants,
         (SELECT COUNT(DISTINCT rp.user_id) FROM em rp JOIN er r ON r.id=rp.race_id WHERE r.started_at IS NOT NULL AND (r.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')<d.d+interval '1 day' AND COALESCE((r.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York'),(CAST(${generatedAt} AS timestamp) AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York'))>d.d)::bigint live,
-        (SELECT COUNT(*) FROM race_powerup_events e JOIN em rp ON rp.race_id=e.race_id AND rp.user_id=e.actor_user_id WHERE e.event_type='POWERUP_USED' AND (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint powers,
-        (SELECT COALESCE(SUM(GREATEST(ct.amount,0)),0) FROM coin_transactions ct JOIN users u ON u.id=ct.user_id WHERE u.is_review_account=false AND (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint credits,
-        (SELECT COALESCE(SUM(GREATEST(-ct.amount,0)),0) FROM coin_transactions ct JOIN users u ON u.id=ct.user_id WHERE u.is_review_account=false AND (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint debits,
-        (SELECT COUNT(*) FROM daily_reward_claims c JOIN users u ON u.id=c.user_id WHERE u.is_review_account=false AND (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint claims,
-        (SELECT COUNT(DISTINCT c.user_id) FROM daily_reward_claims c JOIN users u ON u.id=c.user_id WHERE u.is_review_account=false AND (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint claimers FROM dates d ORDER BY d.d`;
+        COALESCE(p.powers,0)::bigint powers,
+        COALESCE(c.credits,0)::bigint credits, COALESCE(c.debits,0)::bigint debits,
+        COALESCE(q.claims,0)::bigint claims, COALESCE(q.claimers,0)::bigint claimers
+      FROM dates d LEFT JOIN power_daily p USING(d) LEFT JOIN coin_daily c USING(d)
+        LEFT JOIN claim_daily q USING(d) ORDER BY d.d`;
     const [stats] = await prisma.$queryRaw`
       WITH er AS (
         SELECT r.* FROM races r JOIN users c ON c.id=r.creator_id
@@ -914,14 +942,17 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         FROM dates dt CROSS JOIN action_ids a LEFT JOIN dated d
           ON d.action_date=dt.action_date AND d.action_id=a.action_id
         GROUP BY dt.action_date, a.action_id
+      ), daily_union AS (
+        SELECT action_date, COUNT(DISTINCT user_id)::bigint union_users
+        FROM dated GROUP BY action_date
       ), daily AS (
         SELECT da.action_date,
           SUM(users)::bigint total_users,
           ROUND(AVG(users)::numeric,1)::float average_users,
-          COUNT(DISTINCT d.user_id)::bigint union_users,
+          COALESCE(MAX(du.union_users),0)::bigint union_users,
           jsonb_object_agg(da.action_id, jsonb_build_object('users',users,'events',events)) actions
-        FROM daily_action da LEFT JOIN dated d
-          ON d.action_date=da.action_date AND d.action_id=da.action_id
+        FROM daily_action da LEFT JOIN daily_union du
+          ON du.action_date=da.action_date
         GROUP BY da.action_date
       )
       SELECT action_date, total_users, average_users, union_users, actions
@@ -1080,7 +1111,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     const byDate=new Map(); for(const row of rows){if(!byDate.has(row.date))byDate.set(row.date,new Map());if(row.reward_kind)byDate.get(row.date).set(row.reward_kind,row)}
     const daily=[...byDate].map(([date,kinds])=>{const ssvByRewardKind=REWARD_KINDS.map(rewardKind=>({rewardKind,grants:number(kinds.get(rewardKind)?.grants),uniqueWatchers:number(kinds.get(rewardKind)?.watchers)}));const any=[...kinds.values()][0];return {date,impressions:null,ssvGrants:ssvByRewardKind.reduce((a,r)=>a+r.grants,0),uniqueSsvWatchers:number(any?.total_watchers),ssvByRewardKind,estimatedEarnings:null,matchRate:null,showRate:null};});
     const total=daily.reduce((a,r)=>a+r.ssvGrants,0);
-    return {revenue:{daily,adRevenuePerDau:null,ssvGrantsPerRewardedImpression:{numerator:total,denominator:null,percent:null},byNetwork:[],realMoneyPurchases:{available:false,reason:"NO_IAP_PRODUCT"}}};
+    return {revenue:{daily,adRevenuePerDau:null,ssvGrantsPerRewardedImpression:{numerator:total,denominator:null,percent:null},byNetwork:[],realMoneyPurchases:{available:false,reason:"HISTORICAL_CASH_AMOUNTS_UNAVAILABLE",purchaseHistoryAvailable:true}}};
   }
 
   async function loadReleaseAdoption() {

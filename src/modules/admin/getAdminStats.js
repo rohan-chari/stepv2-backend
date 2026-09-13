@@ -803,7 +803,7 @@ function buildGetAdminStats(dependencies = {}) {
     }
 
     const payload = {
-      generatedAt: new Date().toISOString(),
+      generatedAt: (dependencies.now || (() => new Date()))().toISOString(),
       users: {
         total: n(userRows?.total),
         newLast7Days: n(userRows?.new_7d),

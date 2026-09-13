@@ -384,6 +384,8 @@ async function runAfterTransactionTasks(tasks, phase, logger = console) {
 
 module.exports = {
   prisma,
+  // Bounded admin extraction borrows the existing pool; it never opens another.
+  pool,
   databasePoolConfig,
   databasePoolTestSeam,
   getDbPoolPressure,

@@ -768,6 +768,7 @@ function buildAppSettings(dependencies = {}) {
     // below so telemetry integration tests exercise the real lifecycle.
     if (permanentTestOverride && key !== "adminMetricsV2TelemetryEnabled") {
       cache = null;
+      if (key === "adminMetricsV2DashboardEnabled") await require("../../modules/admin/services/adminAnalyticsSnapshots").invalidateAdminAnalytics();
       return;
     }
     if (!(key in KNOWN_FLAGS) && !permanentTestOverride) {
@@ -807,6 +808,9 @@ function buildAppSettings(dependencies = {}) {
         update: { value },
         create: { key, value },
       });
+    }
+    if (["adminMetricsV2DashboardEnabled", "adminMetricsV2TelemetryEnabled"].includes(key)) {
+      await require("../../modules/admin/services/adminAnalyticsSnapshots").invalidateAdminAnalytics();
     }
     cache = null; // bust so this process serves the new value immediately
     if (key === "adminMetricsV2TelemetryEnabled") {
@@ -901,11 +905,15 @@ function buildAppSettings(dependencies = {}) {
       for (const [key, value] of permanentEntries) {
         permanentOverrides.set(key, value);
       }
+      // Telemetry still executes its real collection-epoch transaction in
+      // tests, matching the individual setter's existing semantics.
       entries = entries.filter(([key]) =>
+        key === "adminMetricsV2TelemetryEnabled" ||
         !Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)
       );
       if (entries.length === 0) {
         cache = null;
+        await require("../../modules/admin/services/adminAnalyticsSnapshots").invalidateAdminAnalytics();
         return;
       }
     }
@@ -949,6 +957,7 @@ function buildAppSettings(dependencies = {}) {
         });
       }
     });
+    await require("../../modules/admin/services/adminAnalyticsSnapshots").invalidateAdminAnalytics();
     cache = null;
     await derivedCache.invalidate({
       keys: [cacheKeys.appSettingsKey],

@@ -1,3 +1,4 @@
+require("./adminRedisFixture.cjs");
 // Batch 2026-08-08 — Item 9: "Admin stats: users per app version + private
 // race count".
 //
@@ -19,7 +20,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 
-const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { cleanDatabase, prisma, request, getSharedServer, startServer } = require("./setup");
 
 const ADMIN_EMAIL =
   process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com";
@@ -213,6 +214,12 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
       data: { lastSeenAt: yesterday },
     });
     require("../../src/modules/users/services/authSessionUserCache").clear();
+    // The fixture moved the durable timestamp backwards without moving real
+    // time. Expire the isolated Redis same-day admission proof too, as it would
+    // have expired naturally before the simulated new day. Assertions below
+    // still exercise the real HTTP writer and durable timestamp.
+    const fixtureRedis = new (require("ioredis"))(process.env.REDIS_URL);
+    try { await fixtureRedis.flushdb(); } finally { await fixtureRedis.quit(); }
 
     assert.equal((await me(user.token, "2.1.2")).status, 200);
     const after = await waitForRow(
@@ -408,13 +415,18 @@ describe("batch 2026-08-08 item 9 — app-version sticky write", () => {
 });
 
 describe("batch 2026-08-08 item 9 — GET /admin/stats versions + races", () => {
+  let analyticsNow = new Date();
   before(async () => {
-    server = await getSharedServer();
+    server = await startServer({
+      adminAnalyticsNow: () => analyticsNow,
+      verifyAppleIdentityToken: async token => ({sub: token, email: `${token}@example.com`}),
+    });
   });
 
-  after(async () => {});
+  after(async () => { await server.close(); });
 
   beforeEach(async () => {
+    analyticsNow = new Date();
     await cleanDatabase();
   });
 
@@ -545,7 +557,20 @@ describe("batch 2026-08-08 item 9 — GET /admin/stats versions + races", () => 
       (row) => row.lastAppVersion === "2.1.2",
       "reported version should be durable before stats are read"
     );
-    const after = await (await fetchStats(admin.token, "9.9.9")).json();
+    // Analytics deliberately preserves one completed snapshot for 15 minutes.
+    // Verify that promise, then advance the injected clock and wait for the
+    // normal stale-while-revalidate HTTP path before the original assertions.
+    const cached = await (await fetchStats(admin.token, "9.9.9")).json();
+    assert.equal(cached.stats.versions.find(r => r.version === "unknown" && r.platform === "ios")?.users, 1);
+    analyticsNow = new Date(analyticsNow.getTime() + 901000);
+    let after = await (await fetchStats(admin.token, "9.9.9")).json();
+    assert.equal(after.stats.snapshot.status, 'stale');
+    const refreshDeadline = Date.now() + 5000;
+    while (after.stats.snapshot.status !== 'fresh' && Date.now() < refreshDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      after = await (await fetchStats(admin.token, "9.9.9")).json();
+    }
+    assert.equal(after.stats.snapshot.status, 'fresh');
     assert.equal(
       after.stats.versions.find(
         (r) => r.version === "unknown" && r.platform === "ios"

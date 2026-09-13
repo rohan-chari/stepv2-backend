@@ -1,3 +1,4 @@
+require("./adminRedisFixture.cjs");
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const {
@@ -78,6 +79,7 @@ describe("admin metrics dashboard v2 — locked HTTP contract", () => {
       "versionsWindowDays",
       "races",
       "onboardingFunnel",
+      "snapshot",
     ]);
   });
 

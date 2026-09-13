@@ -1096,6 +1096,8 @@ model DeviceToken {
 }
 
 model CoinTransaction {
+  // Admin history uses the manually maintained coin_transactions_admin_history_idx
+  // (C-collated id / partial predicate), defined in the additive SQL migration.
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
   amount         Int
@@ -1244,6 +1246,8 @@ model UserEquippedAccessory {
 }
 
 model ShopPurchaseRequest {
+  // Admin history uses the manually maintained shop_purchase_requests_admin_history_idx
+  // (C-collated id / partial predicate), defined in the additive SQL migration.
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
   idempotencyKey String   @map("idempotency_key")
@@ -1341,6 +1345,8 @@ model UserPowerupItem {
 // ShopPurchaseRequest but for the powerup catalog (keeps the cosmetic ledger
 // untouched). Keyed on (userId, idempotencyKey).
 model PowerupPurchaseRequest {
+  // Admin history uses the manually maintained powerup_purchase_requests_admin_history_idx
+  // (C-collated id / partial predicate), defined in the additive SQL migration.
   id                String   @id @default(uuid())
   userId            String   @map("user_id")
   idempotencyKey    String   @map("idempotency_key")
@@ -3978,6 +3984,8 @@ model BillingIdentity {
 }
 
 model BillingPurchase {
+  // Admin history uses the manually maintained billing_purchases_admin_history_idx
+  // (C-collated id / partial predicate), defined in the additive SQL migration.
   refundCount Int @default(0) @map("refund_count")
   fulfillmentStatus String @default("pending") @map("fulfillment_status")
   benefitKind String @default("paid") @map("benefit_kind")

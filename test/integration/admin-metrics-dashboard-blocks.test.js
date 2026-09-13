@@ -1,5 +1,5 @@
+require("./adminRedisFixture.cjs");
 process.env.PRISMA_QUERY_EVENTS_ENABLED = "true";
-delete process.env.REDIS_URL;
 
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
@@ -99,11 +99,20 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     }
   });
 
-  it("serves dashboard blocks from Postgres with Redis unavailable", async () => {
-    assert.equal(process.env.REDIS_URL, undefined);
+  it("keeps completed analytics on Redis failure and refuses a cold uncached rebuild", async () => {
     const dashboard = await get("dashboard-summary", "7d");
     assert.equal(dashboard.status, "available");
     assert.ok(dashboard.summary);
+    const redis = require("../../src/shared/cache/redisCache");
+    const original = redis.evalLua;
+    redis.evalLua = async () => ({ok:false,disabled:false,result:null});
+    try {
+      assert.deepEqual(await get("dashboard-summary", "7d"), dashboard);
+      const response = await request(server.baseUrl, "GET", "/admin/stats?sections=dashboard-growth&window=7d", {token:admin.token});
+      assert.equal(response.status,503);
+      assert.equal((await response.json()).code,"ADMIN_ANALYTICS_UNAVAILABLE");
+      assert.equal(response.headers.get("retry-after"),"15");
+    } finally { redis.evalLua = original; }
   });
 
   it("counts Google Sign-In accounts in the retained iOS population", async () => {
@@ -184,7 +193,8 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     assert.equal(revenue.revenue.adRevenuePerDau, null);
     assert.deepEqual(revenue.revenue.realMoneyPurchases, {
       available: false,
-      reason: "NO_IAP_PRODUCT",
+      reason: "HISTORICAL_CASH_AMOUNTS_UNAVAILABLE",
+      purchaseHistoryAvailable: true,
     });
   });
 
