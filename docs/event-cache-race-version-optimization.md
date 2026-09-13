@@ -1,6 +1,6 @@
 # Event-cache race-version optimization
 
-Status: implemented and reviewed locally on `perf/event-cache-race-version`; not deployed. Base: `7d38ce9`. Review verdict: SHIP, with the ordered deployment below. This is not a claim that the entire repository test suite is green.
+Status: merged to main and deployed on September 13, 2026 UTC. Runtime: `01a6ce5`, after preparation `1c176f9`. Base: `7d38ce9`. Review verdict: SHIP. This is not a claim that the entire repository test suite is green.
 
 ## Behavior and scope
 
@@ -43,10 +43,21 @@ A relevant single entitlement update writes its source row, one pair guard and o
 ## Ordered deployment and recovery
 
 1. Deploy preparation commit `1c176f9` (bounded account-deletion retries) and refresh all HTTP workers before enabling the new triggers. It works without the new schema.
-2. Apply `20260913010000_event_fingerprint_race_versions`, regenerate Prisma Client, then deploy the v4 reader. Keep exactly two production HTTP workers and existing cron/resolution topology. This requires fresh production authorization; nothing here was applied to production or staging.
+2. Apply `20260913010000_event_fingerprint_race_versions`, regenerate Prisma Client, then deploy the v4 reader. Keep exactly two production HTTP workers and existing cron/resolution topology. The user authorized this production deployment. Staging remained stopped.
 3. The migration installs atomically under write-blocking source-table locks, seeds race versions/counts once without rewriting historical impacts or entitlements, and creates database-owned triggers. Lock timeout is five seconds; statement timeout is sixty seconds. A timeout rolls back the installation. Use an appropriate low-traffic window and inspect migration outcome before restarting readers.
 4. Monitor warm hits, fallback rates, roster-query buffers/time, event-boundary write time and deadlock/retry counts under real traffic. Do not claim a production saving before measuring it.
 
 Missing version rows fail closed to canonical SQL. To rebuild versions, use an explicitly authorized maintenance transaction with the same source-table locks: recompute counts from impacts, insert missing race versions, and rotate incarnation UUIDs on every repaired row so old Redis entries cannot become current. Never reset revisions under an unchanged incarnation. Restore procedures must also preserve/rotate the database cache epoch as appropriate. Pair rows are synchronization state, not scoring authority.
 
 A reader rollback may use the prior v3 code while leaving the additive tables/triggers in place; retain the preparatory retry fix. Do not deploy new readers before their migration, drop source history, or perform destructive rollback during live traffic.
+
+
+## Production verification — September 13, 2026 UTC
+
+Local backend and origin/main were fast-forwarded to the reviewed change; local frontend was already on main. Unrelated uncommitted files were preserved. The retry fix was fully reloaded before the migration; the migration ran 01:41:27.425–01:41:28.983 UTC, then the v4 reader was generated and reloaded. The guard verified two HTTP workers, one resolution worker, one cron worker and total pool ceiling 32. Environment and the pre-existing production lockfile edit were hash-preserved. API/Redis healthy; referral audit/apply/audit changed zero rows; powerup copy already matched; existing Decoy balance drift was not changed.
+
+All 1,998 races had version rows, with zero missing versions or count mismatches. The old roster/proof query had no active execution at verification.
+
+The user cancelled the ten-minute monitoring request and requested a cache-reuse check instead. Both collectors were stopped. The retained complete 60.3-second SQL interval contains 29 new planning roster reads and 13 fills (10 local, 3 full). The 25 uncached roster reads match the 25 canonical event-history reads, with no observed excess fallback reads. This indicates approximately 16 cache reuses, or 55% of planning lookups, in that short interval. It is a SQL-derived estimate, not a directly exposed worker hit counter. Redis inspection separately found 19 live v4 entries; a brief IDLETIME/TTL probe did not observe a read reset and is inconclusive on its own.
+
+The new roster query recorded 174.4 ms execution and 4,597 buffer accesses across 29 calls (6.0 ms and 159 accesses per call). These are short, unmatched-traffic observations; no ten-minute CPU conclusion is claimed. [Production evidence](evidence/event-cache-race-version/production-verification.json).

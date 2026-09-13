@@ -1,0 +1,213 @@
+{
+  "runtime": {
+    "at": "2026-09-13T01:45:19.842389+00:00",
+    "commit": "01a6ce5a6783c23f5af8bcefcf752e9651c04ade",
+    "processes": [
+      {
+        "name": "steps-tracker-staging",
+        "pid": 0,
+        "status": "stopped",
+        "startedAt": 1788373079797,
+        "restarts": 0
+      },
+      {
+        "name": "steps-tracker-resolution",
+        "pid": 1736519,
+        "status": "online",
+        "startedAt": 1789263735041,
+        "restarts": 0
+      },
+      {
+        "name": "steps-tracker-cron",
+        "pid": 1736537,
+        "status": "online",
+        "startedAt": 1789263735426,
+        "restarts": 2
+      },
+      {
+        "name": "steps-tracker",
+        "pid": 1736353,
+        "status": "online",
+        "startedAt": 1789263699126,
+        "restarts": 12
+      },
+      {
+        "name": "steps-tracker",
+        "pid": 1736365,
+        "status": "online",
+        "startedAt": 1789263700643,
+        "restarts": 12
+      }
+    ]
+  },
+  "database": {
+    "at": "2026-09-13T01:42:42.418Z",
+    "type": "verification",
+    "migration": [
+      {
+        "migration_name": "20260913010000_event_fingerprint_race_versions",
+        "started_at": "2026-09-13T01:41:27.425Z",
+        "finished_at": "2026-09-13T01:41:28.983Z",
+        "rolled_back_at": null
+      }
+    ],
+    "counts": [
+      {
+        "races": "1998",
+        "versions": "1998",
+        "pairs": "0"
+      }
+    ],
+    "missing": [
+      {
+        "count": "0"
+      }
+    ],
+    "drift": [
+      {
+        "count": "0"
+      }
+    ],
+    "sessions": [
+      {
+        "application_name": "",
+        "state": "idle in transaction (aborted)",
+        "count": "7"
+      },
+      {
+        "application_name": "bara_event_version_monitor",
+        "state": "active",
+        "count": "1"
+      },
+      {
+        "application_name": "steps-cron-0",
+        "state": "idle",
+        "count": "1"
+      },
+      {
+        "application_name": "steps-http-0",
+        "state": "idle",
+        "count": "10"
+      },
+      {
+        "application_name": "steps-http-1",
+        "state": "idle",
+        "count": "2"
+      },
+      {
+        "application_name": "steps-resolution-0",
+        "state": "idle",
+        "count": "3"
+      }
+    ],
+    "oldActive": [
+      {
+        "count": "0"
+      }
+    ]
+  },
+  "sample": {
+    "start": "2026-09-13T01:45:04.447Z",
+    "end": "2026-09-13T01:46:04.770Z",
+    "planningReads": 29,
+    "refillReads": 13,
+    "uncachedRosterReads": 25,
+    "canonicalEventReads": 25,
+    "inferredCacheReuses": 16,
+    "inferredReusePercent": 55.17,
+    "method": "planning reads minus refills; canonical event reads match uncached roster reads, giving no observed excess fallback reads. This is SQL-derived, not a directly exposed process hit counter.",
+    "queries": [
+      {
+        "queryid": "-4006200843426884750",
+        "toplevel": true,
+        "calls": 29.0,
+        "total_exec_time": 174.4184459999999,
+        "rows": 1127.0,
+        "shared_blks_hit": 4597.0,
+        "shared_blks_read": 0,
+        "shared_blks_dirtied": 0,
+        "temp_blks_written": 0,
+        "wal_bytes": 176.0
+      },
+      {
+        "queryid": "5307534218807500852",
+        "toplevel": true,
+        "calls": 20.0,
+        "total_exec_time": 80.18315299972892,
+        "rows": 1012.0,
+        "shared_blks_hit": 3889.0,
+        "shared_blks_read": 0,
+        "shared_blks_dirtied": 0,
+        "temp_blks_written": 0,
+        "wal_bytes": 58.0
+      },
+      {
+        "queryid": "8215726927556489320",
+        "toplevel": true,
+        "calls": 3.0,
+        "total_exec_time": 16.040815000000002,
+        "rows": 467.0,
+        "shared_blks_hit": 2658.0,
+        "shared_blks_read": 0,
+        "shared_blks_dirtied": 0,
+        "temp_blks_written": 0,
+        "wal_bytes": 0
+      },
+      {
+        "queryid": "-5772530709744002507",
+        "toplevel": true,
+        "calls": 5.0,
+        "total_exec_time": 1.64736799999082,
+        "rows": 66.0,
+        "shared_blks_hit": 68.0,
+        "shared_blks_read": 0,
+        "shared_blks_dirtied": 0,
+        "temp_blks_written": 0,
+        "wal_bytes": 0
+      },
+      {
+        "queryid": "-4910935918319776275",
+        "toplevel": true,
+        "calls": 25.0,
+        "total_exec_time": 247.09864500002004,
+        "rows": 4048.0,
+        "shared_blks_hit": 34560.0,
+        "shared_blks_read": 6.0,
+        "shared_blks_dirtied": 0,
+        "temp_blks_written": 0,
+        "wal_bytes": 0
+      },
+      {
+        "queryid": "2993438712655304452",
+        "toplevel": true,
+        "calls": 10.0,
+        "total_exec_time": 177.2269530000001,
+        "rows": 1899.0,
+        "shared_blks_hit": 10848.0,
+        "shared_blks_read": 0,
+        "shared_blks_dirtied": 0,
+        "temp_blks_written": 0,
+        "wal_bytes": 0
+      }
+    ]
+  },
+  "redisProbe": {
+    "at": "2026-09-13T01:48:51.296Z",
+    "sampledKeys": 19,
+    "initialLiveKeys": 19,
+    "checksWithUnchangedExpiry": 17,
+    "observedReadsWithoutRefill": 0,
+    "method": "OBJECT IDLETIME resets while PTTL expiry remains unchanged; no GET or cache writes from this observer"
+  },
+  "monitorStoppedAtUserRequest": true,
+  "checks": {
+    "health": {
+      "status": "ok",
+      "redis": "ok"
+    },
+    "environmentAndExistingLockfilePreserved": true,
+    "referralCatchupChanges": 0,
+    "powerupCopyAlreadyMatches": true,
+    "existingDecoyBalanceDriftPreserved": true
+  }
+}
