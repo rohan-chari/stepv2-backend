@@ -1,7 +1,7 @@
 # Historical raw sample cache
 
-Implementation is verified and reviewed. This document does not authorize or
-claim a production deployment.
+Implementation is verified and reviewed. Runtime commit `912fc16` was deployed
+with explicit user authorization on September 13, 2026 UTC.
 
 ## Why this work exists
 
@@ -102,7 +102,7 @@ Measured sparse fixture (96 older hourly samples and one recent sample):
 
 Those two proof reads are additional to the pre-existing source-read path. The
 fixture demonstrates reuse and exact score behavior; it is not a representative
-production hit rate or CPU forecast. No production changes have been made.
+production hit rate or CPU forecast. These measurements preceded deployment.
 
 The denser fixture uses six days of five-minute samples: 1,768 cold rows versus
 616 recent rows (65.2% fewer), with 38,181 bytes in the historical Redis entry.
@@ -132,5 +132,27 @@ writers can continue during deployment: their generation changes leave proof
 incomplete, and subsequent classified intake rotates the historical revision.
 Rollback can leave the nullable columns and disposable cache entries in place.
 
-Production deployment still requires fresh user authorization under AGENTS.md.
 The temporary local Redis instance used for validation has been stopped.
+
+## Production deployment — September 13, 2026 UTC
+
+User explicitly authorized deployment. Runtime `912fc16` is on main and tagged
+`deploy/historical-raw-cache-20260913-912fc16`; previous checkout `c181570` is
+tagged `pre-historical-raw-cache-20260913`.
+
+The additive migration completed at 03:32:44 UTC through a verified direct
+database connection. Prisma was regenerated; dependencies and configuration
+were unchanged. Guarded reload succeeded: exactly two HTTP workers, one
+resolution worker and one cron worker, aggregate pool ceiling 32. Staging stayed
+stopped. Environment and pre-existing remote lockfile changes were preserved.
+Local/public health both reported API and Redis healthy. Referral audit, apply
+and convergence audit all returned zero outstanding rows. Existing Decoy balance
+snapshot drift and BILLING_UNAVAILABLE logs were preserved and are unrelated.
+
+At 03:36:26 UTC, the first observed resolution cache heartbeat reported three
+hits, 379 older rows reused, 443 recent rows read, 143 misses and no proof races.
+Redis held 24 historical raw entries (261,815 payload bytes); 23 users had current
+proofs. These cumulative startup counters confirm actual reuse while the cache
+warms. They do not establish a sustained hit rate or production CPU improvement.
+The brief log check found no P2028/P2024/P1001/P1002 or new proof/metric errors.
+Full aggregate evidence: `docs/evidence/historical-raw-sample-cache/production-verification.json`.

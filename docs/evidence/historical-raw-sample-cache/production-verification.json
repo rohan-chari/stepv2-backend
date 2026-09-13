@@ -1,0 +1,114 @@
+{
+  "at": "2026-09-13T03:36:26.681Z",
+  "commit": "912fc16f591ddd7e4b1b4d97d348233871813e3c",
+  "processes": [
+    {
+      "name": "steps-tracker-staging",
+      "status": "stopped",
+      "startedAt": "2026-09-02T18:17:59.797Z"
+    },
+    {
+      "name": "steps-tracker-resolution",
+      "pid": 1745073,
+      "status": "online",
+      "startedAt": "2026-09-13T03:34:04.351Z"
+    },
+    {
+      "name": "steps-tracker-cron",
+      "pid": 1745091,
+      "status": "online",
+      "startedAt": "2026-09-13T03:34:04.713Z"
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1744961,
+      "status": "online",
+      "startedAt": "2026-09-13T03:33:27.647Z"
+    },
+    {
+      "name": "steps-tracker",
+      "pid": 1744973,
+      "status": "online",
+      "startedAt": "2026-09-13T03:33:29.455Z"
+    }
+  ],
+  "cacheRecords": [
+    {
+      "event": "historical_raw_sample_cache",
+      "pid": 1745073,
+      "hits": 3,
+      "misses": 143,
+      "rowsReused": 379,
+      "recentRowsRead": 443,
+      "fullRowsRead": 55911,
+      "proofRaces": 0
+    }
+  ],
+  "errorCounts": {
+    "BILLING_UNAVAILABLE": 112
+  },
+  "migration": [
+    {
+      "migration_name": "20260913030000_historical_raw_sample_proof",
+      "finished_at": "2026-09-13T03:32:44.873Z",
+      "rolled_back_at": null
+    }
+  ],
+  "proofs": {
+    "total": 1514,
+    "stamped": 23,
+    "complete": 23
+  },
+  "columns": [
+    {
+      "column_name": "historical_raw_complete_generation",
+      "is_nullable": "YES"
+    },
+    {
+      "column_name": "historical_raw_protected_cutoff",
+      "is_nullable": "YES"
+    },
+    {
+      "column_name": "historical_raw_revision",
+      "is_nullable": "YES"
+    }
+  ],
+  "redis": {
+    "sampledKeys": 24,
+    "scanComplete": true,
+    "maxTtlMs": 589408,
+    "payloadBytes": 261815
+  },
+  "configPreserved": true,
+  "health": {
+    "local": {
+      "status": "ok",
+      "redis": "ok"
+    },
+    "public": {
+      "status": "ok",
+      "redis": "ok"
+    }
+  },
+  "poolBudget": 32,
+  "guardedReload": "passed",
+  "referralCatchup": {
+    "before": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    },
+    "applied": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    },
+    "after": {
+      "raceActivities": 0,
+      "reviewOwnership": 0
+    }
+  },
+  "notes": [
+    "First cache heartbeat, cumulative since this worker started; cache is still warming.",
+    "No production CPU improvement inferred from this brief check.",
+    "BILLING_UNAVAILABLE logs and three Decoy balance snapshot differences predate this deployment."
+  ]
+}
