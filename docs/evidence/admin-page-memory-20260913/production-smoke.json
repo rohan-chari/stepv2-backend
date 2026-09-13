@@ -1,0 +1,216 @@
+{
+  "runtimeCommit": "9471f15247b154a3ec654a09c88d02b7f769c625",
+  "checks": [
+    {
+      "view": "overview",
+      "status": 200,
+      "elapsedMs": 6119,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 13,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-summary",
+        "dashboard-growth",
+        "dashboard-dau-engagement"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:03:45.826Z",
+        "freshUntil": "2026-09-13T22:18:45.826Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      },
+      "activeUsersAvailable": true
+    },
+    {
+      "view": "activity",
+      "status": 200,
+      "elapsedMs": 23262,
+      "polls": 2,
+      "warmStatus": 200,
+      "warmMs": 80,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-dau-engagement"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:03:51.876Z",
+        "freshUntil": "2026-09-13T22:18:51.876Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      },
+      "activeUsersAvailable": true
+    },
+    {
+      "view": "ads",
+      "status": 200,
+      "elapsedMs": 1032,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 24,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-revenue",
+        "ads"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:15.201Z",
+        "freshUntil": "2026-09-13T22:19:15.201Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      },
+      "adsAvailable": true
+    },
+    {
+      "view": "retention",
+      "status": 200,
+      "elapsedMs": 712,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 45,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-summary",
+        "dashboard-retention",
+        "dashboard-retention-mature"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:16.164Z",
+        "freshUntil": "2026-09-13T22:19:16.164Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "view": "growth",
+      "status": 200,
+      "elapsedMs": 534,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 7,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-growth"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:16.880Z",
+        "freshUntil": "2026-09-13T22:19:16.880Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "view": "races",
+      "status": 200,
+      "elapsedMs": 2030,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 9,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-summary",
+        "dashboard-engagement",
+        "dashboard-activation"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:17.419Z",
+        "freshUntil": "2026-09-13T22:19:17.419Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "view": "invites",
+      "status": 200,
+      "elapsedMs": 224,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 8,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-funnels"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:19.436Z",
+        "freshUntil": "2026-09-13T22:19:19.436Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "view": "onboarding",
+      "status": 200,
+      "elapsedMs": 4407,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 15,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "dashboard-funnels"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:19.662Z",
+        "freshUntil": "2026-09-13T22:19:19.662Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "view": "shop",
+      "status": 200,
+      "elapsedMs": 769,
+      "polls": 0,
+      "warmStatus": 200,
+      "warmMs": 30,
+      "sameSnapshot": true,
+      "sectionKeys": [
+        "economy"
+      ],
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:24.089Z",
+        "freshUntil": "2026-09-13T22:19:24.089Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "legacyActivityStatus": 503,
+      "ms": 10008,
+      "activeUsersAvailable": false
+    },
+    {
+      "purchaseStatus": 200,
+      "ms": 79,
+      "topLevelKeys": [
+        "generatedAt",
+        "window",
+        "items",
+        "nextCursor"
+      ],
+      "rows": 5
+    },
+    {
+      "legacyActivityStatus": 200,
+      "elapsedMs": 139,
+      "activeUsersAvailable": true,
+      "snapshot": {
+        "generatedAt": "2026-09-13T22:04:24.859Z",
+        "freshUntil": "2026-09-13T22:19:24.859Z",
+        "status": "fresh",
+        "refreshIntervalSeconds": 900
+      }
+    },
+    {
+      "purchaseStatus": 200,
+      "ms": 97,
+      "topLevelKeys": [
+        "generatedAt",
+        "window",
+        "items",
+        "nextCursor"
+      ],
+      "rows": 5,
+      "usernameFieldsPresent": true
+    }
+  ]
+}
