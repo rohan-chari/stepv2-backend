@@ -1,0 +1,250 @@
+{
+  "migration": {
+    "at": "2026-09-13T23:23:19.133Z",
+    "index": {
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX global_step_event_entitlements_pending_parent_idx ON public.global_step_event_entitlements USING btree (event_id) WHERE ((start_processed_at IS NULL) OR (end_processed_at IS NULL))",
+      "bytes": "49152"
+    }
+  },
+  "runtime": {
+    "at": "2026-09-13T23:25:46.196Z",
+    "head": "3ae65f5b8cf2066aac3990928eb94f7755e364fd",
+    "processes": [
+      {
+        "name": "steps-tracker-resolution",
+        "pid": 1810505,
+        "status": "online",
+        "role": "resolution",
+        "uptime": 1789341943235,
+        "restarts": 0
+      },
+      {
+        "name": "steps-tracker-cron",
+        "pid": 1810523,
+        "status": "online",
+        "role": "cron",
+        "uptime": 1789341943537,
+        "restarts": 3
+      },
+      {
+        "name": "steps-tracker",
+        "pid": 1810396,
+        "status": "online",
+        "role": "http",
+        "uptime": 1789341905458,
+        "restarts": 20
+      },
+      {
+        "name": "steps-tracker",
+        "pid": 1810408,
+        "status": "online",
+        "role": "http",
+        "uptime": 1789341907476,
+        "restarts": 20
+      }
+    ],
+    "staging": "stopped",
+    "environmentAndLockPreserved": true
+  },
+  "clients": {
+    "at": "2026-09-13T23:27:48.570Z",
+    "existingReviewAccount": true,
+    "activeReviewRace": false,
+    "checks": [
+      {
+        "client": "legacy",
+        "endpoint": "auth-me",
+        "status": 200,
+        "elapsedMs": 262
+      },
+      {
+        "client": "current",
+        "endpoint": "auth-me",
+        "status": 200,
+        "elapsedMs": 46
+      }
+    ]
+  },
+  "progress": {
+    "at": "2026-09-13T23:31:41.664Z",
+    "checks": [
+      {
+        "client": "legacy",
+        "endpoint": "race-progress",
+        "raceStatus": "completed",
+        "status": 200,
+        "elapsedMs": 567,
+        "progressShapeValid": true
+      },
+      {
+        "client": "current",
+        "endpoint": "race-progress",
+        "raceStatus": "completed",
+        "status": 200,
+        "elapsedMs": 255,
+        "progressShapeValid": true
+      }
+    ],
+    "discovery": [
+      {
+        "calls": "602",
+        "total_exec_time": 193.012277,
+        "rows": "602"
+      }
+    ],
+    "statsMatch": "normalized SQL shape; comments removed by production instrumentation"
+  },
+  "logs": {
+    "at": "2026-09-13T23:29:16.689Z",
+    "live": [
+      {
+        "name": "steps-tracker-resolution",
+        "pid": 1810505,
+        "status": "online",
+        "restarts": 0
+      },
+      {
+        "name": "steps-tracker-cron",
+        "pid": 1810523,
+        "status": "online",
+        "restarts": 3
+      },
+      {
+        "name": "steps-tracker",
+        "pid": 1810396,
+        "status": "online",
+        "restarts": 20
+      },
+      {
+        "name": "steps-tracker",
+        "pid": 1810408,
+        "status": "online",
+        "restarts": 20
+      }
+    ],
+    "poolIdentities": [
+      "resolution:0",
+      "cron:0",
+      "http:0",
+      "http:1"
+    ],
+    "newCacheTelemetry": [
+      {
+        "pid": 1810505,
+        "processStartIdentity": "23564d79-9514-4045-a139-72d83f33e20e",
+        "intervalMs": 135887,
+        "observedAt": "2026-09-13T23:28:00.369Z"
+      },
+      {
+        "pid": 1810505,
+        "processStartIdentity": "23564d79-9514-4045-a139-72d83f33e20e",
+        "intervalMs": 60000,
+        "observedAt": "2026-09-13T23:29:00.369Z"
+      },
+      {
+        "pid": 1810408,
+        "processStartIdentity": "a57379f5-dce7-4a55-b2b4-f0ed55af4190",
+        "intervalMs": 149927,
+        "observedAt": "2026-09-13T23:27:38.873Z"
+      },
+      {
+        "pid": 1810408,
+        "processStartIdentity": "a57379f5-dce7-4a55-b2b4-f0ed55af4190",
+        "intervalMs": 59999,
+        "observedAt": "2026-09-13T23:28:38.872Z"
+      }
+    ],
+    "freshErrorMatches": [],
+    "coverage": [
+      {
+        "file": "steps-tracker-staging-out-2.log",
+        "newBytes": 0,
+        "readBytes": 0,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-staging-error-2.log",
+        "newBytes": 0,
+        "readBytes": 0,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-resolution-out-3.log",
+        "newBytes": 3955327,
+        "readBytes": 3955327,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-resolution-error-3.log",
+        "newBytes": 5657,
+        "readBytes": 5657,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-cron-out-4.log",
+        "newBytes": 75621,
+        "readBytes": 75621,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-cron-error-4.log",
+        "newBytes": 6703,
+        "readBytes": 6703,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-out-5.log",
+        "newBytes": 135466,
+        "readBytes": 135466,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-error-5.log",
+        "newBytes": 5490,
+        "readBytes": 5490,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-out-6.log",
+        "newBytes": 144437,
+        "readBytes": 144437,
+        "truncated": false
+      },
+      {
+        "file": "steps-tracker-error-6.log",
+        "newBytes": 270,
+        "readBytes": 270,
+        "truncated": false
+      }
+    ]
+  },
+  "localMergedChecks": {
+    "enrollmentAndParent": 15,
+    "deadline": 8,
+    "cache": 21,
+    "notes": "Safety-guard fixture mismatches were corrected before successful reruns; no assertions changed."
+  },
+  "maintenance": {
+    "copyChanges": 0,
+    "referralRaceActivities": 0,
+    "referralReviewOwnership": 0,
+    "balanceDrift": "three previously recorded Decoy-related paths; unchanged"
+  },
+  "health": {
+    "localApi": 200,
+    "publicApiWithAppUserAgent": 200,
+    "redis": "ok",
+    "marketingPages": [
+      200,
+      200,
+      200
+    ]
+  },
+  "limitations": [
+    "No production CPU saving is inferred from deployment checks.",
+    "Live reviewer race was completed; active expiry/load parity was verified locally.",
+    "Initial cache telemetry intervals include startup idle time; subsequent complete intervals are about 60 seconds."
+  ]
+}
