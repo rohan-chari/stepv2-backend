@@ -14,9 +14,9 @@ it('requires a complete finite probability map and known viewer/effects', () => 
   assert.equal(reelPreviewAvailable({ ...base, byType: { A: 1 - 0.0000005 } }), true);
   assert.equal(reelPreviewAvailable({ ...base, byType: { A: 1 - 0.000002 } }), false);
 });
-it('uses server effect status and owner, including ACTIVE rows past expiresAt', () => {
+it('keeps decorative previews with Horseshoes, including ACTIVE rows past expiresAt', () => {
   const effect = { type: 'LUCKY_HORSESHOE', status: 'ACTIVE', targetParticipantId: 'owner', expiresAt: new Date(0) };
-  assert.equal(reelPreviewAvailable({ ...base, effects: [effect] }), false);
+  assert.equal(reelPreviewAvailable({ ...base, effects: [effect] }), true);
   assert.equal(reelPreviewAvailable({ ...base, effects: [{ ...effect, targetParticipantId: 'rival' }] }), true);
   assert.equal(reelPreviewAvailable({ ...base, effects: [{ ...effect, status: 'EXPIRED' }] }), true);
 });

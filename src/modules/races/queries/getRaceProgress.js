@@ -1720,8 +1720,8 @@ function buildGetRaceProgress(deps = {}) {
           powerupData.dropOdds = {
             ...dropOdds,
             // Request-derived decoration metadata belongs to the viewer overlay,
-            // never the shared snapshot. Reuse raw effects before privacy filters;
-            // absence is unknown, not proof that a one-shot guarantee is absent.
+            // never the shared snapshot. Validate raw viewer context before
+            // privacy filters; one-shot guarantees do not suppress decoration.
             reelPreviewAvailable: reelPreviewAvailable({
               byType: dropOdds.byType,
               effects: snapshot.activeEffects,

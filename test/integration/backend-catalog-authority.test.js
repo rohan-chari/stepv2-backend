@@ -121,7 +121,7 @@ describe('backend catalog authority — real HTTP, Postgres and Redis', () => {
     assert.ok(odds.byType[row.type] > 0, JSON.stringify(result));
   });
 
-  it('active Lucky Horseshoe disables only its owner preview on a shared warm snapshot, preserving byType', async () => {
+  it('active Lucky Horseshoe keeps its owner preview on a shared warm snapshot, preserving byType', async () => {
     const f = await fixture();
     const horseshoe = await item(f, f.alice, 'LUCKY_HORSESHOE');
     const ordinary = (await get(f.alice, `/races/${f.race.id}/progress`)).progress;
@@ -131,15 +131,52 @@ describe('backend catalog authority — real HTTP, Postgres and Redis', () => {
     const alice = (await get(f.alice, `/races/${f.race.id}/progress`)).progress;
     assert.deepEqual(alice.powerupData.dropOdds.byType, ordinary.powerupData.dropOdds.byType, 'preview metadata never rewrites existing ordinary disclosure');
     const bob = (await get(f.bob, `/races/${f.race.id}/progress`)).progress;
-    assert.equal(alice.powerupData.dropOdds.reelPreviewAvailable, false);
+    assert.equal(alice.powerupData.dropOdds.reelPreviewAvailable, true);
     assert.equal(bob.powerupData.dropOdds.reelPreviewAvailable, true);
     const again = (await get(f.alice, `/races/${f.race.id}/progress`)).progress;
-    assert.equal(again.powerupData.dropOdds.reelPreviewAvailable, false);
+    assert.equal(again.powerupData.dropOdds.reelPreviewAvailable, true);
     assert.deepEqual(again.powerupData.dropOdds.byType, alice.powerupData.dropOdds.byType);
     const keys = await redis.keys(`${process.env.CACHE_ENV_PREFIX}v1:race:progress:${f.race.id}*`);
     assert.ok(keys.length > 0, 'a real shared standings snapshot is warm');
     for (const key of keys) assert.ok(!(await redis.get(key)).includes('reelPreviewAvailable'), 'viewer preview is never stored in shared snapshot');
   });
+
+  for (const [name, headers] of [['current', CURRENT], ['legacy', LEGACY]]) {
+    it(`${name} Horseshoe preview stays populated before and after the guaranteed box opens`, async () => {
+      const f = await fixture();
+      await prisma.race.update({ where: { id: f.race.id }, data: { timezone: 'UTC' } });
+      const horseshoe = await item(f, f.alice, 'LUCKY_HORSESHOE');
+      const box = await item(f, f.alice, 'MYSTERY_BOX', 'MYSTERY_BOX', 2000);
+      const path = `/races/${f.race.id}/progress?view=participants-v1&offset=0&limit=1`;
+      const before = (await get(f.alice, path, headers)).progress.powerupData.dropOdds;
+      const activation = await request(server.baseUrl, 'POST', `/races/${f.race.id}/powerups/${horseshoe.id}/use`, {
+        token: f.alice.token, headers, body: {},
+      });
+      assert.equal(activation.status, 200);
+      for (const pass of ['cold', 'warm']) {
+        const odds = (await get(f.alice, path, headers)).progress.powerupData.dropOdds;
+        assert.equal(odds.reelPreviewAvailable, true, pass);
+        assert.deepEqual(odds.byType, before.byType, 'decorative preview preserves ordinary odds');
+        assert.ok(Object.values(odds.byType).some(value => value > 0));
+      }
+      const effect = await prisma.raceActiveEffect.findFirst({ where: { powerupId: horseshoe.id } });
+      assert.equal(effect.status, 'ACTIVE', 'viewing previews must not consume the guarantee');
+      assert.equal(effect.metadata.minRarity, 'RARE');
+      const opened = await request(server.baseUrl, 'POST', `/races/${f.race.id}/powerups/${box.id}/open`, {
+        token: f.alice.token, headers,
+      });
+      assert.equal(opened.status, 200);
+      const body = await opened.json();
+      const result = body.result;
+      assert.ok(result, JSON.stringify(body));
+      assert.equal(result.rarity, 'RARE');
+      assert.notEqual(result.type, 'LUCKY_HORSESHOE');
+      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, 'EXPIRED');
+      const after = (await get(f.alice, path, headers)).progress.powerupData.dropOdds;
+      assert.equal(after.reelPreviewAvailable, true);
+      assert.deepEqual(after.byType, before.byType);
+    });
+  }
 
   it('expired Lucky Horseshoe does not suppress the ordinary preview', async () => {
     const f = await fixture();
@@ -174,7 +211,7 @@ describe('backend catalog authority — real HTTP, Postgres and Redis', () => {
         token: f.alice.token, headers: CURRENT, body: {},
       });
       assert.equal(activated.status, 200, JSON.stringify(await activated.json()));
-      assert.equal((await get(f.alice, path)).progress.powerupData.dropOdds.reelPreviewAvailable, false);
+      assert.equal((await get(f.alice, path)).progress.powerupData.dropOdds.reelPreviewAvailable, true);
       assert.equal((await get(f.bob, path)).progress.powerupData.dropOdds.reelPreviewAvailable, true);
     });
   }
