@@ -52,9 +52,28 @@ HTTP response. Existing mutation, malformed-cache, Redis-failure, precision,
 size, boundary, concurrency and final-transaction expiry assertions remain.
 Tests use only dedicated loopback PostgreSQL `_test` and Redis instances.
 
-This branch has not been deployed. Production requires a separate user request.
+The user subsequently authorized production deployment; verification follows below.
 
 Final result:67/67 focused integration tests passed (56 event-cache and11
 planning-input cases), Flutter analysis is clean, and code review reports
 SHIP with no blockers. Full repository and known-failing broader closure
 suites were not rerun for this policy-only change.
+
+## Production verification — September 13 UTC
+
+Runtime949605f is deployed through the guarded reload. Local backend and
+production are on main. API/Redis health pass, with exactly two HTTP processes,
+one resolution process and one cron process, pool budget32, staging stopped.
+Schema and copy were already current; no dependency or migration change.
+Environment and the existing remote lockfile edit were hash-preserved. Referral
+audit/apply/audit found zero missing rows. Existing balance drift was preserved.
+
+After startup,31 sampled v4 keys all had more than60 seconds remaining; maximum
+TTL was299471ms. All31 remained present35 seconds later, directly confirming
+retention beyond the old30-second limit. Redis used23702944 bytes of209715200
+and reported zero evictions at sampling. Race commits were observed; existing
+billing-unavailable and notification backlog alerts continue. These checks
+verify deployment and retention, not a production-wide hit-rate or CPU saving.
+
+Rollback tag: `pre-event-cache-retention-20260913` (`079ff84`). Deployment tag:
+`deploy/event-cache-retention-20260913-949605f`.

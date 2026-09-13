@@ -1,0 +1,200 @@
+{
+  "runtimeCommit": "949605f5899fa02a47ad7ca545a18f277586cc24",
+  "health": {
+    "status": "ok",
+    "redis": "ok"
+  },
+  "topology": {
+    "http": 2,
+    "resolution": 1,
+    "cron": 1,
+    "staging": "stopped",
+    "poolBudget": 32
+  },
+  "migration": "schema current; no migration change",
+  "preservedEnvironmentAndLockfile": true,
+  "referralCatchup": {
+    "before": 0,
+    "applied": 0,
+    "after": 0
+  },
+  "cacheObservation": [
+    {
+      "at": "2026-09-13T02:38:04.661Z",
+      "sampled": 31,
+      "longLivedKeys": 31,
+      "payloads": [
+        {
+          "kind": "local",
+          "ttl": 270794,
+          "coverageBeyondLookaheadMs": 324703
+        },
+        {
+          "kind": "local",
+          "ttl": 271250,
+          "coverageBeyondLookaheadMs": 324192
+        },
+        {
+          "kind": "local",
+          "ttl": 285919,
+          "coverageBeyondLookaheadMs": 309495
+        },
+        {
+          "kind": "local",
+          "ttl": 269232,
+          "coverageBeyondLookaheadMs": 326186
+        },
+        {
+          "kind": "local",
+          "ttl": 273152,
+          "coverageBeyondLookaheadMs": 322265
+        },
+        {
+          "kind": "local",
+          "ttl": 273198,
+          "coverageBeyondLookaheadMs": 322227
+        },
+        {
+          "kind": "local",
+          "ttl": 272622,
+          "coverageBeyondLookaheadMs": 322909
+        },
+        {
+          "kind": "local",
+          "ttl": 268884,
+          "coverageBeyondLookaheadMs": 326562
+        },
+        {
+          "kind": "local",
+          "ttl": 276232,
+          "coverageBeyondLookaheadMs": 319226
+        },
+        {
+          "kind": "local",
+          "ttl": 276186,
+          "coverageBeyondLookaheadMs": 319216
+        },
+        {
+          "kind": "local",
+          "ttl": 271976,
+          "coverageBeyondLookaheadMs": 323471
+        },
+        {
+          "kind": "local",
+          "ttl": 299471,
+          "coverageBeyondLookaheadMs": 295942
+        },
+        {
+          "kind": "local",
+          "ttl": 272141,
+          "coverageBeyondLookaheadMs": 323284
+        },
+        {
+          "kind": "local",
+          "ttl": 269948,
+          "coverageBeyondLookaheadMs": 325454
+        },
+        {
+          "kind": "local",
+          "ttl": 270334,
+          "coverageBeyondLookaheadMs": 325109
+        },
+        {
+          "kind": "local",
+          "ttl": 270735,
+          "coverageBeyondLookaheadMs": 324713
+        },
+        {
+          "kind": "local",
+          "ttl": 271962,
+          "coverageBeyondLookaheadMs": 323447
+        },
+        {
+          "kind": "local",
+          "ttl": 276172,
+          "coverageBeyondLookaheadMs": 319209
+        },
+        {
+          "kind": "local",
+          "ttl": 273562,
+          "coverageBeyondLookaheadMs": 321826
+        },
+        {
+          "kind": "global",
+          "ttl": 272399,
+          "coverageBeyondLookaheadMs": 323032
+        },
+        {
+          "kind": "local",
+          "ttl": 269475,
+          "coverageBeyondLookaheadMs": 326165
+        },
+        {
+          "kind": "local",
+          "ttl": 272393,
+          "coverageBeyondLookaheadMs": 323032
+        },
+        {
+          "kind": "local",
+          "ttl": 270803,
+          "coverageBeyondLookaheadMs": 324602
+        },
+        {
+          "kind": "local",
+          "ttl": 299202,
+          "coverageBeyondLookaheadMs": 296179
+        },
+        {
+          "kind": "local",
+          "ttl": 273623,
+          "coverageBeyondLookaheadMs": 321785
+        },
+        {
+          "kind": "local",
+          "ttl": 270025,
+          "coverageBeyondLookaheadMs": 325445
+        },
+        {
+          "kind": "local",
+          "ttl": 269195,
+          "coverageBeyondLookaheadMs": 326198
+        },
+        {
+          "kind": "local",
+          "ttl": 273612,
+          "coverageBeyondLookaheadMs": 321815
+        },
+        {
+          "kind": "local",
+          "ttl": 299239,
+          "coverageBeyondLookaheadMs": 296175
+        },
+        {
+          "kind": "local",
+          "ttl": 271192,
+          "coverageBeyondLookaheadMs": 324206
+        },
+        {
+          "kind": "local",
+          "ttl": 271425,
+          "coverageBeyondLookaheadMs": 324012
+        }
+      ],
+      "memory": {
+        "used_memory": "23702944",
+        "maxmemory": "209715200",
+        "maxmemory_policy": "allkeys-lru",
+        "evicted_keys": "0"
+      }
+    },
+    {
+      "at": "2026-09-13T02:38:39.693Z",
+      "waitSeconds": 35,
+      "initialLongLivedKeys": 31,
+      "stillPresent": 31
+    }
+  ],
+  "raceCommitsObserved": true,
+  "knownBillingAndNotificationAlertsContinue": true,
+  "limitation": "Short deployment verification; not a production refill-rate or CPU comparison."
+}
