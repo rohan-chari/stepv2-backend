@@ -3674,6 +3674,9 @@ model UserScoringInputVersion {
   sourceQueueSemanticsGeneration BigInt?   @map("source_queue_semantics_generation")
   scoringWatermark               String?   @map("scoring_watermark") @db.Char(64)
   nextSampleBoundaryAt           DateTime? @map("next_sample_boundary_at")
+  historicalRawRevision          String?   @map("historical_raw_revision") @db.Uuid
+  historicalRawCompleteGeneration BigInt?  @map("historical_raw_complete_generation")
+  historicalRawProtectedCutoff    DateTime? @map("historical_raw_protected_cutoff")
   updatedAt                      DateTime  @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

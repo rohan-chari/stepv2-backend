@@ -103,6 +103,9 @@ async function lockScoringInputState(client, userId) {
          source_queue_semantics_generation AS "sourceQueueSemanticsGeneration",
          scoring_watermark AS "scoringWatermark",
          next_sample_boundary_at AS "nextSampleBoundaryAt",
+         historical_raw_revision AS "historicalRawRevision",
+         historical_raw_complete_generation AS "historicalRawCompleteGeneration",
+         historical_raw_protected_cutoff AS "historicalRawProtectedCutoff",
          false AS inserted
        FROM user_scoring_input_versions WHERE user_id=$1
        FOR NO KEY UPDATE
@@ -116,6 +119,9 @@ async function lockScoringInputState(client, userId) {
        source_queue_semantics_generation AS "sourceQueueSemanticsGeneration",
        scoring_watermark AS "scoringWatermark",
        next_sample_boundary_at AS "nextSampleBoundaryAt",
+       historical_raw_revision AS "historicalRawRevision",
+       historical_raw_complete_generation AS "historicalRawCompleteGeneration",
+       historical_raw_protected_cutoff AS "historicalRawProtectedCutoff",
        (xmax = 0) AS inserted
      )
      SELECT state.*,
@@ -194,13 +200,35 @@ function scoringBoundaryIsSafe(state) {
   return Number.isFinite(boundary) && Number.isFinite(dbNow) && dbNow < boundary;
 }
 
+function historicalRawProof(state, next, scoringChanged, rawSampleChange) {
+  // Only a writer that classified ALL removed and added source spans may
+  // carry history forward. A legacy generation gap rotates the opaque token
+  // before completeness can be restored, including a later no-op upload.
+  let rawProof = null;
+  if (rawSampleChange?.complete === true) {
+    const decisionMs = new Date(next.dbNow ?? state.dbNow).getTime();
+    const priorCutoff = state.historicalRawProtectedCutoff == null ? 0 : new Date(state.historicalRawProtectedCutoff).getTime();
+    const cutoff = Math.max(priorCutoff, Math.floor(decisionMs / 86400000) * 86400000 - 2 * 86400000);
+    const complete = state.historicalRawRevision && state.historicalRawCompleteGeneration != null &&
+      String(state.historicalRawCompleteGeneration) === String(state.generation);
+    const touchesHistory = rawSampleChange.earliestChangedStartMs != null &&
+      rawSampleChange.earliestChangedStartMs < cutoff;
+    if (Number.isFinite(cutoff)) rawProof = {
+      revision: complete && !touchesHistory ? state.historicalRawRevision : crypto.randomUUID(),
+      generation: String(BigInt(state.generation ?? 1) + (scoringChanged && !state.inserted ? 1n : 0n)),
+      cutoff: new Date(cutoff),
+    };
+  }
+  return rawProof;
+}
+
 async function persistScoringInputState(
   client,
   userId,
   state,
   next,
   scoringChanged,
-  { sourceQueueSemanticsGeneration = null } = {},
+  { sourceQueueSemanticsGeneration = null, rawSampleChange = null } = {},
 ) {
   // All callers hold this user's scoring fence. updated_at is a revision
   // timestamp, not the successful-upload heartbeat (users.last_step_sync_at).
@@ -210,7 +238,11 @@ async function persistScoringInputState(
   const queueGenerationUnchanged = sourceQueueSemanticsGeneration == null ||
     (state.sourceQueueSemanticsGeneration != null &&
       BigInt(sourceQueueSemanticsGeneration) === BigInt(state.sourceQueueSemanticsGeneration));
-  if (!state.inserted && state.generation != null && !scoringChanged &&
+  const rawProof = historicalRawProof(state, next, scoringChanged, rawSampleChange);
+  const rawProofUnchanged = !rawProof || (rawProof.revision === state.historicalRawRevision &&
+    rawProof.generation === String(state.historicalRawCompleteGeneration) &&
+    sameNullableTime(rawProof.cutoff, state.historicalRawProtectedCutoff));
+  if (rawProofUnchanged && !state.inserted && state.generation != null && !scoringChanged &&
       state.scoringWatermark === next.scoringWatermark &&
       sameNullableTime(state.nextSampleBoundaryAt, next.nextSampleBoundaryAt) &&
       queueGenerationUnchanged) return;
@@ -223,6 +255,9 @@ async function persistScoringInputState(
            $5::bigint,
            source_queue_semantics_generation
          ),
+         historical_raw_revision=COALESCE($6::uuid,historical_raw_revision),
+         historical_raw_complete_generation=COALESCE($7::bigint,historical_raw_complete_generation),
+         historical_raw_protected_cutoff=COALESCE($8::timestamp,historical_raw_protected_cutoff),
          updated_at=CURRENT_TIMESTAMP
      WHERE user_id=$1`,
     userId,
@@ -232,6 +267,7 @@ async function persistScoringInputState(
     sourceQueueSemanticsGeneration == null
       ? null
       : String(sourceQueueSemanticsGeneration),
+    rawProof?.revision ?? null, rawProof?.generation ?? null, rawProof?.cutoff ?? null,
   );
 }
 
@@ -257,5 +293,6 @@ module.exports = {
   scoringRevisionIsCurrent,
   scoringBoundaryIsSafe,
   persistScoringInputState,
+  historicalRawProof,
   stampSourceQueueSemanticsGeneration,
 };

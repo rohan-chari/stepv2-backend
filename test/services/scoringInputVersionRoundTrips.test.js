@@ -53,7 +53,7 @@ test("persisting scoring state can stamp queue ownership in the same update", as
 
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /source_queue_semantics_generation/);
-  assert.equal(calls[0].params.at(-1), "4");
+  assert.equal(calls[0].params[4], "4");
 });
 
 test("canonical sample input reads rows and database time in one round trip", async () => {

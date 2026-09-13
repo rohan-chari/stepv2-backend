@@ -1,0 +1,44 @@
+{
+  "dateUtc": "2026-09-13",
+  "environment": "dedicated loopback PostgreSQL *_test and temporary Redis",
+  "productionChanged": false,
+  "migration": "20260913030000_historical_raw_sample_proof",
+  "testsFirst": {
+    "initialIntegration": { "failed": 8, "reason": "separate historical raw entries absent" },
+    "mixedResend": { "expectedSampleRows": 1, "actualBeforeFix": 97 }
+  },
+  "verification": {
+    "focused": { "passed": 56, "failed": 0, "skipped": 0 },
+    "earlierIntegrationRegressions": { "passed": 27, "failed": 0, "skipped": 0 },
+    "latestTargeted": { "passed": 24, "failed": 0, "skipped": 0 },
+    "countsOverlap": true,
+    "fullBackendSuiteRun": false,
+    "flutterAnalyze": "passed, no issues",
+    "prismaValidate": "passed",
+    "architect": "APPROVE",
+    "codeReview": "SHIP, no remaining findings"
+  },
+  "sparseFixture": {
+    "coldSampleRows": 97,
+    "warmSampleRows": 1,
+    "sampleSelectsPerGeneration": 1,
+    "additionalProofSelectsPerGeneration": 2,
+    "redisBytes": 3333
+  },
+  "fiveMinuteFixture": {
+    "coldSampleRows": 1768,
+    "warmSampleRows": 616,
+    "sampleRowsAvoidedPercent": 65.2,
+    "sampleSelectsPerGeneration": 1,
+    "additionalProofSelectsPerGeneration": 2,
+    "redisBytes": 38181,
+    "scoresVerifiedThroughHttpAndPersistedWorkerState": true
+  },
+  "localExplain": {
+    "full": { "rowsReturned": 1768, "executionMs": 2.876, "totalPlanBufferHits": 76, "sampleTableBufferHits": 67 },
+    "recent": { "rowsReturned": 616, "executionMs": 1.551, "totalPlanBufferHits": 67, "sampleTableBufferHits": 67 },
+    "limitation": "Both plans sequentially scan all 1768 local fixture rows; proof/Redis costs excluded. Not a production CPU or buffer-saving prediction."
+  },
+  "crossProcessReuseVerified": true,
+  "temporaryRedisStopped": true
+}

@@ -1,3 +1,5 @@
+const { loadHistoricalRawSamples } = require("./historicalRawSampleCache");
+const { StepSample: canonicalStepSampleModel } = require("../../steps/models/stepSample");
 const { processHistoricalScoringWindowCache } = require("./historicalScoringWindowCache");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../../../shared/time/week");
 const { SETTLEMENT_EFFECT_TYPES } = require("./raceScoringEffectTypes");
@@ -879,7 +881,9 @@ async function prefetchRaceScoringModelsImpl({
     const loadOwned = async () => {
       try {
         if (ownedBounds.length) {
-          const loaded = await loadSampleBounds(ownedBounds);
+          const loaded = sourceReadsOutsideTransaction && scoringInputCache && stepSampleModel === canonicalStepSampleModel
+            ? await loadHistoricalRawSamples({ bounds: ownedBounds, now: currentTime, load: loadSampleBounds, Timeline: CompactSampleTimeline, maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage })
+            : await loadSampleBounds(ownedBounds);
           for (const bound of ownedBounds) {
             const timeline = loaded.get(bound.userId) || new CompactSampleTimeline();
             if (!timeline.isPaged) {

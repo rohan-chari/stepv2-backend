@@ -254,9 +254,13 @@ function buildStepInputIntake(dependencies = {}) {
         scoringState,
         canonicalInput,
         scoringChanged,
-        (scoringChanged || repairRequired)
-          ? { sourceQueueSemanticsGeneration: generation }
-          : undefined,
+        {
+          ...((scoringChanged || repairRequired) ? { sourceQueueSemanticsGeneration: generation } : {}),
+          rawSampleChange: {
+            complete: samplePersistence.scoringChanged !== true || Number.isFinite(samplePersistence.earliestChangedStartMs),
+            earliestChangedStartMs: samplePersistence.earliestChangedStartMs ?? null,
+          },
+        },
       ),
     );
 

@@ -352,6 +352,15 @@ const StepSample = {
     const newScoringRows = kept.map(row => scoringKey(row.raw)).sort();
     const scoringDelta = oldScoringRows.length !== newScoringRows.length ||
       oldScoringRows.some((value, index) => value !== newScoringRows[index]);
+    const oldScoringSet = new Set(oldScoringRows);
+    const newScoringSet = new Set(newScoringRows);
+    // Sync batches may resend days of unchanged samples. Only the symmetric
+    // difference changes raw history; include BOTH removed and added spans.
+    const earliestChangedStartMs = scoringDelta
+      ? [...replacedStored.filter(row => !newScoringSet.has(scoringKey(row))),
+          ...kept.filter(row => !oldScoringSet.has(scoringKey(row.raw)))]
+          .reduce((earliest, row) => Math.min(earliest, row.start), Infinity)
+      : null;
     if (exactNoop) {
       const canonicalInput = (state || returnCanonicalInput)
         ? await readCanonicalSampleInput(client, userId)
@@ -378,6 +387,8 @@ const StepSample = {
       return {
         storageChanged: true,
         scoringChanged: classifyScoringDelta ? scoringDelta : true,
+        // Include deleted/replaced OLD spans, not just accepted incoming rows.
+        earliestChangedStartMs,
         ...(returnCanonicalInput
           ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
           : {}),
