@@ -92,7 +92,17 @@ async function tick({ now = NOW, freezeBudget = false } = {}) {
       logger: { log() {}, error(...args) { throw new Error(args.join(' ')); } } })();
     const events = observed;
     return { result, elapsedMs: performance.now() - start, events,
-      pages: events.filter(isCandidateQuery), queryCount: events.length,
+      // Preserve logical per-parent page observations while counting physical
+      // batched SQL independently. Bind values remain eventId/pageSize/cursor.
+      pages: events.filter(isCandidateQuery).flatMap(event => {
+        const params = JSON.parse(event.params);
+        if (!event.query.includes('parent_inputs')) return [event];
+        const pages = [];
+        for (let index = 0; index < params.length; index += 3) pages.push({ ...event,
+          params: JSON.stringify(params.slice(index, index + 3)), query: candidate,
+          physicalQuery: event.query, physicalParams: event.params });
+        return pages;
+      }), queryCount: events.length,
       counts: Object.fromEntries(['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'BEGIN', 'COMMIT', 'ROLLBACK', 'OTHER']
         .map(kind => [kind, events.filter(e => { const verb = e.query.trim().split(/\s+/)[0];
           return kind === 'OTHER' ? !['SELECT','INSERT','UPDATE','DELETE','WITH','BEGIN','COMMIT','ROLLBACK'].includes(verb) : verb === kind; }).length])) };
@@ -155,7 +165,7 @@ async function resetPerformance() {
 }
 
 async function analyze() {
-  for (const table of ['users', 'races', 'race_participants', 'global_step_event_entitlements']) {
+  for (const table of ['users', 'races', 'race_participants', 'global_step_events', 'global_step_event_entitlements']) {
     await prisma.$executeRawUnsafe(`ANALYZE ${table}`);
   }
 }

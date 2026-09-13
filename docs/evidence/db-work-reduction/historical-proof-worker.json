@@ -1,0 +1,526 @@
+{
+  "sourceBaseline": "6c5fd10cc2bd27d109a2b2a5bc67cae36032553f",
+  "fixture": {
+    "users": 1,
+    "races": 1,
+    "historicalRows": 96
+  },
+  "cold": {
+    "elapsedMs": 165.33475,
+    "queryCount": 44,
+    "proofSelects": 1,
+    "sampleSelects": 1,
+    "sourceRows": 97
+  },
+  "warmup": [
+    {
+      "elapsedMs": 134.912333,
+      "queryCount": 45,
+      "proofSelects": 2,
+      "sampleSelects": 1,
+      "sourceRows": 1
+    },
+    {
+      "elapsedMs": 125.62549999999999,
+      "queryCount": 44,
+      "proofSelects": 1,
+      "sampleSelects": 1,
+      "sourceRows": 1
+    }
+  ],
+  "pairs": [
+    {
+      "baseline": {
+        "elapsedMs": 128.867875,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 124.69675000000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 127.55991700000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 121.92354200000001,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 122.884833,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 125.47512499999999,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 129.644959,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 124.81062499999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 122.750125,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 126.56475,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 123.891042,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 124.12312499999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 126.371375,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 125.003917,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 125.24920800000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 123.85483399999998,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 122.07020899999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 123.0695,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 124.452583,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 125.304792,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 124.048917,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 124.83116700000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 124.400791,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 122.58679200000002,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 129.179291,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 127.721375,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 128.05700000000002,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 125.164375,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 126.199333,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 126.317334,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 125.065,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 126.120083,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 126.567125,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 121.33175,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 123.81283400000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 123.18070800000001,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 124.80175,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 124.506583,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 124.7995,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 124.376292,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 122.915917,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 124.01787500000002,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 123.00862500000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 125.89108399999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 123.640125,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 124.830916,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 124.924375,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 121.439167,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 122.678791,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 125.877333,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 126.309375,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 123.508375,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 123.092541,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 123.79483300000001,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 125.95475000000002,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 126.12349999999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "baseline": {
+        "elapsedMs": 124.17295899999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "candidate": {
+        "elapsedMs": 126.285708,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    },
+    {
+      "candidate": {
+        "elapsedMs": 123.450666,
+        "queryCount": 44,
+        "proofSelects": 1,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      },
+      "baseline": {
+        "elapsedMs": 126.14637499999999,
+        "queryCount": 45,
+        "proofSelects": 2,
+        "sampleSelects": 1,
+        "sourceRows": 1
+      }
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "medianWorkerMs": 124.12312499999999,
+      "p95WorkerMs": 128.867875,
+      "medianQueries": 45
+    },
+    "candidate": {
+      "medianWorkerMs": 124.83116700000001,
+      "p95WorkerMs": 128.05700000000002,
+      "medianQueries": 44
+    }
+  },
+  "note": "30 alternating warm Redis pairs, independent fresh worker process per run; timer excludes process startup but includes entire worker tick. Public HTTP and persisted totals checked every run. No hostCPU attribution."
+}

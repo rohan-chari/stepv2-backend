@@ -304,10 +304,15 @@ const GlobalStepEvent = {
     }));
   },
 
-  async findLocalParentsForMaintenance(now = new Date()) {
+  async findLocalParentsForMaintenance(now = new Date(), { after = null, take = 8 } = {}) {
+    if (!Number.isInteger(take) || take < 1 || take > 8) throw new TypeError("maintenance parent limit must be 1..8");
     return prisma.globalStepEvent.findMany({
       where: {
         scheduleMode: LOCAL_ENTITLEMENTS,
+        ...(after ? { AND: [{ OR: [
+          { startsAt: { gt: new Date(after.startsAt) } },
+          { startsAt: new Date(after.startsAt), id: { gt: after.id } },
+        ] }] } : {}),
         OR: [
           // Future/active compatibility envelopes still need newly joined
           // racers materialized even when creation has been switched off.
@@ -319,8 +324,15 @@ const GlobalStepEvent = {
           } } },
         ],
       },
-      orderBy: { startsAt: "asc" },
+      orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+      take,
     });
+  },
+
+  async findLocalParentsForEventDays(days) {
+    if (!Array.isArray(days) || days.length > 2) throw new TypeError('at most two target event days required');
+    return prisma.globalStepEvent.findMany({ where: { scheduleMode: LOCAL_ENTITLEMENTS, eventDay: { in: days } },
+      take: 2, orderBy: [{ startsAt: 'asc' }, { id: 'asc' }] });
   },
 
   async findEligibleByRace(input) {

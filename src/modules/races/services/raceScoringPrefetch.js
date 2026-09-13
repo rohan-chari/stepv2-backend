@@ -1,4 +1,6 @@
-const { loadHistoricalRawSamples } = require("./historicalRawSampleCache");
+const { recordCacheStage, recordCacheIO } = require('./historicalCacheTelemetry');
+const { performance } = require('node:perf_hooks');
+const { loadHistoricalRawSamples, captureInitialProofRead } = require("./historicalRawSampleCache");
 const { StepSample: canonicalStepSampleModel } = require("../../steps/models/stepSample");
 const { processHistoricalScoringWindowCache } = require("./historicalScoringWindowCache");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../../../shared/time/week");
@@ -30,6 +32,7 @@ function createScoringInputCache({
 } = {}) {
   const entries = new Map();
   const pending = new Map();
+  const userEntries = new Map();
   const identities = new WeakMap();
   let nextIdentity = 0;
   const identity = (value) => {
@@ -49,6 +52,8 @@ function createScoringInputCache({
     if (!entry) return;
     retainedSampleRows -= entry.sampleRows;
     entries.delete(key);
+    const remaining = (userEntries.get(entry.userId) || 1) - 1;
+    if (remaining) userEntries.set(entry.userId, remaining); else userEntries.delete(entry.userId);
   }
   function evict() {
     while (entries.size > maxUsers || retainedSampleRows > maxSampleRows) {
@@ -66,12 +71,14 @@ function createScoringInputCache({
       const key = keyFor(params);
       const entry = entries.get(key);
       if (!entry) {
+        params.onOutcome?.(userEntries.has(params.userId) ? 'caller_budget_source_model_mismatch' : 'absent');
         metrics?.increment("race_scoring_input_cache_total", { outcome: "miss_absent" });
         return null;
       }
       if (entry.expiresAt <= now() || entry.generation !== String(generation) ||
           entry.sampleStartMs > sampleStartMs || entry.sampleEndMs < sampleEndMs ||
           entry.dailyStartMs > dailyStartMs || entry.dailyEndMs < dailyEndMs) {
+        params.onOutcome?.(entry.expiresAt <= now() ? 'expired' : entry.generation !== String(generation) ? 'generation_mismatch' : 'coverage_mismatch');
         remove(key);
         metrics?.increment("race_scoring_input_cache_total", { outcome: "miss_invalid" });
         observeSize();
@@ -79,6 +86,7 @@ function createScoringInputCache({
       }
       entries.delete(key);
       entries.set(key, entry);
+      params.onOutcome?.('hit');
       metrics?.increment("race_scoring_input_cache_total", { outcome: "hit" });
       return entry;
     },
@@ -91,11 +99,12 @@ function createScoringInputCache({
       if (sampleRows > maxSampleRows) return false;
       remove(key);
       const entry = {
-        generation: String(generation), sampleStartMs, sampleEndMs,
+        userId, generation: String(generation), sampleStartMs, sampleEndMs,
         dailyStartMs, dailyEndMs, timeline, dailyRows: [...(dailyRows || [])],
         sampleRows, expiresAt: now() + ttlMs,
       };
       entries.set(key, entry);
+      userEntries.set(userId, (userEntries.get(userId) || 0) + 1);
       retainedSampleRows += sampleRows;
       evict();
       const retained = entries.get(key) === entry;
@@ -122,7 +131,7 @@ function createScoringInputCache({
         resolve: value => finish(resolve, value),
         reject: error => finish(reject, error) };
     },
-    clear() { entries.clear(); pending.clear(); retainedSampleRows = 0; observeSize(); },
+    clear() { entries.clear(); pending.clear(); userEntries.clear(); retainedSampleRows = 0; observeSize(); },
     snapshot() { return { users: entries.size, sampleRows: retainedSampleRows }; },
   };
 }
@@ -641,11 +650,14 @@ async function prefetchRaceScoringModelsImpl({
     };
   });
   let versionsByUser = new Map();
+  const sourceAttempt = Object.freeze({});
+  let initialProofRead = null;
   if (scoringInputCache && scoringInputVersionModel?.findMany) {
     const versions = await scoringInputVersionModel.findMany({
       where: { userId: { in: userIds } },
-      select: { userId: true, generation: true },
+      select: { userId: true, generation: true, historicalRawRevision: true, historicalRawCompleteGeneration: true, historicalRawProtectedCutoff: true },
     });
+    initialProofRead = captureInitialProofRead(versions, userIds, sourceAttempt);
     versionsByUser = new Map((versions || []).map((row) => [
       row.userId, String(row.generation),
     ]));
@@ -653,15 +665,18 @@ async function prefetchRaceScoringModelsImpl({
   const cachedByUser = new Map();
   for (const bound of exactSampleBounds) {
     const generation = versionsByUser.get(bound.userId);
-    if (generation == null) continue;
+    if (generation == null) { recordCacheStage('process', scoringInputCache ? 'absent' : 'caller_budget_source_model_mismatch'); continue; }
+    let processOutcome;
     const cached = scoringInputCache?.get({
       sourceModels, loadingBudget,
+      onOutcome: reason => { processOutcome = reason; },
       userId: bound.userId, generation,
       sampleStartMs: bound.rangeStart.getTime(),
       sampleEndMs: sampleRangeEnd.getTime(),
       dailyStartMs: dailyRangeStart.getTime(),
       dailyEndMs: dailyRangeEnd.getTime(),
     });
+    recordCacheStage('process', processOutcome || (cached ? 'hit' : 'absent'));
     if (cached) cachedByUser.set(bound.userId, cached);
   }
   const samplesByUser = new Map(
@@ -717,10 +732,12 @@ async function prefetchRaceScoringModelsImpl({
       for (;;) {
         const memoryBefore = scoringMemorySnapshot(memoryUsage);
         loadStartMemory ||= memoryBefore;
+        const sampleReadStarted = performance.now();
         const chunkRows = await stepSampleModel.findRowsForUserRanges(bounds, {
           maxRows: pageSize,
           cursor,
         });
+        recordCacheIO('sample', { operations: 1, rows: chunkRows.length, elapsedMs: performance.now() - sampleReadStarted });
         const retainedRowCeiling = Math.max(
           1,
           Number(maxRetainedSampleRowsPerUser) || MAX_RETAINED_SAMPLE_ROWS_PER_USER,
@@ -882,7 +899,7 @@ async function prefetchRaceScoringModelsImpl({
       try {
         if (ownedBounds.length) {
           const loaded = sourceReadsOutsideTransaction && scoringInputCache && stepSampleModel === canonicalStepSampleModel
-            ? await loadHistoricalRawSamples({ bounds: ownedBounds, now: currentTime, load: loadSampleBounds, Timeline: CompactSampleTimeline, maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage })
+            ? await loadHistoricalRawSamples({ bounds: ownedBounds, now: currentTime, load: loadSampleBounds, Timeline: CompactSampleTimeline, maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage, initialProofRead, sourceAttempt })
             : await loadSampleBounds(ownedBounds);
           for (const bound of ownedBounds) {
             const timeline = loaded.get(bound.userId) || new CompactSampleTimeline();

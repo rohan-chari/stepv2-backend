@@ -1,0 +1,33 @@
+{
+  "population": 100,
+  "races": 10,
+  "syncElapsedMs": 954,
+  "dispatchMedianMs": 90,
+  "dispatchP95Ms": 123,
+  "counts": {
+    "mixed_sync_deadline_workers:SELECT": 1730,
+    "mixed_sync_deadline_workers:OTHER": 1086,
+    "mixed_sync_deadline_workers:DELETE": 1,
+    "mixed_sync_deadline_workers:COMMIT": 472,
+    "mixed_sync_deadline_workers:UPDATE": 715,
+    "mixed_sync_deadline_workers:INSERT": 430,
+    "downstream_drain:OTHER": 174,
+    "downstream_drain:SELECT": 795,
+    "downstream_drain:UPDATE": 218,
+    "downstream_drain:COMMIT": 138,
+    "downstream_drain:INSERT": 116,
+    "http_verify:SELECT": 5060,
+    "http_verify:OTHER": 2300,
+    "http_verify:INSERT": 200
+  },
+  "totalQueries": 13435,
+  "remainingQueues": {
+    "jobs": "0",
+    "tasks": "0",
+    "refresh": "0",
+    "repairs": "0",
+    "published": "10"
+  },
+  "httpOutcomes": "all old/current users: score100, slots3, no effects",
+  "note": "Real HTTP activation/sync/progress and default scheduled workers with local Redis. Four concurrent HTTP requests overlap deadline/resolution/publication and startup recovery. Audit trigger adds one local measurement write per dispatch in both variants; observer/setup commands excluded, nested trigger statements not counted in application commands. Publication proven by successful current-generation task/receipt before HTTP verification. Local warm replay only."
+}

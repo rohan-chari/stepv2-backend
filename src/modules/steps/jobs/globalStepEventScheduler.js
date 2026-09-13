@@ -1,3 +1,4 @@
+const { createGlobalEventEnrollmentController } = require('./globalEventEnrollmentController');
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const {
   GlobalStepEventBoundaryCursor,
@@ -12,7 +13,6 @@ const {
   localEventWindowForZone,
 } = require("../globalStepEvent");
 const {
-  materializeEntitlementsForActiveRacers,
   processDueEntitlementBoundaries,
 } = require("../services/globalStepEventEntitlement");
 const {
@@ -55,8 +55,6 @@ function firstSafeLocalEventDay(now) {
 function buildLocalGlobalStepEventTick(dependencies = {}) {
   const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
   const now = dependencies.now || (() => new Date());
-  const materialize = dependencies.materializeEntitlementsForActiveRacers ||
-    materializeEntitlementsForActiveRacers;
   const processBoundaries = dependencies.processDueEntitlementBoundaries ||
     processDueEntitlementBoundaries;
   const logger = dependencies.logger || console;
@@ -65,50 +63,19 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
     captureDefaultOperationalSnapshot;
   const cleanupExpiredEntitlements = dependencies.cleanupExpiredEntitlements ||
     cleanupDefaultExpiredEntitlements;
-  const materializationTickBudgetMs = Math.max(
-    1,
-    Number(dependencies.materializationTickBudgetMs) || 5000
-  );
-  return async function localGlobalStepEventTick() {
+  const enrollment = createGlobalEventEnrollmentController(dependencies);
+  async function runMinuteMaintenance({ isStopped = () => false, flushEnrollment = false } = {}) {
     const current = now();
-    // Maintenance is fail-open with respect to creation switches: once a local
-    // parent exists its entitlements and due edges remain contractual data.
-    // Starts are drained before lower-priority fan-out so a large cohort cannot
-    // make an on-time edge stale while future parents are being prepared.
-    // Start edges are owned by the continuous set-based boundary drain. This
-    // legacy scheduler retains end-edge compatibility processing only.
-    if (!dependencies.skipEndBoundaries) await processBoundaries({ now: current, processStarts: false });
-    const materializationStarted = Date.now();
-    async function drainParent(event) {
-      let afterUserId = null;
-      for (;;) {
-        if (Date.now() - materializationStarted >= materializationTickBudgetMs) break;
-        const page = await materialize(event, {
-          now: current,
-          batchSize: MATERIALIZATION_BATCH_SIZE,
-          afterUserId,
-          returnPage: true,
-          afterDiscovery: dependencies.materializationAfterDiscovery,
-          decisionNow: now,
-        });
-        // Compatibility for narrow injected doubles and old internal callers.
-        if (typeof page === "number") {
-          if (page !== MATERIALIZATION_BATCH_SIZE) break;
-          continue;
-        }
-        if (!page || page.exhausted) break;
-        if (!page.nextCursor || page.nextCursor === afterUserId) break;
-        afterUserId = page.nextCursor;
-      }
-    }
-    const existingParents =
-      typeof globalStepEventModel.findLocalParentsForMaintenance === "function"
-        ? await globalStepEventModel.findLocalParentsForMaintenance(current)
-        : [];
-    for (const event of existingParents || []) {
-      await drainParent(event);
-      if (Date.now() - materializationStarted >= materializationTickBudgetMs) break;
-    }
+    if (isStopped()) return false;
+    const firstDay = firstSafeLocalEventDay(current);
+    const targetDays = [firstDay, addCivilDays(firstDay, 1)];
+    const boundedModel = typeof globalStepEventModel.findLocalParentsForEventDays === 'function';
+    const existingParents = boundedModel
+      ? await globalStepEventModel.findLocalParentsForEventDays(targetDays)
+      : typeof globalStepEventModel.findLocalParentsForMaintenance === 'function'
+        ? await globalStepEventModel.findLocalParentsForMaintenance(current) : [];
+    enrollment.requestHead(boundedModel ? {} : { parents: existingParents || [] });
+    if (flushEnrollment) await enrollment.runEnrollmentSlice({ isStopped });
 
     const retentionEnabled = true;
     let retentionHealthy = retentionEnabled;
@@ -127,8 +94,6 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
       }
     }
 
-    const firstDay = firstSafeLocalEventDay(current);
-    const targetDays = [firstDay, addCivilDays(firstDay, 1)];
     const existingDays = new Set((existingParents || []).map((event) => event.eventDay));
     if (targetDays.every((eventDay) => existingDays.has(eventDay))) return true;
 
@@ -170,14 +135,26 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
       return false;
     }
     for (const eventDay of targetDays) {
+      if (isStopped()) return false;
       const parent = await globalStepEventModel.createLocalParentIfAbsent({ eventDay });
-      if (parent?.event) await drainParent(parent.event);
+      if (parent?.event && (!boundedModel || parent.created)) {
+        enrollment.addParent(parent.event);
+        if (flushEnrollment) await enrollment.runEnrollmentSlice({ isStopped });
+      }
       if (parent?.created) {
         logger.log(`[CRON] Local global step event materialized: ${eventDay}`);
       }
     }
     return true;
+  }
+  const tick = async function localGlobalStepEventTick({ isStopped = () => false } = {}) {
+    if (!dependencies.skipEndBoundaries && !isStopped()) await processBoundaries({ now: now(), processStarts: false });
+    return runMinuteMaintenance({ isStopped, flushEnrollment: true });
   };
+  tick.runMinuteMaintenance = runMinuteMaintenance;
+  tick.runEnrollmentSlice = enrollment.runEnrollmentSlice;
+  tick.enrollmentSnapshot = enrollment.snapshot;
+  return tick;
 }
 
 function buildMaybeStartGlobalEvent(dependencies = {}) {
@@ -190,14 +167,17 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     GlobalStepEventBoundaryCursor;
   const compatibilityEvents = dependencies.eventBus || null;
 
+  const localTick = dependencies.localGlobalStepEventTick || buildLocalGlobalStepEventTick(dependencies);
+
   async function boundarySchedulingEnabled() { return true; }
 
-  async function enqueueBoundaryForActiveRaces(at) {
+  async function enqueueBoundaryForActiveRaces(at, isStopped = () => false) {
     const races = typeof raceModel.findActiveIds === "function"
       ? await raceModel.findActiveIds()
       : [];
     let complete = true;
     for (const race of races || []) {
+      if (isStopped()) return false;
       const job = await enqueue({
         raceId: race.id,
         timeZone: race.timezone || "UTC",
@@ -210,7 +190,8 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     return complete;
   }
 
-  async function deliverDueBoundaries(at) {
+  async function deliverDueBoundaries(at, isStopped = () => false) {
+    if (isStopped()) return false;
     if (typeof boundaryCursor?.claim !== "function") return false;
     const claim = await boundaryCursor.claim({ now: at });
     if (!claim) return false;
@@ -220,7 +201,7 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
         await boundaryCursor.release(claim, at);
         return true;
       }
-      const persisted = await enqueueBoundaryForActiveRaces(at);
+      const persisted = await enqueueBoundaryForActiveRaces(at, isStopped);
       if (!persisted) {
         await boundaryCursor.release(claim, at);
         return false;
@@ -233,12 +214,14 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
   }
 
   // Returns the created event (or null if nothing started this tick).
-  return async function maybeStartGlobalEvent() {
+  return async function maybeStartGlobalEvent(options = {}) {
     const currentTime = now();
+    const isStopped = options.isStopped || (() => false);
+    if (isStopped()) return null;
 
-    const localTick = dependencies.localGlobalStepEventTick ||
-      buildLocalGlobalStepEventTick({ ...dependencies, now: () => currentTime });
-    await localTick();
+    if (options.minuteOnly && localTick.runMinuteMaintenance) await localTick.runMinuteMaintenance(options);
+    else await localTick(options);
+    if (isStopped()) return null;
 
     // Local mode materializes a safely future horizon. Until that horizon's
     // first event day arrives, the intervening days still need their legacy
@@ -250,8 +233,10 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     // crossing. Its lease is reclaimable after process loss, and the cursor is
     // advanced only after every active race has a durable FULL enqueue.
     if (await boundarySchedulingEnabled()) {
-      await deliverDueBoundaries(currentTime);
+      await deliverDueBoundaries(currentTime, isStopped);
     }
+
+    if (isStopped()) return null;
 
     // Idempotency input: events started in the last 24h (rolling window — see
     // findStartedSince for why this isn't a UTC calendar-day bucket).
@@ -260,6 +245,7 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
         new Date(currentTime.getTime() - 24 * 60 * 60 * 1000)
       )) || [];
 
+    if (isStopped()) return null;
     const decision = shouldStartGlobalEvent({
       now: currentTime,
       todaysEvents,
@@ -281,12 +267,13 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     // participant work here would be both duplicate delivery and needless load.
     if (!created.created) return null;
     const event = created.event;
+    if (isStopped()) return event;
 
     // Make the newly-visible start boundary produce a newer FULL generation
     // before an older closure post-task can publish. The queue row is durable;
     // post-task supersession then drops the older snapshot.
     if (await boundarySchedulingEnabled()) {
-      await deliverDueBoundaries(currentTime);
+      await deliverDueBoundaries(currentTime, isStopped);
     }
 
     logger.log(
@@ -325,67 +312,94 @@ const maybeStartGlobalEvent = buildMaybeStartGlobalEvent();
 function scheduleGlobalStepEvents(dependencies = {}) {
   const interval = dependencies.intervalMs || SCHEDULER_INTERVAL_MS;
   const logger = dependencies.logger || console;
-  const runFn = dependencies.maybeStartGlobalEvent || buildMaybeStartGlobalEvent({ ...dependencies, skipEndBoundaries: true });
+  const localTick = dependencies.localGlobalStepEventTick || buildLocalGlobalStepEventTick({ ...dependencies, skipEndBoundaries: true });
+  const runFn = dependencies.maybeStartGlobalEvent || buildMaybeStartGlobalEvent({ ...dependencies,
+    skipEndBoundaries: true, localGlobalStepEventTick: localTick });
   const { buildGlobalEventEndDrain } = require('./globalEventEndDrain');
   const endDrain = dependencies.endDrain || buildGlobalEventEndDrain(dependencies);
-  const schedule = dependencies.setInterval || setInterval;
-
-  let stopped = false;
-  let running = null;
-  let continuation = null;
-  let runningMaintenance = false;
-  let pendingMaintenance = false;
-  function run(maintenance = true) {
-    if (stopped) return Promise.resolve(null);
-    if (running) {
-      if (maintenance && !runningMaintenance) pendingMaintenance = true;
-      return running;
+  const schedule = dependencies.setTimeout || setTimeout;
+  const cancel = dependencies.clearTimeout || clearTimeout;
+  const clock = dependencies.nowMs || Date.now;
+  // Preserve the pre-existing exported injection contract: a supplied complete
+  // minute job starts synchronously. The production stable controller always
+  // drains due boundaries first. Neither adapter contains database algorithms.
+  const legacyImmediate = Boolean(dependencies.maybeStartGlobalEvent && !dependencies.endDrain && !dependencies.localGlobalStepEventTick);
+  let stopped = false, running = null, timer = null;
+  const pending = { minute: clock(), end: clock(), enrollment: clock() };
+  function requestMinute() {
+    const current = clock();
+    pending.minute = Math.min(pending.minute, current);
+    pending.end = Math.min(pending.end, current);
+  }
+  function arm() {
+    if (stopped || running) return;
+    if (timer) cancel(timer);
+    const earliest = Math.min(...Object.values(pending));
+    if (!Number.isFinite(earliest)) { timer = null; return; }
+    timer = schedule(() => { timer = null; void run(); }, Math.max(1, earliest - clock()));
+    timer?.unref?.();
+  }
+  async function minute() {
+    if (pending.minute > clock() || stopped) return;
+    pending.minute = clock() + interval;
+    try {
+      await runFn({ minuteOnly: true, isStopped: () => stopped });
+      pending.enrollment = Math.min(pending.enrollment, clock());
+    } catch (error) {
+      pending.minute = Math.min(pending.minute, clock() + 1000);
+      logger.error('[CRON] Global step event scheduler error:', error);
     }
-    maintenance = maintenance || pendingMaintenance;
-    pendingMaintenance = false;
-    runningMaintenance = maintenance;
-    if (continuation) { clearTimeout(continuation); continuation=null; }
-    let nextDelay = null;
+  }
+  async function boundaries() {
+    if (pending.end > clock() || stopped) return;
+    const dueAt = pending.end;
+    pending.end = clock() + interval;
+    try {
+      const result = await endDrain.run({ isStopped: () => stopped });
+      if (result?.more) pending.end = Math.min(pending.end, clock() + Math.max(1, result.retryAfterMs || dependencies.endContinuationMs || 250));
+    } catch (error) {
+      pending.end = Math.min(pending.end, clock() + 1000);
+      logger.error('[CRON] Global event end drain failed:', error);
+    } finally {
+      const { coordinatedOptimizationMetrics: metrics } = require('../../../shared/observability/coordinatedOptimizationMetrics');
+      metrics.observe('global_event_enrollment_seconds', Math.max(0, clock() - dueAt) / 1000, { kind: 'boundary_service_latency' });
+    }
+  }
+  function run() {
+    if (stopped) return Promise.resolve(null);
+    if (running) return running;
+    if (timer) { cancel(timer); timer = null; }
     running = (async () => {
-      if (maintenance) {
-        try { await runFn(); }
-        catch(error) { logger.error('[CRON] Global step event scheduler error:',error); }
-      }
-      if (stopped) return;
+      if (legacyImmediate) { await minute(); await boundaries(); }
+      else { await boundaries(); await minute(); }
+      if (stopped || pending.enrollment > clock()) return;
+      pending.enrollment = Infinity;
       try {
-        const result = await endDrain.run({ isStopped: () => stopped });
-        if (result?.more) nextDelay = Math.max(1,result.retryAfterMs || dependencies.endContinuationMs || 250);
-      } catch(error) {
-        nextDelay=1000;
-        logger.error('[CRON] Global event end drain failed:',error);
+        const result = await localTick.runEnrollmentSlice?.({ isStopped: () => stopped });
+        if (result?.more) pending.enrollment = Math.min(pending.enrollment, clock() + Math.max(1, result.retryAfterMs || 250));
+      } catch (error) {
+        pending.enrollment = Math.min(pending.enrollment, clock() + 1000);
+        logger.error('[CRON] Global event enrollment continuation failed:', error);
       }
-    })().finally(() => {
-      running=null;
-      runningMaintenance=false;
-      if (pendingMaintenance && nextDelay === null) nextDelay=250;
-      if (!stopped && nextDelay !== null && !continuation) {
-        continuation=setTimeout(() => { continuation=null; void run(false); },nextDelay);
-        continuation.unref?.();
-      }
-    });
+    })().finally(() => { running = null; arm(); });
     return running;
   }
-
-  run();
-  const timer = schedule(run, interval);
-  timer?.unref?.();
-  logger.log(
-    `[CRON] Global step event scheduler scheduled (every ${interval / 1000}s)`
-  );
+  function tick() { if (stopped) return Promise.resolve(null); requestMinute(); return run(); }
+  void run();
+  // Existing injected interval owners remain supported; production has exactly
+  // one earliest-deadline timer and no independent interval callback.
+  const injectedInterval = dependencies.setInterval?.(tick, interval);
+  injectedInterval?.unref?.();
+  logger.log(`[CRON] Global step event scheduler scheduled (every ${interval / 1000}s)`);
   return {
-    tick: run,
+    tick,
     async stop() {
-      if (stopped) return;
+      if (stopped) { await running; return; }
       stopped = true;
-      clearInterval(timer);
-      if (continuation) clearTimeout(continuation);
-      continuation = null;
-      pendingMaintenance = false;
+      if (timer) cancel(timer);
+      timer = null;
+      if (injectedInterval) clearInterval(injectedInterval);
+      for (const key of Object.keys(pending)) pending[key] = Infinity;
       await running;
     },
   };

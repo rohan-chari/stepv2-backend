@@ -1,4 +1,7 @@
 const APPROVED_METRICS = new Set([
+  "deadline_scheduler_pass_total", "deadline_scheduler_query_total", "deadline_scheduler_drain_total", "deadline_scheduler_pass_seconds",
+  "global_event_enrollment_seconds", "global_event_enrollment_total",
+  "race_scoring_cache_reason_rows_total", "race_scoring_cache_stage_total", "race_scoring_cache_io_total", "race_scoring_cache_io_seconds",
   "event_fingerprint_cache_total",
   "cache_efficiency_read_total", "cache_efficiency_source_loads_total",
   "cache_efficiency_redis_total", "cache_efficiency_bytes_total",

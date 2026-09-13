@@ -1,0 +1,919 @@
+{
+  "cancelled": {
+    "error": "57014"
+  },
+  "afterCancel": {
+    "indisvalid": false,
+    "indisready": false,
+    "definition": "CREATE INDEX global_step_event_entitlements_pending_parent_idx ON public.global_step_event_entitlements USING btree (event_id) WHERE ((start_processed_at IS NULL) OR (end_processed_at IS NULL))"
+  },
+  "recovered": {
+    "indisvalid": true,
+    "indisready": true,
+    "definition": "CREATE INDEX global_step_event_entitlements_pending_parent_idx ON public.global_step_event_entitlements USING btree (event_id) WHERE ((start_processed_at IS NULL) OR (end_processed_at IS NULL))"
+  },
+  "indexBytes": 8192,
+  "runs": [
+    {
+      "baseline": [
+        {
+          "executionMs": 11.568,
+          "rootWalBytes": 1205267,
+          "buffers": 25364,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 10.522,
+          "rootWalBytes": 1094280,
+          "buffers": 24640,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 14.492,
+          "rootWalBytes": 1272878,
+          "buffers": 29644,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 15.283,
+          "rootWalBytes": 1103539,
+          "buffers": 26753,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 19.097,
+          "rootWalBytes": 1189654,
+          "buffers": 29316,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 20.514,
+          "rootWalBytes": 1104793,
+          "buffers": 27251,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 19.521,
+          "rootWalBytes": 1290329,
+          "buffers": 31544,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 18.082,
+          "rootWalBytes": 1089445,
+          "buffers": 27483,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 23.853,
+          "rootWalBytes": 1219101,
+          "buffers": 29675,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 21.459,
+          "rootWalBytes": 1095228,
+          "buffers": 28129,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 18.229,
+          "rootWalBytes": 1259171,
+          "buffers": 29819,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 15.803,
+          "rootWalBytes": 1066561,
+          "buffers": 25544,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 21.369,
+          "rootWalBytes": 1189328,
+          "buffers": 26379,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 14.869,
+          "rootWalBytes": 1063055,
+          "buffers": 24232,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 21.145,
+          "rootWalBytes": 1272361,
+          "buffers": 28317,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 16.515,
+          "rootWalBytes": 1076444,
+          "buffers": 24208,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 19.668,
+          "rootWalBytes": 1179704,
+          "buffers": 26367,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 16.37,
+          "rootWalBytes": 1065473,
+          "buffers": 24319,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 20.887,
+          "rootWalBytes": 1255767,
+          "buffers": 28188,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 16.908,
+          "rootWalBytes": 1065594,
+          "buffers": 24515,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 22.597,
+          "rootWalBytes": 1162238,
+          "buffers": 26759,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 19.49,
+          "rootWalBytes": 1057193,
+          "buffers": 24467,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 23.297,
+          "rootWalBytes": 1265129,
+          "buffers": 28591,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 18.142,
+          "rootWalBytes": 1054573,
+          "buffers": 24443,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 24.998,
+          "rootWalBytes": 1165929,
+          "buffers": 26704,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.51,
+          "rootWalBytes": 1059226,
+          "buffers": 24675,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 25.88,
+          "rootWalBytes": 1244074,
+          "buffers": 28541,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 21.007,
+          "rootWalBytes": 1053305,
+          "buffers": 24706,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 24.19,
+          "rootWalBytes": 1154775,
+          "buffers": 27007,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 21.01,
+          "rootWalBytes": 1056966,
+          "buffers": 24788,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 26.974,
+          "rootWalBytes": 1266807,
+          "buffers": 28912,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 19.536,
+          "rootWalBytes": 1050635,
+          "buffers": 24674,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 25.013,
+          "rootWalBytes": 1160920,
+          "buffers": 27040,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 20.402,
+          "rootWalBytes": 1047295,
+          "buffers": 24886,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 24.702,
+          "rootWalBytes": 1243134,
+          "buffers": 28801,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 17.665,
+          "rootWalBytes": 1034854,
+          "buffers": 24860,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 26.611,
+          "rootWalBytes": 1168333,
+          "buffers": 27312,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 20.722,
+          "rootWalBytes": 1051689,
+          "buffers": 25023,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 23.7,
+          "rootWalBytes": 1229369,
+          "buffers": 29066,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 19.641,
+          "rootWalBytes": 1047645,
+          "buffers": 24926,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 23.335,
+          "rootWalBytes": 1146019,
+          "buffers": 27234,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 19.048,
+          "rootWalBytes": 1027517,
+          "buffers": 25053,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 23.811,
+          "rootWalBytes": 1231149,
+          "buffers": 28902,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 17.21,
+          "rootWalBytes": 1032697,
+          "buffers": 25101,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 24.18,
+          "rootWalBytes": 1161058,
+          "buffers": 27413,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 18.615,
+          "rootWalBytes": 1035961,
+          "buffers": 25214,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 25.401,
+          "rootWalBytes": 1244328,
+          "buffers": 29364,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 18.202,
+          "rootWalBytes": 1042585,
+          "buffers": 25075,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 23.972,
+          "rootWalBytes": 1149920,
+          "buffers": 25939,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 20.259,
+          "rootWalBytes": 1044240,
+          "buffers": 23794,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 24.901,
+          "rootWalBytes": 1230725,
+          "buffers": 27655,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 20.241,
+          "rootWalBytes": 1056082,
+          "buffers": 23798,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 24.772,
+          "rootWalBytes": 1150809,
+          "buffers": 25941,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 18.48,
+          "rootWalBytes": 1042400,
+          "buffers": 23728,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 25.939,
+          "rootWalBytes": 1243139,
+          "buffers": 28094,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 19.234,
+          "rootWalBytes": 1037676,
+          "buffers": 23723,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 24.656,
+          "rootWalBytes": 1147347,
+          "buffers": 25961,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 19.124,
+          "rootWalBytes": 1035824,
+          "buffers": 23728,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 27.096,
+          "rootWalBytes": 1227919,
+          "buffers": 27744,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 20.404,
+          "rootWalBytes": 1030126,
+          "buffers": 23764,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 29.209,
+          "rootWalBytes": 1162851,
+          "buffers": 26127,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 22.887,
+          "rootWalBytes": 1044094,
+          "buffers": 23870,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 31.845,
+          "rootWalBytes": 1241003,
+          "buffers": 28078,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 21.144,
+          "rootWalBytes": 1035250,
+          "buffers": 23821,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 27.679,
+          "rootWalBytes": 1158742,
+          "buffers": 26059,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.001,
+          "rootWalBytes": 1045802,
+          "buffers": 23865,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 29.294,
+          "rootWalBytes": 1228079,
+          "buffers": 27715,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 23.235,
+          "rootWalBytes": 1045086,
+          "buffers": 23914,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 32.872,
+          "rootWalBytes": 1162735,
+          "buffers": 26146,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.029,
+          "rootWalBytes": 1048706,
+          "buffers": 23938,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 30.483,
+          "rootWalBytes": 1244698,
+          "buffers": 28255,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.614,
+          "rootWalBytes": 1038548,
+          "buffers": 23916,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 33.71,
+          "rootWalBytes": 1168190,
+          "buffers": 26278,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.718,
+          "rootWalBytes": 1054709,
+          "buffers": 23926,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 33.164,
+          "rootWalBytes": 1258463,
+          "buffers": 27939,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.853,
+          "rootWalBytes": 1052198,
+          "buffers": 23947,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 33.596,
+          "rootWalBytes": 1171385,
+          "buffers": 26254,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 27.985,
+          "rootWalBytes": 1071816,
+          "buffers": 23971,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 33.668,
+          "rootWalBytes": 1255849,
+          "buffers": 28309,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 26.833,
+          "rootWalBytes": 1058310,
+          "buffers": 24097,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 29.287,
+          "rootWalBytes": 1160247,
+          "buffers": 26167,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.081,
+          "rootWalBytes": 1045428,
+          "buffers": 24006,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 41.56,
+          "rootWalBytes": 1241431,
+          "buffers": 27890,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.713,
+          "rootWalBytes": 1053875,
+          "buffers": 23987,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 33.263,
+          "rootWalBytes": 1159579,
+          "buffers": 26282,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 27.354,
+          "rootWalBytes": 1069161,
+          "buffers": 24023,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 32.303,
+          "rootWalBytes": 1252798,
+          "buffers": 28276,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.995,
+          "rootWalBytes": 1055130,
+          "buffers": 24112,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 30.86,
+          "rootWalBytes": 1164008,
+          "buffers": 26157,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 23.79,
+          "rootWalBytes": 1046845,
+          "buffers": 24021,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 33.863,
+          "rootWalBytes": 1249468,
+          "buffers": 27986,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 26.818,
+          "rootWalBytes": 1053305,
+          "buffers": 24065,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 32.817,
+          "rootWalBytes": 1176797,
+          "buffers": 26287,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.882,
+          "rootWalBytes": 1052120,
+          "buffers": 23964,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 33.761,
+          "rootWalBytes": 1252843,
+          "buffers": 28382,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.779,
+          "rootWalBytes": 1053995,
+          "buffers": 24066,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 33.469,
+          "rootWalBytes": 1176892,
+          "buffers": 26340,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 27.247,
+          "rootWalBytes": 1064874,
+          "buffers": 24105,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 31.487,
+          "rootWalBytes": 1253691,
+          "buffers": 28032,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 24.276,
+          "rootWalBytes": 1054042,
+          "buffers": 25106,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 30.632,
+          "rootWalBytes": 1158087,
+          "buffers": 27251,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.751,
+          "rootWalBytes": 1054513,
+          "buffers": 24997,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 30.43,
+          "rootWalBytes": 1240782,
+          "buffers": 29239,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 23.488,
+          "rootWalBytes": 1044132,
+          "buffers": 24972,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 31.859,
+          "rootWalBytes": 1160729,
+          "buffers": 27327,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 26.674,
+          "rootWalBytes": 1062238,
+          "buffers": 25055,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 32.632,
+          "rootWalBytes": 1239162,
+          "buffers": 28948,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 27.297,
+          "rootWalBytes": 1052421,
+          "buffers": 25125,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 35.355,
+          "rootWalBytes": 1157642,
+          "buffers": 27338,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 32.635,
+          "rootWalBytes": 1051142,
+          "buffers": 25012,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 34.994,
+          "rootWalBytes": 1249386,
+          "buffers": 29345,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 27.903,
+          "rootWalBytes": 1049547,
+          "buffers": 24922,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 34.061,
+          "rootWalBytes": 1154751,
+          "buffers": 27291,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 26.833,
+          "rootWalBytes": 1048901,
+          "buffers": 25042,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 33.155,
+          "rootWalBytes": 1230937,
+          "buffers": 28884,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.963,
+          "rootWalBytes": 1049439,
+          "buffers": 25016,
+          "updatedRows": 1000
+        }
+      ]
+    },
+    {
+      "baseline": [
+        {
+          "executionMs": 33.856,
+          "rootWalBytes": 1156385,
+          "buffers": 27193,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 25.103,
+          "rootWalBytes": 1046134,
+          "buffers": 24996,
+          "updatedRows": 1000
+        }
+      ],
+      "candidate": [
+        {
+          "executionMs": 32.828,
+          "rootWalBytes": 1241876,
+          "buffers": 29280,
+          "updatedRows": 1000
+        },
+        {
+          "executionMs": 23.553,
+          "rootWalBytes": 1039426,
+          "buffers": 24899,
+          "updatedRows": 1000
+        }
+      ]
+    }
+  ],
+  "note": "1000 synthetic entitlement start/end updates per variant. Root WAL excludes trigger subplans; timing includes triggers. Alternating order, shared local cluster; no production claim. Concurrent index cancellation/rebuild verified, not interrupted Prisma-ledger reconciliation."
+}

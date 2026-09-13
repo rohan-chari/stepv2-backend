@@ -1,0 +1,623 @@
+{
+  "postgres": "PostgreSQL 18.4 (Homebrew) on aarch64-apple-darwin25.4.0, compiled by Apple clang version 21.0.0 (clang-2100.0.123.102), 64-bit",
+  "dimensions": {
+    "history": 30000,
+    "historicalUsers": 30000,
+    "active": 1009,
+    "activeMemberships": 2522,
+    "activeRaces": 166,
+    "historicalRaces": 300,
+    "missing": 0,
+    "parents": 5
+  },
+  "physicalTick": {
+    "elapsedMs": 19.02062500000011,
+    "queryCount": 7,
+    "counts": {
+      "SELECT": 5,
+      "INSERT": 0,
+      "UPDATE": 0,
+      "DELETE": 0,
+      "WITH": 1,
+      "BEGIN": 0,
+      "COMMIT": 1,
+      "ROLLBACK": 0,
+      "OTHER": 0
+    }
+  },
+  "pairs": [
+    {
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 18.113,
+        "planningMs": 0.775,
+        "cohortEvaluations": 5,
+        "statements": 5
+      },
+      "candidate": {
+        "planningMs": 0.192,
+        "executionMs": 8.214,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      }
+    },
+    {
+      "candidate": {
+        "planningMs": 0.223,
+        "executionMs": 8.077,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      },
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 18.046,
+        "planningMs": 0.767,
+        "cohortEvaluations": 5,
+        "statements": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 17.154,
+        "planningMs": 0.592,
+        "cohortEvaluations": 5,
+        "statements": 5
+      },
+      "candidate": {
+        "planningMs": 0.196,
+        "executionMs": 8.124,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      }
+    },
+    {
+      "candidate": {
+        "planningMs": 0.282,
+        "executionMs": 8.087,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      },
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 18.061,
+        "planningMs": 0.7,
+        "cohortEvaluations": 5,
+        "statements": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 17.756,
+        "planningMs": 0.733,
+        "cohortEvaluations": 5,
+        "statements": 5
+      },
+      "candidate": {
+        "planningMs": 0.178,
+        "executionMs": 8.058,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      }
+    },
+    {
+      "candidate": {
+        "planningMs": 0.202,
+        "executionMs": 8.317,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      },
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 17.837,
+        "planningMs": 0.683,
+        "cohortEvaluations": 5,
+        "statements": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 17.75,
+        "planningMs": 0.6910000000000001,
+        "cohortEvaluations": 5,
+        "statements": 5
+      },
+      "candidate": {
+        "planningMs": 0.158,
+        "executionMs": 7.912,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      }
+    },
+    {
+      "candidate": {
+        "planningMs": 0.173,
+        "executionMs": 7.793,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      },
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 18.035,
+        "planningMs": 0.764,
+        "cohortEvaluations": 5,
+        "statements": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 17.948,
+        "planningMs": 0.618,
+        "cohortEvaluations": 5,
+        "statements": 5
+      },
+      "candidate": {
+        "planningMs": 0.168,
+        "executionMs": 8.032,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      }
+    },
+    {
+      "candidate": {
+        "planningMs": 0.164,
+        "executionMs": 8.116,
+        "hits": 2034,
+        "reads": 0,
+        "buffers": 2034,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "rows": 5,
+        "visits": [
+          {
+            "relation": "race_participants",
+            "type": "Seq Scan",
+            "rows": 32522,
+            "loops": 1,
+            "removed": 0
+          },
+          {
+            "relation": "races",
+            "type": "Seq Scan",
+            "rows": 166,
+            "loops": 1,
+            "removed": 300
+          },
+          {
+            "relation": "global_step_events",
+            "type": "Index Only Scan",
+            "rows": 1,
+            "loops": 5,
+            "removed": 0
+          },
+          {
+            "relation": "global_step_event_entitlements",
+            "type": "Seq Scan",
+            "rows": 1009,
+            "loops": 5,
+            "removed": 4036
+          },
+          {
+            "relation": "users",
+            "type": "Seq Scan",
+            "rows": 31009,
+            "loops": 1,
+            "removed": 0
+          }
+        ],
+        "cohortEvaluations": 1,
+        "statements": 1
+      },
+      "baseline": {
+        "buffers": 4245,
+        "executionMs": 18.138,
+        "planningMs": 0.67,
+        "cohortEvaluations": 5,
+        "statements": 5
+      }
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "medianBuffers": 4245,
+      "medianExecutionMs": 17.948,
+      "p95ExecutionMs": 18.138
+    },
+    "candidate": {
+      "medianBuffers": 2034,
+      "medianExecutionMs": 8.077,
+      "p95ExecutionMs": 8.317
+    }
+  },
+  "scope": "Alternating warm local EXPLAIN executions; full tick query counts include target-day/parent-page/retention/end scans. No CPU or whole-worker-latency claim."
+}

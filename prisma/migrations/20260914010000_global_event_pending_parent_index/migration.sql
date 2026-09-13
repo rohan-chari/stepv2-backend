@@ -1,0 +1,3 @@
+CREATE INDEX CONCURRENTLY global_step_event_entitlements_pending_parent_idx
+ON global_step_event_entitlements (event_id)
+WHERE start_processed_at IS NULL OR end_processed_at IS NULL;

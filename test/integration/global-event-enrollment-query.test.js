@@ -200,3 +200,105 @@ test('scheduler uses authoritative phone timezone when legacy stable metadata di
     const rows=await enrolled(event);assert.equal(rows.length,1);assert.equal(rows[0].timezone,'UTC');
   }
 });
+
+test('five-parent discovery shares one physical active cohort and empty pages acquire no enrollment lock', async () => {
+  await seedUsers(20); const events = await h.parents(); await h.readyGeneration();
+  for (let i = 0; i < 3; i++) {
+    events.push(await h.prisma.globalStepEvent.create({ data: {
+      id: `batch-parent-${i}`, scheduleMode: 'LOCAL_ENTITLEMENTS', eventDay: `2098-01-${String(10 + i).padStart(2, '0')}`,
+      startsAt: events[0].startsAt, endsAt: events[0].endsAt, localStartMinute: 600, durationMinutes: 30,
+    } }));
+  }
+  const first = await h.tick({ freezeBudget: true });
+  const discoveries = first.events.filter(event => event.query.includes('enrollment_candidates') && !event.query.startsWith('EXPLAIN'));
+  assert.equal(discoveries.length, 1, 'one physical cohort discovery serves all five parents');
+  await obligations(100);
+  const second = await h.tick({ freezeBudget: true });
+  assert.equal(second.events.filter(event => event.params.includes('global-event-enrollment')).length, 0,
+    'empty discovery never enters the authoritative enrollment writer transaction');
+  await obligations(100);
+});
+
+test('retained two-lane sweep serves a lower-ID newcomer behind eight zero-created tails across minute requests', { timeout: 180000 }, async t => {
+  const { buildLocalGlobalStepEventTick } = require('../../src/modules/steps');
+  const now = new Date('2098-01-15T00:00:00Z');
+  const race = await seedUsers(10000);
+  const targets = await h.parents(now); await h.readyGeneration(now);
+  const dates = [...Array.from({ length: 8 }, (_, i) => `2098-01-${String(i + 1).padStart(2, '0')}`),
+    ...Array.from({ length: 7 }, (_, i) => `2098-01-${String(i + 19).padStart(2, '0')}`)];
+  const parents = [...targets];
+  for (const eventDay of dates) parents.push(await h.prisma.globalStepEvent.create({ data: {
+    id: `fair-parent-${eventDay}`, scheduleMode: 'LOCAL_ENTITLEMENTS', eventDay,
+    startsAt: new Date(`${eventDay}T00:00:00Z`), endsAt: new Date(+now + 30 * 86400000),
+    localStartMinute: 600, durationMinutes: 30,
+  } }));
+  const tick = buildLocalGlobalStepEventTick({ now: () => now, skipEndBoundaries: true,
+    cleanupExpiredEntitlements: async () => 0, logger: { log() {}, error() {} } });
+  const started = performance.now();
+  await tick.runMinuteMaintenance();
+  let result = await tick.runEnrollmentSlice();
+  assert.equal(result.more, true, 'large sweep remains active after the first bounded slice');
+  assert.ok(tick.enrollmentSnapshot().head.parents + tick.enrollmentSnapshot().tail.parents <= 16);
+  await h.prisma.user.create({ data: { id: '000-fair-newcomer', timezone: 'UTC', globalEventTimezone: 'UTC' } });
+  await h.prisma.raceParticipant.create({ data: { raceId: race.id, userId: '000-fair-newcomer', status: 'ACCEPTED' } });
+  const newcomerAt = performance.now();
+  await tick.runMinuteMaintenance();
+  let slices = 1, reachedAt = null;
+  while (result.more) {
+    result = await tick.runEnrollmentSlice(); slices++;
+    const snapshot = tick.enrollmentSnapshot();
+    assert.ok(snapshot.head.parents + snapshot.tail.parents <= 16);
+    if (!reachedAt && await h.prisma.globalStepEventEntitlement.findUnique({
+      where: { eventId_userId: { eventId: 'fair-parent-2098-01-25', userId: '000-fair-newcomer' } },
+    })) reachedAt = performance.now();
+    assert.ok(slices < 100, 'sweep cannot loop without advancing candidate cursors');
+  }
+  assert.ok(reachedAt && reachedAt - newcomerAt <= 60000, 'fresh head reaches the low-ID newcomer in a later parent within sixty seconds');
+  assert.equal(await h.prisma.globalStepEventEntitlement.count(), 9 * 10001);
+  await obligations(9 * 10001);
+  t.diagnostic(JSON.stringify({ enrollmentFairness: { users: 10001, parents: parents.length, zeroCreatedParents: 8,
+    slices, elapsedMs: performance.now() - started, newcomerServiceMs: reachedAt - newcomerAt } }));
+});
+
+test('budget or shutdown after discovery never admits the next writer and retains its cursor for retry', async () => {
+  const { buildLocalGlobalStepEventTick } = require('../../src/modules/steps');
+  await seedUsers(5); const events = await h.parents(); await h.readyGeneration();
+  const realClock = Date.now; let offset = 0, discoveries = 0, stopped = false;
+  const tick = buildLocalGlobalStepEventTick({ now: () => h.NOW, skipEndBoundaries: true,
+    cleanupExpiredEntitlements: async () => 0, logger: { log() {}, error() {} },
+    materializationAfterDiscovery: async () => { if (++discoveries === 2) offset = 5001; },
+  });
+  await tick.runMinuteMaintenance();
+  Date.now = () => realClock() + offset;
+  try {
+    assert.equal((await tick.runEnrollmentSlice({ isStopped: () => stopped })).more, true);
+    assert.equal((await enrolled(events[0])).length, 5);
+    assert.equal((await enrolled(events[1])).length, 0, 'second writer is rejected after budget expires at the discovery seam');
+    offset = 0; stopped = true;
+    assert.equal((await tick.runEnrollmentSlice({ isStopped: () => stopped })).more, false);
+    assert.equal((await enrolled(events[1])).length, 0);
+    stopped = false;
+    assert.equal((await tick.runEnrollmentSlice({ isStopped: () => stopped })).more, false);
+    assert.equal((await enrolled(events[1])).length, 5);
+    await obligations(10);
+  } finally { Date.now = realClock; }
+});
+
+test('a parent removed while its continuation is resident exhausts without an enrollment transaction', async () => {
+  const { buildLocalGlobalStepEventTick } = require('../../src/modules/steps');
+  await seedUsers(5); const events = await h.parents(); await h.readyGeneration();
+  const realClock = Date.now; let offset = 0, discoveries = 0;
+  const tick = buildLocalGlobalStepEventTick({ now: () => h.NOW, skipEndBoundaries: true,
+    cleanupExpiredEntitlements: async () => 0, logger: { log() {}, error() {} },
+    materializationAfterDiscovery: async () => { if (++discoveries === 2) offset = 5001; },
+  });
+  await tick.runMinuteMaintenance(); Date.now = () => realClock() + offset;
+  try {
+    assert.equal((await tick.runEnrollmentSlice()).more, true);
+    await h.prisma.globalStepEvent.delete({ where: { id: events[1].id } });
+    offset = 0;
+    assert.equal((await tick.runEnrollmentSlice()).more, false);
+    assert.equal(await h.prisma.globalStepEventEntitlement.count(), 5);
+    await obligations(5);
+  } finally { Date.now = realClock; }
+});

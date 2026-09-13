@@ -1,0 +1,9 @@
+{
+  "source": "6c5fd10cc2bd27d109a2b2a5bc67cae36032553f",
+  "query": "SELECT \"public\".\"global_step_events\".\"id\", \"public\".\"global_step_events\".\"starts_at\", \"public\".\"global_step_events\".\"ends_at\", \"public\".\"global_step_events\".\"multiplier\", \"public\".\"global_step_events\".\"label\", \"public\".\"global_step_events\".\"schedule_mode\", \"public\".\"global_step_events\".\"event_day\", \"public\".\"global_step_events\".\"local_start_minute\", \"public\".\"global_step_events\".\"duration_minutes\", \"public\".\"global_step_events\".\"schedule_policy_version\", \"public\".\"global_step_events\".\"created_at\" FROM \"public\".\"global_step_events\" WHERE (\"public\".\"global_step_events\".\"schedule_mode\" = $1 AND (\"public\".\"global_step_events\".\"ends_at\" > $2 OR EXISTS(SELECT \"t0\".\"event_id\" FROM \"public\".\"global_step_event_entitlements\" AS \"t0\" WHERE ((\"t0\".\"start_processed_at\" IS NULL OR \"t0\".\"end_processed_at\" IS NULL) AND (\"public\".\"global_step_events\".\"id\") = (\"t0\".\"event_id\") AND \"t0\".\"event_id\" IS NOT NULL)))) ORDER BY \"public\".\"global_step_events\".\"starts_at\" ASC OFFSET $3",
+  "params": [
+    "LOCAL_ENTITLEMENTS",
+    "2098-01-01T00:00:00.000Z",
+    "0"
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "artifact": "docs/evidence/db-work-reduction/parent-paginated-index-pinned-v1.json",
+  "statistics": "all relevant tables explicitly ANALYZEd; warm repeated plans, construction-warmed candidate; concurrent unrelated DB test work affects elapsed time; within-run planner/visibility variation retained",
+  "fixtures": [
+    {
+      "historyUsers": 1000,
+      "pendingHeavy": false,
+      "withoutIndex": {
+        "medianBuffers": 16127,
+        "minBuffers": 16127,
+        "maxBuffers": 16127,
+        "medianExecutionMs": 19.517,
+        "p95ExecutionMs": 20.249
+      },
+      "withIndex": {
+        "medianBuffers": 55,
+        "minBuffers": 55,
+        "maxBuffers": 55,
+        "medianExecutionMs": 0.027,
+        "p95ExecutionMs": 0.032
+      }
+    },
+    {
+      "historyUsers": 1000,
+      "pendingHeavy": true,
+      "withoutIndex": {
+        "medianBuffers": 4520,
+        "minBuffers": 4520,
+        "maxBuffers": 4520,
+        "medianExecutionMs": 6.441,
+        "p95ExecutionMs": 6.613
+      },
+      "withIndex": {
+        "medianBuffers": 4520,
+        "minBuffers": 4520,
+        "maxBuffers": 4520,
+        "medianExecutionMs": 6.43,
+        "p95ExecutionMs": 6.552
+      }
+    },
+    {
+      "historyUsers": 10000,
+      "pendingHeavy": false,
+      "withoutIndex": {
+        "medianBuffers": 155214,
+        "minBuffers": 155214,
+        "maxBuffers": 155214,
+        "medianExecutionMs": 260.887,
+        "p95ExecutionMs": 272.721
+      },
+      "withIndex": {
+        "medianBuffers": 55,
+        "minBuffers": 55,
+        "maxBuffers": 55,
+        "medianExecutionMs": 0.03,
+        "p95ExecutionMs": 0.047
+      }
+    },
+    {
+      "historyUsers": 10000,
+      "pendingHeavy": true,
+      "withoutIndex": {
+        "medianBuffers": 9508,
+        "minBuffers": 7453,
+        "maxBuffers": 46227,
+        "medianExecutionMs": 17.032,
+        "p95ExecutionMs": 120.861
+      },
+      "withIndex": {
+        "medianBuffers": 9508,
+        "minBuffers": 7453,
+        "maxBuffers": 13527,
+        "medianExecutionMs": 16.269,
+        "p95ExecutionMs": 32.928
+      }
+    }
+  ]
+}

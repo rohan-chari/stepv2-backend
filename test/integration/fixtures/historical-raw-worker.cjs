@@ -6,7 +6,9 @@ const { buildRaceResolutionWorkerV2 } = require('../../../src/modules/races/jobs
 const queries = [];
 prisma.$on('query', event => queries.push(event.query));
 (async () => {
+  const started = performance.now();
   const count = await buildRaceResolutionWorkerV2({ bootAt: 0 }).tick();
-  await new Promise((resolve, reject) => process.send({ count, reads, queries }, error => error ? reject(error) : resolve()));
+  const elapsedMs = performance.now() - started;
+  await new Promise((resolve, reject) => process.send({ count, elapsedMs, reads, queries, metrics: require('../../../src/shared/observability/coordinatedOptimizationMetrics').coordinatedOptimizationMetrics.snapshot() }, error => error ? reject(error) : resolve()));
   await prisma.$disconnect(); process.exit(0);
 })().catch(error => { console.error(error); process.exit(1); });

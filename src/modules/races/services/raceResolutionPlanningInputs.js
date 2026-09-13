@@ -1,3 +1,4 @@
+const { takeFreshScoringInputProof } = require('./freshScoringInputProof');
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const { normalizedEntitlementEvent } = require("../../steps/services/globalStepEventEntitlement");
 
@@ -12,6 +13,8 @@ function planningInputModels({ fingerprint, validUntil, scoringInputVersionModel
       !Array.isArray(fingerprint.participants) || !fingerprint.race?.id) return {};
   const members = new Map(fingerprint.participants.map(row => [row.userId, row]));
   const versions = new Map(fingerprint.inputs.map(row => [row.userId, row]));
+  const freshProofs = takeFreshScoringInputProof(fingerprint);
+  const consumedProofUsers = new Set();
   return {
     ...(provenance.raceComplete === true && raceModel
       ? { Race: {
@@ -85,7 +88,9 @@ function planningInputModels({ fingerprint, validUntil, scoringInputVersionModel
         if (!Array.isArray(ids) || !ids.every(id => versions.has(id))) {
           return scoringInputVersionModel.findMany(options);
         }
-        return ids.map(id => ({ userId: id, generation: BigInt(versions.get(id).generation) }));
+        const includeProof = freshProofs && ids.every(id => freshProofs.has(id) && !consumedProofUsers.has(id));
+        if (includeProof) for (const id of ids) consumedProofUsers.add(id);
+        return ids.map(id => ({ ...(includeProof ? freshProofs.get(id) : {}), userId: id, generation: BigInt(versions.get(id).generation) }));
       },
     },
   };

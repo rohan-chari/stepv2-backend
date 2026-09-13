@@ -1,0 +1,153 @@
+{
+  "dimensions": {
+    "parents": 27,
+    "entitlements": 27000,
+    "pending": 2003
+  },
+  "runs": [
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.079,
+        "executionMs": 22.487,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.275,
+        "executionMs": 0.061,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.171,
+        "executionMs": 22.544,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.139,
+        "executionMs": 0.033,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.066,
+        "executionMs": 20.382,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.118,
+        "executionMs": 0.03,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.08,
+        "executionMs": 20.051,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.13,
+        "executionMs": 0.03,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.062,
+        "executionMs": 20.536,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.127,
+        "executionMs": 0.029,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.063,
+        "executionMs": 20.901,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.141,
+        "executionMs": 0.031,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.063,
+        "executionMs": 20.515,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.188,
+        "executionMs": 0.04,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.081,
+        "executionMs": 21.977,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.148,
+        "executionMs": 0.031,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.084,
+        "executionMs": 21.278,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.146,
+        "executionMs": 0.032,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.06,
+        "executionMs": 21.49,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 57,
+        "planningMs": 0.14,
+        "executionMs": 0.036,
+        "rows": 5
+      }
+    }
+  ],
+  "indexBytes": 32768,
+  "candidate": "bounded parent query with pending-parent index",
+  "additionalFixtureEvidence": "parent-paginated-index-pinned-v1.json",
+  "note": "Alternating warm plans, frozen baseline SQL captured from the real baseline scheduler. No host CPU claim."
+}

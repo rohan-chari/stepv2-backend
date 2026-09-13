@@ -1,0 +1,155 @@
+{
+  "dimensions": {
+    "parents": 25,
+    "entitlements": 25000,
+    "pending": 3
+  },
+  "runs": [
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.073,
+        "executionMs": 19.382,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.116,
+        "executionMs": 0.024,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.056,
+        "executionMs": 20.35,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.112,
+        "executionMs": 0.025,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.054,
+        "executionMs": 20.149,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.106,
+        "executionMs": 0.023,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.052,
+        "executionMs": 19.658,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.113,
+        "executionMs": 0.024,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.054,
+        "executionMs": 20.052,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.1,
+        "executionMs": 0.023,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.074,
+        "executionMs": 20.406,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.112,
+        "executionMs": 0.025,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.072,
+        "executionMs": 20.685,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.119,
+        "executionMs": 0.026,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.052,
+        "executionMs": 20.556,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.105,
+        "executionMs": 0.03,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.054,
+        "executionMs": 20.231,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.125,
+        "executionMs": 0.027,
+        "rows": 5
+      }
+    },
+    {
+      "baseline": {
+        "buffers": 17733,
+        "planningMs": 0.059,
+        "executionMs": 20.41,
+        "rows": 5
+      },
+      "candidate": {
+        "buffers": 56,
+        "planningMs": 0.119,
+        "executionMs": 0.026,
+        "rows": 5
+      }
+    }
+  ],
+  "index": {
+    "indisvalid": true,
+    "indisready": true,
+    "definition": "CREATE INDEX global_step_event_entitlements_pending_parent_idx ON public.global_step_event_entitlements USING btree (event_id) WHERE ((start_processed_at IS NULL) OR (end_processed_at IS NULL))"
+  },
+  "note": "Alternating warm plans; index rebuild warms candidate pages. No host CPU claim."
+}

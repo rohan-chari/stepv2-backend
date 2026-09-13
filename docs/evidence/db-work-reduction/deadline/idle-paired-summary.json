@@ -1,0 +1,182 @@
+[
+  {
+    "run": 0,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.35550000000000637,
+    "p95Ms": 0.5029590000000326,
+    "totalMs": 22.5483329999999
+  },
+  {
+    "run": 0,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.2804580000000101,
+    "p95Ms": 0.4301250000000323,
+    "totalMs": 17.832379000000003
+  },
+  {
+    "run": 1,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.26591600000000426,
+    "p95Ms": 0.5345829999999978,
+    "totalMs": 18.236707000000024
+  },
+  {
+    "run": 1,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.35941700000000765,
+    "p95Ms": 0.5912079999999946,
+    "totalMs": 23.03754499999991
+  },
+  {
+    "run": 2,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.37112500000000637,
+    "p95Ms": 0.5557500000000175,
+    "totalMs": 23.39145499999981
+  },
+  {
+    "run": 2,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.26370799999997985,
+    "p95Ms": 0.4570420000000013,
+    "totalMs": 17.714795999999893
+  },
+  {
+    "run": 3,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.2780830000000094,
+    "p95Ms": 0.4574169999999924,
+    "totalMs": 18.144281999999947
+  },
+  {
+    "run": 3,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.40450000000001296,
+    "p95Ms": 1.8228750000000105,
+    "totalMs": 34.23291800000004
+  },
+  {
+    "run": 4,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.3742080000000101,
+    "p95Ms": 0.5547500000000127,
+    "totalMs": 23.671711999999985
+  },
+  {
+    "run": 4,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.28120799999999235,
+    "p95Ms": 0.4162500000000193,
+    "totalMs": 17.94778900000003
+  },
+  {
+    "run": 5,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.2699169999999924,
+    "p95Ms": 0.3978749999999991,
+    "totalMs": 17.757166999999896
+  },
+  {
+    "run": 5,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.3714999999999975,
+    "p95Ms": 0.5124580000000094,
+    "totalMs": 23.489750999999984
+  },
+  {
+    "run": 6,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.3712500000000034,
+    "p95Ms": 0.53287499999999,
+    "totalMs": 23.892374000000046
+  },
+  {
+    "run": 6,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.26400000000001,
+    "p95Ms": 0.3853330000000028,
+    "totalMs": 17.12816600000008
+  },
+  {
+    "run": 7,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.2618750000000034,
+    "p95Ms": 0.46258399999999256,
+    "totalMs": 17.612327999999934
+  },
+  {
+    "run": 7,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.35900000000000887,
+    "p95Ms": 0.5114580000000046,
+    "totalMs": 23.177837000000096
+  },
+  {
+    "run": 8,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.36650000000000205,
+    "p95Ms": 0.5432920000000081,
+    "totalMs": 22.90646300000003
+  },
+  {
+    "run": 8,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.27545800000001464,
+    "p95Ms": 0.4037500000000023,
+    "totalMs": 17.865371000000238
+  },
+  {
+    "run": 9,
+    "variant": "candidate",
+    "passes": 60,
+    "queries": 60,
+    "medianMs": 0.26687499999999886,
+    "p95Ms": 0.3789999999999907,
+    "totalMs": 17.450790999999953
+  },
+  {
+    "run": 9,
+    "variant": "baseline",
+    "passes": 60,
+    "queries": 180,
+    "medianMs": 0.35970899999998096,
+    "p95Ms": 0.5741250000000093,
+    "totalMs": 23.58650599999993
+  }
+]

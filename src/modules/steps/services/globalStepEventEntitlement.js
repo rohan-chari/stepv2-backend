@@ -447,7 +447,16 @@ async function ensureEntitlementForUser(tx, {
   return entitlement;
 }
 
-async function materializeEntitlementsForActiveRacers(event, {
+async function materializeEntitlementsForActiveRacers(event, options = {}) {
+  const { prisma = defaultPrisma, batchSize = 100, afterUserId = null, returnPage = false } = options;
+  if (event?.scheduleMode !== LOCAL_ENTITLEMENTS) return returnPage
+    ? { candidates: 0, created: 0, nextCursor: afterUserId, exhausted: true } : 0;
+  const { discoverEnrollmentPages } = require('../models/globalStepEventEntitlement');
+  const [page] = await discoverEnrollmentPages([{ eventId: event.id, afterUserId }], { client: prisma, pageSize: batchSize });
+  return writeEnrollmentCandidates(event, page.candidates, options);
+}
+
+async function writeEnrollmentCandidates(event, candidateUsers, {
   prisma = defaultPrisma,
   now = new Date(),
   batchSize = 100,
@@ -455,47 +464,17 @@ async function materializeEntitlementsForActiveRacers(event, {
   returnPage = false,
   generationUsable = isGenerationUsable,
   afterDiscovery = async () => {},
+  shouldWrite = () => true,
   decisionNow = () => new Date(Math.max(+new Date(now), Date.now())),
   recordCounters = async (tx, counters) => {
     const { recordOperationalCounters } = require("./globalStepEventObservability");
     return recordOperationalCounters(tx, counters);
   },
 } = {}) {
-  if (event?.scheduleMode !== LOCAL_ENTITLEMENTS) {
-    return returnPage
-      ? { candidates: 0, created: 0, nextCursor: afterUserId, exhausted: true }
-      : 0;
-  }
-  // Materialize distinct active users before the entitlement anti-join. LIMIT
-  // follows that anti-join so enrolled users cannot consume or truncate a page.
-  const candidateUsers = await prisma.$queryRawUnsafe(
-    `WITH active_users AS MATERIALIZED (
-  SELECT DISTINCT participant.user_id
-    FROM races race
-    JOIN race_participants participant ON participant.race_id = race.id
-   WHERE race.status = 'active'
-     AND participant.status = 'accepted'
-     AND participant.forfeited_at IS NULL
-     AND participant.finished_at IS NULL
-     AND ($3::text IS NULL OR participant.user_id > $3)
-), enrollment_candidates AS MATERIALIZED (
-  SELECT active.user_id FROM active_users active
-   WHERE NOT EXISTS (
-     SELECT 1 FROM global_step_event_entitlements entitlement
-      WHERE entitlement.event_id = $1 AND entitlement.user_id = active.user_id
-   )
-   ORDER BY active.user_id LIMIT $2
-)
-SELECT person.id, person.timezone,
-       person.global_event_timezone AS "globalEventTimezone"
-  FROM enrollment_candidates candidate
-  JOIN users person ON person.id = candidate.user_id
- ORDER BY person.id`,
-    event.id,
-    batchSize,
-    afterUserId,
-  );
   await afterDiscovery({ event, candidateUsers });
+  if (!shouldWrite()) return { interrupted: true };
+  if (!candidateUsers.length) return returnPage
+    ? { candidates: 0, created: 0, nextCursor: afterUserId, exhausted: true } : 0;
   const participants = candidateUsers.map((user) => ({ user }));
   let current = new Date(now);
   const prepare = (participants) => participants.flatMap(({ user }) => {
@@ -1303,6 +1282,7 @@ module.exports = {
   appendLateActivationEvent,
   ensureEntitlementForUser,
   materializeEntitlementsForActiveRacers,
+  writeEnrollmentCandidates,
   findDueEntitlementsForUpdate,
   processDueEntitlementBoundaries,
   processDueEndMicroBatch,

@@ -14,6 +14,7 @@ const Redis = require('ioredis');
 const redis = new Redis(process.env.REDIS_URL);
 const { reads, setAfterRead } = require('./fixtures/observe-historical-raw.cjs');
 const { prisma, cleanDatabase, createTestUser, getSharedServer, request } = require('./setup');
+const { coordinatedOptimizationMetrics: metrics } = require('../../src/shared/observability/coordinatedOptimizationMetrics');
 const { buildRaceResolutionWorkerV2 } = require('../../src/modules/races/jobs/raceResolutionQueueV2');
 let baseUrl;
 let queries = [];
@@ -45,16 +46,16 @@ async function upload(f, steps, samples = null) {
   assert.equal(res.status, 202, JSON.stringify(await res.json()));
 }
 async function run(f, steps, samples = null, options = {}) {
-  await upload(f, steps, samples); reads.length = 0; queries = [];
+  await upload(f, steps, samples); reads.length = 0; queries = []; metrics.reset();
   assert.equal(await buildRaceResolutionWorkerV2({ bootAt: 0, logger: { log() {}, warn() {}, error: console.error }, ...options }).tick(), 1);
-  const captured = reads.slice(); const workerQueries = queries.slice();
+  const captured = reads.slice(); const workerQueries = queries.slice(); const workerMetrics = metrics.snapshot();
   const persistedTotal = (await prisma.raceParticipant.findUniqueOrThrow({ where: { id: f.participant.id } })).totalSteps;
   const res = await request(baseUrl, 'GET', `/races/${f.race.id}/progress`, { token: f.account.token,
     headers: { 'X-Timezone': 'UTC', 'X-Client-Features': '' } });
   assert.equal(res.status, 200);
   const total = (await res.json()).progress.participants.find(p => p.userId === f.account.user.id).totalSteps;
   assert.equal(persistedTotal, total, 'worker itself commits the HTTP score before any display repair');
-  return { total, queries: workerQueries, rows: captured.reduce((n, r) => n + r.rows, 0), reads: captured };
+  return { total, metrics: workerMetrics, queries: workerQueries, rows: captured.reduce((n, r) => n + r.rows, 0), reads: captured };
 }
 const keys = () => redis.keys('historical-raw-test:historical-raw:v1:*');
 it('recent generations reuse older raw rows with exact old-client HTTP scoring', async t => {
@@ -238,4 +239,38 @@ it('six days of five-minute samples avoid old rows while keeping the full recent
     coldSampleSelects: cold.reads.length, warmSampleSelects: warm.reads.length,
     coldProofSelects: cold.queries.filter(q => q.includes('steps:historical-raw-proof')).length,
     warmProofSelects: warm.queries.filter(q => q.includes('steps:historical-raw-proof')).length, redisBytes: bytes }));
+});
+
+it('cache stage accounting attributes cold, warm and malformed Redis loads without diagnostic SELECTs', async () => {
+  const f = await fixture();
+  const cold = await run(f, 100);
+  const stage = (result, kind, reason) => result.metrics.counters[
+    `race_scoring_cache_stage_total{kind=${kind},reason=${reason}}`] || 0;
+  assert.equal(stage(cold, 'raw', 'absent_unknown'), 1);
+  assert.equal(stage(cold, 'publication', 'success'), 1);
+  assert.equal(stage(cold, 'process', 'absent'), 1);
+  const warm = await run(f, 200);
+  assert.equal(stage(warm, 'raw', 'accepted'), 1);
+  assert.equal(stage(warm, 'process', 'generation_mismatch'), 1);
+  for (const key of await keys()) await redis.set(key, '{');
+  const malformed = await run(f, 300);
+  assert.equal(stage(malformed, 'raw', 'malformed_payload'), 1);
+  assert.equal(malformed.total, 1260);
+  for (const result of [cold, warm, malformed]) {
+    const counters = Object.entries(result.metrics.counters);
+    assert.equal(counters.filter(([key]) => key.startsWith('race_scoring_cache_stage_total{kind=raw,')).reduce((sum, [, n]) => sum + n, 0), 1);
+    assert.equal(counters.filter(([key]) => key.startsWith('race_scoring_cache_stage_total{kind=process,')).reduce((sum, [, n]) => sum + n, 0), 1);
+    assert.ok(result.queries.every(query => !/pg_stat_|pg_statio_|pg_stat_activity/.test(query)));
+    assert.doesNotMatch(JSON.stringify(result.metrics), new RegExp(f.account.user.id));
+  }
+});
+
+it('same-attempt initial versions eliminate one proof SELECT on cold and warm worker source reads', async () => {
+  const f = await fixture();
+  for (const steps of [100, 200]) {
+    const result = await run(f, steps);
+    assert.equal(result.total, 960 + steps);
+    assert.equal(result.queries.filter(query => query.includes('steps:historical-raw-proof')).length, 1,
+      'existing initial version SELECT supplies proof; authoritative post-source SELECT remains');
+  }
 });

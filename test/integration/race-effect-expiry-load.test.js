@@ -184,7 +184,7 @@ describe("expiry integration under simultaneous deadlines and viewer load", () =
       capturedQueries = null;
     }
     const dispatchMs = performance.now() - start;
-    const dueQuery = events.find((event) => /SELECT effect_id,race_id FROM race_effect_deadlines/.test(event.query));
+    const dueQuery = events.find((event) => /steps:deadline-scheduler-discovery:v1/.test(event.query));
     assert.ok(dueQuery, "capture the scheduler's actual deadline query for EXPLAIN");
     await prisma.$executeRawUnsafe("ANALYZE race_effect_deadlines");
     const explain = await prisma.$queryRawUnsafe(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${dueQuery.query}`,

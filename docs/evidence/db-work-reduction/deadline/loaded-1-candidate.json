@@ -1,0 +1,31 @@
+{
+  "population": 100,
+  "races": 10,
+  "syncElapsedMs": 257,
+  "dispatchMedianMs": 942,
+  "dispatchP95Ms": 951,
+  "counts": {
+    "http_sync:OTHER": 601,
+    "http_sync:SELECT": 600,
+    "http_sync:INSERT": 300,
+    "http_sync:UPDATE": 500,
+    "http_sync:COMMIT": 300,
+    "deadline:SELECT": 25,
+    "deadline:OTHER": 13,
+    "deadline:DELETE": 1,
+    "deadline:UPDATE": 11,
+    "deadline:COMMIT": 11,
+    "deadline:INSERT": 20,
+    "downstream:SELECT": 676,
+    "downstream:OTHER": 126,
+    "downstream:COMMIT": 132,
+    "downstream:UPDATE": 250,
+    "downstream:INSERT": 120,
+    "http_verify:SELECT": 9001,
+    "http_verify:OTHER": 800,
+    "http_verify:UPDATE": 2000
+  },
+  "totalQueries": 15487,
+  "httpOutcomes": "all old/current users: score100, slots3, no effects",
+  "note": "Real HTTP activation/sync/progress and default scheduled workers; Redis unset fallback. Four concurrent HTTP requests. Observation SELECTs use a separate connection and are excluded; setup excluded. Phases may include overlapping scheduler work. Local warm replay only."
+}

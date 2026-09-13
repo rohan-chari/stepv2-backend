@@ -7,6 +7,57 @@ const {
   normalizedEntitlementEvent,
 } = require("../services/globalStepEventEntitlement");
 
+// Each bounded round evaluates the active membership cohort once. User rows
+// are joined only after the per-parent anti-join and candidate LIMIT.
+async function discoverEnrollmentPages(parents, { client = prisma, pageSize = 500 } = {}) {
+  if (!Array.isArray(parents) || parents.length > 8) throw new TypeError('at most eight enrollment parents required');
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 500) throw new TypeError('enrollment page size must be 1..500');
+  if (!parents.length) return [];
+  const ids = new Set();
+  for (const parent of parents) {
+    if (!parent?.eventId || typeof parent.eventId !== 'string' || ids.has(parent.eventId) ||
+        (parent.afterUserId != null && typeof parent.afterUserId !== 'string')) throw new TypeError('invalid enrollment parent');
+    ids.add(parent.eventId);
+  }
+  const values = parents.flatMap(parent => [parent.eventId, pageSize, parent.afterUserId ?? null]);
+  const relation = parents.map((_, i) => `($${i * 3 + 1}::text,$${i * 3 + 2}::int,$${i * 3 + 3}::text,${i})`).join(',');
+  const rows = await client.$queryRawUnsafe(`WITH active_users AS MATERIALIZED (
+    SELECT DISTINCT participant.user_id FROM races race
+    JOIN race_participants participant ON participant.race_id = race.id
+    WHERE race.status = 'active' AND participant.status = 'accepted'
+      AND participant.forfeited_at IS NULL AND participant.finished_at IS NULL
+  ), parent_inputs(event_id,page_size,after_user_id,ordinal) AS (VALUES ${relation}),
+  enrollment_candidates AS MATERIALIZED (
+    SELECT parent.event_id,parent.ordinal,candidate.user_id FROM parent_inputs parent
+    LEFT JOIN LATERAL (
+      SELECT active.user_id FROM active_users active
+      WHERE (parent.after_user_id IS NULL OR active.user_id > parent.after_user_id)
+        AND EXISTS (SELECT 1 FROM global_step_events existing WHERE existing.id = parent.event_id)
+        AND NOT EXISTS (SELECT 1 FROM global_step_event_entitlements entitlement
+          WHERE entitlement.event_id = parent.event_id AND entitlement.user_id = active.user_id)
+      ORDER BY active.user_id LIMIT parent.page_size
+    ) candidate ON true
+  )
+  SELECT candidate.event_id AS "eventId",person.id,person.timezone,
+    person.global_event_timezone AS "globalEventTimezone"
+  FROM enrollment_candidates candidate LEFT JOIN users person ON person.id = candidate.user_id
+  ORDER BY candidate.ordinal,person.id`, ...values);
+  const groups = new Map(parents.map(parent => [parent.eventId, []]));
+  for (const row of rows) {
+    // Single-parent injected old model doubles return the original user shape.
+    const id = row.eventId ?? (parents.length === 1 ? parents[0].eventId : null);
+    if (!groups.has(id)) throw new Error('unknown parent in enrollment discovery');
+    if (row.id != null) groups.get(id).push({ id: row.id, timezone: row.timezone, globalEventTimezone: row.globalEventTimezone });
+  }
+  return parents.map(parent => {
+    const candidates = groups.get(parent.eventId);
+    if (candidates.length > pageSize) throw new Error('enrollment discovery exceeded page bound');
+    return { eventId: parent.eventId, candidates,
+      nextCursor: candidates.at(-1)?.id ?? parent.afterUserId ?? null,
+      exhausted: candidates.length < pageSize };
+  });
+}
+
 const ELIGIBLE_OUTCOMES = ["ACTIVATED_ON_TIME", "ACTIVATED_LATE_JOIN"];
 
 async function findEligibleByRace({
@@ -179,10 +230,11 @@ async function findViewerActiveHomeCached({ userId, now = new Date() }) {
 }
 
 const GlobalStepEventEntitlement = {
-  findEligibleByRace, findViewerActive, findViewerActiveHomeCached,
+  discoverEnrollmentPages, findEligibleByRace, findViewerActive, findViewerActiveHomeCached,
 };
 
 module.exports = {
+  discoverEnrollmentPages,
   GlobalStepEventEntitlement,
   findEligibleByRace,
   findViewerActive,

@@ -1,3 +1,4 @@
+const { bindFreshScoringInputProof } = require('./freshScoringInputProof');
 const effectRead = require("./raceFingerprintEffectRead");
 const { prisma: defaultPrisma } = require("../../../db");
 const { FULL_EVENT_SQL } = require("./raceFingerprintEventSql");
@@ -91,6 +92,9 @@ async function buildRaceResolutionInputFingerprint({
        )
        SELECT members.user_id AS "userId",
          version.generation::text AS generation,
+         version.historical_raw_revision AS "historicalRawRevision",
+         version.historical_raw_complete_generation::text AS "historicalRawCompleteGeneration",
+         version.historical_raw_protected_cutoff AS "historicalRawProtectedCutoff",
          CASE WHEN version.generation IS NULL THEN
            EXISTS (SELECT 1 FROM steps source WHERE source.user_id=members.user_id)
          ELSE false END AS "hasSteps",
@@ -229,6 +233,7 @@ async function buildRaceResolutionInputFingerprint({
     // clock, while the immutable scoring facts must still hash identically.
     scoringReadSnapshot: { schema: 1, raceId, asOf: now.getTime(), through: horizon.getTime(), effectsComplete: true, raceComplete: true },
   }, eventRows);
+  bindFreshScoringInputProof(fingerprint, inputs);
   return eventCacheRead ? effectRead.bindEffectReadSnapshot(fingerprint, finalLoadedEffects,
     { raceId, now, balanceConfigVersion }) : fingerprint;
 }

@@ -1,0 +1,593 @@
+{
+  "results": [
+    {
+      "historyUsers": 1000,
+      "pendingHeavy": false,
+      "entitlements": 27000,
+      "pairs": [
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.806,
+            "planningMs": 0.057,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.031,
+            "planningMs": 0.119,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.662,
+            "planningMs": 0.057,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.029,
+            "planningMs": 0.13,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.493,
+            "planningMs": 0.057,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.025,
+            "planningMs": 0.109,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.535,
+            "planningMs": 0.056,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.027,
+            "planningMs": 0.139,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.503,
+            "planningMs": 0.068,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.027,
+            "planningMs": 0.12,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.276,
+            "planningMs": 0.057,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.032,
+            "planningMs": 0.139,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 20.249,
+            "planningMs": 0.058,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.028,
+            "planningMs": 0.145,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.689,
+            "planningMs": 0.057,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.028,
+            "planningMs": 0.136,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.517,
+            "planningMs": 0.057,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.024,
+            "planningMs": 0.113,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 16127,
+            "executionMs": 19.478,
+            "planningMs": 0.062,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.023,
+            "planningMs": 0.101,
+            "rows": 5
+          }
+        }
+      ]
+    },
+    {
+      "historyUsers": 1000,
+      "pendingHeavy": true,
+      "entitlements": 27000,
+      "pairs": [
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.609,
+            "planningMs": 0.063,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.404,
+            "planningMs": 0.138,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.458,
+            "planningMs": 0.066,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.32,
+            "planningMs": 0.124,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.402,
+            "planningMs": 0.065,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.386,
+            "planningMs": 0.113,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.397,
+            "planningMs": 0.06,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.528,
+            "planningMs": 0.117,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.441,
+            "planningMs": 0.067,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.345,
+            "planningMs": 0.124,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.384,
+            "planningMs": 0.056,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.519,
+            "planningMs": 0.136,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.613,
+            "planningMs": 0.066,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.502,
+            "planningMs": 0.114,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.467,
+            "planningMs": 0.062,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.552,
+            "planningMs": 0.127,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.472,
+            "planningMs": 0.092,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.436,
+            "planningMs": 0.108,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 4520,
+            "executionMs": 6.426,
+            "planningMs": 0.083,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 4520,
+            "executionMs": 6.43,
+            "planningMs": 0.107,
+            "rows": 8
+          }
+        }
+      ]
+    },
+    {
+      "historyUsers": 10000,
+      "pendingHeavy": false,
+      "entitlements": 252000,
+      "pairs": [
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 272.721,
+            "planningMs": 0.073,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.036,
+            "planningMs": 0.146,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 268.199,
+            "planningMs": 0.072,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.03,
+            "planningMs": 0.153,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 256.077,
+            "planningMs": 0.061,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.047,
+            "planningMs": 0.162,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 254.361,
+            "planningMs": 0.063,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.035,
+            "planningMs": 0.149,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 253.511,
+            "planningMs": 0.111,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.029,
+            "planningMs": 0.138,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 244.992,
+            "planningMs": 0.058,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.029,
+            "planningMs": 0.145,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 271.751,
+            "planningMs": 0.078,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.032,
+            "planningMs": 0.155,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 260.887,
+            "planningMs": 0.07,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.03,
+            "planningMs": 0.151,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 267.191,
+            "planningMs": 0.06,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.031,
+            "planningMs": 0.156,
+            "rows": 5
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 155214,
+            "executionMs": 269.69,
+            "planningMs": 0.071,
+            "rows": 5
+          },
+          "withIndex": {
+            "buffers": 55,
+            "executionMs": 0.03,
+            "planningMs": 0.148,
+            "rows": 5
+          }
+        }
+      ]
+    },
+    {
+      "historyUsers": 10000,
+      "pendingHeavy": true,
+      "entitlements": 252000,
+      "pairs": [
+        {
+          "withoutIndex": {
+            "buffers": 46227,
+            "executionMs": 120.861,
+            "planningMs": 0.088,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 13527,
+            "executionMs": 32.928,
+            "planningMs": 0.154,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 7527,
+            "executionMs": 18.82,
+            "planningMs": 0.104,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 9571,
+            "executionMs": 19.159,
+            "planningMs": 0.157,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 11543,
+            "executionMs": 21.431,
+            "planningMs": 0.091,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 7467,
+            "executionMs": 13.695,
+            "planningMs": 0.156,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 9508,
+            "executionMs": 17.032,
+            "planningMs": 0.111,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 11496,
+            "executionMs": 21.225,
+            "planningMs": 0.187,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 7453,
+            "executionMs": 12.339,
+            "planningMs": 0.109,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 9508,
+            "executionMs": 15.914,
+            "planningMs": 0.153,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 11496,
+            "executionMs": 19.219,
+            "planningMs": 0.104,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 7453,
+            "executionMs": 12.144,
+            "planningMs": 0.159,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 9508,
+            "executionMs": 15.58,
+            "planningMs": 0.113,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 11496,
+            "executionMs": 19.922,
+            "planningMs": 0.146,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 7453,
+            "executionMs": 11.754,
+            "planningMs": 0.098,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 9508,
+            "executionMs": 16.269,
+            "planningMs": 0.15,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 11496,
+            "executionMs": 19.184,
+            "planningMs": 0.088,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 7453,
+            "executionMs": 12.317,
+            "planningMs": 0.181,
+            "rows": 8
+          }
+        },
+        {
+          "withoutIndex": {
+            "buffers": 9508,
+            "executionMs": 15.479,
+            "planningMs": 0.126,
+            "rows": 8
+          },
+          "withIndex": {
+            "buffers": 11496,
+            "executionMs": 19.7,
+            "planningMs": 0.155,
+            "rows": 8
+          }
+        }
+      ]
+    }
+  ],
+  "note": "Captured final bounded Prisma scheduler SQL; ten warm pairs per fixture, candidate pages warmed by construction; no OS cache flush."
+}
