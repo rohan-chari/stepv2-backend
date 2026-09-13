@@ -1,0 +1,53 @@
+{
+  "runtimeCommit": "8b336e33b6bc459d80d2b41ab413beb77990595f",
+  "deployedAtUtc": "2026-09-13T02:13:00Z",
+  "health": {
+    "status": "ok",
+    "redis": "ok"
+  },
+  "topology": {
+    "http": 2,
+    "resolution": 1,
+    "cron": 1,
+    "poolBudget": 32,
+    "staging": "stopped"
+  },
+  "migration": "schema up to date; no migration changes",
+  "environmentAndLockfilePreserved": true,
+  "referralCatchup": {
+    "before": 0,
+    "applied": 0,
+    "after": 0
+  },
+  "observation": {
+    "from": "2026-09-13T02:14:21.672Z",
+    "to": "2026-09-13T02:15:06.843Z",
+    "deltas": [
+      {
+        "queryId": "-4006200843426884750",
+        "kind": "version_roster",
+        "calls": 47
+      },
+      {
+        "queryId": "8215726927556489320",
+        "kind": "fill",
+        "calls": 1
+      },
+      {
+        "queryId": "-7798826138436988852",
+        "kind": "version_roster",
+        "calls": 3
+      }
+    ],
+    "standaloneFullHistoryCalls": 0,
+    "note": "New final proof query observed3 calls; named roster also serves planning and closure. Not a full hit-rate or CPU measurement."
+  },
+  "logs": {
+    "priorBillingUnavailableAlertsContinue": true,
+    "priorNotificationTerminalFailureAlertsContinue": true,
+    "queueStartupAlarm": true,
+    "subsequentRaceCommits": true,
+    "expiredRunningLeases": 0,
+    "newEventValidationErrorsObserved": false
+  }
+}

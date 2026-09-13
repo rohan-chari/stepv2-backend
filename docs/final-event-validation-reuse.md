@@ -64,3 +64,23 @@ claim is not restricted to the fixture race; an isolated baseline repeat also
 failed. The two additional artifact failures likewise reproduce on unchanged
 `01f7c20`. These existing failures remain unchanged; the broader suites are not
 claimed green. No production deployment or production CPU measurement was made.
+
+## Production deployment
+
+User authorized deployment after local validation. Runtime `8b336e3` was merged
+to main and deployed September 13 UTC using the guarded reload. Exactly two
+HTTP processes plus resolution and cron are online, pool budget32, staging
+stopped. API and Redis health pass. Schema is current; no migration or dependency
+change was needed. Environment and existing remote lockfile edit were preserved.
+Referral audit/apply/audit found zero missing rows.
+
+A 45-second read-only interval observed three calls to the new final proof
+query and zero standalone full event-history calls. The shared version-roster
+query ran47 times and the full fill query once. This verifies execution of the
+new path; it is not a production-wide cache hit rate or CPU saving estimate.
+Existing billing-unavailable and notification terminal-failure alerts continue.
+A startup queue alarm was followed by successful race commits; no expired
+running leases remained at verification. No new event-validation error observed.
+
+Rollback anchor: `pre-final-event-validation-20260913` (`01f7c20`). Deployment
+tag: `deploy/final-event-validation-20260913-8b336e3`.
