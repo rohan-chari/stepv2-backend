@@ -69,14 +69,14 @@ async function upload(f, steps) {
   });
   assert.equal(res.status, 202);
 }
-async function run(f, steps, beforeWriteTransaction) {
+async function run(f, steps, beforeWriteTransaction, workerOptions = {}) {
   await upload(f, steps);
   reads.length = 0;
   const logs = [];
   const logger = { log: v => { try { logs.push(JSON.parse(v)); } catch {} }, error: console.error, warn: console.warn };
   const queries = [];
   workerQueries = queries;
-  try { assert.equal(await buildRaceResolutionWorkerV2({ bootAt: 0, logger, beforeWriteTransaction }).tick(), 1); }
+  try { assert.equal(await buildRaceResolutionWorkerV2({ bootAt: 0, logger, beforeWriteTransaction, ...workerOptions }).tick(), 1); }
   finally { workerQueries = null; }
   const captured = reads.slice();
   const res = await request(baseUrl, 'GET', `/races/${f.race.id}/progress`, {
@@ -852,4 +852,46 @@ it('caller mutation cannot change the privately retained event vector', async ()
   assert.equal(eventQueries(final).length, 0);
   assert.equal(final.value.globalEvents[0].multiplier, 2);
   assert.equal(final.value.globalEvents[0].startsAt.getTime(), f.event.startsAt.getTime());
+});
+
+
+it('retains unchanged events beyond 30 seconds and still invalidates old-writer edits', async () => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  await run(f, 50);
+  await delay(31050);
+  const warm = await run(f, 60);
+  assert.equal(warm.score, 120);
+  assert.equal(eventQueries(planning(warm)).length, 0);
+  assert.equal(planning(warm).queries.length, 3);
+  await prisma.$executeRawUnsafe('UPDATE global_step_events SET multiplier=3 WHERE id=$1', f.event.id);
+  const changed = await run(f, 70);
+  assert.equal(changed.score, 210);
+  assert.equal(eventQueries(planning(changed)).length, 1);
+});
+
+it('retained event coverage accommodates three minutes of planning-clock movement', async () => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  await run(f, 50);
+  const result = await run(f, 60, undefined, { now: () => new Date(Date.now() + 180000) });
+  assert.equal(result.score, 120);
+  assert.equal(eventQueries(planning(result)).length, 0);
+  assert.equal(planning(result).queries.length, 3);
+});
+
+it('shorter same-schema entries from an older worker remain safe and refresh when coverage ends', async () => {
+  const f = await fixture('LOCAL_ENTITLEMENTS');
+  await run(f, 50);
+  for (const key of await cacheKeys()) {
+    const { checksum, ...payload } = JSON.parse(await redis.get(key));
+    payload.coversThrough = Date.now() + 660000;
+    payload.expiresAt = Date.now() + 30000;
+    payload.checksum = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    await redis.set(key, JSON.stringify(payload), 'PX', 30000);
+  }
+  const warm = await run(f, 60);
+  assert.equal(warm.score, 120);
+  assert.equal(eventQueries(planning(warm)).length, 0);
+  const moved = await run(f, 70, undefined, { now: () => new Date(Date.now() + 180000) });
+  assert.equal(moved.score, 140);
+  assert.equal(eventQueries(planning(moved)).length, 1);
 });

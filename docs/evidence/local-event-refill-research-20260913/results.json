@@ -1,0 +1,41 @@
+{
+  "base": "079ff84",
+  "prototypeLocation": "isolated detached checkout; main source unchanged",
+  "prototype": {
+    "maxRedisTtlMs": 300000,
+    "extraCoverageMs": 300000,
+    "privateFinalAttemptMs": 30000
+  },
+  "baseline": {
+    "after31RealSeconds": {
+      "planningSelects": 4,
+      "eventReads": 1
+    },
+    "planningClockPlus3Minutes": {
+      "planningSelects": 4,
+      "eventReads": 1
+    }
+  },
+  "ttlOnly": {
+    "planningClockPlus3Minutes": {
+      "planningSelects": 4,
+      "eventReads": 1
+    }
+  },
+  "combined": {
+    "after31RealSeconds": {
+      "planningSelects": 3,
+      "eventReads": 0
+    },
+    "planningClockPlus3Minutes": {
+      "planningSelects": 3,
+      "eventReads": 0
+    }
+  },
+  "integration": {
+    "passed": 55,
+    "failed": 0
+  },
+  "review": "No correctness blocker for recommendation; measure aggregate memory and oversize fallbacks",
+  "productionChanges": false
+}

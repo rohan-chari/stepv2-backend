@@ -66,6 +66,7 @@ function remember(global, local, proof, now, horizon, coversThrough, expiresAt) 
   const data = { global: { cursor: global.cursor, pendingBoundaries: global.pendingBoundaries }, local };
   const encoded = JSON.stringify(data);
   if (Buffer.byteLength(encoded) > 2 * 1024 * 1024) return rows;
+  // Final transactional reuse is deliberately shorter than Redis retention.
   let deadline = Math.min(expiresAt, now.getTime() + 30000);
   for (const event of local.events) {
     for (const time of [Date.parse(event.startsAt), Date.parse(event.endsAt)]) {
@@ -105,9 +106,10 @@ async function readRaceFingerprintEvents({ client, raceId, now, horizon, proof }
       Math.min(cached.global.coversThrough, cached.local.coversThrough),
       Math.min(cached.global.expiresAt, cached.local.expiresAt));
   }
-  // Minute-rounded extra coverage lets the next request's moving ten-minute
-  // horizon reuse this exact vector. Filtering restores the caller's horizon.
-  const coversThrough = new Date(Math.ceil(horizon.getTime() / 60000) * 60000 + 60000);
+  // Extra coverage must span the cache's maximum lifetime, otherwise a valid
+  // retained vector still misses as the ten-minute lookahead moves forward.
+  // Minute rounding adds slack; materialize restores each caller's horizon.
+  const coversThrough = new Date(Math.ceil(horizon.getTime() / 60000) * 60000 + cache.MAX_TTL_MS);
   const localOnly = !!cached.global;
   cache.count(localOnly ? 'local_miss' : 'global_miss');
   const loaded = await client.$queryRawUnsafe(localOnly ? LOCAL_EVENT_SQL : FILL_SQL,

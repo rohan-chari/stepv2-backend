@@ -1,0 +1,24 @@
+{
+  "baselineCommit": "079ff84",
+  "testsFirst": {
+    "reuseCasesFailed": 2,
+    "olderPayloadCompatibilityPassed": 1
+  },
+  "focusedIntegration": {
+    "tests": 67,
+    "passed": 67,
+    "failed": 0,
+    "eventCacheTests": 56,
+    "planningInputTests": 11
+  },
+  "flutterAnalyze": "passed",
+  "review": "SHIP; no blockers",
+  "productionDeployed": false,
+  "limits": {
+    "redisMaxRetentionMs": 300000,
+    "additionalCoverageMs": 300000,
+    "finalAttemptMaxMs": 30000,
+    "maxRows": 8192,
+    "maxBytes": 2097152
+  }
+}

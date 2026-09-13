@@ -8,7 +8,9 @@ const { coordinatedOptimizationMetrics: metrics } = require('../../../shared/obs
 const PREFIX = 'event-fingerprint:v4';
 const MAX_ROWS = 8192;
 const MAX_BYTES = 2 * 1024 * 1024;
-const MAX_TTL_MS = 30000;
+// Storage lifetime, not a freshness grace period: every read still validates
+// the database proof and time coverage, and event boundaries shorten this TTL.
+const MAX_TTL_MS = 5 * 60 * 1000;
 const counts = Object.create(null);
 const OUTCOMES = new Set(['hit', 'local_miss', 'global_miss', 'invalid', 'redis_error',
   'revision_mismatch', 'missing_proof', 'oversize', 'installed', 'fill_failed', 'sql_fallback']);
@@ -108,4 +110,4 @@ function materialize(global, local, proof, now, horizon) {
 // Read-only, process-local diagnostic snapshot; no per-race/user metric labels.
 function diagnostics() { return { schema: 1, mode: 'worker-planning-only', finalFence: 'postgresql',
   completionBypass: false, maxRows: MAX_ROWS, maxBytes: MAX_BYTES, maxTtlMs: MAX_TTL_MS, counts: { ...counts } }; }
-module.exports = { read, write, materialize, validProof, count, diagnostics, MAX_ROWS };
+module.exports = { read, write, materialize, validProof, count, diagnostics, MAX_ROWS, MAX_TTL_MS };
