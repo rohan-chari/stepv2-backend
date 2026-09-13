@@ -34,8 +34,8 @@ Backend-only, additive migration `20260913040000_effect_fingerprint_versions`. O
 
 
 ## Production deployment — 2026-09-13
-Merged to main and deployed runtime `2dba77b`. The additive migration finished at04:19:38UTC; guarded reload completed with two HTTPworkers, one resolutionworker and one cronworker, poolceiling32, stagingstopped. All2029races had effectproof rows; allfive prooftriggers enabled. Environment and the existing serverlockfile edit were preserved. Referral audit/apply/audit reportedzero missing rows; copy alreadymatched; three known Decoybalance differences retained.
+Merged to main and deployed runtime `2dba77b`. The additive migration finished at 04:19:38 UTC. The guarded reload completed with two HTTP workers, one resolution worker and one cron worker, a pool ceiling of 32, and staging stopped. All 2,029 races had effect proof rows; all five proof triggers were enabled. The environment and existing server lockfile edit were preserved. Referral audit/apply/audit reported zero missing rows; power-up copy already matched; three known Decoy balance differences were retained.
 
-At04:23:23UTC the newworker had63successfulcommits (50closure,13FULL), queueclear. PostgreSQL recorded59full-effectloads and59final-effectreuseproofqueries, consistent with the intended one-load path. These are aggregate query counts, not per-job hit-rate tracing or a CPU savings measurement. Local/public health andRedis wereOK; marketing/privacy/support returned200. No sampled newdatabase errors; the existing BILLING_UNAVAILABLE messages remained.
+At 04:23:23 UTC the new worker had 63 successful commits (50 closure, 13 FULL), and the queue was clear. PostgreSQL recorded 59 full effect loads and 59 final effect reuse proof queries, consistent with the intended one-load path. These are aggregate query counts, not per-job hit-rate tracing or a CPU savings measurement. Local/public health and Redis were OK; marketing/privacy/support returned 200. No sampled new database errors appeared; the existing BILLING_UNAVAILABLE messages remained.
 
 [Production evidence](evidence/effect-fingerprint-reuse/production-verification.json)
