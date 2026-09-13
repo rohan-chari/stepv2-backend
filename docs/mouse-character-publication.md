@@ -1,6 +1,22 @@
 # Test-only mouse character publication — 2026-09-13
 
-## Current revision: smoother artwork and animation
+## Current revision: layered body motion and complete client-compatible loop
+
+The user requested slightly more pixel texture, whole-body motion, and removal of the visible leg/reset discontinuity. Current asset commit: `8dcc4a7`. Current CDN file: https://steptracker-api.org/assets/characters/mouse@8e0f2159b0db.png . SHA-256: `8e0f2159b0db1ab58116f77d146d9e3a4d72ef9ac54a810d723d72bd38b7ab98`.
+
+Final published sheet: six 96×96 frames, 576×96 overall. The same Mouse item remains active, testOnly, remoteOnly, owned by Rohan, with unchanged price and other policy. Metadata now declares six frames and baselineOffset -0.03125, aligning the opaque foot boundary: 78/96 - 1/32 = 50/64.
+
+Artwork was generated as separate body, tail and four limb components, then composed into a layered Aseprite animation using continuous periodic transforms. No artwork was drawn by the assembly script. The torso bobs and pitches, paws follow ground-contact/swing paths, and the tail sways. A 24-frame editable master is retained; the published six frames sample master positions 0, 4, 8, 12, 16 and 20. The final Aseprite source has six editable layers and a 720 ms preview loop. Fine raster edges restore some pixel texture between the initial coarse art and the smooth revision.
+
+Compatibility correction: RaceCardCapybaraRow and HomeCourseTrack's runner-layout path currently generate six frame indices. Longer remote sheets are cut short in those paths, even though other previews use the remote frame count. This supersedes the earlier broad claim that twelve-frame content works everywhere without a binary update. Shipping a complete six-pose cycle fixes existing clients immediately; no frontend code or app release was needed. The briefly published 24-frame version `8627cac7f13c` was superseded in the same session. Old immutable PNGs are retained for cached manifests.
+
+Verification: source motion satisfies f(0) = f(1); all final poses are distinct, have moving body pixels and remain inside their cells. Final seam mean channel difference is 8.66 versus maximum interior 11.05, so the wrap is not an outlier. This structural measurement complements the frame inspection and does not replace physical-device playback review. Reviewer independently verified the final six poses equal the selected master frames and confirmed the fixed-six compatibility correction; SHIP.
+
+CDN checksum/dimensions were verified before the admin PATCH. Current/legacy and TestFlight/production first/repeated catalog requests passed; current TestFlight sees the latest six-frame asset owned/activatable, production and clients without remote-art support do not. Manifest URL, frame count and baseline match; peer mirroring succeeded and the Rohan ownership row is unchanged. No coin/equipment changes, migrations, process restarts, flags or configuration changes. Two production HTTP workers retained; staging stayed stopped.
+
+Manual UI check: reopen TestFlight and watch at least five Home/Shop/wardrobe loops for the body bob, smooth stance return, no detached joints, clipping or adjacent-frame bleed. Check the full loop in a race card and Home course runner (the fixed-six paths), then existing race/detail/team/podium and leaderboard surfaces containing Rohan. Check any offered accessories at the highest and lowest torso positions. Demo/tab fixtures omit Mouse and the wardrobe tutorial uses the default capybara; they cannot verify this art revision. Device playback remains a manual check.
+
+## Previous revision: smoother artwork and animation
 
 User subsequently requested less pixelated artwork and smoother animation, explicitly authorizing the CDN update. Asset commit `2d7d9c0` is deployed. Current CDN file: https://steptracker-api.org/assets/characters/mouse@109b9d1eb391.png . SHA-256: `109b9d1eb39186375752f29e233d677b19c7a80fb08907957f11f5e5010da2cd`.
 
