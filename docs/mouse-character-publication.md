@@ -1,5 +1,21 @@
 # Test-only mouse character publication — 2026-09-13
 
+## Current revision: smoother artwork and animation
+
+User subsequently requested less pixelated artwork and smoother animation, explicitly authorizing the CDN update. Asset commit `2d7d9c0` is deployed. Current CDN file: https://steptracker-api.org/assets/characters/mouse@109b9d1eb391.png . SHA-256: `109b9d1eb39186375752f29e233d677b19c7a80fb08907957f11f5e5010da2cd`.
+
+The refined illustration preserves the gray/pink mouse identity with smooth contours. The horizontal sheet is now 1536×128: twelve distinct 128×128 poses instead of six 64×64 poses. Art was regenerated with the built-in image tool, chroma-cleaned, aligned to the stable head anchor with a common scale, and downsampled with Lanczos. Transparent borders and the editable Aseprite export round-trip passed.
+
+Only `assetVersion` and `renderMetadata.animationFrames` changed on the existing catalog item. Baseline, placement metadata, price, availability, test-only/remote-only policy, and ownership were preserved; the same Rohan ownership row remains. Admin PATCH successfully mirrored to the peer database and invalidated catalog/manifest caches. The previous immutable PNG remains available for clients still using the old manifest.
+
+Timing clarification: the app computes the displayed frame from animation-controller progress multiplied by the remote frame count. Its standard preview completes a cycle in 720 ms (other contexts can supply their own cycle duration); the original Aseprite file's 80 ms frame duration is not a universal app playback setting. The new editable source/preview uses 60 ms × 12 = 720 ms, matching the standard app preview. More poses improve temporal resolution within the existing cycle duration.
+
+First/repeated live catalog reads passed for current TestFlight, current production, TestFlight without remote-art support, and legacy production. Only current TestFlight exposes Mouse, owned and activatable. Its manifest returns the new URL and twelve frames; the production manifest excludes it. CDN bytes matched the local hash before updating the catalog. Reviewer: SHIP. No Dart/runtime/config changes, restarts, migrations, ownership grants, or economy changes were made in this revision.
+
+Revision-specific manual checks: reopen the test-channel app and confirm the new art loaded; inspect Shop/wardrobe and Home for consistent size/baseline, uncut ears/tail, no neighboring-frame bleed, and no body jumps at the loop boundary. Inspect existing race cards/detail/team/podium and leaderboard surfaces containing Rohan. Demo/tab fixtures and the default-capybara wardrobe tutorial do not contain Mouse and cannot validate this revision. Physical-device visual checks remain manual.
+
+## Original publication record
+
 User authorized publishing the generated mouse to the CDN and shop as test-only and granting it to the exact Rohan display-name account. Completed through the existing asset and admin catalog pipeline.
 
 ## Published content
