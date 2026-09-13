@@ -874,7 +874,10 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     const historyStart = new Date(`${end}T00:00:00Z`);
     historyStart.setUTCDate(historyStart.getUTCDate() - 60);
     const historyStartString = historyStart.toISOString().slice(0, 10);
-    const rows = await prisma.$queryRaw`
+    // Reduce repeated events to one row per user/day/action before the reused
+    // CTE and date spine. Distinct-user metrics stay exact; event counts sum
+    // the recorded multiplicity rather than retaining every event row.
+    const rows = dependencies.adminActionRows || await prisma.$queryRaw`
       WITH action_events AS (
         SELECT 'raceParticipation' action_id, rp.user_id,
           rp.joined_at occurred_at, 1 event_count
@@ -883,13 +886,10 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         WHERE rp.status='accepted' AND u.is_review_account=false
           AND r.seed_id IS NULL AND r.tournament_id IS NULL AND r.status<>'cancelled'
         UNION ALL
-        SELECT 'boxOpen', e.actor_user_id, e.created_at, 1
+        SELECT CASE e.event_type WHEN 'MYSTERY_BOX_OPENED' THEN 'boxOpen' ELSE 'powerupUse' END,
+          e.actor_user_id, e.created_at, 1
         FROM race_powerup_events e JOIN users u ON u.id=e.actor_user_id
-        WHERE e.event_type='MYSTERY_BOX_OPENED' AND u.is_review_account=false
-        UNION ALL
-        SELECT 'powerupUse', e.actor_user_id, e.created_at, 1
-        FROM race_powerup_events e JOIN users u ON u.id=e.actor_user_id
-        WHERE e.event_type='POWERUP_USED' AND u.is_review_account=false
+        WHERE e.event_type IN ('MYSTERY_BOX_OPENED','POWERUP_USED') AND u.is_review_account=false
         UNION ALL
         SELECT 'dailyRewardClaim', c.user_id, c.created_at, 1
         FROM daily_reward_claims c JOIN users u ON u.id=c.user_id
@@ -922,7 +922,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       ), dated AS (
         SELECT action_id, user_id,
           (occurred_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date action_date,
-          event_count
+          SUM(event_count)::bigint event_count
         FROM action_events
         WHERE occurred_at >= (
             (CAST(${historyStartString} AS date)::timestamp AT TIME ZONE 'America/New_York')
@@ -932,16 +932,19 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
             ((CAST(${end} AS date)+1)::timestamp AT TIME ZONE 'America/New_York')
             AT TIME ZONE 'UTC'
           )
+        GROUP BY action_id, user_id, action_date
       ), dates AS (
         SELECT generate_series(CAST(${historyStartString} AS date), CAST(${end} AS date), interval '1 day')::date action_date
       ), action_ids AS (
         SELECT unnest(ARRAY['raceParticipation','boxOpen','powerupUse','dailyRewardClaim','notificationOpen','rewardedAd','leaderboardView','raceCreated','raceCompleted']) action_id
+      ), daily_action_counts AS (
+        SELECT action_date, action_id, COUNT(*)::bigint users, SUM(event_count)::bigint events
+        FROM dated GROUP BY action_date, action_id
       ), daily_action AS (
         SELECT dt.action_date, a.action_id,
-          COUNT(DISTINCT d.user_id)::bigint users, COALESCE(SUM(d.event_count),0)::bigint events
-        FROM dates dt CROSS JOIN action_ids a LEFT JOIN dated d
+          COALESCE(d.users,0)::bigint users, COALESCE(d.events,0)::bigint events
+        FROM dates dt CROSS JOIN action_ids a LEFT JOIN daily_action_counts d
           ON d.action_date=dt.action_date AND d.action_id=a.action_id
-        GROUP BY dt.action_date, a.action_id
       ), daily_union AS (
         SELECT action_date, COUNT(DISTINCT user_id)::bigint union_users
         FROM dated GROUP BY action_date

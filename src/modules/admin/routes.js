@@ -547,14 +547,14 @@ function createAdminRouter(dependencies = {}) {
       const sections = req.query?.sections;
       res.json({
         stats: await getAdminStats(
-          sections ? { sections, window: req.query?.window } : {}
+          req.query?.view !== undefined ? {view:req.query.view,sections,window:req.query.window} : sections ? { sections, window: req.query?.window } : {}
         ),
       });
     } catch (error) {
       if (error.statusCode === 400 && error.code) {
         return res.status(400).json({ error: error.message, code: error.code });
       }
-      if (error.statusCode === 503 && error.code === "ADMIN_ANALYTICS_UNAVAILABLE") {
+      if (error.statusCode === 503 && ["ADMIN_ANALYTICS_UNAVAILABLE","ADMIN_ANALYTICS_PENDING"].includes(error.code)) {
         return res.status(503).set("Retry-After", "15").json({error:error.message,code:error.code});
       }
       console.error("Admin stats error:", error);

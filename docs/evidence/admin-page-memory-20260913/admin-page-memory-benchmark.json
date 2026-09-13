@@ -1,0 +1,288 @@
+{
+  "localSynthetic": true,
+  "generatedAt": "2026-09-13T21:46:37.533Z",
+  "pages": [
+    {
+      "view": "overview",
+      "status": 200,
+      "initialMs": 2307,
+      "elapsedMs": 2307,
+      "warmMs": 3,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "overview",
+        "streamedRows": 362237,
+        "streamedBytes": 30298236,
+        "batches": 185,
+        "sourceQueries": 11,
+        "queryCount": 214,
+        "dbMs": 1579,
+        "durationMs": 2099,
+        "stateBytes": 3133726,
+        "workerPeakHeapBytes": 15374512,
+        "workerPeakExternalBytes": 2946522,
+        "workerMs": 86.5705589999991,
+        "workerElapsedMs": 2082.25,
+        "processCpuMs": 845.053
+      },
+      "sources": [
+        "users",
+        "foreground",
+        "currentRacers",
+        "actionParticipation",
+        "actionPower",
+        "actionClaims",
+        "actionNotifications",
+        "actionAds",
+        "actionLeaderboard",
+        "actionCreated",
+        "actionCompleted"
+      ]
+    },
+    {
+      "view": "growth",
+      "status": 200,
+      "initialMs": 105,
+      "elapsedMs": 105,
+      "warmMs": 2,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "growth",
+        "streamedRows": 12278,
+        "streamedBytes": 905357,
+        "batches": 7,
+        "sourceQueries": 2,
+        "queryCount": 15,
+        "dbMs": 13,
+        "durationMs": 70,
+        "stateBytes": 2516254,
+        "workerPeakHeapBytes": 12275304,
+        "workerPeakExternalBytes": 2946522,
+        "workerMs": 40.13404100000025,
+        "workerElapsedMs": 57.55854099999988,
+        "processCpuMs": 76.345
+      },
+      "sources": [
+        "users",
+        "foreground"
+      ]
+    },
+    {
+      "view": "activity",
+      "status": 200,
+      "initialMs": 1015,
+      "elapsedMs": 1015,
+      "warmMs": 3,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "activity",
+        "streamedRows": 367753,
+        "streamedBytes": 33581019,
+        "batches": 187,
+        "sourceQueries": 9,
+        "queryCount": 212,
+        "dbMs": 581,
+        "durationMs": 974,
+        "stateBytes": 962030,
+        "workerPeakHeapBytes": 11879944,
+        "workerPeakExternalBytes": 2946522,
+        "workerMs": 32.30045300000029,
+        "workerElapsedMs": 962.9631669999999,
+        "processCpuMs": 620.109
+      },
+      "sources": [
+        "actionParticipation",
+        "actionPower",
+        "actionClaims",
+        "actionNotifications",
+        "actionAds",
+        "actionLeaderboard",
+        "actionCreated",
+        "actionCompleted",
+        "eligibleRacers"
+      ]
+    },
+    {
+      "view": "retention",
+      "status": 200,
+      "initialMs": 307,
+      "elapsedMs": 307,
+      "warmMs": 3,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "retention",
+        "streamedRows": 37412,
+        "streamedBytes": 8689306,
+        "batches": 20,
+        "sourceQueries": 3,
+        "queryCount": 30,
+        "dbMs": 97,
+        "durationMs": 205,
+        "stateBytes": 6407154,
+        "workerPeakHeapBytes": 16818360,
+        "workerPeakExternalBytes": 2946522,
+        "workerMs": 8.98566700000265,
+        "workerElapsedMs": 192.20708300000024,
+        "processCpuMs": 184.13
+      },
+      "sources": [
+        "users",
+        "retentionActivity",
+        "repeatRaces"
+      ]
+    },
+    {
+      "view": "races",
+      "status": 200,
+      "initialMs": 1520,
+      "elapsedMs": 1520,
+      "warmMs": 4,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "races",
+        "streamedRows": 39169,
+        "streamedBytes": 2557548,
+        "batches": 21,
+        "sourceQueries": 6,
+        "queryCount": 40,
+        "dbMs": 58,
+        "durationMs": 1429,
+        "stateBytes": 6606988,
+        "workerPeakHeapBytes": 19915344,
+        "workerPeakExternalBytes": 2946522,
+        "workerMs": 1339.1760870000007,
+        "workerElapsedMs": 1415.471208,
+        "processCpuMs": 1400.926
+      },
+      "sources": [
+        "raceUsers",
+        "raceCore",
+        "raceMembers",
+        "raceFeatured",
+        "raceRanked",
+        "friends"
+      ]
+    },
+    {
+      "view": "invites",
+      "status": 200,
+      "initialMs": 104,
+      "elapsedMs": 104,
+      "warmMs": 3,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "invites",
+        "streamedRows": 0,
+        "streamedBytes": 4,
+        "batches": 0,
+        "sourceQueries": 2,
+        "queryCount": 10,
+        "dbMs": 8,
+        "durationMs": 22,
+        "stateBytes": 3872,
+        "workerPeakHeapBytes": 7044848,
+        "workerPeakExternalBytes": 2946482,
+        "workerMs": 0.3169579999994312,
+        "workerElapsedMs": 8.685166999999637,
+        "processCpuMs": 2.001
+      },
+      "sources": [
+        "invites",
+        "inviteJoined"
+      ]
+    },
+    {
+      "view": "onboarding",
+      "status": 200,
+      "initialMs": 105,
+      "elapsedMs": 105,
+      "warmMs": 3,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "onboarding",
+        "streamedRows": 0,
+        "streamedBytes": 4,
+        "batches": 0,
+        "sourceQueries": 2,
+        "queryCount": 10,
+        "dbMs": 4,
+        "durationMs": 21,
+        "stateBytes": 3872,
+        "workerPeakHeapBytes": 7016184,
+        "workerPeakExternalBytes": 2946482,
+        "workerMs": 0.4013750000003711,
+        "workerElapsedMs": 5.485874999999396,
+        "processCpuMs": 3.057
+      },
+      "sources": [
+        "onboardingStarts",
+        "onboardingStages"
+      ]
+    },
+    {
+      "view": "ads",
+      "status": 200,
+      "initialMs": 103,
+      "elapsedMs": 103,
+      "warmMs": 4,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "ads",
+        "streamedRows": 0,
+        "streamedBytes": 2,
+        "batches": 0,
+        "sourceQueries": 1,
+        "queryCount": 7,
+        "dbMs": 1,
+        "durationMs": 19,
+        "stateBytes": 992,
+        "workerPeakHeapBytes": 6968352,
+        "workerPeakExternalBytes": 2946482,
+        "workerMs": 0.30724999999983993,
+        "workerElapsedMs": 2.2507919999998194,
+        "processCpuMs": 1.413
+      },
+      "sources": [
+        "ads"
+      ]
+    },
+    {
+      "view": "shop",
+      "status": 200,
+      "initialMs": 104,
+      "elapsedMs": 104,
+      "warmMs": 3,
+      "warmReads": 0,
+      "diagnostics": {
+        "event": "pageComplete",
+        "view": "shop",
+        "streamedRows": 0,
+        "streamedBytes": 4,
+        "batches": 0,
+        "sourceQueries": 2,
+        "queryCount": 10,
+        "dbMs": 16,
+        "durationMs": 34,
+        "stateBytes": 992,
+        "workerPeakHeapBytes": 6963184,
+        "workerPeakExternalBytes": 2946482,
+        "workerMs": 0.27133299999968585,
+        "workerElapsedMs": 17.361374999999498,
+        "processCpuMs": 2.056
+      },
+      "sources": [
+        "shopPowerups",
+        "shopItems"
+      ]
+    }
+  ],
+  "cpuMeasurementNote": "This run preceded the diagnostic correction to threadCpuUsage. Recorded processCpuMs measures the whole process, not the worker thread. Worker processing wall time and memory fields are unaffected."
+}
