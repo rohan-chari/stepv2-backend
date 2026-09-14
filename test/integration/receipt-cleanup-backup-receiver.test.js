@@ -44,16 +44,16 @@ async function fixture() {
   }
   return {user,race,task};
 }
-function worker() {
+function worker(extraEnv={}) {
   const messages=[];let logs='';
   const child=spawn(process.execPath,['--require','./test/integration/fixtures/cleanup-replication/worker.cjs','src/index.js'],{
-    env:{...process.env,NODE_ENV:'test',STEPS_PROCESS_ROLE:'resolution',NODE_APP_INSTANCE:'0',PORT:'0',CRON_START_DELAY_MS:'0',REDIS_URL:''},
+    env:{...process.env,NODE_ENV:'test',STEPS_PROCESS_ROLE:'resolution',NODE_APP_INSTANCE:'0',PORT:'0',CRON_START_DELAY_MS:'0',REDIS_URL:'',...extraEnv},
     stdio:['ignore','pipe','pipe','ipc']});
   child.on('message',m=>messages.push(m));child.stdout.on('data',d=>logs+=d);child.stderr.on('data',d=>logs+=d);
   return {messages,logs:()=>logs,async stop(){if(child.exitCode===null){child.kill('SIGTERM');await new Promise(r=>child.once('exit',r));}}};
 }
-async function until(check,w) {
-  const end=Date.now()+8000;
+async function until(check,w,timeoutMs=8000) {
+  const end=Date.now()+timeoutMs;
   while(Date.now()<end){if(await check())return;await delay(50);}
   assert.fail('cleanup condition timed out: '+w.logs().slice(-1500));
 }
@@ -195,4 +195,58 @@ test('scheduled cleanup bounds delivery validation to candidate tasks despite un
   assert.ok(receiptLookups.length>0);
   assert.ok(receiptLookups.every(n=>n['Node Type'].includes('Index') && n['Plan Rows']<=1 && n['Index Cond']?.includes('delivery_key_hash')),
     'each delivery receipt must use its primary key: '+JSON.stringify(receiptLookups));
+});
+
+
+async function backlogFixture(count,prefix){
+  const f=await fixture();await monitoring([]);
+  const old=new Date(Date.now()-9*86400000);
+  await prisma.raceResolutionPostTask.createMany({data:Array.from({length:count},(_,i)=>({
+    raceId:f.race.id,sourceGeneration:i+1,dedupeKey:`${prefix}:${f.race.id}:${i+1}`,
+    state:'succeeded',snapshotState:'succeeded',requestedAt:old,notBeforeAt:old,completedAt:old,
+    snapshotCommand:{raceId:f.race.id,timeZone:'UTC'},payloadBytes:100,intentCount:0
+  }))});
+  return f;
+}
+test('one scheduled cleanup catches up beyond 1000 rows using bounded commits', {timeout:30000},async()=>{
+  const f=await backlogFixture(2501,'catchup');const before=await publicProgress(f);
+  const w=worker({CLEANUP_FIXTURE_SINGLE_TICK:'1'});
+  try{
+    await until(async()=>await prisma.raceResolutionPostTask.count({where:{raceId:f.race.id}})===0,w);
+    assert.equal(await prisma.raceResolutionPostTaskReceipt.count({where:{raceId:f.race.id}}),2501);
+    const pages=w.messages.filter(m=>m.query.includes('DELETE FROM race_resolution_post_tasks task'));
+    assert.ok(pages.length>=6);
+    assert.ok(pages.every(m=>JSON.parse(m.params)[1]<=500));
+    const after=await publicProgress(f);
+    assert.deepEqual(after.progress.participants.map(p=>[p.userId,p.totalSteps]),before.progress.participants.map(p=>[p.userId,p.totalSteps]));
+  }finally{await w.stop();}
+});
+test('one scheduled cleanup retries timed-out pages with smaller atomic batches', {timeout:30000},async()=>{
+  const f=await backlogFixture(501,'cleanup-retry');const before=await publicProgress(f);
+  await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION cleanup_fixture.slow_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+    IF OLD.dedupe_key LIKE 'cleanup-retry:%' THEN PERFORM pg_sleep(0.006); END IF;
+    RETURN OLD; END $$`);
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER cleanup_fixture_slow_delete BEFORE DELETE ON race_resolution_post_tasks FOR EACH ROW EXECUTE FUNCTION cleanup_fixture.slow_delete()`);
+  const w=worker({CLEANUP_FIXTURE_SINGLE_TICK:'1'});
+  try{
+    await until(async()=>await prisma.raceResolutionPostTask.count({where:{raceId:f.race.id}})===0,w,20000);
+    assert.equal(await prisma.raceResolutionPostTaskReceipt.count({where:{raceId:f.race.id}}),501);
+    const limits=w.messages.filter(m=>m.query.includes('DELETE FROM race_resolution_post_tasks task')).map(m=>JSON.parse(m.params)[1]);
+    assert.ok(limits.some(n=>n<500),'timeout must reduce batch size');
+    const after=await publicProgress(f);
+    assert.deepEqual(after.progress.participants.map(p=>[p.userId,p.totalSteps]),before.progress.participants.map(p=>[p.userId,p.totalSteps]));
+  }finally{await w.stop();await prisma.$executeRawUnsafe('DROP TRIGGER cleanup_fixture_slow_delete ON race_resolution_post_tasks');await prisma.$executeRawUnsafe('DROP FUNCTION cleanup_fixture.slow_delete()');}
+});
+
+test('one scheduled cleanup resumes after standby lag clears without another scheduler tick', {timeout:15000},async()=>{
+  const f=await backlogFixture(1,'lag-catchup');await monitoring([{name:'standby',replay:'0/80',lag:'6 seconds'}]);
+  const w=worker({CLEANUP_FIXTURE_SINGLE_TICK:'1'});
+  try{
+    await until(()=>w.messages.some(m=>m.query.includes('pg_stat_replication')),w);
+    assert.equal(await prisma.raceResolutionPostTask.count({where:{raceId:f.race.id}}),1);
+    await monitoring([{name:'standby',replay:'0/100',lag:'1 second'}]);
+    await until(async()=>await prisma.raceResolutionPostTask.count({where:{raceId:f.race.id}})===0,w);
+    assert.equal(await prisma.raceResolutionPostTaskReceipt.count({where:{raceId:f.race.id}}),1);
+    assert.ok((await publicProgress(f)).progress);
+  }finally{await w.stop();}
 });

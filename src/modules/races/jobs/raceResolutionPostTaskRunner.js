@@ -37,7 +37,33 @@ const POLL_INTERVAL_MS = 30_000;
 const RECOVERY_INTERVAL_MS = 30_000;
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 const CLEANUP_BATCH_SIZE = 500;
-const CLEANUP_MAX_BATCHES = 2;
+const CLEANUP_PAGE_PAUSE_MS = 1000;
+const CLEANUP_COOLDOWN_MS = 30_000;
+const CLEANUP_RETRY_BASE_MS = 5000;
+const CLEANUP_RETRY_MAX_MS = 60_000;
+
+function pauseCleanup(delayMs, signal) {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve(!signal?.aborted);
+    };
+    const timer = setTimeout(function receiptCleanupPauseElapsed() { finish(); }, delayMs);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
+}
+
+function cleanupErrorCode(error) {
+  return error?.meta?.driverAdapterError?.cause?.originalCode ||
+    error?.meta?.code || error?.code;
+}
+
+function retryableCleanupError(error) {
+  return ["57014", "55P03", "40P01", "40001", "57P01", "08006", "ECONNRESET", "P2024", "P2028"]
+    .includes(cleanupErrorCode(error));
+}
 const ADAPTIVE_DRAIN_SLICE_MS = 100;
 const ADAPTIVE_DRAIN_SLICE_TASKS = 16;
 const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
@@ -73,16 +99,11 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     1,
     Math.min(CLEANUP_BATCH_SIZE, Number(dependencies.cleanupBatchSize) || CLEANUP_BATCH_SIZE),
   );
-  const cleanupMaxBatches = Math.max(
-    1,
-    Math.min(CLEANUP_MAX_BATCHES, Number(dependencies.cleanupMaxBatches) || CLEANUP_MAX_BATCHES),
-  );
+  const cleanupPause = dependencies.cleanupPause || pauseCleanup;
   const cleanupBudgetFactory = dependencies.cleanupBudgetFactory || (() =>
     dependencies.cleanupBudget || (dependencies.RaceResolutionPostTask
       ? { async runPage(operation) { return { rows: await operation(), allowedContinue: true }; } }
       : createReceiptCleanupBudget({ prisma: dependencies.prisma || defaultPrisma })));
-  const yieldToEventLoop = dependencies.yieldToEventLoop ||
-    (() => new Promise((resolve) => setImmediate(resolve)));
   const workBudget = dependencies.raceResolutionWorkBudget || defaultWorkBudget;
   const isReceiptCleanupCutoffAccepted =
     dependencies.isReceiptCleanupCutoffAccepted ||
@@ -317,28 +338,47 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       }
       return ready;
     },
-    async cleanup() {
-      if (postTaskCleanupDisabled(env)) return 0;
-      // WAL, latency, replica-lag, and stop state are per maintenance run.
-      // A stopped page must resume on the next tick rather than latching until
-      // the Node process restarts.
-      const cleanupBudget = cleanupBudgetFactory();
+    async cleanup({ signal } = {}) {
+      if (postTaskCleanupDisabled(env) || signal?.aborted) return 0;
+      let cleanupBudget = cleanupBudgetFactory();
       const cutoffAccepted = await isReceiptCleanupCutoffAccepted();
       const retentionMs = (cutoffAccepted ? 1 : 7) * 24 * 60 * 60 * 1000;
+      // Hold the cutoff stable while catching up; the next idle tick advances it.
       const before = new Date(now().getTime() - retentionMs);
       let deleted = 0;
-      for (let batch = 0; batch < cleanupMaxBatches; batch += 1) {
-        const pageResult = await cleanupBudget.runPage(() =>
-          model.cleanupTerminal({
-            before,
-            limit: cleanupBatchSize,
-          }),
-        );
-        const pageDeleted = pageResult.rows;
-        deleted += pageDeleted;
-        if (!pageResult.allowedContinue || pageDeleted < cleanupBatchSize)
-          break;
-        if (batch + 1 < cleanupMaxBatches) await yieldToEventLoop();
+      let pageSize = cleanupBatchSize;
+      let retries = 0;
+      while (!signal?.aborted && !postTaskCleanupDisabled(env)) {
+        let attempted = false;
+        let pageResult;
+        try {
+          pageResult = await cleanupBudget.runPage(() => {
+            if (signal?.aborted || postTaskCleanupDisabled(env)) return 0;
+            attempted = true;
+            return model.cleanupTerminal({ before, limit: pageSize });
+          });
+          retries = 0;
+        } catch (error) {
+          if (!retryableCleanupError(error)) throw error;
+          const code = cleanupErrorCode(error);
+          if (code === "57014" || code === "P2028") {
+            pageSize = Math.max(1, Math.floor(pageSize / 2));
+          }
+          const delayMs = Math.min(CLEANUP_RETRY_MAX_MS,
+            CLEANUP_RETRY_BASE_MS * (2 ** Math.min(retries++, 4)));
+          logger.warn("[RACE_RESOLUTION_POST_TASK] cleanup retry", { code, pageSize, delayMs });
+          if (!(await cleanupPause(delayMs, signal))) break;
+          cleanupBudget = cleanupBudgetFactory();
+          continue;
+        }
+        deleted += pageResult.rows;
+        // A denied preflight is not an empty queue. Recheck after a cooldown.
+        if (attempted && pageResult.rows < pageSize) break;
+        const cooldown = !pageResult.allowedContinue;
+        if (!(await cleanupPause(cooldown ? CLEANUP_COOLDOWN_MS : CLEANUP_PAGE_PAUSE_MS, signal))) break;
+        // WAL/latency/replication limits pace catch-up instead of latching it
+        // until another ten-minute scheduler tick.
+        if (cooldown) cleanupBudget = cleanupBudgetFactory();
       }
       return deleted;
     },
@@ -374,6 +414,7 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   );
   let running = false;
   let cleanupRunning = null;
+  const cleanupAbort = new AbortController();
   let backoffUntilMs = 0;
   const adaptiveDrainEnabled = () => isStrictFlagEnabled(
     settings,
@@ -456,8 +497,9 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   snapshotInterval.unref?.();
   const interval = null;
   const runCleanup = () => {
+    if (cleanupAbort.signal.aborted) return Promise.resolve();
     if (cleanupRunning) return cleanupRunning;
-    cleanupRunning = runner.cleanup().catch((error) => {
+    cleanupRunning = runner.cleanup({ signal: cleanupAbort.signal }).catch((error) => {
       (dependencies.logger || console).error(
         "[RACE_RESOLUTION_POST_TASK] cleanup failed:",
         error
@@ -476,10 +518,12 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   return {
     interval, cleanup, qualificationRecovery, runner, runCleanup, coordinator,
     async stop() {
+      cleanupAbort.abort();
       clearInterval(snapshotInterval);
       clearInterval(cleanup);
       clearInterval(qualificationRecovery);
       await coordinator.stop();
+      await cleanupRunning;
     },
   };
 }
@@ -494,7 +538,8 @@ module.exports = {
   RECOVERY_INTERVAL_MS,
   CLEANUP_INTERVAL_MS,
   CLEANUP_BATCH_SIZE,
-  CLEANUP_MAX_BATCHES,
+  CLEANUP_PAGE_PAUSE_MS,
+  CLEANUP_COOLDOWN_MS,
   postTaskCleanupDisabled,
   postTaskWorkerDisabled,
   buildRaceResolutionPostTaskRunner,

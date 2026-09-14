@@ -13,7 +13,12 @@ pg.Pool = class extends OriginalPool {
   }
 };
 const interval = global.setInterval;
-global.setInterval = (callback, ms, ...args) => interval(callback, ms === 600000 ? 100 : ms, ...args);
+const timeout = global.setTimeout;
+global.setInterval = (callback, ms, ...args) => ms === 600000 && process.env.CLEANUP_FIXTURE_SINGLE_TICK === '1'
+  ? timeout(callback,100,...args) : interval(callback, ms === 600000 ? 100 : ms, ...args);
+// Only the cleanup's named pause clock is accelerated, never its database work.
+global.setTimeout = (callback, ms, ...args) => timeout(callback,
+  callback.name === 'receiptCleanupPauseElapsed' ? 20 : ms, ...args);
 const { prisma } = require('../../../../src/db');
 prisma.$on('query', (event) => {
   if (event.query.includes('pg_stat_replication') || event.query.includes('DELETE FROM race_resolution_post_tasks task')) {

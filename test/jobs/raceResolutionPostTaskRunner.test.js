@@ -135,33 +135,34 @@ test("terminal cleanup keeps seven days before cutoff and switches to 24h only a
   assert.equal(await disabled.cleanup(), 0);
 });
 
-test("terminal cleanup drains at most two 500-row pages and yields between full pages", async () => {
+test("terminal cleanup drains beyond two 500-row pages and pauses between full pages", async () => {
   const calls = [];
   let yields = 0;
   const runner = buildRaceResolutionPostTaskRunner({
     env: {},
     now: () => new Date("2026-08-28T12:00:00.000Z"),
-    yieldToEventLoop: async () => { yields += 1; },
+    cleanupPause: async () => { yields += 1; return true; },
     RaceResolutionPostTask: {
       async cleanupTerminal(input) {
         calls.push(input);
-        return 500;
+        return calls.length <= 4 ? 500 : 0;
       },
     },
   });
 
-  assert.equal(await runner.cleanup(), 1000);
-  assert.equal(calls.length, 2);
-  assert.equal(yields, 1);
+  assert.equal(await runner.cleanup(), 2000);
+  assert.equal(calls.length, 5);
+  assert.equal(yields, 4);
   assert.ok(calls.every((call) => call.limit === 500));
 });
 
-test("terminal cleanup creates a fresh WAL/lag budget for every maintenance run", async () => {
+test("terminal cleanup pauses and refreshes a stopped budget within the same run", async () => {
   let budgets = 0;
   let cleanupCalls = 0;
   const runner = buildRaceResolutionPostTaskRunner({
     env: {},
     isReceiptCleanupCutoffAccepted: async () => true,
+    cleanupPause: async () => true,
     cleanupBudgetFactory() {
       budgets += 1;
       const thisRun = budgets;
@@ -177,10 +178,12 @@ test("terminal cleanup creates a fresh WAL/lag budget for every maintenance run"
     },
   });
 
-  assert.equal(await runner.cleanup(), 0);
   assert.equal(await runner.cleanup(), 2);
   assert.equal(budgets, 2);
   assert.equal(cleanupCalls, 1);
+  assert.equal(await runner.cleanup(), 2);
+  assert.equal(budgets, 3);
+  assert.equal(cleanupCalls, 2);
 });
 
 test("scheduled cleanup does not overlap an in-flight cleanup", async () => {
@@ -319,4 +322,62 @@ test("inline fallback claims exactly the created task without taking another bud
     state: "succeeded",
   });
   assert.deepEqual(calls, ["claim:task-1", "publish", "complete"]);
+});
+
+
+test('cleanup backs off and reduces the batch on a Prisma-adapter statement timeout',async()=>{
+  const sizes=[],pauses=[];
+  const runner=buildRaceResolutionPostTaskRunner({env:{},
+    cleanupPause:async ms=>{pauses.push(ms);return true;},logger:{warn(){}},
+    RaceResolutionPostTask:{async cleanupTerminal({limit}){sizes.push(limit);
+      if(sizes.length===1)throw {code:'P2010',meta:{driverAdapterError:{cause:{originalCode:'57014'}}}};
+      return 0;
+    }}
+  });
+  assert.equal(await runner.cleanup(),0);
+  assert.deepEqual(sizes,[500,250]);assert.deepEqual(pauses,[5000]);
+});
+test('cleanup stops during a pause when its signal is aborted',async()=>{
+  const controller=new AbortController();let calls=0;
+  const runner=buildRaceResolutionPostTaskRunner({env:{},
+    cleanupPause:async()=>{controller.abort();return false;},
+    RaceResolutionPostTask:{async cleanupTerminal(){calls++;return 500;}}
+  });
+  assert.equal(await runner.cleanup({signal:controller.signal}),500);
+  assert.equal(calls,1);
+});
+test('cleanup does not retry non-transient SQL errors',async()=>{
+  const runner=buildRaceResolutionPostTaskRunner({env:{},
+    cleanupPause:async()=>assert.fail('must not retry'),
+    RaceResolutionPostTask:{async cleanupTerminal(){throw {code:'P2010',meta:{driverAdapterError:{cause:{originalCode:'23505'}}}};}}
+  });
+  await assert.rejects(runner.cleanup(),e=>e.meta.driverAdapterError.cause.originalCode==='23505');
+});
+
+
+test('scheduler stop cancels the real cleanup pause and prevents later cleanup', {timeout:2000},async()=>{
+  let calls=0;
+  const scheduled=scheduleRaceResolutionPostTaskRunner({env:{},drainOnStart:false,
+    cleanupIntervalMs:60000,pollIntervalMs:60000,subscribeWake:async()=>()=>{},
+    RaceResolutionPostTask:{async cleanupTerminal(){calls++;return 500;},async nextDueAt(){return null;}}
+  });
+  const cleanup=scheduled.runCleanup();
+  try{
+    await new Promise(r=>setImmediate(r));assert.equal(calls,1);
+    const started=Date.now();await scheduled.stop();await cleanup;
+    assert.ok(Date.now()-started<500,'shutdown must interrupt the one-second pause');
+    await scheduled.runCleanup();assert.equal(calls,1);
+  }finally{await scheduled.stop();}
+});
+test('scheduler stop awaits an active atomic page without starting another', {timeout:2000},async()=>{
+  let finish,entered;const started=new Promise(r=>{entered=r;});let calls=0;
+  const scheduled=scheduleRaceResolutionPostTaskRunner({env:{},drainOnStart:false,
+    cleanupIntervalMs:60000,pollIntervalMs:60000,subscribeWake:async()=>()=>{},
+    RaceResolutionPostTask:{async cleanupTerminal(){calls++;entered();return new Promise(r=>{finish=r;});},async nextDueAt(){return null;}}
+  });
+  const cleanup=scheduled.runCleanup();await started;
+  let stopped=false;const stopping=scheduled.stop().then(()=>{stopped=true;});
+  await new Promise(r=>setImmediate(r));assert.equal(stopped,false);
+  finish(500);await stopping;await cleanup;
+  assert.equal(calls,1);await scheduled.runCleanup();assert.equal(calls,1);
 });

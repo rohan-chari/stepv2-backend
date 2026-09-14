@@ -16,7 +16,7 @@ const {
 describe("race resolution post-task durable storage", () => {
   beforeEach(cleanDatabase);
 
-  it("drains two bounded cleanup pages while retaining fresh terminal work", async () => {
+  it("drains all eligible cleanup pages while retaining fresh terminal work", async () => {
     const current = new Date("2026-08-28T12:00:00.000Z");
     const oldCompletedAt = new Date(current.getTime() - 8 * 24 * 60 * 60_000);
     const creator = await createTestUser({ displayName: "Cleanup Creator" });
@@ -66,10 +66,10 @@ describe("race resolution post-task durable storage", () => {
       now: () => current,
       RaceResolutionPostTask,
     });
-    assert.equal(await runner.cleanup(), 1000);
+    assert.equal(await runner.cleanup(), 1101);
     assert.equal(await prisma.raceResolutionPostTask.count({
       where: { dedupeKey: { startsWith: "cleanup-old:" } },
-    }), 101);
+    }), 0);
     assert.equal(await prisma.raceResolutionPostTask.count({
       where: { dedupeKey: "cleanup-fresh" },
     }), 1);
