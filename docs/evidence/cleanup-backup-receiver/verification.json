@@ -3,7 +3,7 @@
   "productionBaseline": "3ae65f5",
   "localPostgres": "18",
   "newIntegration": {
-    "pass": 17,
+    "pass": 19,
     "fail": 0
   },
   "regressionIntegration": {
@@ -16,10 +16,39 @@
   },
   "flutterAnalyze": "clean",
   "baselineFailures": 4,
-  "review": "SHIP; added remaining classification and two-day retention cases",
+  "review": "SHIP for each final implementation; type-compatible index lookup and actual delivery intent test added before final release",
   "prodReadOnlyCandidate": {
     "replicaLagSeconds": 0,
     "replicationEvidenceUnavailable": false
   },
-  "deployment": "not yet deployed"
+  "deployment": {
+    "runtimeCommit": "d8ca21a",
+    "guardCommit": "6b164a6",
+    "historicalReceiptCommit": "ef913d4",
+    "verifiedAt": "2026-09-14T01:27:59Z",
+    "naturalCleanup": {
+      "postTasksDeleted": 500,
+      "deliveryIntentsDeleted": 4,
+      "sampleChecked": 100,
+      "samplePayloadsRemaining": 0,
+      "sampleMatchingReceipts": 100,
+      "cleanupErrors": 0
+    },
+    "health": "200 ok / Redis ok",
+    "readClientVersions": [
+      "2.3.13",
+      "2.3.14"
+    ],
+    "topology": {
+      "http": 2,
+      "resolution": 1,
+      "cron": 1,
+      "staging": "stopped",
+      "applicationPoolBudget": 32
+    },
+    "migration": "none",
+    "configAndLockfile": "preserved",
+    "cpuImprovement": "not established",
+    "retentionBacklog": "not drained; catch-up rate not established"
+  }
 }
