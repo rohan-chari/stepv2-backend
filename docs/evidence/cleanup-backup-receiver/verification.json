@@ -1,0 +1,25 @@
+{
+  "baseline": "d421a1b",
+  "productionBaseline": "3ae65f5",
+  "localPostgres": "18",
+  "newIntegration": {
+    "pass": 17,
+    "fail": 0
+  },
+  "regressionIntegration": {
+    "pass": 52,
+    "fail": 0
+  },
+  "unit": {
+    "pass": 19,
+    "fail": 0
+  },
+  "flutterAnalyze": "clean",
+  "baselineFailures": 4,
+  "review": "SHIP; added remaining classification and two-day retention cases",
+  "prodReadOnlyCandidate": {
+    "replicaLagSeconds": 0,
+    "replicationEvidenceUnavailable": false
+  },
+  "deployment": "not yet deployed"
+}

@@ -10,11 +10,38 @@ function createReceiptCleanupBudget({
   nowMs = () => Number(process.hrtime.bigint()) / 1e6,
 } = {}) {
   const readSnapshot = snapshot || (async () => {
-    const [row = {}] = await prisma.$queryRawUnsafe(
-      `SELECT pg_current_wal_lsn()::text AS lsn,
-              COALESCE((SELECT MAX(EXTRACT(EPOCH FROM replay_lag))::float8
-                FROM pg_stat_replication),0) AS "replicaLagSeconds"`,
+    const [row] = await prisma.$queryRawUnsafe(
+      `WITH receivers AS MATERIALIZED (
+         SELECT state,sent_lsn,replay_lsn,replay_lag,reply_time, COALESCE(
+           application_name='pghoard' AND replay_lsn IS NULL
+           AND state='streaming' AND sent_lsn IS NOT NULL
+           AND write_lsn IS NOT NULL AND flush_lsn IS NOT NULL
+           AND reply_time >= statement_timestamp()-INTERVAL '30 seconds',
+           false
+         ) AS backup_receiver
+         FROM pg_stat_replication
+       )
+       SELECT pg_current_wal_lsn()::text AS lsn,
+         COALESCE(MAX(EXTRACT(EPOCH FROM replay_lag))
+           FILTER (WHERE NOT backup_receiver),0)::float8 AS "replicaLagSeconds",
+         COALESCE(BOOL_OR(NOT backup_receiver AND COALESCE(
+           state<>'streaming' OR replay_lsn IS NULL OR sent_lsn IS NULL
+           OR reply_time IS NULL
+           OR reply_time < statement_timestamp()-INTERVAL '30 seconds'
+           OR (replay_lag IS NULL AND replay_lsn IS DISTINCT FROM sent_lsn),
+           true
+         )),false) AS "replicationEvidenceUnavailable"
+       FROM receivers`,
     );
+    // A live PGHoard WAL archiver does not replay into a standby database.
+    // Do not bypass unknown/nonresponsive receivers or a PGHoard-named sender
+    // that actually reports a replay position. An idle, caught-up standby may
+    // legitimately report NULL replay_lag; a behind/unknown standby may not.
+    if (!row || typeof row.lsn !== "string" || !/^[0-9A-F]+\/[0-9A-F]+$/i.test(row.lsn) ||
+        !Number.isFinite(row.replicaLagSeconds) || row.replicaLagSeconds < 0 ||
+        row.replicationEvidenceUnavailable !== false) {
+      throw new Error("Cleanup replication evidence unavailable");
+    }
     return row;
   });
   const diffWal = walBytesBetween || (async (after, before) => {
