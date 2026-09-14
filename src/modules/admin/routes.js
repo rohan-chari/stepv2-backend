@@ -573,7 +573,7 @@ function createAdminRouter(dependencies = {}) {
   router.get("/shop/items", async (req, res) => {
     try {
       const items = await prisma.shopItem.findMany({
-        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+        orderBy: [{ name: "asc" }, { id: "asc" }],
       });
       res.json({
         items: items.map((item) => ({

@@ -49,6 +49,17 @@ describe("POST /admin/shop/items (create cosmetic)", () => {
     await cleanDatabase();
   });
 
+  it("lists tuner items alphabetically regardless of shop sort order", async () => {
+    const admin = await createUser({ admin: true });
+    for (const [sku, name, sortOrder] of [["tuner_z", "Zebra", -100], ["tuner_a", "Apple", 100]]) {
+      await prisma.shopItem.create({ data: { ...FULL_BODY, sku, name, sortOrder } });
+    }
+    const res = await request(server.baseUrl, "GET", "/admin/shop/items", { token: admin.token });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body.items.filter(item => item.sku.startsWith("tuner_")).map(item => item.name), ["Apple", "Zebra"]);
+  });
+
   it("creates the item end-to-end and reports peer-mirror status", async () => {
     const admin = await createUser({ admin: true });
 
