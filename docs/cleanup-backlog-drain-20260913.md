@@ -1,0 +1,13 @@
+# Production completed-task backlog drain
+
+The authorized one-off operation cleared the accumulated seven-day post-task backlog using the exact deployed `d8ca21a` receipt-preserving deletion SQL. Work was grouped into 100,000-task rounds with 500-row commits, one database connection, a fixed seven-day cutoff per invocation and no application deployment. The short statement/transaction timeouts and ordinary per-run cleanup budgets were bypassed only in the authorized one-off process; normal scheduled cleanup configuration was unchanged. Recent and unfinished tasks remained protected by the existing eligibility and receipt predicates.
+
+The first drain started at 01:37:32 UTC September 14 with 587,447 eligible tasks. It was stopped at the user's request after at least 210,000 committed deletions were logged. No drain session remained active afterward. Both completed 100,000-task rounds verified 100/100 sampled matching receipts. CPU dropped from approximately 99% during the drain to 58.3% after the pause.
+
+The resumed drain started at 01:50:27 UTC with 376,534 eligible tasks. It committed 376,034 deletions in three full rounds and a final 76,034-task round, ending at 01:59:40 UTC with **zero rows remaining at that invocation's cutoff**. Another 500 rows disappeared concurrently; do not include them in the one-off's own deletion count. Every round verified 100 sampled payloads removed with all 100 matching durable receipts retained.
+
+At 02:00:14 UTC, 419 tasks had newly crossed the seven-day age threshold while the drain ran. A final 500-row-maximum sweep at 02:00:41 UTC removed 440 newly eligible tasks in 195.7 ms, with another 100/100 sampled matching receipts verified. The resumed operation and final sweep therefore committed **376,474 deletions**. The accumulated backlog is cleared; a rolling seven-day cutoff naturally admits more tasks afterward for scheduled cleanup.
+
+Old/current app versions 2.3.13 and 2.3.14 passed authenticated auth and completed-race progress reads after the main drain, with health and Redis healthy. One-off processes finished. The two HTTP workers, one resolution worker, one cron worker, pool budget and stopped staging service were unchanged. There was no migration or app release.
+
+A read-only review of the one-off script found no deletion-correctness blocker. Its receipt samples are logged rather than enforced by the script, so the operator checked each round's result. Completion was determined from the final remaining count, not merely a process-finished marker. One-off script and server logs remain under the authorized-backlog-drain backup directory; sanitized progress and verification evidence are in `docs/evidence/cleanup-backlog-drain/`.
