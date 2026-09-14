@@ -762,9 +762,21 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
                  AND receipt.completed_at IS NOT DISTINCT FROM candidate.completed_at
              )
              AND NOT EXISTS (
-               SELECT 1 FROM race_resolution_delivery_intents intent
-               LEFT JOIN race_resolution_delivery_intent_receipts receipt
-                 ON receipt.delivery_key_hash=intent.delivery_key_hash
+               SELECT 1 FROM (
+                 -- Fence delivery reads to this candidate before validating
+                 -- receipts; unrelated delivery history must not be hashed.
+                 SELECT * FROM race_resolution_delivery_intents candidate_intent
+                 WHERE candidate_intent.task_id=candidate.id
+                 OFFSET 0
+               ) intent
+               LEFT JOIN LATERAL (
+                 SELECT * FROM race_resolution_delivery_intent_receipts existing_intent
+                 WHERE existing_intent.delivery_key_hash=intent.delivery_key_hash::bpchar
+                   -- The PK is CHAR(64), while live keys are TEXT. Keep the
+                   -- original exact text comparison after the indexed lookup.
+                   AND existing_intent.delivery_key_hash::text=intent.delivery_key_hash
+                 OFFSET 0
+               ) receipt ON TRUE
                WHERE intent.task_id=candidate.id
                  AND (
                    receipt.delivery_key_hash IS NULL

@@ -154,3 +154,45 @@ test('scheduled cleanup checks only candidate receipts with large retained histo
   assert.ok(scans.every(scan=>scan['Node Type'].includes('Index') && scan['Plan Rows']<=1),
     'receipt validation must use individual candidate keys, not scan the retained history: '+JSON.stringify(scans));
 });
+
+test('scheduled cleanup bounds delivery validation to candidate tasks despite unrelated delivery history', {timeout:30000},async()=>{
+  const f=await fixture();await monitoring([]);
+  await prisma.raceResolutionPostTask.createMany({data:Array.from({length:1000},(_,i)=>({
+    raceId:f.race.id,sourceGeneration:i+1,dedupeKey:`delivery-history:${f.race.id}:${i+1}`,
+    state:'succeeded',snapshotState:'succeeded',requestedAt:new Date(),notBeforeAt:new Date(),
+    completedAt:new Date(),snapshotCommand:{raceId:f.race.id,timeZone:'UTC'},payloadBytes:100,intentCount:10
+  }))});
+  await prisma.$executeRawUnsafe(`INSERT INTO race_resolution_delivery_intents
+    (id,task_id,ordinal,kind,payload,payload_bytes,delivery_key_hash,state,completed_at,created_at,updated_at)
+    SELECT gen_random_uuid()::text,t.id,g,'STEP_SYNC','{}'::jsonb,2,
+      md5(t.id||':'||g)||md5(t.id||':'||g),'accepted',now(),now(),now()
+    FROM race_resolution_post_tasks t CROSS JOIN generate_series(0,9) g WHERE t.race_id=$1`,f.race.id);
+  await prisma.$executeRawUnsafe(`INSERT INTO race_resolution_delivery_intent_receipts
+    (delivery_key_hash,race_id,source_generation,task_dedupe_key,intent_kind,terminal_disposition,completed_at,created_at)
+    SELECT i.delivery_key_hash,t.race_id,t.source_generation,t.dedupe_key,i.kind,i.state,i.completed_at,i.created_at
+    FROM race_resolution_delivery_intents i JOIN race_resolution_post_tasks t ON t.id=i.task_id WHERE t.race_id=$1`,f.race.id);
+  const old=await f.task(1001,{intentCount:1});
+  const deliveryKey='f'.repeat(64);
+  await prisma.raceResolutionDeliveryIntent.create({data:{taskId:old.id,ordinal:0,kind:'STEP_SYNC',
+    payload:{},payloadBytes:2,deliveryKeyHash:deliveryKey,state:'accepted',completedAt:old.completedAt}});
+  for(const table of ['race_resolution_post_tasks','race_resolution_delivery_intents','race_resolution_delivery_intent_receipts'])
+    await prisma.$executeRawUnsafe('ANALYZE '+table);
+  const before=await publicProgress(f);const w=worker();let emitted;
+  try{
+    await until(async()=>!(await prisma.raceResolutionPostTask.findUnique({where:{id:old.id}})),w);
+    emitted=w.messages.find(m=>m.query.includes('DELETE FROM race_resolution_post_tasks task'));
+    assert.ok(emitted);
+  }finally{await w.stop();}
+  assert.equal(await prisma.raceResolutionDeliveryIntent.count({where:{task:{raceId:f.race.id}}}),10000);
+  assert.equal((await prisma.raceResolutionDeliveryIntentReceipt.findUnique({where:{deliveryKeyHash:deliveryKey}})).terminalDisposition,'accepted');
+  const after=await publicProgress(f);
+  assert.deepEqual(after.progress.participants.map(p=>[p.userId,p.totalSteps]),before.progress.participants.map(p=>[p.userId,p.totalSteps]));
+  const plan=await prisma.$queryRawUnsafe('EXPLAIN (FORMAT JSON) '+emitted.query,...JSON.parse(emitted.params));
+  const fullScans=[];const receiptLookups=[];
+  function visit(node){if(node['Alias']==='existing_intent')receiptLookups.push(node);if(['race_resolution_delivery_intents','race_resolution_delivery_intent_receipts'].includes(node['Relation Name']) && node['Node Type']==='Seq Scan')fullScans.push(node);for(const c of node.Plans||[])visit(c);}
+  visit(plan[0]['QUERY PLAN'][0].Plan);
+  assert.deepEqual(fullScans,[],'delivery validation must not scan unrelated historical records');
+  assert.ok(receiptLookups.length>0);
+  assert.ok(receiptLookups.every(n=>n['Node Type'].includes('Index') && n['Plan Rows']<=1 && n['Index Cond']?.includes('delivery_key_hash')),
+    'each delivery receipt must use its primary key: '+JSON.stringify(receiptLookups));
+});
