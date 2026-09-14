@@ -102,13 +102,14 @@ function parse(raw, bound, proof, cutoff) {
 // The caller is exclusively the real worker's nontransactional source phase.
 // The canonical bounded loader remains responsible for PostgreSQL paging/spill.
 async function loadHistoricalRawSamples({ bounds, now, load, Timeline,
-  maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage = process.memoryUsage, initialProofRead = null, sourceAttempt = null }) {
+  maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage = process.memoryUsage, initialProofRead = null, sourceAttempt = null, telemetryContext = null }) {
   // Tighter caller budgets keep the existing paging/spill loader untouched.
   // The default 32 MiB budget reserves at most 4 MiB encoded cache input,
   // 50k parsed rows and one sequential <=1 MiB publication at a time.
   const bypass = !redis.isEnabled() ? 'redis_disabled'
     : maxRetainedSampleRowsPerUser < 50000 || maxHeapGrowthBytes < 32 * 1024 * 1024 ? 'caller_budget' : null;
   if (bypass) {
+    for (const bound of bounds) telemetryContext?.recordRedisEligibility?.('cache_disabled_or_budget');
     stage('raw', bypass, bounds.length);
     const loaded = await load(bounds);
     io('full', { rows: [...loaded.values()].reduce((sum, timeline) => sum + (timeline?.length || 0), 0) });
@@ -130,6 +131,7 @@ async function loadHistoricalRawSamples({ bounds, now, load, Timeline,
     };
     const decisionCutoff = Math.floor(+now / DAY) * DAY - 2 * DAY;
     if (!batch.some(b => +b.rangeStart < decisionCutoff)) {
+      for (const bound of batch) telemetryContext?.recordRedisEligibility?.('recent_mutable_range');
       stage('raw', 'no_historical_range', batch.length);
       for (const bound of batch) terminalUsers.add(bound.userId);
       for (const [id, timeline] of await load(batch)) { result.set(id, timeline); io('full', { rows: timeline?.length || 0 }); }
@@ -140,8 +142,9 @@ async function loadHistoricalRawSamples({ bounds, now, load, Timeline,
     const candidates = batch.flatMap(bound => {
       const proof = before.get(bound.userId)?.proof;
       const cutoff = proof && Math.min(decisionCutoff, proof.cutoff);
-      if (!proof) outcomes.set(bound.userId, before.get(bound.userId)?.reason || 'missing');
-      else if (!(+bound.rangeStart < cutoff)) outcomes.set(bound.userId, 'no_historical_range');
+      if (!proof) { outcomes.set(bound.userId, before.get(bound.userId)?.reason || 'missing'); telemetryContext?.recordRedisEligibility?.('no_historical_proof'); }
+      else if (!(+bound.rangeStart < cutoff)) { outcomes.set(bound.userId, 'no_historical_range'); telemetryContext?.recordRedisEligibility?.('recent_mutable_range'); }
+      else telemetryContext?.recordRedisEligibility?.('eligible');
       const coverageReason = proof && +bound.rangeStart < cutoff ? observeCoverage(bound, proof, cutoff) : null;
       return proof && +bound.rangeStart < cutoff ? [{ bound, proof, cutoff, coverageReason, key: keyFor(bound, proof, cutoff) }] : [];
     });
@@ -172,6 +175,8 @@ async function loadHistoricalRawSamples({ bounds, now, load, Timeline,
           if (!value) reason = 'malformed_payload';
           else if (value.rows.length > remainingRows) reason = 'batch_row_budget';
           else { remainingRows -= value.rows.length; hits.set(c.bound.userId, value); }
+          telemetryContext?.recordRedisOutcome?.(reason === 'accepted' ? 'hit' : 'miss', reason === 'accepted' ? undefined : reason);
+          if (reason === 'accepted') telemetryContext?.recordRedisRows?.(value?.rows?.length || 0);
         }
         if (!['unavailable','absent_unknown','oversized','batch_byte_budget','malformed_payload','batch_row_budget','accepted'].includes(reason)) reason = 'unavailable';
         outcomes.set(c.bound.userId, reason); stage('lookup', reason);
@@ -211,6 +216,7 @@ async function loadHistoricalRawSamples({ bounds, now, load, Timeline,
       io(hit ? 'recent' : 'full', { rows: timeline.length });
       if (hit) {
         count('hits'); count('rowsReused', hit.rows.length); count('recentRowsRead', timeline.length);
+        telemetryContext?.recordRecentTailRows?.(timeline.length);
         const rows = hit.rows.map(([start, end, steps]) => ({ start, end, steps }));
         timeline.forEach((start, end, steps) => rows.push({ start, end, steps }));
         rows.sort((a, b) => a.start - b.start);

@@ -9,9 +9,42 @@ const {
   SCORING_INPUT_CACHE_MAX_USERS,
   SCORING_INPUT_CACHE_MAX_SAMPLE_ROWS,
   SCORING_INPUT_CACHE_TTL_MS,
+  DEFAULT_SAMPLE_RANGE_HORIZON_MS,
   createScoringInputCache,
   prefetchRaceScoringModels,
 } = require("../../src/modules/races/services/raceScoringPrefetch");
+
+test("production scoring prefetch adds one day beyond the required range", async () => {
+  const start = new Date("2026-08-10T00:00:00Z");
+  const now = new Date("2026-08-10T12:00:00Z");
+  let requestedRange = null;
+  const scoped = await prefetchRaceScoringModels({
+    races: [{
+      id: "race-1", startedAt: start, powerupsEnabled: false,
+      participants: [{ id: "participant-1", userId: "user-1" }],
+    }],
+    now,
+    stepSampleModel: {
+      async findRowsForUsersInRange(userIds, rangeStart, rangeEnd) {
+        assert.deepEqual(userIds, ["user-1"]);
+        requestedRange = { rangeStart, rangeEnd };
+        return [];
+      },
+    },
+    stepsModel: { async findByUserIdsAndDateRange() { return []; } },
+    raceActiveEffectModel: {
+      async findEffectsForRaceParticipantsByTypes() { return {}; },
+    },
+  });
+  scoped.stepSampleModel.releaseAll();
+
+  assert.equal(DEFAULT_SAMPLE_RANGE_HORIZON_MS, 24 * 60 * 60 * 1000);
+  assert.deepEqual(requestedRange, {
+    rangeStart: start,
+    rangeEnd: new Date("2026-08-12T00:00:00Z"),
+  });
+});
+
 
 test("process scoring cache has the reviewed production memory bounds", () => {
   assert.equal(SCORING_INPUT_CACHE_MAX_USERS, 2_000);

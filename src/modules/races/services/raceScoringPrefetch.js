@@ -11,8 +11,10 @@ const path = require("node:path");
 const {
   coordinatedOptimizationMetrics: defaultMetrics,
 } = require("../../../shared/observability/coordinatedOptimizationMetrics");
+const { stepHistoryRangeTelemetry: defaultStepHistoryRangeTelemetry } = require("./stepHistoryRangeTelemetry");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_SAMPLE_RANGE_HORIZON_MS = DAY_MS;
 const historicalWindowDemand = new WeakMap();
 const MAX_USERS_PER_CHUNK = 25;
 const MAX_SAMPLE_ROWS_PER_CHUNK = 50_000;
@@ -543,6 +545,8 @@ async function prefetchRaceScoringModelsImpl({
   scoringInputCache = null,
   scoringInputVersionModel = null,
   sourceReadsOutsideTransaction = false,
+  stepHistoryTelemetry = defaultStepHistoryRangeTelemetry,
+  sampleRangeHorizonMs = DEFAULT_SAMPLE_RANGE_HORIZON_MS,
 }) {
   // Only the worker's source-read phase opts in. Transaction-scoped adapters
   // cannot share even if a caller supplies the process cache by mistake.
@@ -599,7 +603,11 @@ async function prefetchRaceScoringModelsImpl({
   // Round the future coverage boundary up so successive generations can reuse
   // the same immutable input-version entry instead of missing by milliseconds.
   const coverageCeilingMs = Math.ceil(currentTime.getTime() / DAY_MS) * DAY_MS;
-  const sampleRangeEnd = new Date(coverageCeilingMs + 7 * DAY_MS);
+  const configuredHorizonMs = Number(sampleRangeHorizonMs);
+  const horizonMs = Number.isFinite(configuredHorizonMs)
+    ? Math.max(0, configuredHorizonMs)
+    : DEFAULT_SAMPLE_RANGE_HORIZON_MS;
+  const sampleRangeEnd = new Date(coverageCeilingMs + horizonMs);
   // Cache coverage is independent of an individual race's minute-level start.
   // Scorers still apply their exact race/join window to the shared timeline.
   const cacheStartMs = scoringInputCache
@@ -662,6 +670,7 @@ async function prefetchRaceScoringModelsImpl({
       row.userId, String(row.generation),
     ]));
   }
+  const rangeTelemetryContext = stepHistoryTelemetry?.createContext?.({ bounds: exactSampleBounds, races: started, futureCoverageDays: horizonMs / DAY_MS });
   const cachedByUser = new Map();
   for (const bound of exactSampleBounds) {
     const generation = versionsByUser.get(bound.userId);
@@ -677,6 +686,7 @@ async function prefetchRaceScoringModelsImpl({
       dailyEndMs: dailyRangeEnd.getTime(),
     });
     recordCacheStage('process', processOutcome || (cached ? 'hit' : 'absent'));
+    rangeTelemetryContext?.recordProcessCache?.(cached ? "hit" : "miss", cached?.timeline?.length || 0);
     if (cached) cachedByUser.set(bound.userId, cached);
   }
   const samplesByUser = new Map(
@@ -856,10 +866,12 @@ async function prefetchRaceScoringModelsImpl({
     const timelines = new Map();
     for (let offset = 0; offset < requestedBounds.length; offset += maxUsersPerChunk) {
       const bounds = requestedBounds.slice(offset, offset + maxUsersPerChunk);
-      mergeSampleTimelines(
-        timelines,
-        await loadBounds(bounds, maxSampleRowsPerChunk),
-      );
+      const telemetryToken = rangeTelemetryContext?.recordSourceLoad?.(bounds, bounds);
+      const telemetryStartedAt = Date.now();
+      const loaded = await loadBounds(bounds, maxSampleRowsPerChunk);
+      rangeTelemetryContext?.recordSourceLoadDuration?.(telemetryToken, Date.now() - telemetryStartedAt);
+      rangeTelemetryContext?.recordPostgresTimelines?.(loaded, { full: true });
+      mergeSampleTimelines(timelines, loaded);
       for (const bound of bounds) preparedSampleUsers.add(bound.userId);
     }
     return timelines;
@@ -899,7 +911,7 @@ async function prefetchRaceScoringModelsImpl({
       try {
         if (ownedBounds.length) {
           const loaded = sourceReadsOutsideTransaction && scoringInputCache && stepSampleModel === canonicalStepSampleModel
-            ? await loadHistoricalRawSamples({ bounds: ownedBounds, now: currentTime, load: loadSampleBounds, Timeline: CompactSampleTimeline, maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage, initialProofRead, sourceAttempt })
+            ? await loadHistoricalRawSamples({ bounds: ownedBounds, now: currentTime, load: loadSampleBounds, Timeline: CompactSampleTimeline, maxRetainedSampleRowsPerUser, maxHeapGrowthBytes, memoryUsage, initialProofRead, sourceAttempt, telemetryContext: rangeTelemetryContext })
             : await loadSampleBounds(ownedBounds);
           for (const bound of ownedBounds) {
             const timeline = loaded.get(bound.userId) || new CompactSampleTimeline();
@@ -1043,6 +1055,7 @@ async function prefetchRaceScoringModelsImpl({
     },
     releaseAll() {
       released = true;
+      rangeTelemetryContext?.finish?.();
       releaseLoadedSources();
     },
     retainedUserCount() {
@@ -1318,4 +1331,5 @@ module.exports = {
   createScoringInputCache,
   processScoringInputCache,
   prefetchRaceScoringModels,
+  DEFAULT_SAMPLE_RANGE_HORIZON_MS,
 };
