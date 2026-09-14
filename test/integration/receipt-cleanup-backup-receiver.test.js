@@ -121,3 +121,36 @@ test('real cleanup resumes on a later tick after actual standby lag clears', {ti
     await until(async()=>!(await prisma.raceResolutionPostTask.findUnique({where:{id:old.id}})),w);
   }finally{await w.stop();}
 });
+
+
+test('scheduled cleanup checks only candidate receipts with large retained history', {timeout:30000}, async()=>{
+  const f=await fixture();await monitoring([]);
+  await prisma.$executeRawUnsafe(`INSERT INTO race_resolution_post_task_receipts
+    (race_id,source_generation,dedupe_key,terminal_state,snapshot_state,intent_count,failure_count,completed_at)
+    SELECT $1,g,'history:'||$1||':'||g,'succeeded_with_failures','succeeded',0,1,
+      now()-interval '9 days' FROM generate_series(1,100000) g`,f.race.id);
+  // These 500 old tasks conflict with retained receipts and must survive cleanup.
+  await prisma.raceResolutionPostTask.createMany({data:Array.from({length:500},(_,i)=>({
+    raceId:f.race.id,sourceGeneration:i+1,dedupeKey:`history:${f.race.id}:${i+1}`,
+    state:'succeeded',snapshotState:'succeeded',requestedAt:new Date(Date.now()-9*86400000),
+    notBeforeAt:new Date(Date.now()-9*86400000),completedAt:new Date(Date.now()-9*86400000),
+    snapshotCommand:{raceId:f.race.id,timeZone:'UTC'},payloadBytes:100,intentCount:0
+  }))});
+  await prisma.$executeRawUnsafe('ANALYZE race_resolution_post_tasks');
+  await prisma.$executeRawUnsafe('ANALYZE race_resolution_post_task_receipts');
+  const before=await publicProgress(f);const w=worker();let emitted;
+  try {
+    await until(()=>{emitted=w.messages.find(m=>m.query.includes('DELETE FROM race_resolution_post_tasks task'));return emitted;},w);
+  }finally{await w.stop();}
+  assert.equal(await prisma.raceResolutionPostTask.count({where:{raceId:f.race.id}}),500);
+  const after=await publicProgress(f);
+  assert.deepEqual(after.progress.participants.map(p=>[p.userId,p.totalSteps]),before.progress.participants.map(p=>[p.userId,p.totalSteps]));
+  // Inspect the exact SQL emitted by the real scheduler. EXPLAIN does not execute it.
+  const plan=await prisma.$queryRawUnsafe('EXPLAIN (FORMAT JSON) '+emitted.query,...JSON.parse(emitted.params));
+  const scans=[];
+  function visit(node){if(node['Relation Name']==='race_resolution_post_task_receipts' && node['Node Type'].includes('Scan'))scans.push(node);for(const child of node.Plans||[])visit(child);}
+  visit(plan[0]['QUERY PLAN'][0].Plan);
+  assert.ok(scans.length>0);
+  assert.ok(scans.every(scan=>scan['Node Type'].includes('Index') && scan['Plan Rows']<=1),
+    'receipt validation must use individual candidate keys, not scan the retained history: '+JSON.stringify(scans));
+});

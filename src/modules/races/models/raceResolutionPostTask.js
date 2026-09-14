@@ -739,7 +739,13 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
                SELECT 1 FROM (
                  -- Data-modifying CTE writes are visible through RETURNING,
                  -- not a sibling scan of the base table in this statement.
-                 SELECT * FROM race_resolution_post_task_receipts
+                 -- Keep the historical lookup correlated and bounded to one
+                 -- primary key. OFFSET 0 prevents flattening this branch into
+                 -- a scan/hash of the entire retained receipt table.
+                 (SELECT * FROM race_resolution_post_task_receipts existing
+                  WHERE existing.race_id=candidate.race_id
+                    AND existing.source_generation=candidate.source_generation
+                  OFFSET 0)
                  UNION ALL SELECT * FROM task_receipts
                ) receipt
                WHERE receipt.race_id=candidate.race_id

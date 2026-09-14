@@ -17,6 +17,6 @@ global.setInterval = (callback, ms, ...args) => interval(callback, ms === 600000
 const { prisma } = require('../../../../src/db');
 prisma.$on('query', (event) => {
   if (event.query.includes('pg_stat_replication') || event.query.includes('DELETE FROM race_resolution_post_tasks task')) {
-    process.send?.({ kind: 'query', query: event.query, duration: event.duration });
+    process.send?.({ kind: 'query', query: event.query, duration: event.duration, params: event.params });
   }
 });
