@@ -3720,7 +3720,6 @@ model RaceResolutionPostTask {
   @@unique([raceId, sourceGeneration])
   @@index([state, notBeforeAt])
   @@index([leaseExpiresAt])
-  @@index([raceId, sourceGeneration])
   @@index([state, completedAt, id])
   @@map("race_resolution_post_tasks")
 }

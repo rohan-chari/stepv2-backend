@@ -1,0 +1,15 @@
+-- Drop only the redundant non-unique lookup index. The unique
+-- race_id/source_generation index remains the ON CONFLICT arbiter and supports
+-- the same lookup shapes.
+--
+-- This migration must remain outside a transaction: PostgreSQL forbids
+-- DROP INDEX CONCURRENTLY inside a transaction block. The normal Prisma
+-- migration runner in this repository executes standalone concurrent-index
+-- migrations without an outer transaction.
+--
+-- Rollback is forward-only: if this migration must be reversed, create the
+-- exact index in a new migration with:
+-- CREATE INDEX CONCURRENTLY
+--   race_resolution_post_tasks_race_id_source_generation_idx
+-- ON race_resolution_post_tasks (race_id, source_generation);
+DROP INDEX CONCURRENTLY "race_resolution_post_tasks_race_id_source_generation_idx";
