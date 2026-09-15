@@ -103,7 +103,7 @@ function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
   };
 }
 
-function buildRenew(ctx) {
+function buildRenew(ctx, overrides = {}) {
   return buildRenewSeededRaces({
     prisma: ctx.prisma,
     appSettings: {
@@ -115,6 +115,7 @@ function buildRenew(ctx) {
     logger: silent,
     eventBus: ctx.eventBus,
     enqueueRaceResolution: async (value) => ctx.enqueued.push(value),
+    ...overrides,
   });
 }
 
@@ -193,6 +194,120 @@ test("idempotent: a second run in steady state changes nothing", async () => {
   assert.equal(after1, 2);
   assert.equal(results2.length, 0);
   assert.equal(ctx.races.length, 2);
+});
+
+test("legacy auto-join fallback runs once at startup and then every ten minutes per seed", async () => {
+  let current = NOW;
+  const ctx = makeCtx({
+    seeds: [dailySeed, weeklySeed],
+    races: [
+      {
+        id: "daily-active",
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        startedAt: new Date("2026-06-25T04:00:00Z"),
+        endsAt: new Date("2026-06-26T04:00:00Z"),
+      },
+      {
+        id: "daily-pending",
+        seedId: dailySeed.id,
+        status: "PENDING",
+        startedAt: null,
+        scheduledStartAt: new Date("2026-06-26T04:00:00Z"),
+        endsAt: new Date("2026-06-27T04:00:00Z"),
+      },
+      {
+        id: "weekly-active",
+        seedId: weeklySeed.id,
+        status: "ACTIVE",
+        startedAt: new Date("2026-06-22T04:00:00Z"),
+        endsAt: new Date("2026-06-29T04:00:00Z"),
+      },
+      {
+        id: "weekly-pending",
+        seedId: weeklySeed.id,
+        status: "PENDING",
+        startedAt: null,
+        scheduledStartAt: new Date("2026-06-29T04:00:00Z"),
+        endsAt: new Date("2026-07-06T04:00:00Z"),
+      },
+    ],
+  });
+  const calls = [];
+  const renew = buildRenew(ctx, {
+    now: () => new Date(current),
+    enrollAutoJoinUsers: async (race) => {
+      calls.push(race.id);
+      return 0;
+    },
+  });
+
+  await renew();
+  assert.deepEqual(calls.sort(), ["daily-pending", "weekly-pending"]);
+
+  current = new Date(current.getTime() + 60 * 1000);
+  await renew();
+  assert.equal(calls.length, 2, "the next minute must not run legacy discovery");
+
+  current = new Date(current.getTime() + 9 * 60 * 1000);
+  await renew();
+  assert.equal(calls.length, 4, "the ten-minute boundary must run both seeds");
+
+  // A fresh renewal instance represents a safe process restart: its first
+  // maintenance pass is allowed to recover immediately.
+  const restarted = buildRenew(ctx, {
+    now: () => new Date(current),
+    enrollAutoJoinUsers: async (race) => {
+      calls.push(`restart:${race.id}`);
+      return 0;
+    },
+  });
+  await restarted();
+  assert.deepEqual(
+    calls.filter((id) => id.startsWith("restart:")).sort(),
+    ["restart:daily-pending", "restart:weekly-pending"],
+  );
+});
+
+test("legacy auto-join failure is retried on the later ten-minute fallback", async () => {
+  let current = NOW;
+  const ctx = makeCtx({
+    seeds: [dailySeed],
+    races: [
+      {
+        id: "daily-active",
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        startedAt: new Date("2026-06-25T04:00:00Z"),
+        endsAt: new Date("2026-06-26T04:00:00Z"),
+      },
+      {
+        id: "daily-pending",
+        seedId: dailySeed.id,
+        status: "PENDING",
+        startedAt: null,
+        scheduledStartAt: new Date("2026-06-26T04:00:00Z"),
+        endsAt: new Date("2026-06-27T04:00:00Z"),
+      },
+    ],
+  });
+  let calls = 0;
+  const renew = buildRenew(ctx, {
+    now: () => new Date(current),
+    enrollAutoJoinUsers: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("temporary enrollment failure");
+      return 1;
+    },
+  });
+
+  await renew();
+  current = new Date(current.getTime() + 9 * 60 * 1000);
+  await renew();
+  assert.equal(calls, 1, "failure must not cause a per-minute retry");
+  current = new Date(current.getTime() + 60 * 1000);
+  await renew();
+  assert.equal(calls, 2, "failure must retry at ten minutes");
 });
 
 test("promotes a due PENDING to ACTIVE, emits RACE_STARTED, and creates the next PENDING", async () => {

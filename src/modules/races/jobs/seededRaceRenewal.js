@@ -38,6 +38,7 @@ const {
 // the just-expired race is filtered out of Featured while the next race is still
 // PENDING until this job promotes it. One minute keeps that window <= ~1 min.
 const RENEWAL_INTERVAL_MS = 60 * 1000;
+const LEGACY_AUTOJOIN_INTERVAL_MS = 10 * 60 * 1000;
 
 // Canonical timezone for seeded daily/weekly challenges. Their day boundaries
 // (and thus "midnight") are defined here for every participant, globally.
@@ -64,7 +65,13 @@ function buildRenewSeededRaces(dependencies = {}) {
   // Pass the cron's logger down: the enrollment filter is a prune hook too
   // (hook 1), and its inactivity/auto-enroll-flip logging belongs in the same
   // stream as this job's, not on the default console.
-  const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma, logger });
+  const {
+    enrollAutoJoinUsers: defaultEnrollAutoJoinUsers,
+  } = buildAutoJoinFeaturedRaces({ prisma, logger });
+  const enrollAutoJoinUsers = dependencies.enrollAutoJoinUsers || defaultEnrollAutoJoinUsers;
+  // This throttle is scoped to this renewal instance and keyed by seeded
+  // window. All other seeded maintenance work remains on its existing path.
+  const legacyAutoJoinAttemptedAt = new Map();
   const seededBuckets =
     dependencies.seededRaceBuckets || buildSeededRaceBuckets({ prisma, now });
   const acquireWriteFence =
@@ -203,7 +210,30 @@ function buildRenewSeededRaces(dependencies = {}) {
   // this tick just created. Best-effort: a failure must never break race
   // creation, or Featured would show no challenge at all. The created-race
   // select omits maxParticipants, so the cap comes from the seed.
+  function legacyAutoJoinKey(seed, race) {
+    const windowStart = race.scheduledStartAt || race.startedAt;
+    return `${seed.id}:${windowStart ? new Date(windowStart).toISOString() : race.id}`;
+  }
+
+  function shouldRunLegacyAutoJoin(seed, race) {
+    const key = legacyAutoJoinKey(seed, race);
+    const nowMs = now().getTime();
+    const lastAttemptedAt = legacyAutoJoinAttemptedAt.get(key);
+    if (
+      lastAttemptedAt != null &&
+      nowMs - lastAttemptedAt < LEGACY_AUTOJOIN_INTERVAL_MS
+    ) {
+      return false;
+    }
+    // Record the attempt before the database work. A failed attempt is
+    // retried on the next allowed fallback tick, without reintroducing a
+    // per-minute retry storm.
+    legacyAutoJoinAttemptedAt.set(key, nowMs);
+    return true;
+  }
+
   async function autoEnroll(seed, race) {
+    if (!shouldRunLegacyAutoJoin(seed, race)) return;
     try {
       const joined = await enrollAutoJoinUsers({
         id: race.id,
@@ -808,5 +838,6 @@ module.exports = {
   renewSeededRaces,
   scheduleSeededRaceRenewal,
   RENEWAL_INTERVAL_MS,
+  LEGACY_AUTOJOIN_INTERVAL_MS,
   SEED_TIMEZONE,
 };
