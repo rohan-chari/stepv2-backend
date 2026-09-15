@@ -228,6 +228,7 @@ test("http and resolution process roles do not start the wrong schedulers", () =
     },
     processRole,
     cronStartDelayMs: 0,
+    scheduleBillingReconciliation: () => calls.push("billing"),
     registerEventHandlers() {},
     registerNotificationHandlers() {},
     scheduleGenerationHeartbeat: () => calls.push("heartbeat"),
@@ -247,6 +248,25 @@ test("http and resolution process roles do not start the wrong schedulers", () =
   assert.deepEqual(resolutionCalls, [
     "heartbeat", "resolution", "placement", "impact", "postTasks",
   ]);
+
+  const cronCalls = [];
+  startServer({
+    app: {
+      listen(...args) {
+        args[2]();
+        return { close() {} };
+      },
+    },
+    processRole: "cron",
+    cronStartDelayMs: 0,
+    capacityHomeOpenIsolation: true,
+    registerEventHandlers() {},
+    registerNotificationHandlers() {},
+    scheduleGenerationHeartbeat: () => cronCalls.push("heartbeat"),
+    scheduleBillingReconciliation: () => cronCalls.push("billing"),
+    logger: { log() {} },
+  });
+  assert.deepEqual(cronCalls, ["heartbeat", "billing"]);
 });
 
 test("home-open capacity keeps the cron process idle", () => {

@@ -108,6 +108,7 @@ function startServer({
   registerEventHandlers: register = registerEventHandlers,
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
   registerRaceListCacheInvalidation: registerRaceListCache = registerRaceListCacheInvalidation,
+  scheduleBillingReconciliation: scheduleBilling = scheduleBillingReconciliation,
   scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
   scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededChallengePreparation,
   scheduleTournamentSeedRenewal:
@@ -235,7 +236,6 @@ function startServer({
       return notificationAdmissionBarrierPromise;
     };
     const startCrons = () => {
-      retainStopHandle(scheduleBillingReconciliation());
       const scheduleTrackedResolutionWorker = () => {
         const handle = scheduleRaceResolution();
         if (reportCapacityResolutionWorker) {
@@ -258,6 +258,9 @@ function startServer({
           retainStopHandle(scheduleResolutionPostTasks());
         }
         return;
+      }
+      if (processRole === "cron") {
+        retainStopHandle(scheduleBilling());
       }
       if (capacityHttpResolutionOnly) {
         scheduleTrackedResolutionWorker();
