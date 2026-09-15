@@ -54,3 +54,28 @@ five runtime-control manifest tests) reproduce on untouched commit 0a4594a and
 were left unchanged. No integration tests ran against production.
 
 A read-only code-reviewer approved the final implementation with no blockers.
+
+## Production verification
+
+Runtime b69c1b5 was deployed through the guarded rolling wrapper on September 14
+UTC. Exactly two HTTP workers, one resolution worker and one cron worker passed
+the final topology/pool checks (32 aggregate connections); staging stayed stopped.
+Migration audit found none missing or unfinished. No installation or migration was
+needed. Environment and pre-existing remote lockfile hashes were preserved.
+Required referral ledger audit/apply/audit found zero outstanding or changed rows.
+Existing Decoy balance snapshot drift was reported and left unchanged.
+
+The first scheduled cleanup after restart ran around 02:29:45 UTC. At 02:30:09,
+all 100 sampled eligible tasks were absent and all 100 receipts matched their
+original race, generation, dedupe key, terminal/snapshot state, intent count and
+completion timestamp. At 02:30:28 only 32 currently eligible rows remained, the
+oldest completed at September 7 02:29:49 UTC (newly aged since this run's fixed
+cutoff). Post-task deletion statistics had advanced by at least 1,000 rows by
+02:30:15; this is a coarse table-counter observation, not a per-query trace.
+
+Public health and authenticated old/current app (2.3.13/2.3.14) authentication and
+completed-race progress checks passed both after reload and after cleanup. Recent
+DigitalOcean CPU samples around 02:30 were 33–42% non-idle; this short unmatched
+window does not establish a causal CPU saving. Private local observation logs use
+the /tmp/bara-cleanup-catchup- prefix. No manual bulk cleanup or synthetic production
+work was introduced for verification.

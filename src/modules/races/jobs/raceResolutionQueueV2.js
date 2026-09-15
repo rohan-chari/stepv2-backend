@@ -1480,6 +1480,38 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     let closurePlan = null;
     let planningFingerprint = null;
     let planningCapture = null;
+    // A team race is deliberately FULL, but its planner still captured the
+    // complete coherent scoring snapshot. Keep that snapshot eligible only
+    // for this attempt's first FULL computation. The transaction fence below
+    // remains the authoritative fresh validation.
+    let teamFullPlanningSnapshot = null;
+    const rememberTeamFullPlanningSnapshot = (fingerprint, capturedAt, balanceConfigVersion) => {
+      if (
+        fingerprint?.race?.isTeamRace !== true ||
+        fingerprint?.scoringReadSnapshot?.effectsComplete !== true ||
+        fingerprint?.scoringReadSnapshot?.raceComplete !== true ||
+        !fingerprint.digest ||
+        !(capturedAt instanceof Date) ||
+        Number.isNaN(capturedAt.getTime())
+      ) return;
+      const validUntil = computeArtifactReuseDeadline({
+        asOf: capturedAt,
+        timeZone: fingerprint.race?.timezone || job.processingTimeZone || "UTC",
+        raceEndsAt: fingerprint.race?.endsAt || null,
+        nextSampleBoundary: fingerprint.nextSampleBoundary,
+        activeEffects: fingerprint.activeEffects,
+        globalEvents: fingerprint.globalEvents,
+      });
+      if (!validUntil) return;
+      teamFullPlanningSnapshot = Object.freeze({
+        fingerprint,
+        digest: fingerprint.digest,
+        validUntil,
+        attemptId,
+        generation: Number(job.processingGeneration),
+        balanceConfigVersion,
+      });
+    };
     let closureSelectionInvariant = null;
     // bool when a closure plan was evaluated, null when the envelope is not
     // candidate-shaped or the planner said FULL.
@@ -1509,7 +1541,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 // a test can only ever see one of them.
                 buildInputFingerprint: async (options) => {
                   planningFingerprint = await buildInputFingerprint({ ...options, eventCacheRead: true });
-                  planningCapture = { capturedAt: new Date(options.now), balanceConfigVersion: options.balanceConfigVersion };
+                  planningCapture = {
+                    capturedAt: new Date(options.now),
+                    balanceConfigVersion: options.balanceConfigVersion,
+                    attemptId,
+                    generation: Number(job.processingGeneration),
+                  };
                   return planningFingerprint;
                 },
               })
@@ -1574,6 +1611,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                   ...closureSelectionInvariant,
                 });
               }
+            } else if (
+              shadowResult?.plan === "FULL" &&
+              planningFingerprint?.race?.isTeamRace === true &&
+              planningCapture?.attemptId === attemptId &&
+              planningCapture?.generation === Number(job.processingGeneration)
+            ) {
+              rememberTeamFullPlanningSnapshot(
+                planningFingerprint,
+                planningCapture.capturedAt,
+                planningCapture.balanceConfigVersion,
+              );
             }
         } catch (error) {
             // The duration is still honest and still useful (a timeout is the
@@ -1900,6 +1948,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             const useClosure = !forceFull && closurePlan != null;
             const protectedPlan = useClosure ? {
               digest: closurePlan.graphFingerprint, validUntil: closurePlan.validUntil,
+            } : (!forceFull && teamFullPlanningSnapshot?.attemptId === attemptId &&
+              teamFullPlanningSnapshot.generation === Number(job.processingGeneration)) ? {
+              digest: teamFullPlanningSnapshot.digest,
+              validUntil: teamFullPlanningSnapshot.validUntil,
             } : sourceInputWork ? sourceInputFingerprint : null;
             const reusedModels = protectedPlan?.digest === planningFingerprint?.digest
               ? planningInputModels({
@@ -2098,7 +2150,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         let stepSyncRejectedAtFence = false;
         let closureRejectedAtFence = false;
         let sourceInputRejectedAtFence = false;
+        let teamFullRejectedAtFence = false;
         const closureCommitting = resolutionPlan === "DEPENDENCY_CLOSURE";
+        const teamFullCommitting = !closureCommitting &&
+          !sourceInputWork &&
+          resolutionPlan === "FULL" &&
+          !forceFull &&
+          teamFullPlanningSnapshot?.attemptId === attemptId &&
+          teamFullPlanningSnapshot.generation === Number(job.processingGeneration);
         const writeStartedAt = Date.now();
         const attemptedBoxSyncResults = [];
         const attemptedPowerupEvents = [];
@@ -2172,6 +2231,41 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               (!Number.isFinite(deadline) || sourceFenceNow.getTime() >= deadline))
           ) {
             sourceInputRejectedAtFence = true;
+            return;
+          }
+        }
+        // Team FULL may reuse the planning snapshot only during computation.
+        // Revalidate every authoritative scoring input inside this transaction
+        // before the first participant write. This is intentionally a fresh
+        // fingerprint read: the planning object is never a fence authority.
+        if (teamFullCommitting) {
+          const dbClock = await tx.$queryRawUnsafe(
+            `SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8
+               AS "dbNowMs"`
+          );
+          const teamFenceNow = new Date(Number(dbClock[0]?.dbNowMs));
+          const teamFenceConfig = await balanceConfig.getSnapshot();
+          const teamFenceFingerprint = await buildInputFingerprint({
+            raceId: job.raceId,
+            now: teamFenceNow,
+            balanceConfigVersion: teamFenceConfig.version,
+            client: tx,
+            reuseEventsFrom: planningFingerprint,
+            includePresentation: false,
+          });
+          const deadline = new Date(teamFullPlanningSnapshot.validUntil).getTime();
+          if (
+            !teamFenceFingerprint ||
+            teamFenceFingerprint.digest !== teamFullPlanningSnapshot.digest ||
+            Number(fenced.generation) !== teamFullPlanningSnapshot.generation ||
+            Number(fenced.processingGeneration) !== teamFullPlanningSnapshot.generation ||
+            String(teamFenceConfig.version ?? "code-default") !==
+              String(teamFullPlanningSnapshot.balanceConfigVersion ?? "code-default") ||
+            !Number.isFinite(deadline) ||
+            !Number.isFinite(teamFenceNow.getTime()) ||
+            teamFenceNow.getTime() >= deadline
+          ) {
+            teamFullRejectedAtFence = true;
             return;
           }
         }
@@ -2699,7 +2793,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           !artifactRejectedAtFence &&
           !stepSyncRejectedAtFence &&
           !closureRejectedAtFence &&
-          !sourceInputRejectedAtFence
+          !sourceInputRejectedAtFence &&
+          !teamFullRejectedAtFence
         ) {
           attempt.authoritativeCommitCompleted = true;
           committedPostTaskId = attemptedPostTaskId;
@@ -2716,11 +2811,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
         if (artifactRejectedAtFence) {
           artifactFallbackReason = "fence_mismatch";
+          teamFullPlanningSnapshot = null;
           forceFull = true;
           await displayArtifactStore.consume(job.processingDisplayArtifactId);
           continue;
         }
         if (stepSyncRejectedAtFence) {
+          teamFullPlanningSnapshot = null;
+          forceFull = true;
+          continue;
+        }
+        if (teamFullRejectedAtFence) {
+          teamFullPlanningSnapshot = null;
+          planningFingerprint = null;
           forceFull = true;
           continue;
         }
@@ -2747,6 +2850,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
           closurePlan = null;
           planningFingerprint = null;
+          teamFullPlanningSnapshot = null;
           forceFull = true;
           continue;
         }
