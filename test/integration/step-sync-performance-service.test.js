@@ -7,9 +7,49 @@ const { cleanDatabase, prisma, createTestUser } = require("./setup");
 const {
   buildStepSyncPushService,
 } = require("../../src/shared/push/stepSyncPush");
+const { User } = require("../../src/modules/users/models/user");
 
 describe("bulk step-sync persistence integration", () => {
   beforeEach(cleanDatabase);
+
+  it("filters both timestamps in SQL, including NULLs and the exact cutoff", async () => {
+    const attemptedAt = new Date("2026-08-13T15:00:00.000Z");
+    const intervalMs = 60 * 60 * 1000;
+    const boundary = new Date(attemptedAt.getTime() - intervalMs);
+    const fresh = await createTestUser();
+    const stale = await createTestUser();
+    const nullSync = await createTestUser();
+    const nullPush = await createTestUser();
+    await prisma.user.update({
+      where: { id: fresh.user.id },
+      data: { lastStepSyncAt: new Date(attemptedAt.getTime() - 10 * 60 * 1000), lastSilentPushSentAt: boundary },
+    });
+    await prisma.user.update({
+      where: { id: stale.user.id },
+      data: { lastStepSyncAt: boundary, lastSilentPushSentAt: boundary },
+    });
+    await prisma.user.update({
+      where: { id: nullSync.user.id },
+      data: { lastStepSyncAt: null, lastSilentPushSentAt: boundary },
+    });
+    await prisma.user.update({
+      where: { id: nullPush.user.id },
+      data: { lastStepSyncAt: boundary, lastSilentPushSentAt: null },
+    });
+
+    const rows = await User.findEligibleStepSyncCandidates(
+      [fresh, stale, nullSync, nullPush].map(({ user }) => ({
+        userId: user.id,
+        intervalMs,
+      })),
+      attemptedAt
+    );
+    assert.deepEqual(new Set(rows.map((row) => row.id)), new Set([
+      stale.user.id,
+      nullSync.user.id,
+      nullPush.user.id,
+    ]));
+  });
 
   it("stamps only a successful user and deletes only the exact unregistered tuple", async () => {
     const first = await createTestUser();

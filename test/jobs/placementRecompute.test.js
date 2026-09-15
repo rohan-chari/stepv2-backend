@@ -68,6 +68,35 @@ test("normal five-minute ownership does not produce score-driven placement", asy
   assert.equal(pullCalls.length, 1, "clock-driven step-sync pulls remain active");
 });
 
+test("step-sync discovery passes disjoint normal and final-stretch freshness groups", async () => {
+  const { deps, pullCalls } = makeDeps({
+    races: [
+      {
+        id: "r1",
+        name: "Race 1",
+        endsAt: new Date(FIXED_NOW.getTime() + 30 * 60 * 1000),
+      },
+      { id: "r2", name: "Race 2" },
+    ],
+    participantsByRace: {
+      r1: [P({ id: "p1", userId: "u1", totalSteps: 1 })],
+      r2: [P({ id: "p2", userId: "u1", totalSteps: 1 }), P({ id: "p3", userId: "u2", totalSteps: 1 })],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+
+  const finalCall = pullCalls.find((call) => call.options.minIntervalMs === 30 * 60 * 1000);
+  const normalCall = pullCalls.find((call) => call.options.minIntervalMs === undefined);
+  assert.deepEqual(finalCall.userIds, ["u1"]);
+  assert.deepEqual(finalCall.options.freshnessCandidates, [
+    { userId: "u1", intervalMs: 30 * 60 * 1000 },
+  ]);
+  assert.deepEqual(normalCall.userIds, ["u2"]);
+  assert.deepEqual(normalCall.options.freshnessCandidates, [
+    { userId: "u2", intervalMs: 60 * 60 * 1000 },
+  ]);
+});
+
 test("emits PLACEMENT_CHANGED only for participants whose live rank changed", async () => {
   const { deps, emitted } = makeDeps({
     races: [{ id: "r1", name: "Race 1" }],
@@ -211,7 +240,11 @@ test("nudges all active-race participants to sync once (deduped step-sync pull)"
   // No race has an end time -> everyone is "normal" -> a single default-option pull.
   assert.equal(pullCalls.length, 1);
   assert.deepEqual([...pullCalls[0].userIds].sort(), ["u1", "u2", "u3"]);
-  assert.deepEqual(pullCalls[0].options, {});
+  assert.deepEqual(pullCalls[0].options.freshnessCandidates, [
+    { userId: "u1", intervalMs: 60 * 60 * 1000 },
+    { userId: "u2", intervalMs: 60 * 60 * 1000 },
+    { userId: "u3", intervalMs: 60 * 60 * 1000 },
+  ]);
 });
 
 test("no participants -> no step-sync pull", async () => {
@@ -474,7 +507,11 @@ test("a race ending in <60min -> its participants get the tighter 30-min option"
   // Only the final-stretch pull should fire (no normal users).
   assert.equal(pullCalls.length, 1);
   assert.deepEqual([...pullCalls[0].userIds].sort(), ["u1", "u2"]);
-  assert.deepEqual(pullCalls[0].options, { minIntervalMs: THIRTY_MIN_MS });
+  assert.equal(pullCalls[0].options.minIntervalMs, THIRTY_MIN_MS);
+  assert.deepEqual(pullCalls[0].options.freshnessCandidates, [
+    { userId: "u1", intervalMs: THIRTY_MIN_MS },
+    { userId: "u2", intervalMs: THIRTY_MIN_MS },
+  ]);
 });
 
 test("a race ending in >60min -> default options (not final-stretch)", async () => {
@@ -487,7 +524,9 @@ test("a race ending in >60min -> default options (not final-stretch)", async () 
   await buildRecomputePlacements(deps)();
   assert.equal(pullCalls.length, 1);
   assert.deepEqual([...pullCalls[0].userIds].sort(), ["u1"]);
-  assert.deepEqual(pullCalls[0].options, {});
+  assert.deepEqual(pullCalls[0].options.freshnessCandidates, [
+    { userId: "u1", intervalMs: 60 * 60 * 1000 },
+  ]);
 });
 
 test("a race with no end time (endsAt null) -> default options (not final-stretch)", async () => {
@@ -499,7 +538,9 @@ test("a race with no end time (endsAt null) -> default options (not final-stretc
   });
   await buildRecomputePlacements(deps)();
   assert.equal(pullCalls.length, 1);
-  assert.deepEqual(pullCalls[0].options, {});
+  assert.deepEqual(pullCalls[0].options.freshnessCandidates, [
+    { userId: "u1", intervalMs: 60 * 60 * 1000 },
+  ]);
 });
 
 test("a user in both a final-stretch and a normal race is nudged once, tighter-only", async () => {
@@ -524,7 +565,7 @@ test("a user in both a final-stretch and a normal race is nudged once, tighter-o
   assert.equal(pullCalls.length, 2);
 
   const finalCall = pullCalls.find((c) => c.options.minIntervalMs === THIRTY_MIN_MS);
-  const normalCall = pullCalls.find((c) => Object.keys(c.options).length === 0);
+  const normalCall = pullCalls.find((c) => c.options.minIntervalMs === undefined);
   assert.ok(finalCall, "expected a final-stretch pull");
   assert.ok(normalCall, "expected a normal pull");
 
@@ -542,5 +583,5 @@ test("final-stretch only (no normal users) -> a single tighter pull, no empty no
   });
   await buildRecomputePlacements(deps)();
   assert.equal(pullCalls.length, 1);
-  assert.deepEqual(pullCalls[0].options, { minIntervalMs: THIRTY_MIN_MS });
+  assert.equal(pullCalls[0].options.minIntervalMs, THIRTY_MIN_MS);
 });

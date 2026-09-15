@@ -15,7 +15,10 @@ const {
 const {
   RaceActiveEffect: defaultRaceActiveEffect,
 } = require("../../powerups/models/raceActiveEffect");
-const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
+const {
+  ONE_HOUR_MS,
+  stepSyncPushService,
+} = require("../../../shared/push/stepSyncPush");
 const {
   computeRacePayouts,
   computeFundedPayouts,
@@ -1091,6 +1094,10 @@ function buildRecomputePlacements(dependencies = {}) {
       try {
         await requestStepSync([...finalStretchUserIds], {
           minIntervalMs: FINAL_STRETCH_MIN_INTERVAL_MS,
+          freshnessCandidates: [...finalStretchUserIds].map((userId) => ({
+            userId,
+            intervalMs: FINAL_STRETCH_MIN_INTERVAL_MS,
+          })),
         });
       } catch (error) {
         logger.error(
@@ -1102,7 +1109,12 @@ function buildRecomputePlacements(dependencies = {}) {
 
     if (normalUserIds.size > 0) {
       try {
-        await requestStepSync([...normalUserIds], {});
+        await requestStepSync([...normalUserIds], {
+          freshnessCandidates: [...normalUserIds].map((userId) => ({
+            userId,
+            intervalMs: ONE_HOUR_MS,
+          })),
+        });
       } catch (error) {
         logger.error("[CRON] placementRecompute: step-sync pull failed:", error);
       }

@@ -115,7 +115,8 @@ function buildStepSyncPushService(dependencies = {}) {
     const flags = getPerformanceFlags();
     if (
       flags.stepSyncBulkEnabled &&
-      typeof userModel.findStepSyncCandidates === "function" &&
+      (typeof userModel.findStepSyncCandidates === "function" ||
+        typeof userModel.findEligibleStepSyncCandidates === "function") &&
       typeof deviceTokenModel.findByUserIds === "function"
     ) {
       return requestStepSyncForUsersBulk(
@@ -156,10 +157,31 @@ function buildStepSyncPushService(dependencies = {}) {
       MIN_INTERVAL_FLOOR_MS,
       options.minIntervalMs ?? ONE_HOUR_MS
     );
-    const [users, tokens] = await Promise.all([
-      userModel.findStepSyncCandidates(uniqueUserIds),
-      deviceTokenModel.findByUserIds(uniqueUserIds),
-    ]);
+    const freshnessCandidates = options.freshnessCandidates;
+    const normalizedFreshnessCandidates = Array.isArray(freshnessCandidates)
+      ? freshnessCandidates.map((candidate) => ({
+          ...candidate,
+          intervalMs: Math.max(
+            MIN_INTERVAL_FLOOR_MS,
+            Number(candidate?.intervalMs ?? minIntervalMs)
+          ),
+        }))
+      : freshnessCandidates;
+    const users = freshnessCandidates &&
+      typeof userModel.findEligibleStepSyncCandidates === "function"
+      ? await userModel.findEligibleStepSyncCandidates(
+          normalizedFreshnessCandidates,
+          attemptedAt
+        )
+      : await userModel.findStepSyncCandidates(uniqueUserIds);
+    const freshnessFiltered = Boolean(
+      freshnessCandidates &&
+      typeof userModel.findEligibleStepSyncCandidates === "function"
+    );
+    const tokenUserIds = freshnessFiltered
+      ? (users || []).map((user) => user.id)
+      : uniqueUserIds;
+    const tokens = await deviceTokenModel.findByUserIds(tokenUserIds);
     const tokensByUser = new Map();
     for (const tokenRecord of tokens || []) {
       const list = tokensByUser.get(tokenRecord.userId) || [];
@@ -171,13 +193,14 @@ function buildStepSyncPushService(dependencies = {}) {
     let noTokenUsers = 0;
     const eligible = [];
     for (const user of users || []) {
-      const throttled =
-        isWithinInterval(user.lastStepSyncAt, attemptedAt, minIntervalMs) ||
-        isWithinInterval(
-          user.lastSilentPushSentAt,
-          attemptedAt,
-          minIntervalMs
-        );
+      const throttled = freshnessFiltered
+        ? false
+        : isWithinInterval(user.lastStepSyncAt, attemptedAt, minIntervalMs) ||
+          isWithinInterval(
+            user.lastSilentPushSentAt,
+            attemptedAt,
+            minIntervalMs
+          );
       if (throttled) {
         throttledUsers += 1;
       } else if ((tokensByUser.get(user.id) || []).length === 0) {
@@ -252,7 +275,9 @@ function buildStepSyncPushService(dependencies = {}) {
       mode: "bulk",
       requestedUsers,
       uniqueUsers: uniqueUserIds.length,
-      throttledUsers,
+      throttledUsers: freshnessFiltered
+        ? uniqueUserIds.length - (users || []).length
+        : throttledUsers,
       noTokenUsers,
       eligibleUsers: eligible.length,
       tokenAttempts: sends.length,

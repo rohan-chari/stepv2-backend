@@ -49,6 +49,54 @@ const User = {
     });
   },
 
+  async findEligibleStepSyncCandidates(candidateGroups, attemptedAt = new Date()) {
+    const groupsByUserId = new Map();
+    for (const group of candidateGroups || []) {
+      const userId = typeof group?.userId === "string" ? group.userId : "";
+      const intervalMs = Number(group?.intervalMs);
+      if (!userId || !Number.isSafeInteger(intervalMs) || intervalMs < 0) {
+        continue;
+      }
+      const previous = groupsByUserId.get(userId);
+      groupsByUserId.set(
+        userId,
+        previous === undefined ? intervalMs : Math.min(previous, intervalMs)
+      );
+    }
+    if (groupsByUserId.size === 0) return [];
+
+    const userIds = [...groupsByUserId.keys()];
+    const intervalMs = [...groupsByUserId.values()];
+    return prisma.$queryRawUnsafe(
+      `
+        WITH candidate_groups AS (
+          SELECT user_id, interval_ms
+          FROM unnest($1::text[], $2::bigint[])
+            AS g(user_id, interval_ms)
+        )
+        SELECT
+          u.id,
+          u.last_step_sync_at AS "lastStepSyncAt",
+          u.last_silent_push_sent_at AS "lastSilentPushSentAt"
+        FROM users u
+        JOIN candidate_groups g ON g.user_id = u.id
+        WHERE (
+          u.last_step_sync_at IS NULL
+          OR u.last_step_sync_at <=
+            $3::timestamptz - g.interval_ms * interval '1 millisecond'
+        )
+        AND (
+          u.last_silent_push_sent_at IS NULL
+          OR u.last_silent_push_sent_at <=
+            $3::timestamptz - g.interval_ms * interval '1 millisecond'
+        )
+      `,
+      userIds,
+      intervalMs,
+      attemptedAt
+    );
+  },
+
   async updateLastSilentPushAttemptedAt(ids, attemptedAt) {
     const userIds = [...new Set(ids || [])].filter(Boolean);
     if (userIds.length === 0) return 0;

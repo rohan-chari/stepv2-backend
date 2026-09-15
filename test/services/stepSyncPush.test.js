@@ -136,6 +136,56 @@ test("requestStepSyncForUsers skips users already pushed within the last hour", 
   assert.equal(sendCalled, false);
 });
 
+test("eligibility-first bulk scheduling loads tokens only for database-eligible users", async () => {
+  const tokenReads = [];
+  const sent = [];
+  const updated = [];
+  const attemptedAt = new Date("2026-03-19T12:00:00.000Z");
+  const service = buildStepSyncPushService({
+    now: () => attemptedAt,
+    getPerformanceFlags: () => ({ stepSyncBulkEnabled: true, stepSyncPushConcurrency: 2 }),
+    User: {
+      async findEligibleStepSyncCandidates(groups, at) {
+        assert.deepEqual(groups, [
+          { userId: "fresh-final", intervalMs: 30 * 60 * 1000 },
+          { userId: "stale-final", intervalMs: 30 * 60 * 1000 },
+        ]);
+        assert.equal(at, attemptedAt);
+        return [{ id: "stale-final", lastStepSyncAt: null, lastSilentPushSentAt: null }];
+      },
+      async updateLastSilentPushAttemptedAt(ids, at) {
+        updated.push({ ids, at });
+      },
+    },
+    DeviceToken: {
+      async findByUserIds(ids) {
+        tokenReads.push(ids);
+        return [{ userId: "stale-final", token: "token-1", platform: "ios" }];
+      },
+      async deleteTokensExact() {},
+    },
+    apnsService: {
+      async sendSilentNotification(args) {
+        sent.push(args);
+        return { success: true };
+      },
+    },
+    logger: { log() {}, warn() {}, error() {} },
+  });
+
+  await service.requestStepSyncForUsers(["fresh-final", "stale-final"], {
+    minIntervalMs: 30 * 60 * 1000,
+    freshnessCandidates: [
+      { userId: "fresh-final", intervalMs: 30 * 60 * 1000 },
+      { userId: "stale-final", intervalMs: 30 * 60 * 1000 },
+    ],
+  });
+
+  assert.deepEqual(tokenReads, [["stale-final"]]);
+  assert.deepEqual(sent, [{ deviceToken: "token-1", payload: { type: "STEP_SYNC_REQUEST" } }]);
+  assert.deepEqual(updated, [{ ids: ["stale-final"], at: attemptedAt }]);
+});
+
 test("requestStepSyncForUsers deletes stale tokens and does not stamp cooldown without a success", async () => {
   const deletedTokens = [];
   let updated = false;
