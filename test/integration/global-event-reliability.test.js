@@ -1636,7 +1636,7 @@ describe("global-event reliability v2 contract", () => {
       "intentional terminal payload cleanup never becomes repair work");
   });
 
-  it("leaves retired materialization and snapshot repairs idle while repairing overdue outboxes and terminal targets", async () => {
+  it("leaves retired materialization and overdue outboxes idle while repairing terminal targets", async () => {
     const startsAt = new Date("2098-08-26T10:00:00.000Z");
     const current = new Date(startsAt.getTime() + 60_000);
     const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
@@ -1692,11 +1692,16 @@ describe("global-event reliability v2 contract", () => {
       nextAttemptAt: current,
     } });
 
+    let notificationWakes = 0;
     const repaired = await buildNotificationCompletenessReconciler({
-      prisma, now: () => current, logger: { log() {}, error() {} },
+      prisma,
+      now: () => current,
+      logger: { log() {}, error() {} },
+      publishNotificationWake: async () => { notificationWakes++; },
     })();
     assert.equal(repaired.materializationGapsRearmed, 0);
-    assert.equal(repaired.overdueOutboxesRearmed, 1);
+    assert.equal(Object.hasOwn(repaired, "overdueOutboxesRearmed"), false);
+    assert.equal(notificationWakes, 0);
     assert.equal(repaired.missingSnapshotsRearmed, 0,
       "delivery claims own target snapshots; the historical snapshot sweep is retired");
     assert.equal(repaired.terminalTargetsRepaired, 1);
@@ -1719,7 +1724,18 @@ describe("global-event reliability v2 contract", () => {
     assert.equal(await prisma.inboxAlert.count({ where: { userId: accounts[0].user.id } }), 0);
     assert.equal((await prisma.inboxDeliveryOutbox.findUniqueOrThrow({
       where: { id: overdueOutbox.id },
-    })).status, "RETRY");
+    })).status, "LEASED",
+      "completeness reconciliation does not rearm overdue outboxes");
+    await buildInboxDelivery({
+      prisma,
+      now: () => current,
+      logger: { log() {}, error() {} },
+    })();
+    assert.equal(
+      (await prisma.inboxDeliveryOutbox.findUniqueOrThrow({
+        where: { id: overdueOutbox.id },
+      })).status, "DELIVERED",
+      "normal inbox delivery recovers the expired lease");
     assert.equal((await prisma.inboxDeliveryDeviceAttempt.findFirstOrThrow({
       where: { outboxId: terminalOutbox.id },
     })).disposition, "EXHAUSTED");

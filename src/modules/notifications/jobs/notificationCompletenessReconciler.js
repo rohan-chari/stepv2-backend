@@ -10,8 +10,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
   const pageSize = Math.min(500, Math.max(1, Number(dependencies.pageSize) || 500));
   const publishDomainWake = dependencies.publishDomainWake ||
     (() => redisCache.publishDurableQueueWakeup("domain-event"));
-  const publishNotificationWake = dependencies.publishNotificationWake ||
-    (() => redisCache.publishNotificationWakeup({ kind: "COMPLETENESS_REARM" }));
   return async function reconcileNotificationCompleteness() {
     await dependencies.startupBarrier?.();
     const current = now();
@@ -133,26 +131,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       }, tx);
       return rows.length;
     });
-    const overdueOutboxesRearmed = await prisma.$executeRawUnsafe(
-      `WITH candidates AS (
-         SELECT outbox.id
-           FROM inbox_delivery_outbox outbox
-           JOIN inbox_alerts alert ON alert.id=outbox.alert_id
-           JOIN notification_schedules schedule
-             ON schedule.recipient_user_id=alert.user_id
-            AND schedule.delivery_key=alert.source_key
-          WHERE schedule.type='GLOBAL_EVENT_STARTED'
-            AND ((outbox.status='LEASED' AND outbox.lease_until <= $1)
-              OR (outbox.status='RETRY' AND outbox.available_at <= $1 - interval '30 seconds'))
-          ORDER BY outbox.available_at,outbox.id LIMIT $2
-       )
-       UPDATE inbox_delivery_outbox outbox
-          SET status=CASE WHEN outbox.admission_class IS NULL THEN 'RETRY' ELSE 'ADMISSION_RETRY' END,
-              available_at=$1,retry_at=$1,
-              lease_until=NULL,lease_token=NULL,updated_at=$1
-         FROM candidates WHERE outbox.id=candidates.id`,
-      current, pageSize,
-    );
     const terminalTargetsRepaired = await prisma.$executeRawUnsafe(
       `WITH candidates AS (
          SELECT attempt.id,outbox.status
@@ -198,14 +176,12 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       return rows.length;
     });
     if (Number(unknownReset) + Number(projectionsRearmed) > 0) await publishDomainWake();
-    if (Number(overdueOutboxesRearmed) > 0) await publishNotificationWake();
     return {
       unknownEventsReset: Number(unknownReset),
       projectionsRearmed: Number(projectionsRearmed),
       linkedDormant: Number(linkedDormant),
       // Retain the diagnostic shape for consumers of reconciliation results.
       materializationGapsRearmed: 0,
-      overdueOutboxesRearmed: Number(overdueOutboxesRearmed),
       terminalTargetsRepaired: Number(terminalTargetsRepaired),
       // Delivery claims create targets (including NO_DEVICE) and recover
       // expired leases. Retain the diagnostic field without scanning history
@@ -214,7 +190,7 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       expired: Number(expired),
       fullPage: Number(unknownReset) === pageSize || Number(projectionsRearmed) === pageSize ||
         Number(linkedDormant) === pageSize ||
-        Number(overdueOutboxesRearmed) === pageSize || Number(terminalTargetsRepaired) === pageSize ||
+        Number(terminalTargetsRepaired) === pageSize ||
         Number(expired) === pageSize,
     };
   };

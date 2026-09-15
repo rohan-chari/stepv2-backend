@@ -92,7 +92,6 @@ describe("notification delivery without historical snapshot repair", () => {
     const before = await inbox(f);
     const result = await buildNotificationCompletenessReconciler({ prisma, now: () => current })();
     assert.equal(result.missingSnapshotsRearmed, 0);
-    assert.equal(result.overdueOutboxesRearmed, 0);
     assert.deepEqual(await prisma.inboxDeliveryOutbox.findUnique({ where: { id: f.outbox.id } }), f.outbox);
     assert.deepEqual(await inbox(f), before);
   });
