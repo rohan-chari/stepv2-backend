@@ -169,7 +169,15 @@ function buildStepInputIntake(dependencies = {}) {
           userId,
           samples,
           new Date(requestTimestamp).getTime(),
-          { noopSuppression: true, manageScoringVersion: false, classifyScoringDelta: true },
+          {
+            noopSuppression: true,
+            manageScoringVersion: false,
+            classifyScoringDelta: true,
+            // The scoring-state lock above serializes this user's proof and
+            // insert. Corrections still fall through to reconciliation.
+            appendOnlyFastPath: true,
+            scoringInputLockHeld: true,
+          },
         ),
       );
     }

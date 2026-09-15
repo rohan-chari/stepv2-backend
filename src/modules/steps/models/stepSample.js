@@ -122,6 +122,53 @@ async function replaceSamplesOn(client, userId, samples, replacementWindows = sa
   );
 }
 
+// This query deliberately combines the append proof with the existing overlap
+// read. That keeps correction/replay requests to one authoritative read: the
+// fast path never trusts client intent, and the fallback does not pay for a
+// proof query followed by a second reconciliation query.
+async function readAppendProofAndOverlapsOn(client, userId, coveredStart, coveredEnd) {
+  return client.$queryRawUnsafe(
+    `WITH latest AS (
+       SELECT (
+         SELECT period_end
+         FROM step_samples
+         WHERE user_id = $1
+         ORDER BY period_end DESC
+         LIMIT 1
+       ) AS latest_end
+     )
+     SELECT latest.latest_end AS "latestEnd",
+            sample.period_start AS "start", sample.period_end AS "end", sample.steps,
+            sample.source_name AS "sourceName", sample.source_id AS "sourceId",
+            sample.source_device_id AS "sourceDeviceId", sample.device_model AS "deviceModel",
+            sample.recording_method AS "recordingMethod", sample.metadata
+     FROM latest
+     LEFT JOIN LATERAL (
+       SELECT period_start, period_end, steps, source_name, source_id,
+              source_device_id, device_model, recording_method, metadata
+       FROM step_samples
+       WHERE user_id = $1
+         AND period_end > $2::timestamp
+         AND period_start < $3::timestamp
+     ) sample ON TRUE`,
+    userId,
+    new Date(coveredStart).toISOString(),
+    new Date(coveredEnd).toISOString(),
+  );
+}
+
+function isStrictlyNonOverlappingBatch(incoming, latestEndMs) {
+  if (!incoming.length) return false;
+  const ordered = [...incoming].sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let index = 0; index < ordered.length; index += 1) {
+    const sample = ordered[index];
+    if (!Number.isFinite(sample.start) || !Number.isFinite(sample.end) ||
+        sample.end <= sample.start) return false;
+    if (index > 0 && sample.start < ordered[index - 1].end) return false;
+  }
+  return latestEndMs == null || ordered[0].start >= latestEndMs;
+}
+
 async function findRowsForUserRangesOn(
   client,
   bounds,
@@ -201,6 +248,8 @@ const StepSample = {
     lockScoringInput = false,
     returnCanonicalInput = false,
     classifyScoringDelta = false,
+    appendOnlyFastPath = false,
+    scoringInputLockHeld = false,
   } = {}) {
     if (!samples || samples.length === 0) {
       return {
@@ -212,6 +261,9 @@ const StepSample = {
       };
     }
     if (lockScoringInput && !(noopSuppression && manageScoringVersion)) {
+      await lockScoringInputState(client, userId);
+    }
+    if (appendOnlyFastPath && !scoringInputLockHeld) {
       await lockScoringInputState(client, userId);
     }
     const state = noopSuppression && manageScoringVersion
@@ -231,23 +283,28 @@ const StepSample = {
     const coveredStart = Math.min(...incoming.map((i) => i.start));
     const coveredEnd = Math.max(...incoming.map((i) => i.end));
 
-    // Fetch every stored sample overlapping the covered range in ONE query.
-    // `steps` is read so the span guard only fires when the non-spanned overhang
-    // actually carries step credit to protect.
-    const storedRaw = await client.$queryRawUnsafe(
-      `SELECT period_start AS "start", period_end AS "end", steps,
-              source_name AS "sourceName", source_id AS "sourceId",
-              source_device_id AS "sourceDeviceId",device_model AS "deviceModel",
-              recording_method AS "recordingMethod",metadata
-       FROM step_samples
-       WHERE user_id = $1
-         AND period_end > $2::timestamp
-         AND period_start < $3::timestamp`,
-      userId,
-      new Date(coveredStart).toISOString(),
-      new Date(coveredEnd).toISOString()
-    );
-    const stored = storedRaw.map((r) => ({
+    // Fetch the append proof and every stored sample overlapping the covered
+    // range in ONE query. `steps` is read so the span guard only fires when the
+    // non-spanned overhang actually carries step credit to protect.
+    const proofRows = appendOnlyFastPath
+      ? await readAppendProofAndOverlapsOn(client, userId, coveredStart, coveredEnd)
+      : await client.$queryRawUnsafe(
+        `SELECT period_start AS "start", period_end AS "end", steps,
+                source_name AS "sourceName", source_id AS "sourceId",
+                source_device_id AS "sourceDeviceId",device_model AS "deviceModel",
+                recording_method AS "recordingMethod",metadata
+         FROM step_samples
+         WHERE user_id = $1
+           AND period_end > $2::timestamp
+           AND period_start < $3::timestamp`,
+        userId,
+        new Date(coveredStart).toISOString(),
+        new Date(coveredEnd).toISOString()
+      );
+    const latestEndMs = appendOnlyFastPath && proofRows[0]?.latestEnd
+      ? new Date(proofRows[0].latestEnd).getTime()
+      : null;
+    const stored = proofRows.filter((r) => r.start != null).map((r) => ({
       start: r.start.getTime(),
       end: r.end.getTime(),
       steps: r.steps,
@@ -258,6 +315,39 @@ const StepSample = {
       recordingMethod: r.recordingMethod,
       metadata: r.metadata,
     }));
+
+    if (appendOnlyFastPath && isStrictlyNonOverlappingBatch(incoming, latestEndMs)) {
+      // The sync path holds the user's scoring lock across this proof and
+      // write. Therefore no concurrent writer can create an overlapping row
+      // between the authoritative read and this bulk insert.
+      await insertSamplesOn(client, userId, incoming.map((row) => row.raw));
+      if (!manageScoringVersion) {
+        return {
+          storageChanged: true,
+          scoringChanged: true,
+          earliestChangedStartMs: coveredStart,
+          ...(returnCanonicalInput
+            ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
+            : {}),
+        };
+      }
+      if (!state) {
+        await bumpScoringInputVersion(client, userId);
+        return { storageChanged: true, scoringChanged: true };
+      }
+      const afterCanonical = await readCanonicalSampleInput(client, userId);
+      const storageChanged = beforeCanonical.storageWatermark !==
+        afterCanonical.storageWatermark;
+      const decisionState = { ...state, dbNow: afterCanonical.dbNow };
+      const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
+        state.scoringWatermark !== afterCanonical.scoringWatermark;
+      await persistScoringInputState(client, userId, state, afterCanonical, scoringChanged);
+      return {
+        storageChanged,
+        scoringChanged,
+        ...(returnCanonicalInput ? { canonicalInput: afterCanonical } : {}),
+      };
+    }
 
     // Rules 1 & 2 decide which incoming samples to KEEP.
     const kept = incoming.filter((i) => {
