@@ -1,8 +1,14 @@
 const { entitlementsChanged, raceEventDisplayChanged } = require('./eventDisplayCacheInvalidation');
+const {
+  FALLBACK_EVENT_TIMEZONE,
+  LOCAL_ENTITLEMENTS,
+  localEventWindowForZone,
+} = require('../globalStepEvent');
+const { isValidIanaTimeZone } = require('../../users/services/globalEventTimezone');
+const { isGenerationUsable } = require('../models/globalStepEventGeneration');
 // Durable lifecycle entries for a global event's race impact. These helpers
 // only establish membership; settlement remains the sole score authority.
 const {
-  ensureEntitlementForUser,
   START_OUTCOMES,
 } = require("./globalStepEventEntitlement");
 
@@ -127,15 +133,20 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
     },
     orderBy: { startsAt: "desc" },
   });
+  const unique = uniqueUserIds(userIds);
   if (event) {
-    await createPendingEnrollments(tx, {
-      eventId: event.id,
-      raceId,
-      userIds,
+    const existing = await tx.globalEventRaceImpact.findMany({
+      where: { eventId: event.id, raceId, userId: { in: unique } },
+      select: { userId: true },
     });
+    await tx.globalEventRaceImpact.createMany({
+      data: unique.map((userId) => ({ eventId: event.id, raceId, userId })),
+      skipDuplicates: true,
+    });
+    if (existing.length < unique.length) await raceEventDisplayChanged([raceId]);
   }
 
-  if (!tx.globalStepEventEntitlement || !tx.user) return event;
+  if (!tx.globalStepEventEntitlement || !tx.user || unique.length === 0) return event;
   const localParents = await tx.globalStepEvent.findMany({
     where: {
       scheduleMode: "LOCAL_ENTITLEMENTS",
@@ -143,55 +154,104 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
     },
     orderBy: { eventDay: "asc" },
   });
-  let activeLocalEvent = null;
-  for (const userId of uniqueUserIds(userIds)) {
-    const user = await tx.user.findUnique({
-      where: { id: userId },
-      select: { id: true, timezone: true, globalEventTimezone: true },
-    });
+  const users = await tx.user.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, timezone: true, globalEventTimezone: true },
+  });
+  const userById = new Map(users.map((user) => [user.id, {
+    ...user,
+    globalEventTimezone: user.timezone,
+  }]));
+  const parentIds = localParents.map((parent) => parent.id);
+  const existing = parentIds.length
+    ? await tx.globalStepEventEntitlement.findMany({
+      where: { eventId: { in: parentIds }, userId: { in: unique } },
+    })
+    : [];
+  const byKey = new Map(existing.map((row) => [`${row.eventId}:${row.userId}`, row]));
+  const prepared = [];
+  for (const userId of unique) {
+    const user = userById.get(userId);
     if (!user) continue;
+    const timezone = isValidIanaTimeZone(user.globalEventTimezone)
+      ? user.globalEventTimezone : FALLBACK_EVENT_TIMEZONE;
     for (const parent of localParents) {
-      const before = await tx.globalStepEventEntitlement.findUnique({
-        where: { eventId_userId: { eventId: parent.id, userId } },
+      const key = `${parent.id}:${userId}`;
+      if (byKey.has(key)) continue;
+      const window = localEventWindowForZone({
+        eventDay: parent.eventDay,
+        localStartMinute: parent.localStartMinute,
+        durationMinutes: parent.durationMinutes,
+        timeZone: timezone,
       });
-      const entitlement = before || await ensureEntitlementForUser(tx, {
-        event: parent, user, now: current, allowActive: true,
+      if (window.endsAt <= current) continue;
+      prepared.push({
+        eventId: parent.id, userId, timezone, localDate: window.localDate,
+        startsAt: window.startsAt, endsAt: window.endsAt,
+        startOutcome: START_OUTCOMES.PENDING,
       });
-      if (!entitlement) continue;
-      const active = new Date(entitlement.startsAt) <= current &&
-        current < new Date(entitlement.endsAt);
-      if (
-        !active ||
-        entitlement.startOutcome === START_OUTCOMES.SKIPPED_STALE
-      ) continue;
+    }
+  }
+  if (prepared.length) {
+    const generationReady = await isGenerationUsable({ client: tx, now: current });
+    await tx.globalStepEventEntitlement.createMany({ data: prepared, skipDuplicates: true });
+    const persisted = await tx.globalStepEventEntitlement.findMany({
+      where: { eventId: { in: parentIds }, userId: { in: unique } },
+    });
+    const parentById = new Map(localParents.map((parent) => [parent.id, parent]));
+    const authoritativePrepared = prepared.map((row) => {
+      const entitlement = persisted.find((candidate) =>
+        candidate.eventId === row.eventId && candidate.userId === row.userId);
+      return entitlement ? { ...entitlement, event: parentById.get(entitlement.eventId) } : null;
+    }).filter(Boolean);
+    if (generationReady && authoritativePrepared.length) {
+      const { appendScheduledEntitlementEventsBatch } = require("./globalStepEventEntitlement");
+      await appendScheduledEntitlementEventsBatch(tx, {
+        entitlements: authoritativePrepared,
+        occurredAt: current,
+      });
+    }
+    for (const row of persisted) byKey.set(`${row.eventId}:${row.userId}`, row);
+    for (const row of prepared) await entitlementsChanged([row.userId]);
+  }
 
-      let outcome = entitlement.startOutcome;
-      if (!before || outcome === START_OUTCOMES.NO_ACTIVE_RACES) {
-        outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
-      } else if (outcome === START_OUTCOMES.PENDING) {
-        outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
-      }
-      await createPendingEnrollments(tx, {
-        eventId: parent.id,
-        raceId,
-        userIds: [userId],
-      });
-      if (outcome !== entitlement.startOutcome) {
-        await tx.globalStepEventEntitlement.updateMany({
-          where: { id: entitlement.id },
-          data: { startOutcome: outcome, startProcessedAt: entitlement.startProcessedAt || current },
-        });
-        await entitlementsChanged([userId]);
-        if (outcome === START_OUTCOMES.ACTIVATED_LATE_JOIN) {
-          const { appendLateActivationEvent } = require("./globalStepEventEntitlement");
-          await appendLateActivationEvent(tx, {
-            event: parent,
-            entitlement,
-            occurredAt: current,
-          });
-        }
-      }
-      if (!activeLocalEvent) activeLocalEvent = parent;
+  const localRows = [];
+  const late = [];
+  let activeLocalEvent = null;
+  for (const userId of unique) for (const parent of localParents) {
+    const entitlement = byKey.get(`${parent.id}:${userId}`);
+    if (!entitlement) continue;
+    const active = new Date(entitlement.startsAt) <= current &&
+      current < new Date(entitlement.endsAt);
+    if (!active || entitlement.startOutcome === START_OUTCOMES.SKIPPED_STALE) continue;
+    localRows.push({ eventId: parent.id, raceId, userId });
+    if (entitlement.startOutcome === START_OUTCOMES.NO_ACTIVE_RACES ||
+        entitlement.startOutcome === START_OUTCOMES.PENDING) {
+      late.push({ event: parent, entitlement });
+    }
+    if (!activeLocalEvent) activeLocalEvent = parent;
+  }
+  const existingLocalImpacts = localRows.length
+    ? await tx.globalEventRaceImpact.findMany({
+      where: { raceId, eventId: { in: localParents.map((parent) => parent.id) }, userId: { in: unique } },
+      select: { eventId: true, userId: true },
+    }) : [];
+  await tx.globalEventRaceImpact.createMany({ data: localRows, skipDuplicates: true });
+  if (localRows.length) {
+    const old = new Set(existingLocalImpacts.map((row) => `${row.eventId}:${row.userId}`));
+    for (const row of localRows) if (!old.has(`${row.eventId}:${row.userId}`)) {
+      await raceEventDisplayChanged([raceId]);
+    }
+  }
+  if (late.length) {
+    await tx.globalStepEventEntitlement.updateMany({
+      where: { id: { in: late.map(({ entitlement }) => entitlement.id) } },
+      data: { startOutcome: START_OUTCOMES.ACTIVATED_LATE_JOIN, startProcessedAt: current },
+    });
+    for (const { event: parent, entitlement } of late) {
+      await entitlementsChanged([entitlement.userId]);
+      const { appendLateActivationEvent } = require("./globalStepEventEntitlement");
+      await appendLateActivationEvent(tx, { event: parent, entitlement, occurredAt: current });
     }
   }
   return event || activeLocalEvent;

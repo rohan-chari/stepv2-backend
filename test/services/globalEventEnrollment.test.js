@@ -38,6 +38,7 @@ test("late joins enroll only while a global event is active", async () => {
       },
     },
     globalEventRaceImpact: {
+      async findMany() { return []; },
       async createMany(input) { writes.push(input); return { count: 1 }; },
     },
   };
@@ -61,8 +62,8 @@ test("late enrollment scans every local parent before returning the active match
   const visitedParents = [];
   const now = new Date("2026-08-20T12:10:00.000Z");
   const parents = [
-    { id: "today", scheduleMode: "LOCAL_ENTITLEMENTS", eventDay: "2026-08-20" },
-    { id: "tomorrow", scheduleMode: "LOCAL_ENTITLEMENTS", eventDay: "2026-08-21" },
+    { id: "today", scheduleMode: "LOCAL_ENTITLEMENTS", eventDay: "2026-08-20", localStartMinute: 720, durationMinutes: 30 },
+    { id: "tomorrow", scheduleMode: "LOCAL_ENTITLEMENTS", eventDay: "2026-08-21", localStartMinute: 720, durationMinutes: 30 },
   ];
   const entitlements = new Map([
     ["today", {
@@ -85,20 +86,29 @@ test("late enrollment scans every local parent before returning the active match
       async findMany() { return parents; },
     },
     globalEventRaceImpact: {
+      async findMany() { return []; },
       async createMany({ data }) { writes.push(...data); return { count: data.length }; },
     },
     globalStepEventEntitlement: {
+      async findMany({ where }) {
+        for (const parent of parents) visitedParents.push(parent.id);
+        return [...entitlements.values()].filter((item) => where.eventId.in.includes(item.eventId));
+      },
       async findUnique({ where }) {
         visitedParents.push(where.eventId_userId.eventId);
         return entitlements.get(where.eventId_userId.eventId) || null;
       },
       async updateMany({ where, data }) {
-        const row = [...entitlements.values()].find((item) => item.id === where.id);
+        const ids = where.id?.in || [where.id];
+        const row = [...entitlements.values()].find((item) => ids.includes(item.id));
         Object.assign(row, data);
         return { count: row ? 1 : 0 };
       },
     },
     user: {
+      async findMany() {
+        return [{ id: "user-1", timezone: "UTC", globalEventTimezone: "UTC" }];
+      },
       async findUnique() {
         return { id: "user-1", timezone: "UTC", globalEventTimezone: "UTC" };
       },
