@@ -10,6 +10,7 @@ assert.match(url.pathname, /_test$/);
 const { reads } = require('./fixtures/observe-event-fingerprint.cjs');
 const { prisma, cleanDatabase, createTestUser, getSharedServer, request } = require('./setup');
 const { buildRaceResolutionWorkerV2 } = require('../../src/modules/races/jobs/raceResolutionQueueV2');
+const { RaceResolutionJobV2 } = require('../../src/modules/races/models/raceResolutionJobV2');
 let baseUrl;
 before(async () => { baseUrl = (await getSharedServer()).baseUrl; });
 beforeEach(async () => { await cleanDatabase(); reads.length = 0; });
@@ -82,9 +83,37 @@ for (const [kind, expected] of [['none', 100], ['RUNNERS_HIGH', 200], ['RAINSTOR
     assert.equal(result.persisted, expected);
     assert.equal(fullReads(result.observations), 1);
     assert.equal(result.observations.length, 2, 'one original planning capture and one final fence');
+    if (kind === 'team') {
+      assert.equal(
+        result.done.computePhaseQueryCount.activeEffects,
+        0,
+        'team FULL compute must reuse the coherent planning effect snapshot',
+      );
+      assert.equal(
+        result.done.computePhaseQueryCount.raceLoad,
+        0,
+        'team FULL compute must reuse the coherent planning race snapshot',
+      );
+    }
     t.diagnostic(JSON.stringify({ kind, plan: result.done.resolutionPlan, fullEffectReads: fullReads(result.observations), rows: result.observations.map(r => r.value.scoringEffects.length) }));
   });
 }
+
+it('team FULL with committed STEP_SYNC uses the complete planning snapshot', async () => {
+  const f = await fixture('team');
+  await sync(f);
+  const job = await RaceResolutionJobV2.findByRaceId(f.race.id);
+  await prisma.raceResolutionJobV2.update({ where: { id: job.id }, data: {
+    dirtyReasons: ['STEP_SYNC'],
+    dirtyParticipantIds: [f.parts[0].id],
+    dirtyPowerupTypes: [],
+    triggeredByUserIds: [f.users[0].user.id],
+  } });
+  const result = await resolve(f);
+  assert.equal(result.done.resolutionPlan, 'FULL');
+  assert.equal(result.done.computePhaseQueryCount.raceLoad, 0);
+  assert.equal(result.done.computePhaseQueryCount.activeEffects, 0);
+});
 for (const action of ['insert', 'update', 'delete', 'missing proof', 'replace proof', 'rollback']) {
   it(`final fence handles ${action} after planning`, async () => {
     const f = await fixture(action === 'insert' ? 'none' : 'RUNNERS_HIGH'); await sync(f);
