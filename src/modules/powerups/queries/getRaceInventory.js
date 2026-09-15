@@ -3,7 +3,9 @@ const { Race } = require("../../races/models/race");
 const { RacePowerup } = require("../models/racePowerup");
 
 async function getRaceInventory(userId, raceId, supportsPowerups4 = false) {
-  const race = await Race.findById(raceId);
+  const race = typeof Race.findInventoryAccess === "function"
+    ? await Race.findInventoryAccess(raceId, userId)
+    : await Race.findById(raceId);
   if (!race) {
     const error = new Error("Race not found");
     error.statusCode = 404;

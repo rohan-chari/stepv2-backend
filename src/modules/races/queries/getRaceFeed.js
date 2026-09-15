@@ -1,4 +1,5 @@
 const { Race } = require("../models/race");
+const { prisma } = require("../../../db");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const {
@@ -9,7 +10,9 @@ const {
 } = require("../../../shared/lib/displayNameValidator");
 
 async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerups4 = false } = {}) {
-  const race = await Race.findById(raceId);
+  const race = typeof Race.findFeedAccess === "function"
+    ? await Race.findFeedAccess(raceId, userId)
+    : await Race.findById(raceId);
   if (!race) {
     const error = new Error("Race not found");
     error.statusCode = 404;
@@ -46,19 +49,40 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
 
   // Event descriptions snapshot names in prose, so keep the raw lookup long
   // enough to replace both stealthed and legacy-profane principals safely.
-  const participantNames = new Map();
-  for (const p of race.participants) {
-    if (p.user?.displayName) {
-      participantNames.set(p.userId, p.user.displayName);
-    }
-  }
-
   const rawEvents = await RacePowerupEvent.findByRace(raceId, {
     cursor,
     limit,
     excludeWelcomeMysteryBoxEvents: true,
     excludeHiddenFromFeedEvents: true,
   });
+
+  // Durable descriptions can name principals who are not the viewer. Fetch
+  // only those race members, rather than hydrating the complete roster and
+  // cosmetic graph before the event page is known.
+  const namedPrincipalIds = new Set();
+  for (const event of rawEvents) {
+    for (const id of [
+      event.actorUserId,
+      event.targetUserId,
+      event.metadata?.attackerUserId,
+      event.metadata?.decoyOwnerUserId,
+      event.metadata?.redirectedUserId,
+    ].filter(Boolean)) {
+      namedPrincipalIds.add(id);
+    }
+  }
+  const participantNames = new Map();
+  if (namedPrincipalIds.size > 0) {
+    const namedParticipants = await prisma.raceParticipant.findMany({
+      where: { raceId, userId: { in: [...namedPrincipalIds] } },
+      select: { userId: true, user: { select: { displayName: true } } },
+    });
+    for (const participant of namedParticipants) {
+      if (participant.user?.displayName) {
+        participantNames.set(participant.userId, participant.user.displayName);
+      }
+    }
+  }
 
   // MYSTERY_BOX_OPENED rows are persisted only for the admin box-opener metric
   // (Item 9). They are audit-only — hide them from the visible feed so the

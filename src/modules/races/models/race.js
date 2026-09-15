@@ -393,6 +393,43 @@ const Race = {
     });
   },
 
+  // Viewer authorization contexts for feed/inventory reads. These callers do
+  // not need the roster; feed obtains only event-referenced display names
+  // after it has loaded the event page.
+  async findFeedAccess(id, userId) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        seededBucketId: true,
+        tournamentId: true,
+        powerupsEnabled: true,
+        participants: {
+          where: { userId },
+          select: { id: true, userId: true, status: true },
+          take: 1,
+        },
+      },
+    });
+  },
+
+  async findInventoryAccess(id, userId) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        seededBucketId: true,
+        participants: {
+          where: { userId },
+          select: { id: true, userId: true, status: true },
+          take: 1,
+        },
+      },
+    });
+  },
+
   async findProgressScoringContext(id) {
     return prisma.race.findUnique({
       where: { id },
