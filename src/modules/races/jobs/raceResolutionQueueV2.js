@@ -2756,6 +2756,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             () => postTaskHandoff.createDurable({
               raceId: job.raceId,
               sourceGeneration: job.processingGeneration,
+              includesGlobalEventBoundary: job.processingDirtyReasons.includes("GLOBAL_EVENT_BOUNDARY"),
               snapshotCommand: preparedSnapshotCommand,
               intents: [],
               resolveIntents,
@@ -3113,6 +3114,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           await postTaskHandoff({
             raceId: job.raceId,
             sourceGeneration: job.processingGeneration,
+            includesGlobalEventBoundary: job.processingDirtyReasons.includes("GLOBAL_EVENT_BOUNDARY"),
             snapshotCommand: deferredSnapshotCommand,
             intents: deferredIntents,
             resolveIntents,

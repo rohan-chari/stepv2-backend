@@ -138,6 +138,25 @@ test("durable handoff passes deferred claim resolution to the task transaction",
   assert.equal(received.resolveIntents, resolveIntents);
 });
 
+test("durable handoff passes boundary provenance from the processing envelope", async () => {
+  let received;
+  const handoff = buildRaceResolutionPostTaskHandoff({
+    RaceResolutionPostTask: {
+      async create(value) { received = value; return { created: true, id: "t-boundary" }; },
+    },
+    runner: { async isReady() { return true; } },
+  });
+
+  await handoff({
+    raceId: "r1",
+    sourceGeneration: 14,
+    includesGlobalEventBoundary: true,
+    snapshotCommand: { raceId: "r1", timeZone: "UTC" },
+  });
+
+  assert.equal(received.includesGlobalEventBoundary, true);
+});
+
 test("known non-creation resolves deferred claims before legacy inline fallback", async () => {
   const delivered = [];
   const handoff = buildRaceResolutionPostTaskHandoff({

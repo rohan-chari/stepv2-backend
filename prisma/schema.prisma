@@ -3695,6 +3695,7 @@ model RaceResolutionPostTask {
   id                  String    @id @default(uuid())
   raceId              String    @map("race_id")
   sourceGeneration    Int       @map("source_generation")
+  includesGlobalEventBoundary Boolean @default(false) @map("includes_global_event_boundary")
   dedupeKey           String    @unique @map("dedupe_key")
   state               String    @default("queued") @db.VarChar(32)
   requestedAt         DateTime  @map("requested_at")
