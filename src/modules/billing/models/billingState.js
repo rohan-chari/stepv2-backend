@@ -2,7 +2,7 @@ const {randomUUID}=require('node:crypto');
 const {AppError}=require('../../../shared/errors/AppError');
 const {awardCoins}=require('../../../shared/economy/awardCoins');
 const {deductCoinsAtomic}=require('../../../shared/economy/deductCoinsAtomic');
-const {PRODUCTS}=require('../catalog');
+const {PRODUCTS,GOLD_BENEFIT_VERSION,productForPurchase}=require('../catalog');
 const error=(message,code='BILLING_UNAVAILABLE',status=503)=>new AppError(message,code,status);
 const keyFor=(config,p)=>JSON.stringify([config.projectId,p.appId,p.store,p.environment,p.transactionId]);
 const instant=(v)=>{const d=new Date(v);if(v==null||!Number.isFinite(d.getTime()))throw error('Invalid verified billing date');return d;};
@@ -45,10 +45,31 @@ function signalMatchesReceipt(receipt,signal){
  const product=PRODUCTS.find(p=>p.id===receipt.productId),platform=receipt.store==='app_store'?'ios':'android';
  return product&&(product[platform]===signal.storeProductId||(signal.exported&&platform==='android'&&product[platform].split(':')[0]===signal.storeProductId));
 }
+function isGoldPurchase(product,p){return product?.gold===true&&(p?.benefitContract===GOLD_BENEFIT_VERSION||product.id==='plus_weekly');}
+function isDirectCharacterProduct(product){return typeof product?.goldCharacterSku==='string';}
+function directCharacterProductFor(receipt){return PRODUCTS.find(p=>p.id===receipt.productId&&isDirectCharacterProduct(p));}
+async function reverseDirectCharacter(tx,identity,receipt,signal){
+ const product=directCharacterProductFor(receipt);if(!product)return false;
+ const item=await tx.shopItem.findUnique({where:{sku:product.goldCharacterSku},select:{id:true}});if(!item)return true;
+ const sourceKey=`DIRECT_IAP:${receipt.canonicalKey}`;
+ const source=await tx.shopItemOwnershipSource.findUnique({where:{userId_shopItemId_source:{userId:identity.userId,shopItemId:item.id,source:sourceKey}}});
+ if(!source)return true;
+ if(signal.refunded){
+  await tx.shopItemOwnershipSource.update({where:{id:source.id},data:{revokedAt:signal.at}});
+  const active=await tx.shopItemOwnershipSource.count({where:{userId:identity.userId,shopItemId:item.id,revokedAt:null}});
+  const all=await tx.shopItemOwnershipSource.count({where:{userId:identity.userId,shopItemId:item.id}});
+  if(active===0&&all>0)await tx.userShopItem.deleteMany({where:{userId:identity.userId,shopItemId:item.id}});
+ }else{
+  await tx.shopItemOwnershipSource.update({where:{id:source.id},data:{revokedAt:null}});
+  await tx.userShopItem.upsert({where:{userId_shopItemId:{userId:identity.userId,shopItemId:item.id}},create:{userId:identity.userId,shopItemId:item.id},update:{}});
+ }
+ return true;
+}
 async function reversePurchase(tx,identity,receipt,signal){
  if(!signalMatchesReceipt(receipt,signal))throw error('Refund product does not match verified transaction');
  if(receipt.refundObservedAt&&receipt.refundObservedAt>=signal.observedAt)return receipt;
  if(signal.refunded){
+  if(await reverseDirectCharacter(tx,identity,receipt,signal))return tx.billingPurchase.update({where:{id:receipt.id},data:{refundedAt:signal.at,refundObservedAt:signal.observedAt,refundSource:signal.source,fulfillmentStatus:'reversed',refundCount:{increment:1}}});
   if(receipt.refundedAt)return tx.billingPurchase.update({where:{id:receipt.id},data:{refundObservedAt:signal.observedAt,refundSource:signal.source}});
   const user=await tx.user.findUnique({where:{id:identity.userId},select:{coins:true}});
   const recovered=Math.min(user?.coins||0,receipt.grantedCoins);
@@ -58,6 +79,7 @@ async function reversePurchase(tx,identity,receipt,signal){
   return tx.billingPurchase.update({where:{id:receipt.id},data:{refundedAt:signal.at,refundObservedAt:signal.observedAt,refundSource:signal.source,recoveredCoins:recovered,absorbedCoins:receipt.grantedCoins-recovered,revokedCredits:revoked,fulfillmentStatus:'reversed',refundCount:{increment:1}}});
  }
  if(!receipt.refundedAt)return tx.billingPurchase.update({where:{id:receipt.id},data:{refundObservedAt:signal.observedAt,refundSource:signal.source}});
+ if(await reverseDirectCharacter(tx,identity,receipt,signal))return tx.billingPurchase.update({where:{id:receipt.id},data:{refundedAt:null,refundObservedAt:signal.observedAt,refundSource:signal.source,fulfillmentStatus:'fulfilled'}});
  if(receipt.recoveredCoins)await awardCoins({tx,userId:identity.userId,amount:receipt.recoveredCoins,reason:'billing_refund_reversed',refId:signal.source});
  const lot=await tx.billingCreditLot.findUnique({where:{sourceKey:receipt.canonicalKey}});
  if(lot&&receipt.revokedCredits){await tx.billingCreditLot.update({where:{id:lot.id},data:{remaining:{increment:receipt.revokedCredits}}});await tx.billingCreditEntry.create({data:{lotId:lot.id,operationKey:signal.source,amount:receipt.revokedCredits}});}
@@ -91,23 +113,29 @@ async function applyHistory({db,config,identity,token,history}){
   const signals=inbox.map(i=>refundSignal(config,identity,i)).filter(Boolean).sort((a,b)=>a.observedAt-b.observedAt);
   const latestSignals=new Map(signals.map(s=>[s.key,s]));
   for(const p of history.purchases){
-   const product=validatePurchase(config,identity,p),canonicalKey=keyFor(config,p);
+   const product=validatePurchase(config,identity,p),canonicalKey=keyFor(config,p),gold=isGoldPurchase(product,p),direct=isDirectCharacterProduct(product);
    let receipt=await tx.billingPurchase.findUnique({where:{canonicalKey}});
    if(receipt&&receipt.identityId!==identity.id)throw error('Purchase belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
    const subscription=history.subscriptions.find(s=>s.providerId===p.subscriptionId);
-   const isTrial=!p.paid&&subscription?.trial===true&&p.purchasedAt===subscription.startsAt;
+   const isTrial=!p.paid&&subscription?.trial===true&&instant(p.purchasedAt).getTime()===instant(subscription.startsAt).getTime();
    const signal=latestSignals.get(canonicalKey);
-   if(!receipt){receipt=await tx.billingPurchase.create({data:{identityId:identity.id,canonicalKey,projectId:config.projectId,appId:p.appId,store:p.store,environment:p.environment,transactionId:p.transactionId,providerId:p.providerId||p.transactionId,productId:product.id,subscriptionId:p.subscriptionId||null,purchasedAt:instant(p.purchasedAt),expiresAt:p.expiresAt?instant(p.expiresAt):null,effectiveExpiresAt:p.effectiveExpiresAt?instant(p.effectiveExpiresAt):p.expiresAt?instant(p.expiresAt):null,quantity:p.quantity,benefitKind:product.kind==='non_consumable'&&p.paid===true&&['owned','refunded'].includes(p.purchaseStatus)?'permanent':isTrial?'trial':p.paid?'paid':'unpaid'}});}
-   if(product.kind==='non_consumable'&&p.paid===true&&['owned','refunded'].includes(p.purchaseStatus)&&receipt.benefitKind!=='permanent')receipt=await tx.billingPurchase.update({where:{id:receipt.id},data:{benefitKind:'permanent'}});
+   if(!receipt){receipt=await tx.billingPurchase.create({data:{identityId:identity.id,canonicalKey,projectId:config.projectId,appId:p.appId,store:p.store,environment:p.environment,transactionId:p.transactionId,providerId:p.providerId||p.transactionId,productId:product.id,subscriptionId:p.subscriptionId||null,purchasedAt:instant(p.purchasedAt),expiresAt:p.expiresAt?instant(p.expiresAt):null,effectiveExpiresAt:p.effectiveExpiresAt?instant(p.effectiveExpiresAt):p.expiresAt?instant(p.expiresAt):null,quantity:p.quantity,benefitContract:p.benefitContract||(product.id==='plus_weekly'?GOLD_BENEFIT_VERSION:null),benefitKind:direct?'character_direct_iap':product.kind==='non_consumable'&&p.paid===true&&['owned','refunded'].includes(p.purchaseStatus)?'permanent':isTrial?'trial':p.paid?'paid':'unpaid'}});}
+   if(product.kind==='non_consumable'&&!direct&&p.paid===true&&['owned','refunded'].includes(p.purchaseStatus)&&receipt.benefitKind!=='permanent')receipt=await tx.billingPurchase.update({where:{id:receipt.id},data:{benefitKind:'permanent'}});
    // Refund-before-fulfillment records provenance without temporarily minting.
    if(signal?.refunded&&signalMatchesReceipt(receipt,signal)&&receipt.fulfillmentStatus==='pending'&&!receipt.refundedAt)receipt=await reversePurchase(tx,identity,receipt,signal);
    if(p.refunded&&receipt.refundCount===0&&(!receipt.refundObservedAt||observedAt>receipt.refundObservedAt))receipt=await reversePurchase(tx,identity,receipt,{refunded:true,at:observedAt,observedAt,source:`provider:${canonicalKey}`});
-   if(product.kind!=='non_consumable'&&receipt.fulfillmentStatus==='pending'&&!receipt.refundedAt&&(p.paid===true||isTrial)&&instant(p.purchasedAt)<=new Date()){
-    const coins=p.paid?product.coins*p.quantity:0,creditAmount=p.paid?product.credits:3;
-    if(coins)await awardCoins({tx,userId:identity.userId,amount:coins,reason:'billing_purchase',refId:canonicalKey});
+   if(direct&&receipt.fulfillmentStatus==='pending'&&!receipt.refundedAt&&p.paid===true&&['owned','refunded'].includes(p.purchaseStatus)&&instant(p.purchasedAt)<=new Date()){
+    const item=await tx.shopItem.findUnique({where:{sku:product.goldCharacterSku}});if(!item)throw error('Verified character product is not active','INVALID_PRODUCT',422);
+    await tx.userShopItem.upsert({where:{userId_shopItemId:{userId:identity.userId,shopItemId:item.id}},create:{userId:identity.userId,shopItemId:item.id},update:{}});
+    await tx.shopItemOwnershipSource.upsert({where:{userId_shopItemId_source:{userId:identity.userId,shopItemId:item.id,source:`DIRECT_IAP:${canonicalKey}`}},create:{userId:identity.userId,shopItemId:item.id,source:`DIRECT_IAP:${canonicalKey}`,verifiedTransactionRef:canonicalKey},update:{verifiedTransactionRef:canonicalKey,revokedAt:null}});
+    receipt=await tx.billingPurchase.update({where:{id:receipt.id},data:{fulfillmentStatus:'fulfilled',benefitKind:'character_direct_iap',grantedCoins:0,grantedCredits:0}});
+   } else if(product.kind!=='non_consumable'&&receipt.fulfillmentStatus==='pending'&&!receipt.refundedAt&&(p.paid===true||isTrial)&&instant(p.purchasedAt)<=new Date()){
+    const benefits=productForPurchase(product,gold),coins=(isTrial?benefits.trialCoins||0:benefits.coins||0)*p.quantity,creditAmount=gold?0:(p.paid?benefits.credits:3);
+    const grant=coins?await awardCoins({tx,userId:identity.userId,amount:coins,reason:isTrial&&gold?'billing_trial':'billing_purchase',refId:isTrial&&gold?`gold-trial:${identity.id}:${product.subscriptionGroup}`:canonicalKey}):{awarded:false};
+    const grantedCoins=grant.awarded?coins:0;
     let issuedCredits=0;
     if(creditAmount){const sourceKey=isTrial?`trial:${identity.id}`:canonicalKey;const created=await tx.billingCreditLot.createMany({data:[{identityId:identity.id,sourceKey,kind:isTrial?'trial':'paid',granted:creditAmount,remaining:creditAmount,expiresAt:isTrial?instant(p.expiresAt):null}],skipDuplicates:true});issuedCredits=created.count?creditAmount:0;}
-    receipt=await tx.billingPurchase.update({where:{id:receipt.id},data:{fulfillmentStatus:'fulfilled',benefitKind:isTrial?'trial':'paid',grantedCoins:coins,grantedCredits:issuedCredits}});
+    receipt=await tx.billingPurchase.update({where:{id:receipt.id},data:{fulfillmentStatus:'fulfilled',benefitKind:isTrial?'trial':'paid',grantedCoins,grantedCredits:issuedCredits}});
    }
    // A historical initial zero-price period may no longer be labelled a trial
    // by the provider. Acknowledge its terminal state without inventing trial
@@ -130,7 +158,8 @@ async function applyHistory({db,config,identity,token,history}){
    if(existing&&existing.identityId!==identity.id)throw error('Subscription belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
    const period=s.periodStartsAt?instant(s.periodStartsAt):null;
    if(existing&&(existing.observedAt>observedAt||period&&existing.periodStartsAt&&period<existing.periodStartsAt))continue;
-   const data={identityId:identity.id,productId:s.productId,startsAt:instant(s.startsAt),periodStartsAt:period,accessUntil:s.accessUntil?instant(s.accessUntil):null,givesAccess:s.givesAccess===true,providerStatus:s.status||(s.trial?'trialing':'active'),trial:s.trial===true,renews:s.renews===true,observedAt,managementUrl:s.managementUrl||null};
+   const data={identityId:identity.id,productId:s.productId,startsAt:instant(s.startsAt),periodStartsAt:period,accessUntil:s.accessUntil?instant(s.accessUntil):null,givesAccess:s.givesAccess===true,providerStatus:s.status||(s.trial?'trialing':'active'),trial:s.trial===true,renews:s.renews===true,observedAt,managementUrl:s.managementUrl||null,benefitContract:s.benefitContract||(s.productId==='plus_weekly'?GOLD_BENEFIT_VERSION:null)};
+   if(existing?.benefitContract&&!data.benefitContract)data.benefitContract=existing.benefitContract;
    await tx.billingSubscription.upsert({where:{id},create:{id,...data},update:data});
    if(!s.trial){const lots=await tx.billingCreditLot.findMany({where:{identityId:identity.id,kind:'trial',remaining:{gt:0}}});for(const lot of lots){await tx.billingCreditLot.update({where:{id:lot.id},data:{remaining:0}});await tx.billingCreditEntry.create({data:{lotId:lot.id,operationKey:`trial-ended:${lot.id}`,amount:-lot.remaining}});}}
   }

@@ -12,6 +12,7 @@ const {
   priceFields,
 } = require("../billing/services/memberPrice");
 const { buildAdUnlockBlock } = require("../economy/services/adUnlockPolicy");
+const { goldMembershipForUser, characterPolicy } = require("../billing/queries/goldPolicy");
 const {
   SLOTS,
   CONTRACT,
@@ -142,11 +143,11 @@ async function character(tx, key, opts, requireOwned = true) {
   if (requireOwned && !i.owned) fail("CHARACTER_NOT_OWNED", 403);
   return i;
 }
-async function quotes(opts) {
-  const discount = await memberDiscount(prisma, opts.userId);
+async function quotes(opts, db = prisma) {
+  const discount = await memberDiscount(db, opts.userId);
   let adUnlock = null;
   try {
-    adUnlock = await buildAdUnlockBlock(prisma, opts.userId, {
+    adUnlock = await buildAdUnlockBlock(db, opts.userId, {
       localDate: opts.localDate,
     });
   } catch {}
@@ -169,7 +170,7 @@ async function getCharacters(opts, db = prisma) {
     const count = page.limit - (!page.last ? 1 : 0),
       last = page.last;
     const rows = await tx.$queryRaw(
-      Prisma.sql`SELECT i.*, EXISTS(SELECT 1 FROM user_shop_items o WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id) AS owned FROM shop_items i WHERE i.slot='CHARACTER' AND ${!!opts.supportsCharacters} AND ${visibilitySql(opts)} AND ((i.active AND NOT i.earn_only) OR EXISTS(SELECT 1 FROM user_shop_items o WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id)) ${last && last.id !== "default" ? Prisma.sql`AND (i.sort_order,i.id)>(${last.sort},${last.id})` : Prisma.empty} ORDER BY i.sort_order,i.id LIMIT ${count + 1}`,
+      Prisma.sql`SELECT i.*, EXISTS(SELECT 1 FROM user_shop_items o WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id) AS owned FROM shop_items i WHERE i.slot='CHARACTER' AND ${!!opts.supportsCharacters} AND ${visibilitySql(opts)} AND ((i.active AND NOT i.earn_only) OR EXISTS(SELECT 1 FROM user_shop_items o WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id)) AND (${!!opts.supportsGold} OR i.sku NOT IN ('mouse','hedgehog','sea_lion') OR EXISTS(SELECT 1 FROM user_shop_items o WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id)) ${last && last.id !== "default" ? Prisma.sql`AND (i.sort_order,i.id)>(${last.sort},${last.id})` : Prisma.empty} ORDER BY i.sort_order,i.id LIMIT ${count + 1}`,
     );
     const hasMore = rows.length > count,
       items = rows.slice(0, count).map(itemFromDb);
@@ -188,23 +189,32 @@ async function getCharacters(opts, db = prisma) {
         : null,
     };
   }, db);
-  const { discount, adUnlock } = await quotes(opts);
+  const { discount, adUnlock } = await quotes(opts, db);
+  const { isMember } = await goldMembershipForUser(db, opts.userId);
   const { state } = result;
   const characterRow = (i) => {
     const key = i.id,
       owned = i.owned,
       o = owned ? outfitView(state, key, opts, i.active) : null;
+    const policy = characterPolicy({ ...i, owned }, isMember);
     return {
       characterKey: key,
       name: i.name,
       item: key === "default" ? null : serialized(i, discount),
       owned,
       active: owned && activeKey(state.equipment) === key,
-      canPurchase: key !== "default" && !owned && i.active && !i.earnOnly,
+      canPurchase: key !== "default" && !owned && i.active && !i.earnOnly && (!opts.supportsGold || policy.coinPurchaseAllowed),
       canActivate: owned && i.active,
       canEdit: !!o?.editable,
       availability: i.active ? "available" : "unavailable",
       outfit: o,
+      ...(opts.supportsGold && key !== "default" ? {
+        goldAccess: policy.goldAccess,
+        benefitVersion: policy.benefitVersion,
+        coinPurchaseAllowed: policy.coinPurchaseAllowed,
+        directPurchase: policy.directPurchase,
+        unavailableReason: policy.unavailableReason,
+      } : {}),
     };
   };
   return {

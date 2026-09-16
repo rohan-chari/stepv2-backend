@@ -214,7 +214,8 @@ describe("Batch 2026-08-08 item 11 — rewarded-ad box reroll", () => {
     assert.equal(status, 200, JSON.stringify(body));
 
     // Exact contract shape.
-    assert.deepEqual(Object.keys(body).sort(), ["id", "rarity", "rerolled", "type"]);
+    assert.deepEqual(Object.keys(body).sort(), ["funding", "id", "rarity", "rerolled", "type"]);
+    assert.equal(body.funding, "REWARDED_AD");
     assert.equal(body.id, powerup.id);
     assert.equal(body.rerolled, true);
     assert.ok(body.type, "a type is returned");

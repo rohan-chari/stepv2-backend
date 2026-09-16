@@ -3,7 +3,7 @@ const {
   CHARACTER_SLOT,
   buildEquipmentMap,
 } = require("./shopCosmetics");
-const { findConflictingEquipment } = require("./accessoryCompatibility");
+const { findConflictingEquipment, characterAllowsAccessory } = require("./accessoryCompatibility");
 
 class AccessoryEquipError extends Error {
   constructor(message, statusCode = 400, extras = {}) {
@@ -84,6 +84,15 @@ async function equipAccessory({
           );
         }
 
+        const activeCharacter = state.equipment.find((entry) => entry.slot === CHARACTER_SLOT)?.shopItem;
+        if (slot !== CHARACTER_SLOT && !characterAllowsAccessory(activeCharacter, ownership.shopItem)) {
+          throw new AccessoryEquipError("This accessory is not compatible with the active character.", 409, {
+            code: "CHARACTER_FIT_CONFLICT",
+            conflictingItemIds: [activeCharacter.id],
+            conflictingSlots: [CHARACTER_SLOT],
+          });
+        }
+
         {
           const equippedAccessories = state.equipment;
           // The same-slot item is being replaced by the candidate and is therefore
@@ -104,6 +113,16 @@ async function equipAccessory({
               },
             );
           }
+        }
+      }
+      if (slot === CHARACTER_SLOT && ownership) {
+        const conflicts = state.equipment.filter((entry) => entry.slot !== CHARACTER_SLOT && !characterAllowsAccessory(ownership.shopItem, entry.shopItem));
+        if (conflicts.length) {
+          throw new AccessoryEquipError("This character is not compatible with an equipped accessory.", 409, {
+            code: "CHARACTER_FIT_CONFLICT",
+            conflictingItemIds: conflicts.map((entry) => entry.shopItemId),
+            conflictingSlots: conflicts.map((entry) => entry.slot),
+          });
         }
       }
       const before = state.equipment;

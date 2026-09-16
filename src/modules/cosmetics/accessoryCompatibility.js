@@ -1,7 +1,9 @@
 // Server-owned compatibility vocabulary. Keep this intentionally small: tags
 // are policy identifiers, not client-provided arbitrary labels, so an admin
 // typo cannot silently create an accessory that appears compatible everywhere.
-const ACCESSORY_COMPATIBILITY_TAGS = new Set(["eyewear", "full_face"]);
+const ACCESSORY_COMPATIBILITY_TAGS = new Set(["eyewear", "full_face", "headwear"]);
+const GOLD_CHARACTER_SKUS = new Set(["mouse", "hedgehog", "sea_lion"]);
+const HELMET_SKUS = new Set(["knight_helmet", "football_helmet"]);
 
 function compatibilityError(message) {
   const error = new Error(message);
@@ -75,10 +77,21 @@ function hasIntersection(left, right) {
 function itemsConflict(candidateItem, equippedItem) {
   const candidate = readCompatibility(candidateItem?.compatibility);
   const equipped = readCompatibility(equippedItem?.compatibility);
-  return (
+  const helmetFaceConflict =
+    (HELMET_SKUS.has(candidateItem?.sku) && equippedItem?.slot === "FACE") ||
+    (HELMET_SKUS.has(equippedItem?.sku) && candidateItem?.slot === "FACE");
+  return helmetFaceConflict || (
     hasIntersection(candidate.blocksTags, equipped.tags) ||
     hasIntersection(equipped.blocksTags, candidate.tags)
   );
+}
+
+function characterAllowsAccessory(characterItem, accessoryItem) {
+  if (!characterItem || characterItem.slot !== "CHARACTER") return true;
+  if (!GOLD_CHARACTER_SKUS.has(characterItem.sku)) return true;
+  if (accessoryItem?.sku === "football_helmet") return false;
+  if (characterItem.sku === "sea_lion" && accessoryItem?.sku === "trail_shoes") return false;
+  return true;
 }
 
 function findConflictingEquipment(candidateItem, equippedAccessories) {
@@ -93,4 +106,6 @@ module.exports = {
   readCompatibility,
   itemsConflict,
   findConflictingEquipment,
+  characterAllowsAccessory,
+  HELMET_SKUS,
 };

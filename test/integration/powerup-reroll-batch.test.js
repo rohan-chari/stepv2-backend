@@ -148,6 +148,36 @@ async function seedGrant(userId, grantedDate = today(), extra = {}) {
   });
 }
 
+async function makeGoldMember(userId) {
+  const identity = await prisma.billingIdentity.create({ data: { userId } });
+  await prisma.billingSubscription.create({
+    data: {
+      id: `gold-batch-${userId}`,
+      identityId: identity.id,
+      productId: "plus_monthly",
+      startsAt: new Date(Date.now() - 60_000),
+      periodStartsAt: new Date(Date.now() - 60_000),
+      accessUntil: new Date(Date.now() + 7 * 86400000),
+      givesAccess: true,
+      trial: false,
+      renews: true,
+      providerStatus: "active",
+      observedAt: new Date(),
+      benefitContract: "bara_gold_v1",
+    },
+  });
+}
+
+async function rerollSingle(token, raceId, powerupId, headers = ADS_FEATURES) {
+  const res = await request(
+    server.baseUrl,
+    "POST",
+    `/races/${raceId}/powerups/${powerupId}/reroll`,
+    { token, headers, body: { localDate: today() } },
+  );
+  return { status: res.status, body: await res.json() };
+}
+
 async function rerollBatch(token, raceId, body, headers = ADS_FEATURES) {
   const res = await request(
     server.baseUrl,
@@ -726,5 +756,71 @@ describe("Batch 2026-08-10b item 1 — POST /races/:raceId/powerups/reroll-batch
     ]) {
       assert.ok(key in pd, `powerupData.${key} still present`);
     }
+  });
+
+  it("Gold concurrent batches reroll each powerup at most once", async () => {
+    await makeGoldMember(alice.userId);
+    const ids = [
+      (await seedOpenedPowerup(raceId, alice)).id,
+      (await seedOpenedPowerup(raceId, alice)).id,
+      (await seedOpenedPowerup(raceId, alice)).id,
+    ];
+    const [first, second] = await Promise.all([
+      rerollBatch(alice.token, raceId, { powerupIds: ids }, {
+        "X-Client-Features": "characters,powerups3,powerups4,powerups5",
+      }),
+      rerollBatch(alice.token, raceId, { powerupIds: ids }, {
+        "X-Client-Features": "characters,powerups3,powerups4,powerups5",
+      }),
+    ]);
+    assert.ok([200, 409].includes(first.status));
+    assert.ok([200, 409].includes(second.status));
+    const rows = await prisma.racePowerup.findMany({ where: { id: { in: ids } } });
+    assert.equal(
+      rows.filter((row) => row.rerolledAt != null).length,
+      ids.length,
+      JSON.stringify({ first, second, rows }),
+    );
+    assert.ok(rows.every((row) => row.rerolledAt instanceof Date));
+  });
+
+  it("Gold single and batch racing preserve the one-reroll fence", async () => {
+    await makeGoldMember(alice.userId);
+    const first = await seedOpenedPowerup(raceId, alice);
+    const second = await seedOpenedPowerup(raceId, alice);
+    const headers = { "X-Client-Features": "characters,powerups3,powerups4,powerups5" };
+    await Promise.all([
+      rerollSingle(alice.token, raceId, first.id, headers),
+      rerollBatch(alice.token, raceId, { powerupIds: [first.id, second.id] }, headers),
+    ]);
+    const rows = await prisma.racePowerup.findMany({ where: { id: { in: [first.id, second.id] } } });
+    assert.equal(rows.filter((row) => row.rerolledAt != null).length, 2);
+  });
+
+  it("replays an identical batch request and rejects a changed fingerprint", async () => {
+    await makeGoldMember(alice.userId);
+    const first = await seedOpenedPowerup(raceId, alice);
+    const second = await seedOpenedPowerup(raceId, alice);
+    const key = "0b7f5d95-6d34-4a49-9e37-2e2bd5595f15";
+    const headers = {
+      "X-Client-Features": "characters,powerups3,powerups4,powerups5",
+      "Idempotency-Key": key,
+    };
+    const body = { powerupIds: [first.id, second.id] };
+    const initial = await rerollBatch(alice.token, raceId, body, headers);
+    assert.equal(initial.status, 200, JSON.stringify(initial.body));
+    const operation = await prisma.billingRerollOperation.findFirst({ where: { userId: alice.userId } });
+    assert.ok(operation, "batch idempotency operation was persisted");
+    const replay = await rerollBatch(alice.token, raceId, body, headers);
+    assert.equal(replay.status, 200, JSON.stringify(replay.body));
+    assert.deepEqual(replay.body, initial.body);
+    const conflict = await rerollBatch(
+      alice.token,
+      raceId,
+      { powerupIds: [first.id] },
+      headers,
+    );
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.code, "IDEMPOTENCY_CONFLICT");
   });
 });

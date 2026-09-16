@@ -15,6 +15,7 @@ const {
   consumedUnlocksToday,
   SHORTFALL_TOO_LARGE_MESSAGE,
 } = require("../../economy/services/adUnlockPolicy");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
 
 // Item 10 (2026-07-24): "watch ads to afford a powerup". When a user is within
 // powerupUnlockMaxShortfall() coins of a powerup (20 since 2026-07-25 §7; env
@@ -119,6 +120,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
           throw new UnlockWithAdsError("Powerup not found", 404);
         }
         item = await pricedItem(tx, userId, item);
+        const { isMember: goldMember } = await goldMembershipForUser(tx, userId);
 
         const user = await tx.user.findUnique({ where: { id: userId } });
         const coins = user?.coins ?? 0;
@@ -146,7 +148,14 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
         // Shared daily cap (D4) — one ad unlock per local day across powerups
         // AND cosmetics. Enforced inside this transaction, and BEFORE anything
         // is consumed or debited, so the 409 costs the user nothing.
-        await assertUnderDailyCap(tx, userId, effectiveLocalDate, unlockError);
+        if (goldMember) {
+          const existingGoldClaim = await tx.goldActionClaim.findUnique({ where: { userId_action_localDate: { userId, action: `powerup_unlock:${item.sku}`, localDate: effectiveLocalDate } } });
+          if (existingGoldClaim) throw new UnlockWithAdsError("Powerup unlock already used today", 409, "DAILY_CAP_REACHED");
+          const usedGoldClaims = await tx.goldActionClaim.count({ where: { userId, localDate: effectiveLocalDate, action: { startsWith: "powerup_unlock:" } } });
+          if (usedGoldClaims >= powerupUnlockDailyCap()) throw new UnlockWithAdsError("Daily ad unlock limit reached", 409, "DAILY_CAP_REACHED");
+        } else {
+          await assertUnderDailyCap(tx, userId, effectiveLocalDate, unlockError);
+        }
 
         const adsNeeded = adsNeededFor(shortfall);
 
@@ -163,7 +172,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
         });
 
         // Verified, still-unconsumed watches for THIS user + sku.
-        const watches = await tx.adRewardGrant.findMany({
+        const watches = goldMember ? [] : await tx.adRewardGrant.findMany({
           where: {
             userId,
             rewardKind: POWERUP_UNLOCK_REWARD_KIND,
@@ -174,7 +183,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
           take: adsNeeded,
           select: { id: true },
         });
-        if (watches.length < adsNeeded) {
+        if (!goldMember && watches.length < adsNeeded) {
           throw new UnlockWithAdsError(
             "Not enough verified ad watches yet",
             409,
@@ -189,7 +198,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
         // custom_data carries only user+sku), so it arrives stamped with the
         // SERVER date. Restamping is what makes the daily-cap count above mean
         // "unlocks performed on the user's day" rather than the server's.
-        const consumed = await tx.adRewardGrant.updateMany({
+        const consumed = goldMember ? { count: adsNeeded } : await tx.adRewardGrant.updateMany({
           where: { id: { in: watches.map((w) => w.id) }, consumedAt: null },
           data: {
             consumedAt: new Date(),
@@ -198,7 +207,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
             powerupType: item.powerupType,
           },
         });
-        if (consumed.count !== adsNeeded) {
+        if (!goldMember && consumed.count !== adsNeeded) {
           throw new UnlockWithAdsError(
             "Ad watches were already spent",
             409,
@@ -224,6 +233,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
           create: { userId, powerupType: item.powerupType, quantity: 1 },
           update: { quantity: { increment: 1 } },
         });
+        if (goldMember) await tx.goldActionClaim.create({ data: { userId, action: `powerup_unlock:${item.sku}`, localDate: effectiveLocalDate } });
 
         // Additive contract fields (§4.1) so the client can grey the affordance
         // out for the rest of the day without a second round-trip. Counted
@@ -233,7 +243,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
 
         const result = {
           coins: 0,
-          adsWatched: adsNeeded,
+          adsWatched: goldMember ? 0 : adsNeeded,
           adUnlockDailyCap: cap,
           adUnlockRemainingToday: Math.max(0, cap - usedToday),
           inventory: {

@@ -24,6 +24,7 @@ const { serializePowerupShopItem } = require("../../powerups");
 const { grantPowerupToUser } = require("../../powerups");
 const { EXTRA_SPIN_REWARD_KIND } = require("../adRewards");
 const { balanceConfig: defaultBalanceConfig } = require("../balanceConfig");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
 
 // Extra daily box spin, paid for by a verified rewarded-ad watch. Consumes an
 // unconsumed AdRewardGrant for the same localDate (minted only by the AdMob
@@ -81,6 +82,14 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       throw new DailyRewardError("Claim your free daily box first", 409);
     }
 
+    const { isMember: goldMember } = await goldMembershipForUser(db, userId);
+    const alreadyGoldUsed = goldMember && db.goldActionClaim
+      ? await db.goldActionClaim.findUnique({ where: { userId_action_localDate: { userId, action: "extra_daily_spin", localDate } } })
+      : null;
+    if (alreadyGoldUsed) {
+      if (!alreadyGoldUsed.resultJson) throw new DailyRewardError("Extra spin already used today", 409);
+      return { ...alreadyGoldUsed.resultJson, idempotent: true };
+    }
     const alreadyUsed = await db.adRewardGrant.findFirst({
       where: {
         userId,
@@ -94,7 +103,18 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       throw new DailyRewardError("Extra spin already used today", 409);
     }
 
-    const grant = await db.adRewardGrant.findFirst({
+    let claim = null;
+    if (goldMember && db.goldActionClaim) {
+      claim = await db.goldActionClaim.create({ data: { userId, action: "extra_daily_spin", localDate } }).catch(async (error) => {
+        if (error?.code === "P2002") {
+          const existing = await db.goldActionClaim.findUnique({ where: { userId_action_localDate: { userId, action: "extra_daily_spin", localDate } } });
+          if (existing?.resultJson) return existing;
+        }
+        throw error;
+      });
+      if (claim?.resultJson) return { ...claim.resultJson, idempotent: true };
+    }
+    const grant = goldMember ? null : await db.adRewardGrant.findFirst({
       where: {
         userId,
         rewardKind: EXTRA_SPIN_REWARD_KIND,
@@ -104,7 +124,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       orderBy: { createdAt: "asc" },
       select: { id: true },
     });
-    if (!grant) {
+    if (!goldMember && !grant) {
       const err = new DailyRewardError(
         "No verified ad reward available yet",
         409
@@ -117,7 +137,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
 
     // Conditional consume: a concurrent duplicate claim loses here (count 0)
     // before anything mints.
-    const consumed = await db.adRewardGrant.updateMany({
+    const consumed = goldMember ? { count: 1 } : await db.adRewardGrant.updateMany({
       where: { id: grant.id, consumedAt: null },
       data: { consumedAt: new Date() },
     });
@@ -151,6 +171,8 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     let shopItem = null;
     let powerup = null;
     let coinsAfter = null;
+    const rewardRef = grant?.id || claim?.id;
+    const rewardReason = goldMember ? "gold_extra_spin" : "ad_extra_spin";
 
     if (rarity === "RARE") {
       const prizeKind = rollRarePrizeKind(pool.length, powerupPool.length, rng, { config: balance });
@@ -184,8 +206,8 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
         const result = await awardCoinsFn({
           userId,
           amount: coinAmount,
-          reason: "ad_extra_spin",
-          refId: grant.id,
+          reason: rewardReason,
+          refId: rewardRef,
         });
         rewardType = REWARD_TYPE.COINS_FALLBACK;
         coinsAfter = result.coins;
@@ -197,14 +219,14 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       const result = await awardCoinsFn({
         userId,
         amount: coinAmount,
-        reason: "ad_extra_spin",
-        refId: grant.id,
+        reason: rewardReason,
+        refId: rewardRef,
       });
       rewardType = REWARD_TYPE.COINS;
       coinsAfter = result.coins;
     }
 
-    await db.adRewardGrant.update({
+    if (!goldMember) await db.adRewardGrant.update({
       where: { id: grant.id },
       data: {
         rewardType,
@@ -215,7 +237,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       },
     });
 
-    return {
+    const result = {
       rarity,
       rewardType,
       coinAmount,
@@ -224,7 +246,10 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       coins: coinsAfter,
       streak,
       extra: true,
+      ...(goldMember ? { bypassedByGold: true } : {}),
     };
+    if (claim) await db.goldActionClaim.update({ where: { id: claim.id }, data: { resultJson: result } });
+    return result;
   };
 }
 

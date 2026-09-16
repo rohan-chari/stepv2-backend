@@ -16,6 +16,7 @@ const {
   consumedUnlocksToday,
   SHORTFALL_TOO_LARGE_MESSAGE,
 } = require("../economy/services/adUnlockPolicy");
+const { goldMembershipForUser } = require("../billing/queries/goldPolicy");
 
 // 2026-07-25 §7 — "watch ads to afford it", for ACCESSORIES and CHARACTERS.
 //
@@ -118,6 +119,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
           throw new ShopUnlockWithAdsError("Shop item not found", 404);
         }
         item = await pricedItem(tx, userId, item);
+        const { isMember: goldMember } = await goldMembershipForUser(tx, userId);
 
         const alreadyOwned = await tx.userShopItem.findUnique({
           where: { userId_shopItemId: { userId, shopItemId: item.id } },
@@ -149,7 +151,14 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
           );
         }
 
-        await assertUnderDailyCap(tx, userId, effectiveLocalDate, unlockError);
+        if (goldMember) {
+          const existingGoldClaim = await tx.goldActionClaim.findUnique({ where: { userId_action_localDate: { userId, action: `shop_unlock:${item.sku}`, localDate: effectiveLocalDate } } });
+          if (existingGoldClaim) throw new ShopUnlockWithAdsError("Shop unlock already used today", 409, "DAILY_CAP_REACHED");
+          const usedGoldClaims = await tx.goldActionClaim.count({ where: { userId, localDate: effectiveLocalDate, action: { startsWith: "shop_unlock:" } } });
+          if (usedGoldClaims >= powerupUnlockDailyCap()) throw new ShopUnlockWithAdsError("Daily ad unlock limit reached", 409, "DAILY_CAP_REACHED");
+        } else {
+          await assertUnderDailyCap(tx, userId, effectiveLocalDate, unlockError);
+        }
 
         const adsNeeded = adsNeededFor(shortfall);
 
@@ -168,7 +177,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
         // Verified, still-unconsumed watches for THIS user + sku. Grants are
         // stamped with the catalog sku by grantAdReward from the SSV
         // custom_data "shop_unlock:<userId>:<sku>".
-        const watches = await tx.adRewardGrant.findMany({
+        const watches = goldMember ? [] : await tx.adRewardGrant.findMany({
           where: {
             userId,
             rewardKind: SHOP_UNLOCK_REWARD_KIND,
@@ -179,7 +188,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
           take: adsNeeded,
           select: { id: true },
         });
-        if (watches.length < adsNeeded) {
+        if (!goldMember && watches.length < adsNeeded) {
           throw new ShopUnlockWithAdsError(
             "Not enough verified ad watches yet",
             409,
@@ -190,7 +199,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
         // rewardType "COSMETIC" is a free-text String column on ad_reward_grants
         // (prisma/schema.prisma: `rewardType String?`), NOT an enum — so this
         // needs no migration and no backfill, and old rows are untouched.
-        const consumed = await tx.adRewardGrant.updateMany({
+        const consumed = goldMember ? { count: adsNeeded } : await tx.adRewardGrant.updateMany({
           where: { id: { in: watches.map((w) => w.id) }, consumedAt: null },
           data: {
             consumedAt: new Date(),
@@ -199,7 +208,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
             shopItemId: item.sku,
           },
         });
-        if (consumed.count !== adsNeeded) {
+        if (!goldMember && consumed.count !== adsNeeded) {
           throw new ShopUnlockWithAdsError(
             "Ad watches were already spent",
             409,
@@ -222,13 +231,14 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
         await tx.userShopItem.create({
           data: { userId, shopItemId: item.id },
         });
+        if (goldMember) await tx.goldActionClaim.create({ data: { userId, action: `shop_unlock:${item.sku}`, localDate: effectiveLocalDate } });
 
         const cap = powerupUnlockDailyCap();
         const usedToday = await consumedUnlocksToday(tx, userId, effectiveLocalDate);
 
         const result = {
           coins: 0,
-          adsWatched: adsNeeded,
+          adsWatched: goldMember ? 0 : adsNeeded,
           adUnlockDailyCap: cap,
           adUnlockRemainingToday: Math.max(0, cap - usedToday),
           item: serializeShopItem(item, { owned: true, equipped: false }),

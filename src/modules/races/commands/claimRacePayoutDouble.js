@@ -21,6 +21,7 @@ const {
 const {
   withRacePayoutDoubleTransaction,
 } = require("../services/withRacePayoutDoubleTransaction");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
 
 function claimBody(offer, items, coins, alreadyClaimed) {
   return {
@@ -72,11 +73,13 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
         if (offer.status === "FORFEITED") {
           throw new ConflictError("Offer was forfeited", "OFFER_FORFEITED");
         }
+        const { isMember: goldMember } = await goldMembershipForUser(tx, userId);
         if (
+          !goldMember &&
           !clientFeatures?.has("race_payout_double") &&
           !clientFeatures?.has("race_payout_flat_50") ||
-          !config.adsRacePayoutDoubleClaimEnabled() ||
-          config.racePayoutDoubleAdUnitIds().length === 0
+          !goldMember && (!config.adsRacePayoutDoubleClaimEnabled() ||
+          config.racePayoutDoubleAdUnitIds().length === 0)
         ) {
           throw new ForbiddenError(
             "Race payout double claims are disabled",
@@ -168,7 +171,7 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           rolling24hRemainingBeforeClaim,
         };
 
-        const grant = await tx.adRewardGrant.findFirst({
+        const grant = goldMember ? null : await tx.adRewardGrant.findFirst({
           where: {
             userId,
             rewardKind: adRewards.RACE_PAYOUT_DOUBLE_REWARD_KIND,
@@ -178,14 +181,17 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           orderBy: { createdAt: "asc" },
         });
         if (
+          !goldMember &&
           !grant ||
-          !config
+          !goldMember && !config
             .racePayoutDoubleAdUnitSuffixes()
             .includes(adRewards.normalizeAdUnit(grant.adUnit))
         ) {
           throw new ConflictError("Ad reward has not been verified", "AD_NOT_VERIFIED");
         }
-        await tx.$queryRaw`SELECT id FROM ad_reward_grants WHERE id = ${grant.id} FOR UPDATE`;
+        if (!goldMember) {
+          await tx.$queryRaw`SELECT id FROM ad_reward_grants WHERE id = ${grant.id} FOR UPDATE`;
+        }
 
         const awarded = await award({
           tx,
@@ -202,7 +208,7 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
             userId,
           });
         }
-        const grantUpdate = await tx.adRewardGrant.updateMany({
+        const grantUpdate = goldMember ? { count: 1 } : await tx.adRewardGrant.updateMany({
           where: { id: grant.id, consumedAt: null },
           data: {
             consumedAt: settledAt,

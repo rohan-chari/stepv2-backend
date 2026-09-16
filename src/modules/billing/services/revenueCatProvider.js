@@ -1,5 +1,5 @@
 const { AppError } = require('../../../shared/errors/AppError');
-const { PRODUCTS } = require('../catalog');
+const { PRODUCTS, GOLD_BENEFIT_VERSION } = require('../catalog');
 const ORIGIN='https://api.revenuecat.com';
 const fail=(message='Billing provider unavailable')=>new AppError(message,'BILLING_UNAVAILABLE',503);
 const date=(n)=>{if(typeof n!=='number'||!Number.isFinite(n)) throw fail('Invalid provider timestamp'); const d=new Date(n); if(!Number.isFinite(d.getTime()))throw fail('Invalid provider timestamp'); return d.toISOString();};
@@ -19,7 +19,7 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
   while(path){if(seen.has(path))throw fail('Provider pagination cycle');seen.add(path);const data=await get(path);if(!Array.isArray(data.items))throw fail('Invalid provider list');rows.push(...data.items);if(data.next_page!==null&&data.next_page!==undefined&&typeof data.next_page!=='string')throw fail('Invalid provider pagination');path=data.next_page;}
   return rows;
  }
- return {async getCustomerHistory(identity){
+ return {async getCustomerHistory(identity, { goldTransactionId = null } = {}){
   const observedAt=new Date().toISOString();
   const customer=`${prefix}customers/${encodeURIComponent(identity.id)}`;
   // Fetch every page: one provider identity can retain both TestFlight and
@@ -39,7 +39,17 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
    if(!['production','sandbox'].includes(row.environment)||!['production','sandbox'].includes(identity.environment))throw new AppError('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
    return row.environment===identity.environment;
   }
-  const purchases=[],subscriptions=[];
+  const purchases=[],subscriptions=[],goldSubscriptionIds=new Set();
+  const cutoverAt = config.monthlyGoldContractCutoverAt == null
+    ? null
+    : new Date(config.monthlyGoldContractCutoverAt);
+  if (cutoverAt && Number.isNaN(cutoverAt.getTime())) throw fail('Invalid Gold contract cutover');
+  function monthlyContractForTransactions(mapped, transactions) {
+   if (mapped.id !== 'plus_monthly' || !cutoverAt || !transactions.length) return false;
+   const first = [...transactions].sort((a,b)=>Number(a.purchased_at)-Number(b.purchased_at))[0];
+   const firstPurchasedAt = new Date(Number(first.purchased_at));
+   return Number.isFinite(firstPurchasedAt.getTime()) && firstPurchasedAt >= cutoverAt;
+  }
   for(const row of rawPurchases){if(!ownership(row))continue;const {mapped,appId}=await resolve(row.product_id,row.store);
    if(!['coins','non_consumable'].includes(mapped.kind))throw fail('Unexpected non-subscription product');
    if(typeof row.status!=='string'||!row.status)throw fail('Missing purchase status');
@@ -47,15 +57,18 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
    if(mapped.kind==='non_consumable'&&(typeof row.revenue_in_usd?.gross!=='number'||!Number.isFinite(row.revenue_in_usd.gross)||row.revenue_in_usd.gross<0))throw fail('Invalid non-consumable payment revenue');
    const quantity=row.quantity??1;if(!Number.isSafeInteger(quantity)||quantity<1||!Number.isSafeInteger(mapped.coins*quantity))throw fail('Invalid purchase quantity');
    const transactionId=String(row.store_purchase_identifier??'');if(!transactionId)throw fail('Missing transaction identifier');
-   purchases.push({transactionId,providerId:row.id,productId:mapped.id,appId,store:row.store,environment:row.environment,purchasedAt:date(row.purchased_at),expiresAt:null,quantity,paid:Number(row.revenue_in_usd?.gross)>0&&['owned','refunded'].includes(row.status),purchaseStatus:row.status,refunded:row.status==='refunded',subscriptionId:null});
+   purchases.push({transactionId,providerId:row.id,productId:mapped.id,appId,store:row.store,environment:row.environment,purchasedAt:date(row.purchased_at),expiresAt:null,quantity,paid:Number(row.revenue_in_usd?.gross)>0&&['owned','refunded'].includes(row.status),purchaseStatus:row.status,refunded:row.status==='refunded',subscriptionId:null,benefitContract:mapped.id==='plus_weekly'||(mapped.id==='plus_monthly'&&transactionId===goldTransactionId)?GOLD_BENEFIT_VERSION:null});
   }
   for(const row of rawSubscriptions){if(!ownership(row))continue;const {mapped,appId}=await resolve(row.product_id,row.store);if(mapped.kind!=='subscription')throw fail('Unexpected subscription product');
    const transactions=await list(`${prefix}subscriptions/${encodeURIComponent(row.id)}/transactions?limit=100`);
+   const monthlyIsGold = mapped.id === 'plus_weekly' || monthlyContractForTransactions(mapped, transactions);
+   if (monthlyIsGold) goldSubscriptionIds.add(String(row.id));
    for(const transaction of transactions){const product=await resolve(row.product_id,row.store,transaction.product_store_identifier);
     if(product.mapped.kind!=='subscription'||!transaction.id)throw fail('Invalid subscription transaction');
-    purchases.push({transactionId:String(transaction.id),providerId:String(transaction.id),productId:product.mapped.id,appId,store:row.store,environment:row.environment,purchasedAt:date(transaction.purchased_at),expiresAt:date(transaction.expiration_date),effectiveExpiresAt:transaction.effective_expiration_date==null?date(transaction.expiration_date):date(transaction.effective_expiration_date),quantity:1,paid:Number(transaction.revenue_in_usd?.gross)>0,refunded:false,subscriptionId:row.id});
+    const transactionId=String(transaction.id);
+    purchases.push({transactionId,providerId:transactionId,productId:product.mapped.id,appId,store:row.store,environment:row.environment,purchasedAt:date(transaction.purchased_at),expiresAt:date(transaction.expiration_date),effectiveExpiresAt:transaction.effective_expiration_date==null?date(transaction.expiration_date):date(transaction.effective_expiration_date),quantity:1,paid:Number(transaction.revenue_in_usd?.gross)>0,refunded:false,subscriptionId:row.id,benefitContract:monthlyIsGold?GOLD_BENEFIT_VERSION:null});
    }
-   subscriptions.push({providerId:row.id,productId:mapped.id,appId,store:row.store,environment:row.environment,startsAt:date(row.starts_at),periodStartsAt:row.current_period_starts_at==null?null:date(row.current_period_starts_at),accessUntil:row.current_period_ends_at==null?null:date(row.current_period_ends_at),givesAccess:row.gives_access===true,status:row.status,trial:row.status==='trialing',renews:['will_renew','will_change_product','has_already_renewed'].includes(row.auto_renewal_status),managementUrl:row.management_url||null});
+   subscriptions.push({providerId:row.id,productId:mapped.id,appId,store:row.store,environment:row.environment,startsAt:date(row.starts_at),periodStartsAt:row.current_period_starts_at==null?null:date(row.current_period_starts_at),accessUntil:row.current_period_ends_at==null?null:date(row.current_period_ends_at),givesAccess:row.gives_access===true,status:row.status,trial:row.status==='trialing',renews:['will_renew','will_change_product','has_already_renewed'].includes(row.auto_renewal_status),managementUrl:row.management_url||null,benefitContract:monthlyIsGold?GOLD_BENEFIT_VERSION:null});
   }
   return {purchases,subscriptions,observedAt};
  }};

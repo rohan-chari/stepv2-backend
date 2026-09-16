@@ -39,6 +39,7 @@ function createShopBootstrapRouter(dependencies = {}) {
     userId: req.user.id,
     channel: req.releaseChannel,
     supportsCharacters: req.clientFeatures?.has("characters") || false,
+    supportsGold: req.clientFeatures?.has("bara_gold_v1") || false,
     supportsRemoteAssets: req.clientFeatures?.has("remote_assets") || false,
   });
   router.get(
@@ -109,6 +110,7 @@ function createShopBootstrapRouter(dependencies = {}) {
         localDate: req.query.localDate,
         channel: req.releaseChannel,
         supportsCharacters: features.has("characters"),
+        supportsGold: features.has("bara_gold_v1"),
         supportsRemoteAssets: features.has("remote_assets"),
         supportsJammer: features.has("jammer"),
         supportsPowerups2: features.has("powerups2"),

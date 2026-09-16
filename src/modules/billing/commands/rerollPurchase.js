@@ -9,12 +9,13 @@ const {resolveNullRoll}=require('../../powerups/commands/rerollMysteryBox');
 const {DEFAULT_POWERUP_SLOTS,POWERUP_NAMES}=require('../../powerups/commands/rollPowerup');
 const {balanceConfig}=require('../../economy/balanceConfig');
 const {creditsFor,ensureIdentity}=require('../queries/bootstrap');
+const {goldMembershipForUser}=require('../queries/goldPolicy');
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function error(message,code,status=409,meta){return new AppError(message,code,status,meta);}
 function validate({requestKey,body}){
  if(typeof requestKey!=='string'||!uuid.test(requestKey))throw error('A UUIDv4 Idempotency-Key is required','INVALID_IDEMPOTENCY_KEY',400);
  const ids=body?.powerupIds;
- if(!Array.isArray(ids)||ids.length<1||ids.length>8||ids.some(id=>typeof id!=='string'||!id||id.length>128)||new Set(ids).size!==ids.length||!['coins','credits'].includes(body.funding)||(body.funding==='coins'&&!Number.isInteger(body.expectedCoinCost)))throw error('Invalid reroll request','INVALID_REROLL_REQUEST',400);
+ if(!Array.isArray(ids)||ids.length<1||ids.length>8||ids.some(id=>typeof id!=='string'||!id||id.length>128)||new Set(ids).size!==ids.length||!['coins','credits','FREE_GOLD','free_gold'].includes(body.funding)||(body.funding==='coins'&&!Number.isInteger(body.expectedCoinCost)))throw error('Invalid reroll request','INVALID_REROLL_REQUEST',400);
  return [...ids].sort();
 }
 async function rerollPurchase({db,userId,raceId,requestKey,body,supportsPowerups5=false}){
@@ -45,9 +46,12 @@ async function rerollPurchase({db,userId,raceId,requestKey,body,supportsPowerups
   await tx.$queryRawUnsafe('SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE',userId);
   const walletReplay=await tx.billingRerollOperation.findUnique({where:{userId_requestKey:{userId,requestKey}}});
   if(walletReplay){if(walletReplay.fingerprint!==fingerprint)throw error('Idempotency key was used for another request','IDEMPOTENCY_CONFLICT');return walletReplay.response;}
+  const {isMember}=await goldMembershipForUser(tx,userId);
   await tx.$queryRawUnsafe('SELECT id FROM billing_credit_lots WHERE identity_id = $1 ORDER BY id FOR UPDATE',identity.id);
-  const charged={coins:0,paidCredits:0,trialCredits:0};
-  if(body.funding==='coins'){
+  const charged={coins:0,paidCredits:0,trialCredits:0,freeGold:0};
+  if(isMember){
+   charged.freeGold=ids.length;
+  }else if(body.funding==='coins'){
    await deductCoinsAtomic({userId,amount:50,reason:'billing_reroll',refId:requestKey,tx,insufficientError:error('Insufficient coins','INSUFFICIENT_COINS')});charged.coins=50;
   }else{
    const lots=await tx.billingCreditLot.findMany({where:{identityId:identity.id,remaining:{gt:0},OR:[{expiresAt:null},{expiresAt:{gt:new Date()}}]},orderBy:[{createdAt:'asc'},{id:'asc'}]});

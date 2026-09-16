@@ -24,6 +24,7 @@ const {
   adsBoxRerollEnabled,
 } = require("../../economy/adRewards");
 const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
 
 // Batch 2026-08-08 item 11 — rewarded-ad mystery-box reroll.
 //
@@ -236,6 +237,8 @@ function buildRerollMysteryBox(dependencies = {}) {
     // custom_data), it is validated exactly like the daily-reward claims: a real
     // date, close to server time. An out-of-range date is a 400 rather than a
     // silent fallback, so a client can never quietly reach a stale date's grants.
+    const { isMember: goldMember } = await goldMembershipForUser(tx, userId);
+    if (!goldMember) {
     let effectiveDate;
     if (localDate === undefined || localDate === null) {
       effectiveDate = localDateFor(timeZone);
@@ -293,6 +296,7 @@ function buildRerollMysteryBox(dependencies = {}) {
         409,
         "AD_NOT_VERIFIED"
       );
+    }
     }
 
     // ── The roll. Same context builder, same config snapshot, same null guard
@@ -405,7 +409,7 @@ function buildRerollMysteryBox(dependencies = {}) {
     // No invalidateRaceProgress: `powerupData.inventory` is built in the
     // per-viewer overlay from a live findSlotPowerups read, not from the shared
     // cached snapshot, so there is nothing stale to drop.
-    return { id: powerupId, type: rolled.type, rarity: rolled.rarity, rerolled: true };
+    return { id: powerupId, type: rolled.type, rarity: rolled.rarity, rerolled: true, funding: goldMember ? "FREE_GOLD" : "REWARDED_AD" };
     }, { maxWait: 10_000, timeout: 20_000 });
   };
 }

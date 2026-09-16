@@ -2465,6 +2465,7 @@ function createRacesRouter(dependencies = {}) {
         // Same wave-5 compat gate as /open and the single reroll — REROLL ALL
         // must not be a way to land a type the requesting binary cannot use.
         supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
+        requestKey: req.get("Idempotency-Key"),
       });
       res.json(result);
     } catch (error) {

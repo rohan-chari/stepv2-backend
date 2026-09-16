@@ -50,6 +50,33 @@ it('retains paginated trial and paid renewal transactions, effective expiry and 
  assert.equal(history.subscriptions[0].productId,'plus_monthly');assert.equal(history.subscriptions[0].renews,true);
  assert.equal(visited.filter(url=>url.includes('/transactions?')).length,2);
 });
+it('uses the explicit Gold monthly contract cutover on the first subscription transaction',async()=>{
+ const cutover=Date.parse('2026-06-01T00:00:00Z');
+ const configWithCutover={...config,monthlyGoldContractCutoverAt:new Date(cutover).toISOString()};
+ const subscriptions=[
+  {id:'legacy',customer_id:'identity',original_customer_id:'identity',product_id:'sub',starts_at:Date.parse('2026-01-01T00:00:00Z'),current_period_starts_at:cutover,current_period_ends_at:cutover+30*86400000,gives_access:true,status:'active',auto_renewal_status:'will_renew',ownership:'purchased',store:'app_store',environment:'production'},
+  {id:'gold',customer_id:'identity',original_customer_id:'identity',product_id:'sub',starts_at:cutover,current_period_starts_at:cutover,current_period_ends_at:cutover+30*86400000,gives_access:true,status:'active',auto_renewal_status:'will_renew',ownership:'purchased',store:'app_store',environment:'production'},
+ ];
+ const transactions={
+  legacy:[{id:'legacy-initial',product_store_identifier:'bara_plus_monthly_v1',purchased_at:Date.parse('2026-01-01T00:00:00Z'),expiration_date:Date.parse('2026-02-01T00:00:00Z'),revenue_in_usd:{gross:2.99}},{id:'legacy-renewal',product_store_identifier:'bara_plus_monthly_v1',purchased_at:Date.parse('2026-06-15T00:00:00Z'),expiration_date:Date.parse('2026-07-15T00:00:00Z'),revenue_in_usd:{gross:2.99}}],
+  gold:[{id:'gold-initial',product_store_identifier:'bara_plus_monthly_v1',purchased_at:Date.parse('2026-06-02T00:00:00Z'),expiration_date:Date.parse('2026-07-02T00:00:00Z'),revenue_in_usd:{gross:2.99}},{id:'gold-renewal',product_store_identifier:'bara_plus_monthly_v1',purchased_at:Date.parse('2026-07-02T00:00:00Z'),expiration_date:Date.parse('2026-08-02T00:00:00Z'),revenue_in_usd:{gross:2.99}}],
+ };
+ const fetch=async url=>{const parsed=new URL(url),path=parsed.pathname;let body;
+  if(path.endsWith('/products/sub')) body={id:'sub',app_id:'app_ios',store_identifier:'bara_plus_monthly_v1',type:'subscription'};
+  else if(path.endsWith('/purchases')) body={items:[],next_page:null};
+  else if(path.endsWith('/subscriptions')) body={items:subscriptions,next_page:null};
+  else {const id=path.split('/').at(-2);body={items:transactions[id],next_page:null};}
+  return new Response(JSON.stringify(body));
+ };
+ const history=await createRevenueCatProvider({config:configWithCutover,fetch}).getCustomerHistory({id:'identity',environment:'production'});
+ const byId=new Map(history.purchases.map(row=>[row.transactionId,row]));
+ assert.equal(byId.get('legacy-initial').benefitContract,null);
+ assert.equal(byId.get('legacy-renewal').benefitContract,null);
+ assert.equal(byId.get('gold-initial').benefitContract,'bara_gold_v1');
+ assert.equal(byId.get('gold-renewal').benefitContract,'bara_gold_v1');
+ assert.equal(history.subscriptions.find(row=>row.providerId==='legacy').benefitContract,null);
+ assert.equal(history.subscriptions.find(row=>row.providerId==='gold').benefitContract,'bara_gold_v1');
+});
 it('verifies permanent ownership with strict state, quantity and finite numeric payment evidence',async()=>{
  const row={id:'purchase',customer_id:'identity',original_customer_id:'identity',product_id:'perm',purchased_at:1000,quantity:1,status:'owned',store:'app_store',environment:'production',store_purchase_identifier:'permanent-store',ownership:'purchased',revenue_in_usd:{gross:19.99}};
  const provider=()=>createRevenueCatProvider({config,fetch:async url=>new Response(JSON.stringify(new URL(url).pathname.endsWith('/products/perm')?{id:'perm',app_id:'app_ios',store_identifier:'bara_plus_permanent_v1'}:new URL(url).pathname.endsWith('/subscriptions')?{items:[],next_page:null}:{items:[row],next_page:null}))});

@@ -4,6 +4,8 @@ const { prisma } = require("../../db");
 const { serializeShopItem, CHARACTER_SLOT } = require("./shopCosmetics");
 const { testOnlyFilter } = require("../../shared/middleware/releaseChannel");
 const { deductCoinsAtomic } = require("../../shared/economy/deductCoinsAtomic");
+const { AppError } = require("../../shared/errors/AppError");
+const { goldMembershipForUser, isGoldCharacterSku } = require("../billing/queries/goldPolicy");
 
 class ShopPurchaseError extends Error {
   constructor(message, statusCode = 400) {
@@ -96,6 +98,12 @@ async function purchaseShopItem({
       if (!item) {
         throw new ShopPurchaseError("Shop item not found", 404);
       }
+      if (item.slot === CHARACTER_SLOT && isGoldCharacterSku(item.sku)) {
+        const { isMember } = await goldMembershipForUser(tx, userId);
+        if (!isMember) throw new AppError("Bara Gold membership is required", "GOLD_REQUIRED", 403, {
+          unavailableReason: "requires_gold_or_direct_purchase",
+        });
+      }
       item = await pricedItem(tx, userId, item, expectedPriceCoins);
 
       await tx.shopPurchaseRequest.create({
@@ -153,6 +161,13 @@ async function purchaseShopItem({
       await tx.userShopItem.create({
         data: { userId, shopItemId: item.id },
       });
+      if (item.slot === CHARACTER_SLOT) {
+        await tx.shopItemOwnershipSource.upsert({
+          where: { userId_shopItemId_source: { userId, shopItemId: item.id, source: "COIN_PURCHASE" } },
+          create: { userId, shopItemId: item.id, source: "COIN_PURCHASE" },
+          update: { revokedAt: null },
+        });
+      }
 
       const user = await tx.user.findUnique({ where: { id: userId } });
       const result = {

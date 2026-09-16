@@ -106,6 +106,7 @@ const TABLES_IN_ORDER = [
   "step_milestone_claims",
   "daily_reward_claims",
   "user_equipped_accessories",
+  "shop_item_ownership_sources",
   "user_shop_items",
   "shop_items",
   "coin_transactions",

@@ -177,6 +177,7 @@ model User {
   appearanceRevision      Int @default(0) @map("appearance_revision")
   characterWardrobes      CharacterWardrobe[]
   shopItems               UserShopItem[]
+  shopItemOwnershipSources ShopItemOwnershipSource[]
   equippedAccessories     UserEquippedAccessory[]
   shopPurchaseRequests    ShopPurchaseRequest[]
   seasonScores            SeasonScore[]
@@ -1211,6 +1212,7 @@ model ShopItem {
   purchases        UserShopItem[]
   equipped         UserEquippedAccessory[]
   purchaseRequests ShopPurchaseRequest[]
+  ownershipSources ShopItemOwnershipSource[]
 
   @@index([active, sortOrder])
   @@map("shop_items")
@@ -1228,6 +1230,29 @@ model UserShopItem {
   @@unique([userId, shopItemId])
   @@index([shopItemId])
   @@map("user_shop_items")
+}
+
+// Additive ownership provenance for permanent character ownership. Existing
+// UserShopItem rows remain valid and are intentionally not backfilled: a
+// missing source is treated as LEGACY_UNKNOWN and is never revoked solely
+// because a later direct-IAP receipt is refunded.
+model ShopItemOwnershipSource {
+  id                     String    @id @default(uuid())
+  userId                 String    @map("user_id")
+  shopItemId             String    @map("shop_item_id")
+  source                 String
+  verifiedTransactionRef String?   @unique @map("verified_transaction_ref")
+  revokedAt              DateTime? @map("revoked_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopItem ShopItem @relation(fields: [shopItemId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, shopItemId, source])
+  @@index([userId, shopItemId, revokedAt])
+  @@index([shopItemId, revokedAt])
+  @@map("shop_item_ownership_sources")
 }
 
 model UserEquippedAccessory {
@@ -3989,6 +4014,7 @@ model BillingPurchase {
   refundCount Int @default(0) @map("refund_count")
   fulfillmentStatus String @default("pending") @map("fulfillment_status")
   benefitKind String @default("paid") @map("benefit_kind")
+  benefitContract String? @map("benefit_contract")
   effectiveExpiresAt DateTime? @map("effective_expires_at")
   id               String    @id @default(uuid())
   identityId       String    @map("identity_id")
@@ -4025,6 +4051,7 @@ model BillingSubscription {
   id             String   @id
   identityId     String   @map("identity_id")
   productId      String   @map("product_id")
+  benefitContract String? @map("benefit_contract")
   startsAt       DateTime @map("starts_at")
   periodStartsAt DateTime? @map("period_starts_at")
   accessUntil    DateTime? @map("access_until")

@@ -1,4 +1,5 @@
 const { slotsChanged } = require('../services/raceSlotCacheInvalidation');
+const { createHash } = require('node:crypto');
 const { prisma } = require("../../../db");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
@@ -24,6 +25,9 @@ const {
   localDateFor,
   resolveNullRoll,
 } = require("./rerollMysteryBox");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
+const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence");
+const { runInPrismaTransaction } = require("../../../db");
 
 // Batch 2026-08-10b item 1 — REROLL ALL after OPEN ALL.
 //
@@ -55,6 +59,7 @@ const REROLL_BATCH_MAX_COUNT = 8;
 // 409 lands afterwards. 100 is far above any legitimate client (the physical
 // inventory ceiling is 5) and far below anything that costs real work.
 const MAX_REQUEST_IDS = 100;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class PowerupRerollBatchError extends Error {
   constructor(message, statusCode, code) {
@@ -92,6 +97,16 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
   const rollFn = dependencies.rollPowerupOdds || rollPowerupOdds;
   const balance = dependencies.balanceConfig || defaultBalanceConfig;
   const isEnabled = dependencies.adsBoxRerollEnabled || adsBoxRerollEnabled;
+  const runTransaction = dependencies.runInPrismaTransaction ||
+    (dependencies.prisma?.$transaction
+      ? (work) => dependencies.prisma.$transaction(work)
+      : Object.keys(dependencies).length > 0
+        ? (work) => work(db)
+        : runInPrismaTransaction);
+  const acquireWriteFence = dependencies.acquireRaceWriteFence ||
+    (Object.keys(dependencies).length > 0 && !dependencies.prisma
+      ? async () => null
+      : acquireRaceWriteFence);
 
   return async function rerollMysteryBoxBatch({
     userId,
@@ -101,6 +116,9 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
     timeZone,
     localDate,
     supportsPowerups5 = false,
+    // Additive request idempotency for new clients. Old clients omit this
+    // header and retain the historical endpoint behavior.
+    requestKey,
   }) {
     // (a) Kill switch, read at CALL time. One switch governs both reroll
     // endpoints, so turning it off removes the button AND 503s the call.
@@ -131,11 +149,58 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
         400
       );
     }
+    if (requestKey !== undefined &&
+        (typeof requestKey !== "string" || !UUID_V4.test(requestKey))) {
+      throw new PowerupRerollBatchError(
+        "A UUIDv4 Idempotency-Key is required",
+        400,
+        "INVALID_IDEMPOTENCY_KEY",
+      );
+    }
+    const normalizedRequestKey = requestKey || null;
+    const fingerprint = normalizedRequestKey
+      ? createHash("sha256")
+          .update(JSON.stringify({ raceId, ids: [...ids].sort(), localDate: localDate ?? null }))
+          .digest("hex")
+      : null;
 
     // (c) localDate — identical validation and semantics to the single reroll,
     // using ITS implementation. Optional; absent means "derive from the stored
     // zone". An out-of-range date is a 400, never a silent fallback, so a client
     // can't quietly reach a stale date's grants.
+    return runTransaction(async (tx) => {
+    // Batch rerolls use the same race fence and row-lock ordering as the
+    // single-reroll command. Funding is the only Gold-specific difference.
+    await acquireWriteFence(tx, raceId);
+    if (typeof tx?.$queryRawUnsafe === "function") {
+      await tx.$queryRawUnsafe("SELECT id FROM races WHERE id = $1 FOR UPDATE", raceId);
+      await tx.$queryRawUnsafe(
+        "SELECT id FROM race_participants WHERE race_id = $1 AND user_id = $2 FOR UPDATE",
+        raceId,
+        userId,
+      );
+      await tx.$queryRawUnsafe(
+        "SELECT id FROM race_powerups WHERE race_id = $1 AND user_id = $2 ORDER BY id FOR UPDATE",
+        raceId,
+        userId,
+      );
+    }
+      const { isMember: goldMember } = await goldMembershipForUser(tx, userId);
+      if (normalizedRequestKey) {
+        const replay = await tx.billingRerollOperation.findUnique({
+          where: { userId_requestKey: { userId, requestKey: normalizedRequestKey } },
+        });
+        if (replay) {
+          if (replay.fingerprint !== fingerprint) {
+            throw new PowerupRerollBatchError(
+              "Idempotency key was used for another request",
+              409,
+              "IDEMPOTENCY_CONFLICT",
+            );
+          }
+          return replay.response;
+        }
+      }
     let effectiveDate;
     if (localDate === undefined || localDate === null) {
       effectiveDate = localDateFor(timeZone);
@@ -169,7 +234,7 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
     // calls: the row count is bounded by what the caller owns, and the
     // userId/raceId predicate is what makes a foreign id come back as "not
     // mine" without a second lookup that would confirm it exists.
-    const rows = await db.racePowerup.findMany({
+    const rows = await tx.racePowerup.findMany({
       where: { id: { in: ids }, userId, raceId },
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -218,7 +283,8 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
     // economic change (N boxes per watch instead of 1). Same find + CAS the
     // single command uses, including the +/-1 day lookup that keeps a watch
     // taken just before local midnight spendable.
-    const grant = await db.adRewardGrant.findFirst({
+    if (!goldMember) {
+    const grant = await tx.adRewardGrant.findFirst({
       where: {
         userId,
         rewardKind: BOX_REROLL_REWARD_KIND,
@@ -235,7 +301,7 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
         "AD_NOT_VERIFIED"
       );
     }
-    const consumed = await db.adRewardGrant.updateMany({
+    const consumed = await tx.adRewardGrant.updateMany({
       where: { id: grant.id, consumedAt: null },
       data: { consumedAt: new Date() },
     });
@@ -245,6 +311,7 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
         409,
         "AD_NOT_VERIFIED"
       );
+    }
     }
 
     // (h) ONE position, ONE roll context, ONE config snapshot for the whole
@@ -304,7 +371,7 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
       // (in the normal case) other boxes did reroll. If EVERY row loses, the
       // response is still 200 with rerolledCount 0; the only way to reach that
       // is the client double-firing, not the user being cheated.
-      const claimed = await db.racePowerup.updateMany({
+      const claimed = await tx.racePowerup.updateMany({
         where: { id: entry.powerupId, status: "HELD", rerolledAt: null },
         data: {
           type: rolled.type,
@@ -329,21 +396,35 @@ function buildRerollMysteryBoxBatch(dependencies = {}) {
     // single path uses. Inventing a new type would surface it in the visible
     // feed and leak box contents the open path deliberately hides.
     for (const type of rerolledTypes) {
-      await eventModel.create({
-        raceId,
-        actorUserId: userId,
-        eventType: "POWERUP_REROLLED",
-        powerupType: type,
-        description: `${displayName || "A runner"} rerolled a mystery box: ${
-          POWERUP_NAMES[type] || type
-        }!`,
+      await tx.racePowerupEvent.create({
+        data: {
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_REROLLED",
+          powerupType: type,
+          description: `${displayName || "A runner"} rerolled a mystery box: ${
+            POWERUP_NAMES[type] || type
+          }!`,
+        },
       });
     }
 
     // (k) No invalidateRaceProgress: `powerupData.inventory` is built in the
     // per-viewer overlay from a live findSlotPowerups read, not from the shared
     // cached snapshot, so there is nothing stale to drop.
-    return { results, rerolledCount };
+    const response = { results, rerolledCount };
+    if (normalizedRequestKey) {
+      await tx.billingRerollOperation.create({
+        data: {
+          userId,
+          requestKey: normalizedRequestKey,
+          fingerprint,
+          response,
+        },
+      });
+    }
+    return response;
+    });
   };
 }
 

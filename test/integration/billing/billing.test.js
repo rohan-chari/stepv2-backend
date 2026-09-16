@@ -8,7 +8,7 @@ const config = { projectId:'proj_bara', secretApiKey:'integration-only', webhook
 before(async () => { server = await startServer({ billingConfig:config, billingProvider:{ async getCustomerHistory() { return history; } } }); });
 after(async () => { await server?.close(); });
 beforeEach(async () => { await cleanDatabase(); history={ purchases:[], subscriptions:[], observedAt:new Date().toISOString() }; });
-async function bootstrap(token) { const res=await request(server.baseUrl,'GET','/billing/bootstrap?platform=ios',{token}); assert.equal(res.status,200); return res.json(); }
+async function bootstrap(token, features = '') { const res=await request(server.baseUrl,'GET','/billing/bootstrap?platform=ios',{token,headers:features?{'X-Client-Features':features}:undefined}); assert.equal(res.status,200); return res.json(); }
 for (const platform of ['ios', 'android']) {
  it(`supports ${platform} checkout and account sync with only that store configured`, async () => {
   const other = platform === 'ios' ? 'android' : 'ios';
@@ -21,7 +21,7 @@ for (const platform of ['ios', 'android']) {
     assert.equal(response.status,200); return response.json();
    };
    const enabled = await get(platform);
-   assert.equal(enabled.available,true); assert.equal(enabled.products.length,5);
+   assert.equal(enabled.available,true); assert.equal(enabled.products.length,4);
    const disabled = await get(other);
    assert.equal(disabled.available,false); assert.deepEqual(disabled.products,[]);
    assert.equal(disabled.coins,350); assert.equal(disabled.reroll.supported,true);
@@ -43,7 +43,7 @@ it('authenticates billing and creates a stable opaque account identity without m
   assert.equal(first.available,true); assert.equal(first.contract,'bara-billing-v1');
   assert.match(first.identity.appUserId,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.equal(first.identity.appUserId,again.identity.appUserId); assert.notEqual(first.identity.appUserId,user.id);
-  assert.deepEqual(first.products.map(p=>p.coins),[500,3000,7500,500,500]);
+  assert.deepEqual(first.products.map(p=>p.coins),[500,3000,7500,500]);
   assert.equal(first.coins,350); assert.equal(first.membership.status,'free');
   assert.deepEqual(first.credits,{paid:0,trial:0,trialExpiresAt:null});
   assert.equal(first.termsUrl,config.termsUrl);
@@ -70,7 +70,7 @@ it('authenticates and deduplicates durable webhook inbox without synchronously g
 async function fixture(coins=100){const owner=await createTestUser({coins});const race=await prisma.race.create({data:{creatorId:owner.user.id,name:'Billing race',targetSteps:20000,status:'ACTIVE',startedAt:new Date(),maxDurationDays:1}});const participant=await prisma.raceParticipant.create({data:{raceId:race.id,userId:owner.user.id,status:'ACCEPTED'}});const items=[];for(let i=0;i<2;i++)items.push(await prisma.racePowerup.create({data:{raceId:race.id,participantId:participant.id,userId:owner.user.id,type:'PROTEIN_SHAKE',rarity:'COMMON'}}));return {...owner,race,items};}
 async function reroll(f,key=randomUUID(),body={}){return request(server.baseUrl,'POST',`/races/${f.race.id}/powerups/reroll-purchase`,{token:f.token,headers:{'Idempotency-Key':key,'X-Client-Features':'powerups5'},body:{powerupIds:f.items.map(i=>i.id),funding:'coins',expectedCoinCost:50,...body}});}
 it('charges one action for a whole batch and replays its durable response after race end',async()=>{
- const f=await fixture(),key=randomUUID();const first=await reroll(f,key);assert.equal(first.status,200);const result=await first.json();assert.equal(result.coins,50);assert.deepEqual(result.charged,{coins:50,paidCredits:0,trialCredits:0});assert.equal(result.results.length,2);assert.ok(result.results.every(r=>r.rerolledAt&&r.rerolled));
+ const f=await fixture(),key=randomUUID();const first=await reroll(f,key);assert.equal(first.status,200);const result=await first.json();assert.equal(result.coins,50);assert.deepEqual(result.charged,{coins:50,paidCredits:0,trialCredits:0,freeGold:0});assert.equal(result.results.length,2);assert.ok(result.results.every(r=>r.rerolledAt&&r.rerolled));
  await prisma.race.update({where:{id:f.race.id},data:{status:'COMPLETED'}});
  const replay=await reroll(f,key);assert.equal(replay.status,200);assert.deepEqual(await replay.json(),result);
  assert.equal(await prisma.coinTransaction.count({where:{userId:f.user.id,reason:'billing_reroll'}}),1);
@@ -86,7 +86,8 @@ it('serializes competing paid requests so one action is charged exactly once',as
  const f=await fixture();const replies=await Promise.all([reroll(f),reroll(f)]);assert.deepEqual(replies.map(r=>r.status).sort(),[200,409]);
  assert.equal((await prisma.user.findUnique({where:{id:f.user.id}})).coins,50);
 });
-async function member(userId){const identity=await prisma.billingIdentity.create({data:{userId}});await prisma.billingSubscription.create({data:{id:randomUUID(),identityId:identity.id,productId:'plus_monthly',startsAt:new Date(),periodStartsAt:new Date(),accessUntil:new Date(Date.now()+86400000),givesAccess:true,observedAt:new Date()}});return identity;}
+async function member(userId){const identity=await prisma.billingIdentity.create({data:{userId}});await prisma.billingSubscription.create({data:{id:randomUUID(),identityId:identity.id,productId:'plus_monthly',startsAt:new Date(),periodStartsAt:new Date(),accessUntil:new Date(Date.now()+86400000),givesAccess:true,benefitContract:'bara_gold_v1',observedAt:new Date()}});return identity;}
+async function legacyMember(userId){const identity=await prisma.billingIdentity.create({data:{userId}});await prisma.billingSubscription.create({data:{id:randomUUID(),identityId:identity.id,productId:'plus_monthly',startsAt:new Date(),periodStartsAt:new Date(),accessUntil:new Date(Date.now()+86400000),givesAccess:true,observedAt:new Date()}});return identity;}
 it('serves and charges the same member price on legacy cosmetic and powerup paths',async()=>{
  const {user,token}=await createTestUser({coins:1000});await member(user.id);
  const cosmetic=await prisma.shopItem.create({data:{sku:'billing_hat',name:'Billing Hat',slot:'HEAD',assetKey:'straw_hat',priceCoins:201}});
@@ -95,6 +96,35 @@ it('serves and charges the same member price on legacy cosmetic and powerup path
  const stale=await request(server.baseUrl,'POST',`/shop/items/${cosmetic.id}/purchase`,{token,headers:{'Idempotency-Key':randomUUID()},body:{expectedPriceCoins:201}});assert.equal(stale.status,409);assert.equal((await stale.json()).code,'PRICE_CHANGED');
  const bought=await request(server.baseUrl,'POST',`/shop/items/${cosmetic.id}/purchase`,{token,headers:{'Idempotency-Key':randomUUID()},body:{}});assert.equal(bought.status,200);assert.equal((await bought.json()).coins,829);
  const p=await request(server.baseUrl,'POST','/shop/powerups/purchase',{token,headers:{'Idempotency-Key':randomUUID(),'X-Client-Features':'powerups5'},body:{sku:powerup.sku}});assert.equal(p.status,200);assert.equal((await p.json()).coins,659);
+});
+it('applies the backend 15 percent discount only to active Gold membership',async()=>{
+ const item=await prisma.shopItem.create({data:{sku:'gold-discount-hat',name:'Gold Discount Hat',slot:'HEAD',assetKey:'straw_hat',priceCoins:200}});
+ for(const plan of ['weekly','monthly']){
+  const {user,token}=await createTestUser({coins:0});
+  const identity=await member(user.id);
+  await prisma.billingSubscription.updateMany({where:{identityId:identity.id},data:{productId:`plus_${plan}`,trial:plan==='weekly'}});
+  const response=await request(server.baseUrl,'GET','/shop/catalog',{token});
+  assert.equal(response.status,200);
+  const row=(await response.json()).items.find(i=>i.id===item.id);
+  assert.equal(row.priceCoins,170);
+  assert.equal(row.discountPercent,15);
+ }
+ const free=await createTestUser({coins:0});
+ let response=await request(server.baseUrl,'GET','/shop/catalog',{token:free.token});
+ let row=(await response.json()).items.find(i=>i.id===item.id);
+ assert.equal(row.priceCoins,200);
+ assert.equal(row.discountPercent,undefined);
+ const expired=await createTestUser({coins:0});
+ const expiredIdentity=await member(expired.user.id);
+ await prisma.billingSubscription.updateMany({where:{identityId:expiredIdentity.id},data:{givesAccess:false,accessUntil:new Date(Date.now()-1000)}});
+ response=await request(server.baseUrl,'GET','/shop/catalog',{token:expired.token});
+ row=(await response.json()).items.find(i=>i.id===item.id);
+ assert.equal(row.priceCoins,200);
+ assert.equal(row.discountPercent,undefined);
+ const goldUser=await createTestUser();
+ const goldProducts=await bootstrap(goldUser.token,'bara_gold_v1');
+ assert.equal(goldProducts.products.some(p=>p.plan==='annual'),false);
+ assert.equal(goldProducts.products.some(p=>p.plan==='permanent'),false,JSON.stringify(goldProducts.products));
 });
 it('keeps existing public race-share routing unauthenticated',async()=>{
  const res=await request(server.baseUrl,'GET','/races/share/not-a-real-share-token');assert.equal(res.status,404);
@@ -119,14 +149,14 @@ it('accepts concurrent copies of the same authenticated webhook once',async()=>{
  const replies=await Promise.all([send(),send()]);assert.deepEqual(replies.map(r=>r.status),[200,200]);assert.equal(await prisma.billingInbox.count(),1);
 });
 it('spends one expiring trial credit before paid credits and keeps paid credits usable after expiry',async()=>{
- const f=await fixture(),identity=await member(f.user.id);
+ const f=await fixture(),identity=await legacyMember(f.user.id);
  await prisma.billingCreditLot.create({data:{identityId:identity.id,sourceKey:'trial-1',kind:'trial',granted:3,remaining:3,expiresAt:new Date(Date.now()+86400000)}});
  await prisma.billingCreditLot.create({data:{identityId:identity.id,sourceKey:'paid-1',kind:'paid',granted:10,remaining:10}});
- const first=await reroll(f,randomUUID(),{funding:'credits'});assert.equal(first.status,200);const result=await first.json();assert.deepEqual(result.charged,{coins:0,paidCredits:0,trialCredits:1});assert.equal(result.coins,100);assert.equal(result.credits.paid,10);assert.equal(result.credits.trial,2);
+ const first=await reroll(f,randomUUID(),{funding:'credits'});assert.equal(first.status,200);const result=await first.json();assert.deepEqual(result.charged,{coins:0,paidCredits:0,trialCredits:1,freeGold:0});assert.equal(result.coins,100);assert.equal(result.credits.paid,10);assert.equal(result.credits.trial,2);
  await prisma.billingSubscription.updateMany({where:{identityId:identity.id},data:{givesAccess:false,accessUntil:new Date(Date.now()-1000)}});
  await prisma.billingCreditLot.updateMany({where:{identityId:identity.id,kind:'trial'},data:{expiresAt:new Date(Date.now()-1000)}});
  const held=await prisma.racePowerup.create({data:{raceId:f.race.id,participantId:f.items[0].participantId,userId:f.user.id,type:'PROTEIN_SHAKE',rarity:'COMMON'}});
- const second=await reroll(f,randomUUID(),{funding:'credits',powerupIds:[held.id]});assert.equal(second.status,200);const last=await second.json();assert.deepEqual(last.charged,{coins:0,paidCredits:1,trialCredits:0});assert.equal(last.credits.paid,9);assert.equal(last.credits.trial,0);
+ const second=await reroll(f,randomUUID(),{funding:'credits',powerupIds:[held.id]});assert.equal(second.status,200);const last=await second.json();assert.deepEqual(last.charged,{coins:0,paidCredits:1,trialCredits:0,freeGold:0});assert.equal(last.credits.paid,9);assert.equal(last.credits.trial,0);
 });
 it('keeps coin rerolls available when RevenueCat checkout has no configuration',async()=>{
  const unconfigured=await startServer({billingConfig:{}});try{

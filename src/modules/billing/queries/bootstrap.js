@@ -1,5 +1,5 @@
 const { AppError } = require('../../../shared/errors/AppError');
-const { PRODUCTS,catalogFor,configured } = require('../catalog');
+const { PRODUCTS,catalogFor,configured,GOLD_BENEFIT_VERSION } = require('../catalog');
 async function ensureIdentity(db,userId){
  return db.$transaction(async tx=>{
  const db=tx;
@@ -32,8 +32,13 @@ async function membershipFor(db,identityId,now=new Date()){
 async function bootstrap({db,config,userId,platform,clientFeatures=new Set(),channel="prod"}){
  if(platform!==undefined&&!['ios','android'].includes(platform))throw new AppError('Invalid platform','INVALID_PLATFORM',400);
  const {identity,user}=await ensureIdentity(db,userId);const selected=platform||(user.googleSub?'android':'ios');
- const [state,credits]=await Promise.all([membershipFor(db,identity.id),creditsFor(db,identity.id)]);
+ const [state,credits,goldState]=await Promise.all([
+  membershipFor(db,identity.id),
+  creditsFor(db,identity.id),
+  require('./goldPolicy').goldMembershipForUser(db,userId),
+ ]);
  const {managementUrl,...membership}=state;const available=configured(config,selected);
+ const goldCapable=clientFeatures.has('bara_gold_v1');
  let cosmetic=null;
  const granted=await db.billingCosmeticGrant.findFirst({where:{identityId:identity.id},orderBy:{month:'desc'}});
  if(granted){const item=await db.shopItem.findUnique({where:{id:granted.shopItemId}});
@@ -41,6 +46,7 @@ async function bootstrap({db,config,userId,platform,clientFeatures=new Set(),cha
    cosmetic={month:granted.month,item:require('../../cosmetics/shopCosmetics').serializeShopItem(item,{owned:true}),owned:true,grantedAt:granted.createdAt.toISOString()};
   }
  }
- return {available,contract:'bara-billing-v1',identity:{appUserId:identity.id,environment:identity.environment},products:available?catalogFor(selected).filter(p=>membership.plan!=='permanent'||!membership.givesAccess||p.kind==='coins'):[],membership,credits,coins:user.coins,reroll:{supported:true,coinCost:50,maxItems:8},cosmetic,managementUrl,termsUrl:config.termsUrl||null,privacyUrl:config.privacyUrl||null};
+ const products=available?catalogFor(selected,{gold:goldCapable}).filter(p=>membership.plan!=='permanent'||!membership.givesAccess||p.kind==='coins'):[];
+ return {available,contract:'bara-billing-v1',identity:{appUserId:identity.id,environment:identity.environment},products,membership,credits,coins:user.coins,reroll:{supported:true,coinCost:50,maxItems:8,...(goldCapable?{freeGold:goldState.isMember,benefitVersion:GOLD_BENEFIT_VERSION}: {})},cosmetic,managementUrl,termsUrl:config.termsUrl||null,privacyUrl:config.privacyUrl||null,...(goldCapable?{goldPolicy:{version:GOLD_BENEFIT_VERSION,isMember:goldState.isMember,weeklyProductId:'bara_plus_weekly_v1',monthlyProductId:'bara_plus_monthly_v1'}}:{})};
 }
 module.exports={bootstrap,ensureIdentity,creditsFor,membershipFor};
