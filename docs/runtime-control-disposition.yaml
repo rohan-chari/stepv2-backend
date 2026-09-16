@@ -549,6 +549,19 @@
       "rollbackValue": false
     },
     {
+      "id": "env:BARA_GOLD_MONTHLY_CONTRACT_CUTOVER_AT",
+      "name": "BARA_GOLD_MONTHLY_CONTRACT_CUTOVER_AT",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "explicit UTC cutover for distinguishing new Gold monthly subscription contracts from historical monthly records",
+      "deployFamily": "billing_config",
+      "rollbackValue": null
+    },
+    {
       "id": "env:BILLING_PRIVACY_URL",
       "name": "BILLING_PRIVACY_URL",
       "kind": "string_environment",

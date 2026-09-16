@@ -133,6 +133,7 @@ const envMetadata = {
   REVENUECAT_IOS_APP_ID: ["deployment_config", null, "RevenueCat App Store app identifier; missing configuration leaves checkout unavailable", "billing_config", null],
   REVENUECAT_ANDROID_APP_ID: ["deployment_config", null, "RevenueCat Play Store app identifier; missing configuration leaves checkout unavailable", "billing_config", null],
   REVENUECAT_WEBHOOK_AUTHORIZATION: ["deployment_config", null, "exact server-only webhook Bearer authorization; missing configuration leaves checkout unavailable", "billing_config", null],
+  BARA_GOLD_MONTHLY_CONTRACT_CUTOVER_AT: ["deployment_config", null, "explicit UTC cutover for distinguishing new Gold monthly subscription contracts from historical monthly records", "billing_config", null],
   BILLING_TERMS_URL: ["deployment_config", null, "published absolute HTTPS billing terms URL; missing configuration leaves checkout unavailable", "billing_config", null],
   BILLING_PRIVACY_URL: ["deployment_config", null, "published absolute HTTPS privacy URL; missing configuration leaves checkout unavailable", "billing_config", null],
   GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE: ["deployment_config", null, "absolute path to the root-readable Gmail send-only OAuth secret", "feedback_delivery", null],
