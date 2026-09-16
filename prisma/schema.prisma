@@ -10,6 +10,7 @@ model User {
   seededAutomaticEligibleAt DateTime? @db.Timestamptz(3) @map("seeded_automatic_eligible_at")
   billingRealm String @default("production") @map("billing_realm")
   raceProgressRefreshIntents RaceProgressRefreshIntent[]
+  goldActionClaims                 GoldActionClaim[]
   id                                String                          @id @default(uuid())
   // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
   // Both are nullable+unique so a pure-Google user has no appleId and vice versa.
@@ -4006,6 +4007,24 @@ model BillingIdentity {
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@map("billing_identities")
+}
+
+// Durable, account-scoped idempotency for Gold actions that do not have a
+// provider transaction or ad-grant row to act as their replay key.
+model GoldActionClaim {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String
+  localDate String   @map("local_date")
+  resultJson Json?   @map("result_json")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, action, localDate])
+  @@index([action, localDate])
+  @@map("gold_action_claims")
 }
 
 model BillingPurchase {
