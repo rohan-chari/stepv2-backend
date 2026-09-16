@@ -44,6 +44,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
   const handoff = async function handoff({
     raceId,
     sourceGeneration,
+    includesGlobalEventBoundary = false,
     snapshotCommand,
     intents = [],
     resolveIntents = null,
@@ -82,6 +83,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
         () => model.create({
           raceId,
           sourceGeneration,
+          includesGlobalEventBoundary,
           snapshotCommand,
           intents,
           resolveIntents,

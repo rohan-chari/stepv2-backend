@@ -176,6 +176,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       {
         raceId,
         sourceGeneration,
+        includesGlobalEventBoundary = false,
         snapshotCommand,
         intents,
         resolveIntents = null,
@@ -232,15 +233,17 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
         const task = await measure("taskInsert", () =>
           client.$queryRawUnsafe(
             `INSERT INTO race_resolution_post_tasks (
-               id, race_id, source_generation, dedupe_key, state, requested_at,
+               id, race_id, source_generation, includes_global_event_boundary,
+               dedupe_key, state, requested_at,
                not_before_at, snapshot_state, snapshot_command, payload_bytes,
                intent_count, created_at, updated_at
-             ) VALUES ($1,$2,$3,$4,'queued',$5,$5,'pending',$6::jsonb,$7,$8,$5,$5)
+             ) VALUES ($1,$2,$3,$4,$5,'queued',$6,$6,'pending',$7::jsonb,$8,$9,$6,$6)
              ON CONFLICT (race_id, source_generation) DO NOTHING
              RETURNING id`,
             id,
             raceId,
             sourceGeneration,
+            includesGlobalEventBoundary === true,
             dedupeKey,
             now,
             JSON.stringify(snapshotCommand),
