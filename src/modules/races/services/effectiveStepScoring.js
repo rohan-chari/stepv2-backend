@@ -194,14 +194,14 @@ function umbrellaAdjustedRainstorms(rainstorms, umbrellas, nowMs) {
 // earn ~1.5x while walking (prod, 2026-07-24). Models that predate the closed
 // variant fall back to the open-bucket sums, so external callers and test
 // doubles keep working unchanged.
-async function sumWindows(model, userId, windows, now) {
+async function sumWindows(model, userId, windows, now, onSourceRowsRead = null) {
   if (windows.length === 0) return [];
   if (now != null && typeof model.sumClosedStepsInWindows === "function") {
-    return model.sumClosedStepsInWindows(userId, windows, now);
+    return model.sumClosedStepsInWindows(userId, windows, now, onSourceRowsRead);
   }
   if (now != null && typeof model.sumClosedStepsInWindow === "function") {
     return Promise.all(
-      windows.map((w) => model.sumClosedStepsInWindow(userId, w.start, w.end, now))
+      windows.map((w) => model.sumClosedStepsInWindow(userId, w.start, w.end, now, onSourceRowsRead))
     );
   }
   if (typeof model.sumStepsInWindows === "function") {
@@ -683,6 +683,7 @@ async function createIncrementalEffectScoreCapture({
   windowStart = null,
   windowEnd = null,
   globalEvents = [],
+  onSourceRowsRead = null,
 }) {
   const completeEffects = effects.filter(Boolean);
   const prefixEffects = [];
@@ -725,6 +726,7 @@ async function createIncrementalEffectScoreCapture({
           userId,
           windows,
           new Date(nowMs),
+          onSourceRowsRead,
         );
         for (let index = 0; index < segments.length; index++) {
           segments[index].steps = Number(sums[index]) || 0;

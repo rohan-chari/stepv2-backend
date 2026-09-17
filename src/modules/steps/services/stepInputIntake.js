@@ -23,6 +23,10 @@ const {
   measureStepTelemetryPhase,
   markStepTelemetryTransactionError,
 } = require("../../../shared/observability/stepTelemetryContext");
+const { buildHistoricalRaceDiscovery } = require("../../races/services/historicalRaceDiscovery");
+const { buildHistoricalRaceReconciliationIntentModel } = require("../../races/models/historicalRaceReconciliationIntent");
+const { buildHistoricalRaceDiscoveryCursorModel } = require("../../races/models/historicalRaceDiscoveryCursor");
+const lateEventTimeMetrics = require("../../../shared/observability/lateEventTimeMetrics");
 
 function generationsEqual(left, right) {
   if (left == null || right == null) return false;
@@ -123,6 +127,9 @@ function buildStepInputIntake(dependencies = {}) {
   const raceResolutionJobModel =
     dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobModel;
   const now = dependencies.now || (() => new Date());
+  const findHistoricalRaces = dependencies.findHistoricalRaces || buildHistoricalRaceDiscovery({ prisma, now });
+  const historicalIntentModel = dependencies.HistoricalRaceReconciliationIntent || buildHistoricalRaceReconciliationIntentModel(prisma);
+  const historicalCursorModel = dependencies.HistoricalRaceDiscoveryCursor || buildHistoricalRaceDiscoveryCursorModel(prisma);
 
   async function runOn(tx, {
     userId,
@@ -160,7 +167,7 @@ function buildStepInputIntake(dependencies = {}) {
       if (dailyStorageChanged) await milestonesChanged(userId, record.date);
     }
 
-    let samplePersistence = { storageChanged: false, scoringChanged: false };
+    let samplePersistence = { storageChanged: false, scoringChanged: false, earliestChangedStartMs: null, latestChangedEndMs: null, changedBucketCount: 0 };
     if (Array.isArray(samples) && samples.length > 0) {
       samplePersistence = await measureStepTelemetryPhase(
         "sample",
@@ -200,6 +207,17 @@ function buildStepInputIntake(dependencies = {}) {
       scoringState.sourceQueueSemanticsGeneration,
       generation
     );
+
+    const sourceEnvelope = samplePersistence.scoringChanged === true &&
+      Number.isFinite(samplePersistence.earliestChangedStartMs) &&
+      Number.isFinite(samplePersistence.latestChangedEndMs)
+      ? {
+          changedStart: new Date(samplePersistence.earliestChangedStartMs),
+          changedEnd: new Date(samplePersistence.latestChangedEndMs),
+          changedBucketCount: samplePersistence.changedBucketCount || 0,
+          sourceGeneration: generation,
+        }
+      : null;
 
     let jobs = [];
     let activeRaceCount = 0;
@@ -241,6 +259,9 @@ function buildStepInputIntake(dependencies = {}) {
             resolutionTimeZone: timeZone,
             now: new Date(requestTimestamp),
             dirtyEnvelopeByRaceId,
+            sourceEnvelopeByRaceId: sourceEnvelope
+              ? new Map(races.map((race) => [race.raceId, sourceEnvelope]))
+              : null,
             largeRaceScopeByRaceId,
             burstCoalescing,
             queuedGenerationMerge,
@@ -249,6 +270,48 @@ function buildStepInputIntake(dependencies = {}) {
           tx,
         ),
       );
+
+      if (sourceEnvelope) {
+        const discovered = await measureStepTelemetryPhase("historical_discovery", () => findHistoricalRaces({
+          userId,
+          changedStart: sourceEnvelope.changedStart,
+          changedEnd: sourceEnvelope.changedEnd,
+          cursor: null,
+          limit: 100,
+        }));
+        lateEventTimeMetrics.increment("historical_discovery_queries_total", { result: discovered.outOfHorizon ? "out_of_horizon" : "queried" });
+        lateEventTimeMetrics.increment("historical_discovery_races_found", { result: "returned" }, discovered.rows.length);
+        if (discovered.outOfHorizon) {
+          lateEventTimeMetrics.increment("historical_out_of_horizon_total", { reason: "retention" });
+        }
+        const completed = discovered.rows.filter((row) => String(row.raceStatus).toLowerCase() === "completed");
+        if (completed.length) {
+          await historicalIntentModel.admitMany({
+            rows: completed,
+            changedStart: sourceEnvelope.changedStart,
+            changedEnd: sourceEnvelope.changedEnd,
+            sourceGeneration: generation,
+            now: new Date(requestTimestamp),
+          }, tx);
+        }
+        if (discovered.nextCursor) {
+          await historicalCursorModel.upsert({
+            userId,
+            changedStart: sourceEnvelope.changedStart,
+            changedEnd: sourceEnvelope.changedEnd,
+            sourceGeneration: generation,
+            cursor: discovered.nextCursor,
+            now: new Date(requestTimestamp),
+          }, tx);
+          lateEventTimeMetrics.increment("historical_intents_overflowed", { reason: "discovery_page" });
+        }
+        lateEventTimeMetrics.increment("late_samples_received_total", { result: "changed" });
+        lateEventTimeMetrics.observe(
+          "late_sample_age_seconds",
+          Math.max(0, (new Date(requestTimestamp).getTime() - sourceEnvelope.changedEnd.getTime()) / 1000),
+          { age_bucket: "bounded" },
+        );
+      }
     }
 
     // The generation, canonical watermark, and durable-queue ownership fence

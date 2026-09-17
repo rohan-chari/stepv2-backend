@@ -2434,6 +2434,19 @@
       "rollbackValue": null
     },
     {
+      "id": "env:STEP_CORRECTION_HORIZON_DAYS",
+      "name": "STEP_CORRECTION_HORIZON_DAYS",
+      "kind": "numeric_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "runtime value; see source consumers",
+      "deployFamily": "runtime_configuration",
+      "rollbackValue": null
+    },
+    {
       "id": "env:STEP_MILESTONE_REMINDERS_DISABLED",
       "name": "STEP_MILESTONE_REMINDERS_DISABLED",
       "kind": "boolean_environment",

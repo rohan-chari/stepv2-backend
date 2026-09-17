@@ -326,6 +326,8 @@ const StepSample = {
           storageChanged: true,
           scoringChanged: true,
           earliestChangedStartMs: coveredStart,
+          latestChangedEndMs: coveredEnd,
+          changedBucketCount: incoming.length,
           ...(returnCanonicalInput
             ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
             : {}),
@@ -333,7 +335,7 @@ const StepSample = {
       }
       if (!state) {
         await bumpScoringInputVersion(client, userId);
-        return { storageChanged: true, scoringChanged: true };
+        return { storageChanged: true, scoringChanged: true, earliestChangedStartMs: coveredStart, latestChangedEndMs: coveredEnd, changedBucketCount: incoming.length };
       }
       const afterCanonical = await readCanonicalSampleInput(client, userId);
       const storageChanged = beforeCanonical.storageWatermark !==
@@ -451,6 +453,11 @@ const StepSample = {
           ...kept.filter(row => !oldScoringSet.has(scoringKey(row.raw)))]
           .reduce((earliest, row) => Math.min(earliest, row.start), Infinity)
       : null;
+    const latestChangedEndMs = scoringDelta
+      ? [...replacedStored.filter(row => !newScoringSet.has(scoringKey(row))),
+          ...kept.filter(row => !oldScoringSet.has(scoringKey(row.raw)))]
+          .reduce((latest, row) => Math.max(latest, row.end), -Infinity)
+      : null;
     if (exactNoop) {
       const canonicalInput = (state || returnCanonicalInput)
         ? await readCanonicalSampleInput(client, userId)
@@ -460,7 +467,7 @@ const StepSample = {
         const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
           state.scoringWatermark !== canonicalInput.scoringWatermark;
         await persistScoringInputState(client, userId, state, canonicalInput, scoringChanged);
-        return { storageChanged: false, scoringChanged, ...(returnCanonicalInput ? { canonicalInput } : {}) };
+        return { storageChanged: false, scoringChanged, earliestChangedStartMs: null, latestChangedEndMs: null, changedBucketCount: 0, ...(returnCanonicalInput ? { canonicalInput } : {}) };
       }
       return { storageChanged: false, scoringChanged: false, ...(returnCanonicalInput ? { canonicalInput } : {}) };
     }
@@ -479,6 +486,8 @@ const StepSample = {
         scoringChanged: classifyScoringDelta ? scoringDelta : true,
         // Include deleted/replaced OLD spans, not just accepted incoming rows.
         earliestChangedStartMs,
+        latestChangedEndMs,
+        changedBucketCount: scoringDelta ? oldScoringRows.length + newScoringRows.length : 0,
         ...(returnCanonicalInput
           ? { canonicalInput: await readCanonicalSampleInput(client, userId) }
           : {}),
@@ -543,7 +552,7 @@ const StepSample = {
   // periodEnd <= now (§3.4). Excludes any not-yet-closed bucket (whatever its
   // size) so Leech's credited window is monotonic across recomputes. Same plain
   // ::timestamp comparison style as sumStepsInWindows (columns hold UTC).
-  async sumClosedStepsInWindow(userId, windowStart, windowEnd, now) {
+  async sumClosedStepsInWindow(userId, windowStart, windowEnd, now, onSourceRowsRead = null) {
     const start =
       typeof windowStart === "string" ? windowStart : new Date(windowStart).toISOString();
     const end =
@@ -560,6 +569,7 @@ const StepSample = {
       userId, start, end, nowIso
     );
 
+    if (typeof onSourceRowsRead === "function") onSourceRowsRead(samples.length);
     return prorateSamplesIntoWindow(
       samples,
       new Date(start).getTime(),
@@ -576,7 +586,7 @@ const StepSample = {
   // down as the freeze window widens, and paying boosted credit for steps walked
   // after the boost ended. Same plain ::timestamp comparison style as
   // sumStepsInWindows (columns hold UTC).
-  async sumClosedStepsInWindows(userId, windows, now) {
+  async sumClosedStepsInWindows(userId, windows, now, onSourceRowsRead = null) {
     if (!windows || windows.length === 0) return [];
 
     const parsed = windows.map((w) => ({
@@ -602,6 +612,7 @@ const StepSample = {
       userId, fetchStart, fetchEnd, nowIso
     );
 
+    if (typeof onSourceRowsRead === "function") onSourceRowsRead(samples.length);
     return parsed.map((w) =>
       prorateSamplesIntoWindow(
         samples,
@@ -630,6 +641,33 @@ const StepSample = {
          AND period_start < $3::timestamp`,
       userIds, start, end
     );
+  },
+
+  // Historical reconciliation source read. The worker supplies one bounded
+  // race/user window and performs all segment sums in memory, so an effect
+  // never causes its own StepSample query. The extra row proves the cap
+  // without loading an unbounded result set.
+  async findRowsForUserInRange(userId, rangeStart, rangeEnd, maxRows = 5000) {
+    const cap = Math.max(1, Math.min(5000, Number(maxRows) || 5000));
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT period_start AS "start", period_end AS "end", steps
+         FROM step_samples
+        WHERE user_id=$1
+          AND period_end > $2::timestamp
+          AND period_start < $3::timestamp
+        ORDER BY period_start ASC
+        LIMIT $4`,
+      userId,
+      new Date(rangeStart).toISOString(),
+      new Date(rangeEnd).toISOString(),
+      cap + 1,
+    );
+    if (rows.length > cap) {
+      const error = new RangeError("historical reconciliation source row cap exceeded");
+      error.code = "SOURCE_ROWS_CAP";
+      throw error;
+    }
+    return rows;
   },
 
   // Resolution/expiry worker path: preserve the exact user/range pairing.

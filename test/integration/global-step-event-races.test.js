@@ -3,8 +3,12 @@
 // Wrong Turn / Leg Cramp. Exercises the display path (GET /races/:id/progress),
 // which shares computeEffectModifiers + computeGlobalEventBoost with settlement.
 const assert = require("node:assert/strict");
+const { randomUUID } = require("node:crypto");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { buildRaceResolutionWorkerV2 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
+const { buildRecomputePlacements } = require("../../src/modules/races/jobs/placementRecompute");
+const { processDueEndMicroBatch } = require("../../src/modules/steps/services/globalStepEventEntitlement");
 
 let server;
 let nextAppleId = 0;
@@ -93,6 +97,26 @@ async function recordSamples(token, samples) {
   });
 }
 
+async function recordSyncV2(token, samples) {
+  return request(server.baseUrl, "POST", "/steps/sync-v2", {
+    body: { date: new Date().toISOString().slice(0, 10), steps: 2000, samples },
+    headers: { "Idempotency-Key": randomUUID() },
+    token,
+  });
+}
+
+async function drainRaceResolution() {
+  await buildRecomputePlacements({
+    requestStepSyncForUsers: async () => {},
+    logger: { log() {}, warn() {}, error(error) { throw error; } },
+  })();
+  const worker = buildRaceResolutionWorkerV2({
+    bootAt: 0,
+    logger: { log() {}, error(error) { throw error; } },
+  });
+  while (await worker.processOne()) {}
+}
+
 async function getProgress(token, raceId) {
   const res = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, { token });
   return (await res.json()).progress;
@@ -163,6 +187,113 @@ describe("global 2x step event in races", () => {
     assert.ok(progress.globalEvent, "progress should include globalEvent while one is active");
     assert.equal(progress.globalEvent.active, true);
     assert.equal(progress.globalEvent.multiplier, 2);
+  });
+
+  it("preserves active historical 2x scoring when late event-time samples arrive", async () => {
+    const alice = await createUser("AliceLateGlobal2x");
+    const bob = await createUser("BobLateGlobal2x");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, bob);
+
+    const eventStart = minutesAgo(90);
+    const eventEnd = minutesAgo(60);
+    const event = await createGlobalEvent({ startsAt: eventStart, endsAt: eventEnd });
+    const entitlement = await prisma.globalStepEventEntitlement.create({
+      data: {
+        eventId: event.id,
+        userId: alice.userId,
+        timezone: "UTC",
+        localDate: new Date().toISOString().slice(0, 10),
+        startsAt: eventStart,
+        endsAt: eventEnd,
+        startOutcome: "ACTIVATED_ON_TIME",
+        startProcessedAt: eventStart,
+      },
+    });
+    await prisma.globalEventRaceImpact.create({
+      data: { eventId: event.id, raceId, userId: alice.userId },
+    });
+
+    const early = {
+      periodStart: minutesAgo(88).toISOString(),
+      periodEnd: minutesAgo(86).toISOString(),
+      steps: 500,
+    };
+    const earlyResponse = await recordSyncV2(alice.token, [early]);
+    assert.equal(earlyResponse.status, 202, await earlyResponse.text());
+
+    // Exercise the real event-end path. The entitlement is ended and the
+    // existing active race is re-enqueued for its boundary resolution.
+    const ended = await processDueEndMicroBatch({
+      prisma,
+      now: new Date(),
+      ids: [entitlement.id],
+    });
+    assert.equal(ended.length, 1);
+    await drainRaceResolution();
+
+    const entitlementAfterEnd = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
+      where: { id: entitlement.id },
+    });
+    assert.ok(entitlementAfterEnd.endProcessedAt, "event-end processing should be recorded");
+    const initialParticipant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    const initialRaw = await prisma.stepSample.aggregate({
+      where: { userId: alice.userId, periodStart: { gte: eventStart }, periodEnd: { lte: eventEnd } },
+      _sum: { steps: true },
+    });
+    assert.equal(initialRaw._sum.steps, 500);
+    const initialProgress = findUser(await getProgress(alice.token, raceId), alice.userId);
+    assert.equal(initialProgress.totalSteps, 1000);
+
+    const late = [
+      { periodStart: minutesAgo(85).toISOString(), periodEnd: minutesAgo(80).toISOString(), steps: 500 },
+      { periodStart: minutesAgo(80).toISOString(), periodEnd: minutesAgo(75).toISOString(), steps: 500 },
+      { periodStart: minutesAgo(75).toISOString(), periodEnd: minutesAgo(70).toISOString(), steps: 500 },
+    ];
+    const upload = await recordSyncV2(alice.token, late);
+    assert.equal(upload.status, 202, await upload.text());
+    await drainRaceResolution();
+    const generationAfterLate = await prisma.userScoringInputVersion.findUniqueOrThrow({
+      where: { userId: alice.userId },
+    });
+
+    const finalParticipant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    const finalRaw = await prisma.stepSample.aggregate({
+      where: { userId: alice.userId, periodStart: { gte: eventStart }, periodEnd: { lte: eventEnd } },
+      _sum: { steps: true },
+    });
+    assert.equal(finalRaw._sum.steps, 2000);
+    const finalProgress = findUser(await getProgress(alice.token, raceId), alice.userId);
+    assert.equal(finalProgress.totalSteps, 4000);
+
+    const historicalEntitlement = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
+      where: { id: entitlement.id },
+    });
+    assert.ok(historicalEntitlement.endProcessedAt);
+    const historicalEvent = await prisma.globalStepEvent.findUniqueOrThrow({ where: { id: event.id } });
+    assert.equal(historicalEvent.multiplier, 2);
+    assert.ok(historicalEvent.startsAt < eventEnd && historicalEvent.endsAt > eventStart);
+
+    const duplicateUpload = await recordSyncV2(alice.token, late);
+    assert.equal(duplicateUpload.status, 202, await duplicateUpload.text());
+    await drainRaceResolution();
+    const generationAfterDuplicate = await prisma.userScoringInputVersion.findUniqueOrThrow({
+      where: { userId: alice.userId },
+    });
+    assert.equal(BigInt(generationAfterDuplicate.generation), BigInt(generationAfterLate.generation));
+    const afterDuplicate = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    const duplicateRaw = await prisma.stepSample.aggregate({
+      where: { userId: alice.userId, periodStart: { gte: eventStart }, periodEnd: { lte: eventEnd } },
+      _sum: { steps: true },
+    });
+    assert.equal(duplicateRaw._sum.steps, 2000);
+    assert.equal(findUser(await getProgress(alice.token, raceId), alice.userId).totalSteps, 4000);
   });
 
   it("steps outside the event window are not boosted", async () => {

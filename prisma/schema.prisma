@@ -11,6 +11,9 @@ model User {
   billingRealm String @default("production") @map("billing_realm")
   raceProgressRefreshIntents RaceProgressRefreshIntent[]
   goldActionClaims                 GoldActionClaim[]
+  historicalRaceReconciliationIntents HistoricalRaceReconciliationIntent[]
+  historicalRaceDiscoveryCursors HistoricalRaceDiscoveryCursor[]
+  historicalEffectContributions HistoricalEffectContribution[]
   id                                String                          @id @default(uuid())
   // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
   // Both are nullable+unique so a pure-Google user has no appleId and vice versa.
@@ -1502,6 +1505,13 @@ enum RaceParticipantStatus {
   DECLINED @map("declined")
 }
 
+enum HistoricalRaceReconciliationState {
+  QUEUED    @map("queued")
+  RUNNING   @map("running")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+}
+
 enum RacePayoutPreset {
   WINNER_TAKES_ALL @map("winner_takes_all")
   TOP3_70_20_10    @map("top3_70_20_10")
@@ -1763,6 +1773,8 @@ model Race {
   activeImpactWork                 ActiveRaceImpactWork[]
   activeEffectImpacts              ActiveRaceEffectImpact[]
   globalEventImpacts               GlobalEventRaceImpact[]
+  historicalReconciliationIntents  HistoricalRaceReconciliationIntent[]
+  historicalEffectContributions    HistoricalEffectContribution[]
   reviewPromptAttempts             AppReviewPromptAttempt[]
   referralQualifications           Referral[]                            @relation("ReferralQualifyingRace")
   referralQualificationIntents     ReferralQualificationIntent[]         @relation("ReferralQualificationIntentRace")
@@ -3633,6 +3645,12 @@ model RaceResolutionJobV2 {
   processingDirtyPowerupTypes     Json                   @default("[]") @map("processing_dirty_powerup_types")
   processingDirtyPriority         String                 @default("IMMEDIATE") @map("processing_dirty_priority") @db.VarChar(16)
   processingQueuePriority         String                 @default("LIVE") @map("processing_queue_priority") @db.VarChar(16)
+  dirtySourceStartAt              DateTime?              @map("dirty_source_start_at")
+  dirtySourceEndAt                DateTime?              @map("dirty_source_end_at")
+  dirtySourceGeneration           BigInt?                @map("dirty_source_generation")
+  processingSourceStartAt         DateTime?              @map("processing_source_start_at")
+  processingSourceEndAt           DateTime?              @map("processing_source_end_at")
+  processingSourceGeneration      BigInt?                @map("processing_source_generation")
   displayArtifactId               String?                @map("display_artifact_id")
   displayArtifactDigest           String?                @map("display_artifact_digest") @db.VarChar(64)
   displayArtifactSchema           Int?                   @map("display_artifact_schema")
@@ -3650,6 +3668,98 @@ model RaceResolutionJobV2 {
   @@index([state, queuePriority, requestedAt])
   @@index([requestedAt])
   @@map("race_resolution_jobs_v2")
+}
+
+model HistoricalRaceReconciliationIntent {
+  id                        String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  raceId                    String                              @map("race_id")
+  userId                    String                              @map("user_id")
+  scopeKind                 String                              @default("PARTICIPANT") @map("scope_kind") @db.VarChar(32)
+  changedStart              DateTime                            @map("changed_start")
+  changedEnd                DateTime                            @map("changed_end")
+  requestedSourceGeneration BigInt                              @map("requested_source_generation")
+  phase2Eligible           Boolean                             @default(false) @map("phase2_eligible")
+  status                    HistoricalRaceReconciliationState   @default(QUEUED)
+  availableAt               DateTime                            @default(now()) @map("available_at")
+  leaseToken                String?                             @map("lease_token") @db.Uuid
+  leaseExpiresAt            DateTime?                           @map("lease_expires_at")
+  attemptCount              Int                                 @default(0) @map("attempt_count")
+  lastErrorCode             String?                             @map("last_error_code") @db.VarChar(128)
+  terminalAt                DateTime?                           @map("terminal_at")
+  createdAt                 DateTime                            @default(now()) @map("created_at")
+  updatedAt                 DateTime                            @updatedAt @map("updated_at")
+  race                      Race                                @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user                      User                                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([raceId, userId])
+  @@index([status, availableAt, raceId])
+  @@index([raceId, status])
+  @@map("historical_race_reconciliation_intents")
+}
+
+model HistoricalRaceDiscoveryCursor {
+  id                        String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                    String                            @unique @map("user_id")
+  changedStart              DateTime                          @map("changed_start")
+  changedEnd                DateTime                          @map("changed_end")
+  requestedSourceGeneration BigInt                            @map("requested_source_generation")
+  cursorRaceId              String?                           @map("cursor_race_id")
+  cursorParticipantId       String?                           @map("cursor_participant_id")
+  status                    HistoricalRaceReconciliationState @default(QUEUED)
+  availableAt               DateTime                          @default(now()) @map("available_at")
+  leaseToken                String?                           @map("lease_token") @db.Uuid
+  leaseExpiresAt            DateTime?                         @map("lease_expires_at")
+  attemptCount              Int                               @default(0) @map("attempt_count")
+  createdAt                 DateTime                          @default(now()) @map("created_at")
+  updatedAt                 DateTime                          @updatedAt @map("updated_at")
+  user                      User                              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([status, availableAt, userId])
+  @@map("historical_race_discovery_cursors")
+}
+
+// Mutable, rebuildable contribution state for the forward-only late-sample
+// reconciliation worker. `effectId` deliberately has no FK: the immutable
+// effect-impact artifact can outlive active-effect retention.
+model HistoricalEffectContribution {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  raceId              String   @map("race_id")
+  userId              String   @map("user_id")
+  effectId            String   @map("effect_id")
+  powerupType         String   @map("powerup_type") @db.VarChar(32)
+  currentDeltaSteps   Int      @default(0) @map("current_delta_steps")
+  sourceGeneration    BigInt   @map("source_generation")
+  calculationVersion  Int      @default(1) @map("calculation_version")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([raceId, userId, effectId, calculationVersion])
+  @@index([raceId, userId])
+  @@index([effectId])
+  @@map("historical_effect_contributions")
+}
+
+// Append-only audit of each successful projection transition. It is not a
+// request log and is never used as the score read path.
+model HistoricalEffectCorrection {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectionId          String   @map("projection_id") @db.Uuid
+  raceId                String   @map("race_id")
+  userId                String   @map("user_id")
+  effectId              String   @map("effect_id")
+  fromDeltaSteps        Int      @map("from_delta_steps")
+  toDeltaSteps          Int      @map("to_delta_steps")
+  correctionDeltaSteps  Int      @map("correction_delta_steps")
+  sourceGeneration      BigInt   @map("source_generation")
+  calculationVersion    Int      @default(1) @map("calculation_version")
+  sourceRevision        String   @map("source_revision") @db.VarChar(128)
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@unique([projectionId, sourceGeneration, calculationVersion])
+  @@index([raceId, userId, createdAt])
+  @@index([effectId, createdAt])
+  @@map("historical_effect_corrections")
 }
 
 // Constant-size, durable handoff from one committed race-resolution generation

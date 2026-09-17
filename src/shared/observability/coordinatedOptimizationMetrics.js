@@ -46,11 +46,23 @@ const APPROVED_METRICS = new Set([
   "domain_event_receipt_quarantined_total",
   "domain_event_receipt_recovery_claim_total",
   "domain_event_receipt_recovery_age_seconds",
+  "late_samples_received_total", "late_sample_age_seconds",
+  "historical_discovery_queries_total", "historical_discovery_races_found",
+  "historical_intents_created", "historical_intents_coalesced",
+  "historical_intents_overflowed", "historical_intents_completed",
+  "historical_intents_retried", "historical_queue_age_seconds",
+  "historical_worker_duration_ms", "historical_race_fence_wait_ms",
+  "historical_out_of_horizon_total",
+  "historical_effects_checked", "historical_effects_corrected",
+  "historical_reconciliation_noop", "historical_reconciliation_generation_stale",
+  "historical_source_rows_read", "historical_corrections_created",
+  "correction_delta_steps_absolute", "historical_reconciliation_duration_ms",
 ]);
 
 const APPROVED_LABELS = new Set([
   "queue", "state", "state_class", "plan", "outcome", "kind", "reason", "table",
   "found_work",
+  "race_status", "age_bucket", "result", "scope_kind",
 ]);
 
 function metricKey(name, labels = {}) {

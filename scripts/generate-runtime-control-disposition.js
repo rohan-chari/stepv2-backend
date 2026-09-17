@@ -266,7 +266,7 @@ const deploymentConfigEnv = [
   "REFERRAL_REFEREE_COINS", "REFERRAL_REFERRER_COINS", "S3_ACCESS_KEY_ID",
   "S3_AVATAR_PREFIX", "S3_BUCKET", "S3_PRESIGNED_URL_EXPIRES_SECONDS",
   "S3_PUBLIC_BASE_URL", "S3_REGION", "S3_SECRET_ACCESS_KEY", "S3_SESSION_TOKEN",
-  "SESSION_TOKEN_SECRET", "STAGING_DATABASE_URL", "STEPS_PROCESS_ROLE",
+  "SESSION_TOKEN_SECRET", "STAGING_DATABASE_URL", "STEP_CORRECTION_HORIZON_DAYS", "STEPS_PROCESS_ROLE",
   "TEAM_POOL_MULT_LONG",
   "TEAM_POOL_MULT_MID", "TEAM_POOL_MULT_SHORT",
 ];
@@ -489,10 +489,15 @@ function collectRuntimeEnvironmentReads({
       walkAst(ast, (node) => {
         if (node.type !== "Literal" || typeof node.value !== "string") return;
         const name = staticEnvironmentName(node.value);
-        if (!name) return;
+        // A computed env lookup often sits beside SQL transaction literals
+        // such as COMMIT/ROLLBACK. Those are not environment names. Versioned
+        // secret prefixes, however, are represented by the wildcard metadata
+        // entry (for example REFERRAL_IP_HMAC_SECRET_V*).
+        if (!name || !name.includes("_")) return;
+        const normalized = name.endsWith("_V") ? `${name}*` : name;
         const relative = path.relative(ROOT, file);
-        if (!found.has(name)) found.set(name, new Set());
-        found.get(name).add(relative);
+        if (!found.has(normalized)) found.set(normalized, new Set());
+        found.get(normalized).add(relative);
       });
     }
   }

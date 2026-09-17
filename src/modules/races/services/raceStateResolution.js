@@ -914,6 +914,7 @@ async function captureIncrementalRacePrefixTerms({
   orderedEffects,
   stepSampleModel,
   eventsByUserId,
+  onSourceRowsRead = null,
 }) {
   const allowedIds = new Set(orderedEffects.map((effect) => effect.id));
   const prefixEffectsByParticipant = new Map();
@@ -961,6 +962,7 @@ async function captureIncrementalRacePrefixTerms({
       // Global events are separately owned settlement sources. They affect the
       // authoritative total, but never an individual active-effect marginal.
       globalEvents: [],
+      onSourceRowsRead,
     });
     localCaptureByParticipantId.set(participant.id, capture);
     activeEntries.push({
@@ -1124,6 +1126,7 @@ async function computeActiveTimedImpactCapture({
   selectedEffects = [],
   prepareSampleUsers = null,
   releaseSampleUsers = null,
+  onSourceRowsRead = null,
 }) {
   if (selectedEffects.length === 0) return { resolved: [], all: [], scorerCalls: 0 };
   const participantById = new Map(participants.map((row) => [row.id, row]));
@@ -1231,6 +1234,7 @@ async function computeActiveTimedImpactCapture({
           orderedEffects,
           stepSampleModel,
           eventsByUserId,
+          onSourceRowsRead,
         });
       },
     });

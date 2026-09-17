@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { randomUUID } = require("node:crypto");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const {
@@ -7,6 +8,9 @@ const {
 const {
   buildRecomputePlacements,
 } = require("../../src/modules/races/jobs/placementRecompute");
+const {
+  buildHistoricalRaceReconciliationWorker,
+} = require("../../src/modules/races/jobs/historicalRaceReconciliation");
 
 let server;
 let nextAppleId = 0;
@@ -116,6 +120,14 @@ async function giveHeldPowerup(raceId, userId, type, earnedAtSteps) {
 async function recordSamples(token, samples) {
   return request(server.baseUrl, "POST", "/steps/samples", {
     body: { samples },
+    token,
+  });
+}
+
+async function recordSyncV2(token, samples, steps = 1900) {
+  return request(server.baseUrl, "POST", "/steps/sync-v2", {
+    body: { date: new Date().toISOString().slice(0, 10), steps, samples },
+    headers: { "Idempotency-Key": randomUUID() },
     token,
   });
 }
@@ -570,6 +582,89 @@ describe("runner's high", () => {
       );
       assert.ok(useEvent, "feed should have activation event");
       assert.ok(expiryEvent, "feed should have expiry event");
+    });
+
+    it("late event-time samples admit Runner's High reconciliation without changing its immutable impact", async () => {
+      const alice = await createUser("AliceLateRH");
+      const bob = await createUser("BobLateRH");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+      await backdateRaceStart(raceId, hoursAgo(7));
+      const powerup = await giveHeldPowerup(raceId, alice.userId, "RUNNERS_HIGH", 99901);
+      await usePowerup(alice.token, raceId, powerup.id);
+      const effect = await prisma.raceActiveEffect.findFirstOrThrow({ where: { raceId, type: "RUNNERS_HIGH" } });
+      const effectStart = hoursAgo(4);
+      const effectEnd = hoursAgo(1);
+      await prisma.raceActiveEffect.update({ where: { id: effect.id }, data: { startsAt: effectStart, expiresAt: effectEnd } });
+      await recordSamples(alice.token, [{ periodStart: hoursAgo(3.5).toISOString(), periodEnd: hoursAgo(3).toISOString(), steps: 100 }]);
+      await drainRaceResolution();
+      const before = await prisma.raceImpactEvent.findFirstOrThrow({ where: { raceId, recipientUserId: alice.userId, sourceId: effect.id } });
+      await prisma.race.update({ where: { id: raceId }, data: { status: "COMPLETED", endsAt: hoursAgo(0.5), completedAt: hoursAgo(0.5) } });
+      const late = [
+        { periodStart: hoursAgo(2.5).toISOString(), periodEnd: hoursAgo(2).toISOString(), steps: 500 },
+        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1.5).toISOString(), steps: 600 },
+        { periodStart: hoursAgo(1.5).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 700 },
+      ];
+      const response = await recordSyncV2(alice.token, late);
+      assert.equal(response.status, 202, await response.text());
+      const afterVersion = await prisma.userScoringInputVersion.findUniqueOrThrow({ where: { userId: alice.userId } });
+      const intent = await prisma.historicalRaceReconciliationIntent.findUniqueOrThrow({ where: { raceId_userId: { raceId, userId: alice.userId } } });
+      assert.ok(intent.requestedSourceGeneration <= afterVersion.generation);
+      assert.ok(+intent.changedStart <= Date.parse(late[0].periodStart));
+      assert.ok(+intent.changedEnd >= Date.parse(late[2].periodEnd));
+      assert.equal(await prisma.historicalRaceReconciliationIntent.count({ where: { raceId, userId: alice.userId } }), 1);
+      const after = await prisma.raceImpactEvent.findFirstOrThrow({ where: { raceId, recipientUserId: alice.userId, sourceId: effect.id } });
+      assert.equal(after.deltaSteps, before.deltaSteps);
+      await recordSyncV2(alice.token, late);
+      assert.equal(await prisma.historicalRaceReconciliationIntent.count({ where: { raceId, userId: alice.userId } }), 1);
+      assert.equal((await prisma.raceImpactEvent.findFirstOrThrow({ where: { raceId, recipientUserId: alice.userId, sourceId: effect.id } })).deltaSteps, before.deltaSteps);
+    });
+
+    it("forward-only worker corrects a newly admitted late Runner's High intent", async () => {
+      const alice = await createUser("AlicePhase2RH");
+      const bob = await createUser("BobPhase2RH");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+      await backdateRaceStart(raceId, hoursAgo(7));
+      const powerup = await giveHeldPowerup(raceId, alice.userId, "RUNNERS_HIGH", 99903);
+      await usePowerup(alice.token, raceId, powerup.id);
+      const effect = await prisma.raceActiveEffect.findFirstOrThrow({ where: { raceId, type: "RUNNERS_HIGH" } });
+      const effectStart = hoursAgo(4);
+      const effectEnd = hoursAgo(1);
+      await prisma.raceActiveEffect.update({ where: { id: effect.id }, data: { startsAt: effectStart, expiresAt: effectEnd } });
+      await recordSamples(alice.token, [{ periodStart: hoursAgo(3.5).toISOString(), periodEnd: hoursAgo(3).toISOString(), steps: 100 }]);
+      await drainRaceResolution();
+      const before = await prisma.raceImpactEvent.findFirstOrThrow({ where: { raceId, recipientUserId: alice.userId, sourceId: effect.id } });
+      const participantBefore = await prisma.raceParticipant.findFirstOrThrow({ where: { raceId, userId: alice.userId } });
+      await prisma.race.update({ where: { id: raceId }, data: { status: "COMPLETED", endsAt: hoursAgo(0.5), completedAt: hoursAgo(0.5) } });
+
+      const late = [
+        { periodStart: hoursAgo(2.5).toISOString(), periodEnd: hoursAgo(2).toISOString(), steps: 500 },
+        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1.5).toISOString(), steps: 600 },
+        { periodStart: hoursAgo(1.5).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 700 },
+      ];
+      const response = await recordSyncV2(alice.token, late);
+      assert.equal(response.status, 202, await response.text());
+      const generation = await prisma.userScoringInputVersion.findUniqueOrThrow({ where: { userId: alice.userId } });
+      const intent = await prisma.historicalRaceReconciliationIntent.findUniqueOrThrow({ where: { raceId_userId: { raceId, userId: alice.userId } } });
+      assert.equal(intent.phase2Eligible, true);
+      assert.equal(BigInt(intent.requestedSourceGeneration), BigInt(generation.generation));
+
+      const worker = buildHistoricalRaceReconciliationWorker({
+        logger: { log() {}, warn() {}, error(error) { throw error; } },
+      });
+      const result = await worker.runOnce();
+      assert.equal(result.corrected, 1);
+
+      const after = await prisma.raceImpactEvent.findFirstOrThrow({ where: { raceId, recipientUserId: alice.userId, sourceId: effect.id } });
+      assert.equal(after.deltaSteps, before.deltaSteps);
+      const projection = await prisma.historicalEffectContribution.findUniqueOrThrow({
+        where: { raceId_userId_effectId_calculationVersion: { raceId, userId: alice.userId, effectId: effect.id, calculationVersion: 1 } },
+      });
+      assert.equal(projection.currentDeltaSteps, 1900);
+      const participantAfter = await prisma.raceParticipant.findFirstOrThrow({ where: { raceId, userId: alice.userId } });
+      assert.equal(participantAfter.totalSteps - participantBefore.totalSteps, projection.currentDeltaSteps - before.deltaSteps);
+      assert.equal(await prisma.historicalEffectCorrection.count({ where: { projectionId: projection.id } }), 1);
     });
   });
 });

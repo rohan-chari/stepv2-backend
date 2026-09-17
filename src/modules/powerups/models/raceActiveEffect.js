@@ -332,6 +332,23 @@ const RaceActiveEffect = {
     return byType;
   },
 
+  // Phase 2 historical read: only an admitted race/user intent may ask for
+  // these rows. Expired rows remain authoritative evidence; no global effect
+  // scan is permitted here.
+  async findSupportedHistoricalEffects({ raceId, targetParticipantId, changedStart, changedEnd, types }) {
+    return prisma.raceActiveEffect.findMany({
+      where: {
+        raceId,
+        targetParticipantId,
+        status: { in: ["ACTIVE", "EXPIRED"] },
+        type: { in: types },
+        startsAt: { lt: new Date(changedEnd) },
+        expiresAt: { not: null, gt: new Date(changedStart) },
+      },
+      orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+    });
+  },
+
   // Bulk variant of findEffectsForRaceByTypes across many races' participants
   // (cross-participant prefetch in getHomeRaceCard). One query, returned as
   // { [participantId]: { [type]: effects[] } } with each list in the same

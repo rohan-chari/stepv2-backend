@@ -171,6 +171,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/jobs/raceExpiry.js": ["raceParticipant.update", "raceParticipant.update"],
   // Includes the fenced set-based box_progress_steps projection.
   "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update", "raw.race_participants.update", "raw.race_participants.update", "raw.race_participants.update"],
+  "src/modules/races/jobs/historicalRaceReconciliation.js": ["raceParticipant.update"],
   "src/modules/races/jobs/raceSeriesRenewal.js": ["raceParticipant.create"],
   "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raw.race_participants.update", "raw.race_participants.update"],
@@ -449,6 +450,7 @@ const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/races/commands/setRacePlacementMute.js",
   "src/modules/races/commands/startRace.js",
   "src/modules/races/commands/switchRaceTeam.js",
+  "src/modules/races/jobs/historicalRaceReconciliation.js",
   "src/modules/races/jobs/placementRecompute.js",
   "src/modules/races/jobs/raceExpiry.js",
   "src/modules/races/jobs/raceResolutionQueueV2.js",

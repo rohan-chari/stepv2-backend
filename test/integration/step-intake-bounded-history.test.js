@@ -48,6 +48,24 @@ const job = raceId => prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { ra
 describe("bounded sample history through public step intake", () => {
   before(async () => { baseUrl = (await getSharedServer()).baseUrl; });
   beforeEach(cleanDatabase);
+
+  it("admits a late event-time change for a completed race without changing score", async () => {
+    const { account, sample, race } = await fixture();
+    await prisma.race.update({ where: { id: race.id }, data: {
+      status: "COMPLETED",
+      endsAt: new Date(Date.now() - 30 * 60 * 1000),
+      completedAt: new Date(Date.now() - 20 * 60 * 1000),
+    } });
+    const late = { ...sample, periodStart: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), periodEnd: new Date(Date.now() - 175 * 60 * 1000).toISOString(), steps: 250 };
+    assert.equal((await sync(account, late, 350)).status, 202);
+    const intent = await prisma.historicalRaceReconciliationIntent.findUnique({ where: { raceId_userId: { raceId: race.id, userId: account.user.id } } });
+    assert.ok(intent);
+    assert.equal(intent.raceId, race.id);
+    assert.equal(intent.userId, account.user.id);
+    assert.equal(intent.requestedSourceGeneration, await version(account.user.id).then(row => row.generation));
+    assert.equal(Number(intent.changedEnd - intent.changedStart), 5 * 60 * 1000);
+    assert.equal((await prisma.race.findUniqueOrThrow({ where: { id: race.id } })).status, "COMPLETED");
+  });
   for (const mode of ["changed", "identical", "metadata-only", "daily-only"]) {
     it(`${mode} intake does not hydrate unrelated retained history`, async (t) => {
       const { account, sample, race } = await fixture();

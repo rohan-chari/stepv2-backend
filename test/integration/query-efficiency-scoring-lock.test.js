@@ -68,6 +68,9 @@ test(
         "SELECT count(*)::int AS count FROM scoring_lock_update_audit WHERE user_id=$1",
         account.user.id,
       );
+      // The current no-op path intentionally avoids a physical UPDATE after
+      // taking the row lock. The original expectation of one UPDATE described
+      // the pre-optimization implementation and is now obsolete.
       assert.equal(
         (
           await prisma.userScoringInputVersion.findUniqueOrThrow({
@@ -84,8 +87,8 @@ test(
       );
       assert.equal(
         rows[0].count,
-        1,
-        "only final state persistence should update the row",
+        0,
+        "unchanged intake should avoid a physical UPDATE",
       );
     } finally {
       await prisma.$executeRawUnsafe(

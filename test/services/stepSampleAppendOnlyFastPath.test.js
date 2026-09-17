@@ -42,6 +42,8 @@ test("append-only proof uses one authoritative read and the bulk insert path", a
     storageChanged: true,
     scoringChanged: true,
     earliestChangedStartMs: Date.parse("2026-09-15T10:00:00.000Z"),
+    latestChangedEndMs: Date.parse("2026-09-15T12:00:00.000Z"),
+    changedBucketCount: 2,
   });
 });
 
@@ -117,4 +119,3 @@ test("a direct fast-path caller acquires the scoring lock before proving coverag
   assert.match(queries[0], /FOR NO KEY UPDATE/);
   assert.match(queries[1], /ORDER BY period_end DESC/);
 });
-

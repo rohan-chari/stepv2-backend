@@ -230,6 +230,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         resolutionTimeZone = null,
         now = new Date(),
         dirtyEnvelope = null,
+        sourceEnvelope = null,
         displayArtifact = null,
         burstCoalescing = false,
         queuedGenerationMerge = false,
@@ -247,6 +248,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           resolutionTimeZone,
           now,
           dirtyEnvelopeByRaceId: new Map([[raceId, dirtyEnvelope]]),
+          sourceEnvelopeByRaceId: new Map([[raceId, sourceEnvelope]]),
           displayArtifactByRaceId: new Map([[raceId, displayArtifact]]),
           burstCoalescing,
           queuedGenerationMerge,
@@ -688,6 +690,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         resolutionTimeZone = null,
         now = new Date(),
         dirtyEnvelopeByRaceId = null,
+        sourceEnvelopeByRaceId = null,
         largeRaceScopeByRaceId = null,
         triggeredUserIdsByRaceId = null,
         displayArtifactByRaceId = null,
@@ -717,6 +720,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             ? candidate
             : null;
         const priority = dirty?.priority || "IMMEDIATE";
+        const source = sourceEnvelopeByRaceId?.get?.(raceId) || null;
         const fullScope = dirty?.reasons?.includes("FULL") === true;
         return {
           raceId,
@@ -734,6 +738,9 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirtyParticipantIds: dirty?.dirtyParticipantIds || [],
           dirtyPowerupTypes: dirty?.powerupTypes || [],
           dirtyPriority: priority,
+          sourceStart: source?.changedStart || null,
+          sourceEnd: source?.changedEnd || null,
+          sourceGeneration: source?.sourceGeneration == null ? null : String(source.sourceGeneration),
           queuePriority: normalizeQueuePriority(queuePriority),
           artifactId: artifact?.id || null,
           artifactDigest: artifact?.digest || null,
@@ -806,6 +813,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             resolutionTimeZone,
             now,
             dirtyEnvelopeByRaceId,
+            sourceEnvelopeByRaceId,
             largeRaceScopeByRaceId,
             triggeredUserIdsByRaceId,
             displayArtifactByRaceId,
@@ -859,6 +867,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           id, race_id, generation, resolution_time_zone, state, attempts,
           requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids,
           dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority,
+          dirty_source_start_at, dirty_source_end_at, dirty_source_generation,
           queue_priority,
           display_artifact_id, display_artifact_digest, display_artifact_schema,
           created_at, updated_at
@@ -867,6 +876,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           gen_random_uuid()::text, i."raceId", 1, i."resolutionTimeZone", 'queued', 0,
           $2::timestamp, i."notBeforeAt", i."triggered", '[]'::jsonb,
           i."dirtyReasons", i."dirtyParticipantIds", i."dirtyPowerupTypes", i."dirtyPriority",
+          i."sourceStart", i."sourceEnd", i."sourceGeneration",
           i."queuePriority",
           i."artifactId", i."artifactDigest", i."artifactSchema",
           $2::timestamp, $2::timestamp
@@ -878,6 +888,9 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           "dirtyParticipantIds" jsonb,
           "dirtyPowerupTypes" jsonb,
           "dirtyPriority" text,
+          "sourceStart" timestamp,
+          "sourceEnd" timestamp,
+          "sourceGeneration" bigint,
           "queuePriority" text,
           "artifactId" text,
           "artifactDigest" text,
@@ -1043,6 +1056,18 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirty_priority = CASE
             WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE'
               THEN 'IMMEDIATE' ELSE 'COALESCE' END,
+          dirty_source_start_at = CASE
+            WHEN EXCLUDED.dirty_source_start_at IS NULL THEN race_resolution_jobs_v2.dirty_source_start_at
+            WHEN race_resolution_jobs_v2.dirty_source_start_at IS NULL THEN EXCLUDED.dirty_source_start_at
+            ELSE LEAST(race_resolution_jobs_v2.dirty_source_start_at, EXCLUDED.dirty_source_start_at) END,
+          dirty_source_end_at = CASE
+            WHEN EXCLUDED.dirty_source_end_at IS NULL THEN race_resolution_jobs_v2.dirty_source_end_at
+            WHEN race_resolution_jobs_v2.dirty_source_end_at IS NULL THEN EXCLUDED.dirty_source_end_at
+            ELSE GREATEST(race_resolution_jobs_v2.dirty_source_end_at, EXCLUDED.dirty_source_end_at) END,
+          dirty_source_generation = GREATEST(
+            COALESCE(race_resolution_jobs_v2.dirty_source_generation, 0),
+            COALESCE(EXCLUDED.dirty_source_generation, 0)
+          ),
           queue_priority = CASE
             WHEN race_resolution_jobs_v2.queue_priority = 'SETTLEMENT' OR EXCLUDED.queue_priority = 'SETTLEMENT' THEN 'SETTLEMENT'
             WHEN race_resolution_jobs_v2.queue_priority = 'RECOVERY' OR EXCLUDED.queue_priority = 'RECOVERY' THEN 'RECOVERY'
@@ -1279,6 +1304,9 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               WHEN j.processing_dirty_priority = 'IMMEDIATE' OR j.dirty_priority = 'IMMEDIATE'
                 THEN 'IMMEDIATE' ELSE 'COALESCE' END,
             processing_queue_priority = j.queue_priority,
+            processing_source_start_at = j.dirty_source_start_at,
+            processing_source_end_at = j.dirty_source_end_at,
+            processing_source_generation = j.dirty_source_generation,
             processing_display_artifact_id = j.display_artifact_id,
             processing_display_artifact_digest = j.display_artifact_digest,
             processing_display_artifact_schema = j.display_artifact_schema,
@@ -1288,6 +1316,9 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             dirty_powerup_types = '[]'::jsonb,
             dirty_priority = 'COALESCE',
             queue_priority = 'LIVE',
+            dirty_source_start_at = NULL,
+            dirty_source_end_at = NULL,
+            dirty_source_generation = NULL,
             display_artifact_id = NULL,
             display_artifact_digest = NULL,
             display_artifact_schema = NULL,
@@ -1345,6 +1376,9 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             processing_dirty_powerup_types = '[]'::jsonb,
             processing_dirty_priority = 'COALESCE',
             processing_queue_priority = 'LIVE',
+            processing_source_start_at = NULL,
+            processing_source_end_at = NULL,
+            processing_source_generation = NULL,
             processing_display_artifact_id = NULL,
             processing_display_artifact_digest = NULL,
             processing_display_artifact_schema = NULL,

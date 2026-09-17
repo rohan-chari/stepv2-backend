@@ -72,6 +72,7 @@ const {
   scheduleResolvedImpactBoundaryScheduler,
   scheduleRaceEffectDeadlineScheduler,
   scheduleRaceAdminCommandRunner,
+  scheduleHistoricalRaceReconciliationWorker,
 } = require("./modules/races");
 const {
   scheduleRacePayoutDoubleReconcile,
@@ -249,6 +250,7 @@ function startServer({
       if (processRole === "http") return;
       if (processRole === "resolution") {
         scheduleTrackedResolutionWorker();
+        retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
@@ -401,6 +403,7 @@ function startServer({
       // injected startup logger.
       if (processRole !== "cron") {
         scheduleTrackedResolutionWorker();
+        retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();

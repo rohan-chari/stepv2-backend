@@ -102,6 +102,10 @@ Object.assign(module.exports, require("./jobs/seededRaceRenewal"));
 Object.assign(module.exports, require("./jobs/racePayoutDoubleReconcile"));
 Object.assign(module.exports, require("./jobs/raceAdminCommandRunner"));
 Object.assign(module.exports, require("./jobs/fixedTeamPayoutMonitoring"));
+Object.assign(module.exports, require("./models/historicalRaceReconciliationIntent"));
+Object.assign(module.exports, require("./models/historicalRaceDiscoveryCursor"));
+Object.assign(module.exports, require("./services/historicalRaceDiscovery"));
+Object.assign(module.exports, require("./jobs/historicalRaceReconciliation"));
 
 Object.assign(module.exports, require("./routes"));
 Object.assign(module.exports, require("./seriesRoutes"));
