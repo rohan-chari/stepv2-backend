@@ -161,7 +161,7 @@ test("HITCHHIKE requires a target and rejects self-targeting", async () => {
   );
 });
 
-test("HITCHHIKE parks a 60-minute 1:1 link on the target and marks the powerup USED", async () => {
+test("HITCHHIKE parks a 60-minute 50% link on the target and marks the powerup USED", async () => {
   const ctx = makeDeps();
   const use = buildUsePowerup(ctx.deps);
 
@@ -174,7 +174,7 @@ test("HITCHHIKE parks a 60-minute 1:1 link on the target and marks the powerup U
 
   assert.equal(result.outcome, "APPLIED");
   assert.equal(result.durationMs, SIXTY_MIN_MS);
-  assert.equal(result.copyRatio, 1);
+  assert.equal(result.copyRatio, 0.5);
   assert.equal(ctx.effectsCreated.length, 1);
   const eff = ctx.effectsCreated[0];
   assert.equal(eff.type, "HITCHHIKE");
@@ -190,7 +190,7 @@ test("HITCHHIKE parks a 60-minute 1:1 link on the target and marks the powerup U
     NOW.getTime() + SIXTY_MIN_MS,
     "hitchhike window is exactly 60 minutes"
   );
-  assert.deepEqual(eff.metadata, { copyRatio: 1, scoringVersion: 3 });
+  assert.deepEqual(eff.metadata, { copyRatio: 0.5, scoringVersion: 3 });
   assert.equal(ctx.updatedPowerup.status, "USED");
 });
 
@@ -324,7 +324,7 @@ test("HITCHHIKE rejects a second link ON a target that already has one (409 HITC
   assert.equal(ctx.updatedPowerup, null, "powerup NOT consumed on rejection");
 });
 
-test("HITCHHIKE cannot target a teammate in a team race", async () => {
+test("HITCHHIKE can target an eligible teammate in a team race", async () => {
   const ctx = makeDeps({
     isTeamRace: true,
     user1: { team: "TEAM_A" },
@@ -332,17 +332,15 @@ test("HITCHHIKE cannot target a teammate in a team race", async () => {
     user3: { team: "TEAM_B" },
   });
   const use = buildUsePowerup(ctx.deps);
-  await assert.rejects(
-    () =>
-      use({
-        userId: "user-1",
-        raceId: "race-1",
-        powerupId: "pw-1",
-        targetUserId: "user-2",
-      }),
-    (err) => err instanceof PowerupUseError
-  );
-  assert.equal(ctx.effectsCreated.length, 0);
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+    targetUserId: "user-2",
+  });
+  assert.equal(result.outcome, "APPLIED");
+  assert.equal(ctx.effectsCreated.length, 1);
+  assert.equal(ctx.effectsCreated[0].targetUserId, "user-2");
 });
 
 test("HITCHHIKE cannot target a forfeited racer", async () => {

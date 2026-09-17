@@ -16,9 +16,11 @@ const {
 } = require("../../cosmetics");
 const {
   getEligiblePowerupPool,
+  getPowerupDisplayPool,
 } = require("../../powerups");
 const { serializeShopItem } = require("../../cosmetics");
 const { serializePowerupShopItem } = require("../../powerups");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
 
 // How many unowned accessories the status preview ships for the reel.
 const ACCESSORY_POOL_PREVIEW_LIMIT = 10;
@@ -116,11 +118,17 @@ async function getDailyRewardStatus({
   const { version: configVersion, config } = await balanceConfig.getSnapshot();
 
   const accessoryPool = await getUnownedAccessoryPool(userId);
+  const { isMember: goldMember } = supportsSpinPowerups
+    ? await goldMembershipForUser(prisma, userId)
+    : { isMember: false };
   // Shop powerups are only rolled/previewed for spinpowerups-capable clients —
   // old binaries can't render a POWERUP tile/result. Non-flagged clients get an
   // empty pool, so their odds and payload are byte-identical to today.
   const powerupPool = supportsSpinPowerups
-    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5 })
+    ? await getPowerupDisplayPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5 })
+    : [];
+  const eligiblePowerupPool = supportsSpinPowerups
+    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5, isGoldMember: goldMember })
     : [];
   // Empty pools → RARE folded to 0 so shipped clients never draw the "???"
   // mystery-accessory tile (see dailyBoxOddsForPool). With powerups in play,
@@ -128,7 +136,7 @@ async function getDailyRewardStatus({
   const [common, uncommon, rare] = dailyBoxOddsForPool(
     projectedStreak,
     accessoryPool.length,
-    powerupPool.length,
+    eligiblePowerupPool.length,
     config
   );
 
@@ -150,9 +158,12 @@ async function getDailyRewardStatus({
   // share of a RARE is an accessory vs a powerup) without re-deriving the
   // 50/50-or-fold-to-one rule the command uses.
   if (supportsSpinPowerups) {
-    box.powerupPool = powerupPool.map((item) => serializePowerupShopItem(item));
+    box.powerupPool = powerupPool.map((item) =>
+      serializePowerupShopItem(item, { isGoldMember: goldMember })
+    );
+    box.eligiblePowerupTypes = eligiblePowerupPool.map((item) => item.powerupType);
     const hasAccessory = accessoryPool.length > 0;
-    const hasPowerup = powerupPool.length > 0;
+    const hasPowerup = eligiblePowerupPool.length > 0;
     let accessoryShare = 0;
     let powerupShare = 0;
     if (hasAccessory && hasPowerup) {
@@ -180,14 +191,14 @@ async function getDailyRewardStatus({
     config
   );
   const powerupProbabilities = pickProbabilities(
-    powerupPool,
+    eligiblePowerupPool,
     projectedStreak,
     config
   );
   const accessories = accessoryPool
     .map((item, i) => ({ sku: item.sku, p: accessoryProbabilities[i] }))
     .slice(0, ACCESSORY_POOL_PREVIEW_LIMIT);
-  const powerups = powerupPool.map((item, i) => ({
+  const powerups = eligiblePowerupPool.map((item, i) => ({
     type: item.powerupType,
     p: powerupProbabilities[i],
   }));
@@ -196,7 +207,7 @@ async function getDailyRewardStatus({
     configVersion,
     rarity: { COMMON: common, UNCOMMON: uncommon, RARE: rare },
     // Unlike rarePrizeMix, this INCLUDES the COINS slice and always sums to 1.
-    rareMix: rarePrizeMix(accessoryPool.length, powerupPool.length, config),
+    rareMix: rarePrizeMix(accessoryPool.length, eligiblePowerupPool.length, config),
     ...(accessories.length > 0 ? { accessories } : {}),
     ...(powerups.length > 0 ? { powerups } : {}),
   };

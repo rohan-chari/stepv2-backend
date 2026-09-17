@@ -16,6 +16,7 @@ const {
   SHORTFALL_TOO_LARGE_MESSAGE,
 } = require("../../economy/services/adUnlockPolicy");
 const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
+const { powerupRequiresGold } = require("../constants/premiumPowerups");
 
 // Item 10 (2026-07-24): "watch ads to afford a powerup". When a user is within
 // powerupUnlockMaxShortfall() coins of a powerup (20 since 2026-07-25 §7; env
@@ -119,8 +120,15 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
         if (!item) {
           throw new UnlockWithAdsError("Powerup not found", 404);
         }
-        item = await pricedItem(tx, userId, item);
         const { isMember: goldMember } = await goldMembershipForUser(tx, userId);
+        if (powerupRequiresGold(item.powerupType) && !goldMember) {
+          throw new UnlockWithAdsError(
+            "Bara Gold is required for this powerup",
+            403,
+            "GOLD_REQUIRED",
+          );
+        }
+        item = await pricedItem(tx, userId, item);
 
         const user = await tx.user.findUnique({ where: { id: userId } });
         const coins = user?.coins ?? 0;

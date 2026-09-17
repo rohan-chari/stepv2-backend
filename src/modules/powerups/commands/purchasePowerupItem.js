@@ -7,6 +7,8 @@ const {
   isRetiredPowerupRequest,
   markRetiredPowerupError,
 } = require("../powerupRetirement");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
+const { powerupRequiresGold } = require("../constants/premiumPowerups");
 
 class PowerupPurchaseError extends Error {
   constructor(message, statusCode = 400, code) {
@@ -100,6 +102,16 @@ function buildPurchasePowerupItem(dependencies = {}) {
         let item = await tx.powerupShopItem.findFirst({ where });
         if (!item) {
           throw new PowerupPurchaseError("Powerup not found", 404);
+        }
+        if (powerupRequiresGold(item.powerupType)) {
+          const { isMember } = await goldMembershipForUser(tx, userId);
+          if (!isMember) {
+            throw new PowerupPurchaseError(
+              "Bara Gold is required for this powerup",
+              403,
+              "GOLD_REQUIRED",
+            );
+          }
         }
         item = await pricedItem(tx, userId, item, expectedPriceCoins);
 

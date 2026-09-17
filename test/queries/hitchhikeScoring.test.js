@@ -396,7 +396,7 @@ function discoverLeechAssemblySites() {
       if (!entry.name.endsWith(".js")) continue;
       if (EXCLUDED.has(full)) continue;
       const code = stripComments(fs.readFileSync(full, "utf8"));
-      if (/applyLeechTransfers\s*\(/.test(code)) {
+      if (/applyLeechTransfers(?:AndFinalize)?\s*\(/.test(code)) {
         sites.push({ file: path.relative(path.join(srcRoot, ".."), full), code });
       }
     }
@@ -421,7 +421,7 @@ test("STRUCTURAL PARITY GUARD: EVERY discovered scoring-assembly site inserts th
 
   const missing = sites
     .filter(
-      (s) => !/applyLeechTransfers\(\s*\n?\s*applyHitchhikeCopies\(/.test(s.code)
+      (s) => !/applyLeechTransfers(?:AndFinalize)?\(\s*\n?\s*applyHitchhikeCopies\(/.test(s.code)
     )
     .map((s) => s.file);
 

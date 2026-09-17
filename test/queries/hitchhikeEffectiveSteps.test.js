@@ -24,3 +24,26 @@ test("Hitchhike v2 carries Wrong Turn as a signed delta and floors the caster at
   assert.equal(await computeHitchhikeCopiedSteps(effect(2, 0.5025), samples, now, { raceId: "r", targetParticipantId: "tp", raceActiveEffectModel: effects(wrongTurn) }), -101);
   assert.equal(applyHitchhikeCopies([{ userId: "caster", preLeechTotal: 50 }], [{ sourceUserId: "caster", copiedSteps: copied }])[0].preLeechTotal, 0);
 });
+
+test("new Hitchhike casts apply one deterministic floor after aggregating eligible steps", async () => {
+  const samples = {
+    async sumStepsInWindow() { return 1001; },
+  };
+  const copied = await computeHitchhikeCopiedSteps(
+    effect(2, 0.5), samples, now,
+  );
+  assert.equal(copied, 500);
+
+  const expected = new Map([
+    [0, 0], [1, 0], [2, 1], [3, 1], [10, 5], [99, 49],
+    [100, 50], [101, 50], [1000, 500], [10001, 5000],
+  ]);
+  for (const [targetSteps, contribution] of expected) {
+    const value = await computeHitchhikeCopiedSteps(
+      effect(2, 0.5),
+      { async sumStepsInWindow() { return targetSteps; } },
+      now,
+    );
+    assert.equal(value, contribution, `target=${targetSteps}`);
+  }
+});

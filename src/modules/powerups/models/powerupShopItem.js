@@ -1,5 +1,6 @@
 const { prisma } = require("../../../db");
 const { testOnlyFilter } = require("../../../shared/middleware/releaseChannel");
+const { powerupRequiresGold, powerupAcquisitionState } = require("../constants/premiumPowerups");
 
 // Catalog of coin-purchasable powerups (separate from the cosmetic ShopItem
 // table so the cosmetic catalog stays byte-compatible for old app versions).
@@ -30,14 +31,21 @@ const PowerupShopItem = {
 // box. `powerupType` drives the reel/reveal icon (PowerupIcon maps type →
 // asset); name/sku/description are for display. Kept small and additive so old
 // clients that never read it are unaffected.
-function serializePowerupShopItem(item) {
+function serializePowerupShopItem(item, { isGoldMember = true } = {}) {
+  const access = powerupAcquisitionState(item, isGoldMember);
   return {
     sku: item.sku,
     name: item.name,
     description: item.description ?? null,
     priceCoins: item.priceCoins,
     powerupType: item.powerupType,
+    requiresGold: access.requiresGold,
+    eligible: access.goldEligible,
   };
 }
 
-module.exports = { PowerupShopItem, serializePowerupShopItem };
+module.exports = {
+  PowerupShopItem,
+  serializePowerupShopItem,
+  powerupRequiresGold,
+};

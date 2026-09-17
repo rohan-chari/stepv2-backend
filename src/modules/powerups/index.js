@@ -13,6 +13,7 @@ Object.assign(module.exports, require("./models/powerupShopItem"));
 Object.assign(module.exports, require("./models/powerupCopy"));
 Object.assign(module.exports, require("./models/powerupUpgradeEvent"));
 Object.assign(module.exports, require("./constants/powerupGating"));
+Object.assign(module.exports, require("./constants/premiumPowerups"));
 Object.assign(module.exports, require("./constants/powerupCopySeed"));
 Object.assign(module.exports, require("./powerupOdds"));
 Object.assign(module.exports, require("./powerupUpgrades"));

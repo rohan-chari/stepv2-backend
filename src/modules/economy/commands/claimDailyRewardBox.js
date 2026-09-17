@@ -27,6 +27,7 @@ const { balanceConfig } = require("../balanceConfig");
 const { serializeShopItem } = require("../../cosmetics");
 const { serializePowerupShopItem } = require("../../powerups");
 const { grantPowerupToUser } = require("../../powerups");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
 
 // Daily reward v2: one mystery-box roll per day. Rarity odds and payout size
 // scale with the user's consecutive-day login streak (see utils/dailyBoxOdds).
@@ -98,10 +99,13 @@ async function claimDailyRewardBox({
   // from a single version. Relying on the synchronous cache here would let the
   // pool be built from one config and the odds from another.
   const { config: balance } = await balanceConfig.getSnapshot();
+  const { isMember: goldMember } = supportsSpinPowerups
+    ? await goldMembershipForUser(prisma, userId)
+    : { isMember: false };
 
   const pool = await getUnownedAccessoryPool(userId);
   const powerupPool = supportsSpinPowerups
-    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5 })
+    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5, isGoldMember: goldMember })
     : [];
   const rarity = rollDailyBoxRarity(
     loginStreak,
@@ -196,7 +200,7 @@ async function claimDailyRewardBox({
     rewardType,
     coinAmount,
     shopItem: shopItem ? serializeShopItem(shopItem) : null,
-    powerup: powerup ? serializePowerupShopItem(powerup) : null,
+    powerup: powerup ? serializePowerupShopItem(powerup, { isGoldMember: goldMember }) : null,
     coins: coinsAfter,
     streak: loginStreak,
   };

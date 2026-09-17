@@ -125,6 +125,7 @@ const DEFAULT_CONFIG = {
     DEFENSE_SCAN: "RARE",
     HITCHHIKE: "RARE",
     QUICK_RINSE: "RARE",
+    QUICKSAND: "RARE",
 
     // Powerups Wave 5 — rarity is COSMETIC only (none are droppable), so these
     // values just drive icon tinting. Per spec §5.
@@ -210,6 +211,7 @@ const DEFAULT_CONFIG = {
     "DEFENSE_SCAN",
     "HITCHHIKE",
     "QUICK_RINSE",
+    "QUICKSAND",
     // Powerups Wave 5 — all store-only, never rolled from an in-race mystery box.
     "UPRISING",
     "GHOST_PEPPER",

@@ -11,6 +11,8 @@ const {
   DEFAULT_CONFIG: BALANCE_DEFAULT_CONFIG,
 } = require("../../economy/balanceConfig.defaults");
 const { powerupAssetUrl } = require("../../../shared/lib/remoteAssets");
+const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
+const { powerupAcquisitionState } = require("../constants/premiumPowerups");
 
 // See shopCosmetics.assetVersionFields — additive, and absent for bundled art.
 function powerupAssetFields(item) {
@@ -28,6 +30,12 @@ function buildGetPowerupShopCatalog(deps = {}) {
   const powerupShopItemModel = deps.PowerupShopItem || PowerupShopItem;
   const userPowerupItemModel = deps.UserPowerupItem || UserPowerupItem;
   const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
+  const membershipForUser =
+    deps.goldMembershipForUser ||
+    (deps.User || deps.PowerupShopItem || deps.UserPowerupItem || deps.PowerupCopy
+      ? async () => ({ isMember: false })
+      : goldMembershipForUser);
+  const db = deps.db || prisma;
 
   return async function getPowerupShopCatalog(
     userId,
@@ -55,7 +63,10 @@ function buildGetPowerupShopCatalog(deps = {}) {
         : Promise.resolve([]),
     ]);
 
-    const discountPercent = deps.User ? 0 : await memberDiscount(prisma, userId);
+    const [discountPercent, { isMember: goldMember }] = await Promise.all([
+      deps.User ? 0 : memberDiscount(db, userId),
+      membershipForUser(db, userId),
+    ]);
     const copyByType = new Map();
     for (const row of copyRows || []) {
       copyByType.set(row.powerupType, row);
@@ -103,6 +114,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
         ...priceFields(item.priceCoins, discountPercent),
         powerupType: item.powerupType,
         ownedQuantity: ownedByType[item.powerupType] ?? 0,
+        ...powerupAcquisitionState(item, goldMember),
         // Item 9 — additive. Old clients ignore both; the frontend defaults a
         // missing category to "utility" and a missing rarity to COMMON.
         category: categoryForPowerup(item.powerupType),

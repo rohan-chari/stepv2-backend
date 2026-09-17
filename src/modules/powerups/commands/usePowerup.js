@@ -275,13 +275,13 @@ const LEECH_RATIO = 2;
 const LEECH_SCORING_VERSION = 2;
 const LEECH_MAX_PER_VICTIM = 1;
 // HITCHHIKE (§7.1): store-only, non-upgradeable, fixed 60-minute window. The
-// caster COPIES the target's recorded raw steps at `copyRatio` (1:1) — the target
+// caster COPIES 50% of the target's recorded eligible steps — the target
 // loses nothing. Metadata carries `{ copyRatio, scoringVersion }` and the scorer
 // reads copyRatio (defaulting to 1), so a rebalance is data-only. At most ONE
 // active link per caster AND one per target (§7.2): unlike Leech, Hitchhike is not
 // zero-sum, so concurrent links would compound.
 const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
-const HITCHHIKE_COPY_RATIO = 1;
+const HITCHHIKE_COPY_RATIO = 0.5;
 const HITCHHIKE_EFFECTIVE_SCORING_VERSION = 3;
 const HITCHHIKE_MAX_PER_TARGET = 1;
 // QUICK_RINSE (§8): store-only, SELF-ONLY, instantaneous. Halves the REMAINING
@@ -2583,8 +2583,11 @@ function buildUsePowerup(dependencies = {}) {
       if (targetParticipant.forfeitedAt) {
         throw new PowerupUseError("Target has forfeited the race", 400);
       }
-      // TR-651: no friendly fire — offensive powerups only hit the enemy team.
-      if (isTeamRace && !isEnemy(targetParticipant)) {
+      // Most offensive powerups remain enemy-only. Hitchhike is the deliberate
+      // exception: it may copy an eligible teammate's steps without changing
+      // that teammate's own score. The backend remains authoritative; the
+      // client target list is only a convenience.
+      if (isTeamRace && type !== "HITCHHIKE" && !isEnemy(targetParticipant)) {
         throw new PowerupUseError("You can't target a teammate", 400, "INVALID_TARGET");
       }
     }
@@ -3642,7 +3645,9 @@ function buildUsePowerup(dependencies = {}) {
         // the walked-on racer, sourced by the hitchhiker. The copy itself is
         // computed in src/utils/hitchhikeCopies.js from the TARGET's in-window
         // steps as floor(steps * copyRatio) — NOT here — and is inserted into the
-        // caster's preLeechTotal at every scoring-assembly site. The target's own
+        // caster's preLeechTotal at every scoring-assembly site. New effects copy
+        // 50% of eligible target steps; historical rows keep their stored ratio.
+        // The target's own
         // steps are never touched. As a shop powerup it can never be reflected
         // (SHOP_POWERUP_TYPES), and the OFFENSIVE Compression Socks block above
         // already protected a shielded target (no effect created). NOT stealthy:
@@ -3675,7 +3680,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} hitched a ride on ${targetDisplayName}! Every step ${targetDisplayName} takes for the next hour is copied to ${myDisplayName}. ${targetDisplayName} loses nothing.`,
+          description: `${myDisplayName} hitched a ride on ${targetDisplayName}! Half of every eligible step ${targetDisplayName} takes for the next hour is copied to ${myDisplayName}. ${targetDisplayName} loses nothing.`,
           createdAt: decoyTerminalEventAt || undefined,
         });
         break;

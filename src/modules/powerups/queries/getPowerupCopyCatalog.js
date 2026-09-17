@@ -124,7 +124,7 @@ function buildGetPowerupCopyCatalog(deps = {}) {
         type: row.powerupType,
         name: row.name,
         description: hitchhikeEffective
-          ? "Copy the target's effective steps; their boosts and reversals carry over."
+          ? "Copy half of the target's eligible steps; their boosts and reversals carry over."
           : row.description,
         // Explicit null (never "") so the client omits the effect-rail subtitle
         // rather than rendering a blank line or truncating the description.

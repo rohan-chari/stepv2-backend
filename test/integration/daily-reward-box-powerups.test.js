@@ -343,4 +343,41 @@ describe("daily reward box powerup prizes", () => {
       "testOnly powerup must be hidden from the prod channel"
     );
   });
+
+  it("free users see premium powerups but cannot receive them from the daily spin", async () => {
+    const user = await createUser();
+    await seedPowerup("drbp-premium-leech", "LEECH");
+    await seedPowerup("drbp-premium-hitchhike", "HITCHHIKE");
+    await seedPowerup("drbp-normal-red-card", "RED_CARD");
+
+    const status = await request(
+      server.baseUrl,
+      "GET",
+      `/daily-reward/status?localDate=${todayLocal()}`,
+      { token: user.token, headers: { "X-Client-Features": "characters,spinPowerups,powerups3" } }
+    );
+    const statusBody = await status.json();
+    const leech = statusBody.box.powerupPool.find((p) => p.powerupType === "LEECH");
+    assert.ok(leech, "premium item remains visible in the display pool");
+    assert.equal(leech.requiresGold, true);
+    assert.equal(leech.eligible, false);
+    assert.ok(!statusBody.box.eligiblePowerupTypes.includes("LEECH"));
+    assert.ok(!statusBody.box.eligiblePowerupTypes.includes("HITCHHIKE"));
+    assert.ok(statusBody.box.eligiblePowerupTypes.includes("RED_CARD"));
+
+    const { claimDailyRewardBox } = require("../../src/modules/economy/commands/claimDailyRewardBox");
+    const result = await claimDailyRewardBox({
+      userId: user.userId,
+      localDate: todayLocal(),
+      rng: () => 0.999,
+      supportsSpinPowerups: true,
+      supportsPowerups3: true,
+    });
+    assert.notEqual(result.powerup?.powerupType, "LEECH");
+    assert.notEqual(result.powerup?.powerupType, "HITCHHIKE");
+    assert.equal(
+      await prisma.userPowerupItem.count({ where: { userId: user.userId, powerupType: { in: ["LEECH", "HITCHHIKE"] } } }),
+      0
+    );
+  });
 });

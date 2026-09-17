@@ -9,7 +9,7 @@
 // drives live progress, background resolution, and settlement ("they move
 // together"):
 //   * computeHitchhikeCopiedSteps — async, per-effect: reads the TARGET's
-//     in-window steps and returns floor(steps * copyRatio). Excludes the
+//     in-window eligible steps and returns floor(steps * copyRatio). Excludes the
 //     in-progress hour bucket so the number is monotonic across recomputes.
 //   * collectRaceHitchhikeCopies — async, per-race: ONE bulk query for every
 //     HITCHHIKE row in the race (including rows on finished/forfeited targets,

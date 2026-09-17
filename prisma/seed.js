@@ -247,17 +247,12 @@ async function seed() {
       priceCoins: 300,
       powerupType: "LEECH",
       // Left ACTIVE deliberately. `active:false` RETIRES an item (the Cleanse
-      // precedent at sortOrder 3); `testOnly:true` merely gates it to the
-      // TestFlight release channel. Leech is being gated, not retired.
+      // precedent at sortOrder 3). Leech is Gold-only for new acquisition and
+      // eligible for Gold Daily Spin, but remains excluded from mystery/race
+      // boxes through balanceConfig.storeOnlyTypes.
       active: true,
-      // Was omitted, so it inherited the schema default of FALSE
-      // (schema.prisma:535) — the mismatch that made an earlier spec draft
-      // wrongly claim Leech was already testOnly. Set explicitly so fresh and
-      // staging databases match the intended production state. Stays true
-      // through this deploy and the carrying binary's rollout; the owner flips
-      // it manually afterwards. Note the existing PROD row is NOT changed by
-      // re-seeding (the upsert `update` block omits testOnly).
-      testOnly: true,
+      testOnly: false,
+      dailyRewardEligible: true,
       sortOrder: 4,
     },
     {
@@ -275,11 +270,9 @@ async function seed() {
     },
     {
       // Store-only, `powerups3`-gated. Targeted 60-minute 1:1 raw-step COPY —
-      // the caster gains, the target loses nothing. Never a mystery-box /
-      // daily-box prize (excluded from getEligiblePowerupPool).
-      //
-      // Permanently available to capable clients, but deliberately excluded
-      // from daily rewards: Hitchhike remains a paid coin sink.
+      // the caster gains, the target loses nothing. Gold-only for new
+      // acquisition, but eligible for Gold Daily Spin. It remains excluded
+      // from mystery/race boxes through balanceConfig.storeOnlyTypes.
       sku: "POWERUP_HITCHHIKE",
       name: "Hitchhike",
       description:
@@ -288,7 +281,7 @@ async function seed() {
       powerupType: "HITCHHIKE",
       active: true,
       testOnly: false,
-      dailyRewardEligible: false,
+      dailyRewardEligible: true,
       sortOrder: 6,
     },
     {
@@ -308,15 +301,16 @@ async function seed() {
       sortOrder: 7,
     },
     {
-      // Store-only, powerups4-gated multi-target freeze. Remains dark through
-      // the carrying app's phased rollout.
+      // Store-only, powerups4-gated multi-target freeze. Gold-only for new
+      // acquisition, but eligible for Gold Daily Spin.
       sku: "POWERUP_QUICKSAND",
       name: "Quicksand",
       description: "Freeze the steps of up to three rivals for 2 hours. Compression Socks block each target independently; Mirrors can't reflect it.",
       priceCoins: 300,
       powerupType: "QUICKSAND",
       active: true,
-      testOnly: true,
+      testOnly: false,
+      dailyRewardEligible: true,
       sortOrder: 8,
     },
     // ── Powerups Wave 5 (store-only, `powerups5`-gated) ──────────────────────

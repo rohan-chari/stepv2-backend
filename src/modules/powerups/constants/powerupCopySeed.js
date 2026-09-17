@@ -309,8 +309,8 @@ const POWERUP_COPY_SEED = [
     powerupType: "HITCHHIKE",
     name: "Hitchhike",
     description:
-      "For 60 min, every step a chosen rival takes is copied into your score. They lose nothing. Compression Socks block it; Mirrors can't reflect it",
-    shortDescription: "Steps being copied",
+      "For 60 min, half of every eligible step a chosen racer takes is copied into your score. They lose nothing. Compression Socks block it; Mirrors can't reflect it",
+    shortDescription: "Half of eligible steps copied",
     upgradeTierLabels: [],
   },
   {

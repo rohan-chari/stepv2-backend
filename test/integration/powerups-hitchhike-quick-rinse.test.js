@@ -7,7 +7,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
 
 // Integration coverage for the 2026-07-20 batch (§7, §8, §9.5) against a real DB:
-//   * HITCHHIKE — a 60-minute 1:1 COPY of the target's raw steps into the
+//   * HITCHHIKE — a 60-minute 50% COPY of the target's eligible steps into the
 //     caster's score. The target loses nothing, the copy survives repeated reads,
 //     Cleanse clamps it, Quick Rinse halves it, and race end truncates the window.
 //   * QUICK_RINSE — halves every active timed opponent effect; 409 with none.
@@ -85,6 +85,49 @@ async function createActiveRace(alice, others) {
     where: { raceId },
     data: { joinedAt: start },
   });
+  return raceId;
+}
+
+async function createActiveTeamRace(alice, bob, carol, dave) {
+  const headers = { ...POWERUPS3, "X-Client-Features": "characters,powerups3,team_races" };
+  const created = await request(server.baseUrl, "POST", "/races", {
+    body: {
+      name: "Hitchhike Team Integration",
+      targetSteps: 500000,
+      maxDurationDays: 7,
+      powerupsEnabled: true,
+      powerupStepInterval: 50000,
+      isPublic: true,
+      isTeamRace: true,
+      teamSize: 2,
+    },
+    token: alice.token,
+    headers,
+  });
+  const raceId = (await created.json()).race.id;
+  for (const other of [bob, carol, dave]) {
+    const sent = await request(server.baseUrl, "POST", "/friends/request", {
+      body: { addresseeId: other.userId }, token: alice.token, headers,
+    });
+    const friendshipId = (await sent.json()).friendship.id;
+    await request(server.baseUrl, "PUT", `/friends/request/${friendshipId}`, {
+      body: { accept: true }, token: other.token, headers,
+    });
+  }
+  await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+    body: { inviteeIds: [bob.userId, carol.userId, dave.userId] },
+    token: alice.token, headers,
+  });
+  for (const [user, team] of [[bob, "TEAM_A"], [carol, "TEAM_B"], [dave, "TEAM_B"]]) {
+    const response = await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true, team }, token: user.token, headers,
+    });
+    assert.equal(response.status, 200, JSON.stringify(await response.json()));
+  }
+  const started = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+    token: alice.token, headers,
+  });
+  assert.equal(started.status, 200, JSON.stringify(await started.json()));
   return raceId;
 }
 
@@ -166,7 +209,7 @@ describe("hitchhike / quick rinse — integration", () => {
     await cleanDatabase();
   });
 
-  it("copies the target's raw steps into the caster's score without touching the target", async () => {
+  it("copies half of the target's eligible steps without touching the target", async () => {
     const alice = await createUser("Alice");
     const bob = await createUser("Bob");
     await makeFriends(alice, bob);
@@ -183,7 +226,7 @@ describe("hitchhike / quick rinse — integration", () => {
     assert.equal(result.effect.sourceUserId, alice.userId);
     assert.equal(result.effect.targetUserId, bob.userId);
     assert.equal(result.durationMs, HOUR_MS);
-    assert.equal(result.copyRatio, 1);
+    assert.equal(result.copyRatio, 0.5);
 
     // Backdate the link so its window covers two CLOSED hour buckets.
     const start = windowStartFor(4);
@@ -197,7 +240,7 @@ describe("hitchhike / quick rinse — integration", () => {
     const aliceTotal = totalFor(progress, alice.userId);
     const bobTotal = totalFor(progress, bob.userId);
 
-    assert.equal(aliceTotal, 6000, "two closed hours of Bob's 3,000/h were copied");
+    assert.equal(aliceTotal, 3000, "two closed hours of Bob's 3,000/h contribute 50%");
     assert.equal(bobTotal, 30000, "the target keeps every one of their own steps");
     assert.ok(bobTotal >= bobBefore, "the target's total is never reduced");
   });
@@ -219,7 +262,62 @@ describe("hitchhike / quick rinse — integration", () => {
     await progressFor(raceId, alice);
     const third = totalFor(await progressFor(raceId, alice), alice.userId);
     assert.equal(third, first, "the copy is recomputed, never accumulated");
-    assert.equal(first, 6000);
+    assert.equal(first, 3000);
+  });
+
+  it("allows Hitchhike to target an eligible teammate in a team race", async () => {
+    const [alice, bob, carol, dave] = await Promise.all([
+      createUser("Alice Team Hitch"), createUser("Bob Team Hitch"),
+      createUser("Carol Team Hitch"), createUser("Dave Team Hitch"),
+    ]);
+    const raceId = await createActiveTeamRace(alice, bob, carol, dave);
+    const result = await useHitchhike(raceId, alice, bob.userId);
+    assert.equal(result.status, 200, JSON.stringify(await result.json()));
+    const effect = await prisma.raceActiveEffect.findFirst({
+      where: { raceId, type: "HITCHHIKE" },
+    });
+    assert.deepEqual(
+      [effect.sourceUserId, effect.targetUserId],
+      [alice.userId, bob.userId],
+    );
+    const startedAt = new Date(Date.now() - 12 * HOUR_MS);
+    await prisma.race.update({ where: { id: raceId }, data: { startedAt, timezone: "UTC" } });
+    await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: startedAt } });
+    await giveHourlySamples(bob.userId, 11, 10, 1000);
+    const windowStart = windowStartFor(4);
+    await prisma.raceActiveEffect.update({
+      where: { id: effect.id },
+      data: { startsAt: windowStart, expiresAt: new Date(windowStart.getTime() + 2 * HOUR_MS) },
+    });
+    const progress = await progressFor(raceId, alice);
+    assert.equal(totalFor(progress, alice.userId), 1000);
+    assert.equal(totalFor(progress, bob.userId), 10000);
+  });
+
+  it("rejects self, cross-race, and non-participant Hitchhike targets", async () => {
+    const alice = await createUser("Alice Target Guards");
+    const bob = await createUser("Bob Target Guards");
+    const outsider = await createUser("Outsider Target Guards");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+
+    const self = await useHitchhike(raceId, alice, alice.userId);
+    assert.equal(self.status, 400);
+    await self.json();
+
+    const outsiderTarget = await useHitchhike(raceId, alice, outsider.userId);
+    assert.equal(outsiderTarget.status, 400);
+    await outsiderTarget.json();
+
+    const nonParticipantItem = await giveHeld(raceId, alice.userId, "HITCHHIKE");
+    const nonParticipantUse = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${nonParticipantItem.id}/use`,
+      { body: { targetUserId: bob.userId }, token: outsider.token, headers: POWERUPS3 },
+    );
+    assert.equal(nonParticipantUse.status, 403);
+    await nonParticipantUse.json();
   });
 
   it("rejects a second link from the same caster and a second link on the same target", async () => {
@@ -271,8 +369,8 @@ describe("hitchhike / quick rinse — integration", () => {
     });
 
     const progress = await progressFor(raceId, alice);
-    assert.equal(totalFor(progress, alice.userId), 6000, "Alice copies Bob only");
-    assert.equal(totalFor(progress, carol.userId), 2000, "Carol copies Dan only");
+    assert.equal(totalFor(progress, alice.userId), 3000, "Alice copies half of Bob only");
+    assert.equal(totalFor(progress, carol.userId), 1000, "Carol copies half of Dan only");
     assert.equal(
       totalFor(progress, dan.userId),
       10000,
@@ -812,10 +910,10 @@ describe("hitchhike / quick rinse — integration", () => {
     assert.equal(settled.progress.status, "COMPLETED");
     assert.equal(
       totalFor(settled, alice.userId),
-      3000,
+      1500,
       "only the hour BEFORE race end is copied, not the full 2-hour window"
     );
-    // Hitchhike is a 1:1 COPY — the target loses nothing to it. This asserts the
+    // Hitchhike is a 50% COPY — the target loses nothing to it. This asserts the
     // target's total is byte-identical to the no-hitchhike CONTROL above, which
     // is the actual property worth pinning. It previously asserted 30000 (the
     // raw sample sum), which conflated "hitchhike took nothing" with "the race
@@ -850,7 +948,7 @@ describe("hitchhike / quick rinse — integration", () => {
     assert.ok(!types.includes("HITCHHIKE"), "the entry is withheld");
     assert.equal(
       totalFor(legacy, alice.userId),
-      6000,
+      3000,
       "the authoritative score is NOT withheld (the accepted §9.3 artifact)"
     );
   });

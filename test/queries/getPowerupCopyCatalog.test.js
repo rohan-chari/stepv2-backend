@@ -302,7 +302,7 @@ test("guide catalog applies the complete request capability visibility rule", as
 
 // ── The shop endpoint now SOURCES its strings from the copy catalog ─────────
 
-test("getPowerupShopCatalog serves copy-catalog strings while keeping its response SHAPE unchanged", async () => {
+test("getPowerupShopCatalog serves copy strings with additive premium state", async () => {
   const catalog = await buildGetPowerupShopCatalog({
     User: { async findCoins() { return 500; } },
     PowerupShopItem: {
@@ -330,18 +330,25 @@ test("getPowerupShopCatalog serves copy-catalog strings while keeping its respon
   assert.deepEqual(Object.keys(catalog).sort(), ["coins", "items"]);
   const [item] = catalog.items;
   // Item 9 (2026-07-24): `category` + `rarity` are additive shop-catalog fields.
+  // Bara Gold premium acquisition state is additive as well.
   assert.deepEqual(Object.keys(item).sort(), [
-    "category",
-    "description",
-    "name",
-    "ownedQuantity",
-    "powerupType",
-    "priceCoins",
-    "rarity",
-    "sku",
+  "category",
+  "description",
+  "goldEligible",
+  "name",
+  "ownedQuantity",
+  "powerupType",
+  "priceCoins",
+  "purchaseEligibility",
+  "rarity",
+  "requiresGold",
+  "sku",
   ]);
   assert.equal(item.name, "Leech", "sourced from PowerupCopy, not PowerupShopItem");
   assert.match(item.description, /^For 60 min, /);
+  assert.equal(item.requiresGold, true);
+  assert.equal(item.goldEligible, false);
+  assert.equal(item.purchaseEligibility, "GOLD_REQUIRED");
 });
 
 test("getPowerupShopCatalog falls back to the shop row when a type has no copy row", async () => {

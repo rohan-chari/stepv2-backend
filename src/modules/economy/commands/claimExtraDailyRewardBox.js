@@ -156,7 +156,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     const { config: balance } = await balanceConfig.getSnapshot();
     const pool = await getPool(userId);
     const powerupPool = supportsSpinPowerups
-      ? await getPowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5 })
+      ? await getPowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5, isGoldMember: goldMember })
       : [];
     const rarity = rollDailyBoxRarity(
       streak,
@@ -242,7 +242,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       rewardType,
       coinAmount,
       shopItem: shopItem ? serializeShopItem(shopItem) : null,
-      powerup: powerup ? serializePowerupShopItem(powerup) : null,
+      powerup: powerup ? serializePowerupShopItem(powerup, { isGoldMember: goldMember }) : null,
       coins: coinsAfter,
       streak,
       extra: true,
