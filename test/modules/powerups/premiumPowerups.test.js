@@ -20,11 +20,9 @@ const ITEMS = [
   { sku: "POWERUP_RAINSTORM", powerupType: "RAINSTORM", dailyRewardEligible: true },
 ];
 
-test("only Hitchhike requires Bara Gold", () => {
-  assert.deepEqual([...PREMIUM_POWERUP_TYPES].sort(), [
-  "HITCHHIKE",
-  ]);
-  assert.equal(powerupRequiresGold("HITCHHIKE"), true);
+test("no powerups require Bara Gold", () => {
+  assert.deepEqual([...PREMIUM_POWERUP_TYPES].sort(), []);
+  assert.equal(powerupRequiresGold("HITCHHIKE"), false);
   assert.equal(powerupRequiresGold("LEECH"), false);
   assert.equal(powerupRequiresGold("QUICKSAND"), false);
   assert.equal(powerupRequiresGold("GHOST_PEPPER"), false);
@@ -61,6 +59,7 @@ test("display pool includes premium items while free eligible pool excludes them
     ITEMS.map((item) => item.powerupType)
   );
   assert.deepEqual(free.eligiblePool.map((item) => item.powerupType), [
+    "HITCHHIKE",
     "LEECH",
     "QUICKSAND",
     "RAINSTORM",

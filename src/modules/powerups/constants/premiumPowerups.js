@@ -1,6 +1,4 @@
-const PREMIUM_POWERUP_TYPES = new Set([
-  "HITCHHIKE",
-]);
+const PREMIUM_POWERUP_TYPES = new Set();
 
 function powerupRequiresGold(powerupType) {
   return PREMIUM_POWERUP_TYPES.has(powerupType);
