@@ -12,7 +12,7 @@ const {
   priceFields,
 } = require("../billing/services/memberPrice");
 const { buildAdUnlockBlock } = require("../economy/services/adUnlockPolicy");
-const { goldMembershipForUser, characterPolicy, characterAccess } = require("../billing/queries/goldPolicy");
+const { goldMembershipForUser, characterPolicy, characterAccess, isGoldCharacterSku } = require("../billing/queries/goldPolicy");
 const {
   SLOTS,
   CONTRACT,
@@ -231,6 +231,7 @@ async function getCharacters(opts, db = prisma) {
       availability: i.active ? "available" : "unavailable",
       outfit: o,
       ...(opts.supportsGold && key !== "default" ? {
+        goldExclusive: isGoldCharacterSku(i.sku),
         goldAccess: policy.goldAccess,
         hasAccess: policy.hasAccess,
         accessSource: policy.accessSource,

@@ -9,6 +9,7 @@ const { testOnlyFilter } = require("../../shared/middleware/releaseChannel");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
 const { appSettings } = require("../../shared/config/appSettings");
+const { isGoldCharacterSku } = require("../billing/queries/goldPolicy");
 
 const CATALOG_TTL_SECONDS = 60;
 
@@ -111,6 +112,7 @@ async function getShopCatalog(
       serializeShopItem({ ...item, ...priceFields(item.priceCoins, discountPercent) }, {
         owned: ownedItemIdSet.has(item.id),
         equipped: equippedItemIdSet.has(item.id),
+        ...(item.slot === CHARACTER_SLOT ? { goldExclusive: isGoldCharacterSku(item.sku) } : {}),
       })
     ),
   };
