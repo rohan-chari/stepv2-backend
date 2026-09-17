@@ -2345,7 +2345,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: beneficiaries.length },
       });
       await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
-      await finalizeSelfContainedUse(null, outageEnd);
+      await finalizeSelfContainedUse(null, flagEnd);
       return {
         blocked: false,
         upgradeLevel: 0,
