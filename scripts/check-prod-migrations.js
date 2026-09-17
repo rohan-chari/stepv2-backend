@@ -37,8 +37,14 @@ const repoMigs = fs
     `SELECT migration_name, finished_at, rolled_back_at
        FROM "_prisma_migrations" ORDER BY started_at`
   );
-  const applied = rows.filter((r) => r.finished_at && !r.rolled_back_at);
-  const unfinished = rows.filter((r) => !r.finished_at || r.rolled_back_at);
+  // Prisma keeps historical rows when a failed migration is resolved and
+  // re-applied. Evaluate only the latest ledger row for each migration;
+  // otherwise an old rolled-back row would keep blocking every future deploy.
+  const latestByName = new Map();
+  for (const row of rows) latestByName.set(row.migration_name, row);
+  const current = [...latestByName.values()];
+  const applied = current.filter((r) => r.finished_at && !r.rolled_back_at);
+  const unfinished = current.filter((r) => !r.finished_at || r.rolled_back_at);
   const appliedNames = new Set(applied.map((r) => r.migration_name));
   const missing = repoMigs.filter((m) => !appliedNames.has(m));
 
