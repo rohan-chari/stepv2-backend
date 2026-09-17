@@ -71,7 +71,9 @@ function characterPolicy(item, isMember, { allowGoldAccess = true } = {}) {
   const directPurchase = goldActive
     ? { available: false, storeProductId: null }
     : directCharacterPurchase(item?.sku);
-  const coinPurchaseAllowed = !goldActive;
+  // Gold characters are never coin merchandise. Non-members acquire them via
+  // their configured store product; Gold members receive temporary access.
+  const coinPurchaseAllowed = !goldActive && !isGoldCharacterSku(item?.sku);
   const canPurchase = !owned && item?.active === true && item?.earnOnly !== true && coinPurchaseAllowed;
   return {
     goldAccess,

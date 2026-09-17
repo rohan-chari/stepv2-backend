@@ -219,6 +219,11 @@ describe("Bara Gold client capability compatibility", () => {
     const goldMouse = (await goldCharacters.json()).characters.find((row) => row.item?.sku === "mouse");
     const freeMouse = (await freeCharacters.json()).characters.find((row) => row.item?.sku === "mouse");
     assert.equal(goldMouse.coinPurchaseAllowed, false);
-    assert.equal(freeMouse.coinPurchaseAllowed, true);
+    assert.equal(freeMouse.coinPurchaseAllowed, false);
+    assert.equal(freeMouse.canPurchase, false);
+    assert.deepEqual(freeMouse.directPurchase, {
+      available: true,
+      storeProductId: "bara_character_mouse_v1",
+    });
   });
 });

@@ -44,7 +44,7 @@ async function character(overrides = {}) {
 }
 
 describe("Bara Gold character policy", () => {
-  it("returns temporary-access policy and preserves non-Gold purchase behavior", async () => {
+  it("returns IAP-only policy and rejects coin purchases for non-Gold users", async () => {
     const user = await createTestUser({ coins: 1200 });
     const mouse = await character({ sku: "mouse" });
     const catalog = await request(server.baseUrl, "GET", "/shop/characters", {
@@ -58,8 +58,8 @@ describe("Bara Gold character policy", () => {
     assert.equal(row.owned, false);
     assert.equal(row.hasAccess, false);
     assert.equal(row.accessSource, null);
-    assert.equal(row.coinPurchaseAllowed, true);
-    assert.equal(row.canPurchase, true);
+    assert.equal(row.coinPurchaseAllowed, false);
+    assert.equal(row.canPurchase, false);
     assert.equal(row.unavailableReason, "requires_gold_or_direct_purchase");
 
     const purchase = await request(server.baseUrl, "POST", `/shop/items/${mouse.id}/purchase`, {
@@ -67,9 +67,9 @@ describe("Bara Gold character policy", () => {
       headers: { "Idempotency-Key": "gold-character-free-denied", "X-Client-Features": "characters,bara_gold_v1" },
       body: {},
     });
-    assert.equal(purchase.status, 200);
-    assert.equal((await purchase.json()).purchase.coinsSpent, 1000);
-    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 1);
+    assert.equal(purchase.status, 403);
+    assert.equal((await purchase.json()).code, "GOLD_CHARACTER_IAP_REQUIRED");
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 0);
   });
 
   it("blocks permanent character purchases while Gold is active", async () => {
