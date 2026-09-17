@@ -103,7 +103,7 @@ async function purchaseShopItem({
       }
       if (item.slot === CHARACTER_SLOT) {
         const { isMember } = await goldMembershipForUser(tx, userId);
-        if (isMember) throw new AppError("Character purchases are unavailable while Bara Gold is active", "GOLD_CHARACTER_PURCHASE_UNAVAILABLE", 403);
+        if (isMember && isGoldCharacterSku(item.sku)) throw new AppError("Character purchases are unavailable while Bara Gold is active", "GOLD_CHARACTER_PURCHASE_UNAVAILABLE", 403);
         if (isGoldCharacterSku(item.sku)) {
           throw new AppError("This character requires its configured in-app purchase", "GOLD_CHARACTER_IAP_REQUIRED", 403);
         }

@@ -86,6 +86,19 @@ describe("Bara Gold character policy", () => {
     assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 0);
   });
 
+  it("allows non-Gold characters to be bought with coins while Gold is active", async () => {
+    const user = await createTestUser({ coins: 1200 });
+    const turtle = await character({ sku: "turtle", name: "Turtle" });
+    await goldMembership(user.user.id);
+    const purchase = await request(server.baseUrl, "POST", `/shop/items/${turtle.id}/purchase`, {
+      token: user.token,
+      headers: { "Idempotency-Key": "gold-standard-character-coin-buy", "X-Client-Features": "characters,bara_gold_v1" },
+      body: {},
+    });
+    assert.equal(purchase.status, 200, JSON.stringify(await purchase.json()));
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: turtle.id } }), 1);
+  });
+
   it("grants temporary access only to Gold characters", async () => {
     const user = await createTestUser();
     const otter = await character({ sku: "otter", name: "Otter" });
