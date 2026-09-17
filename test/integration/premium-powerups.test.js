@@ -4,8 +4,6 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
 const PREMIUM = [
   ["POWERUP_HITCHHIKE", "HITCHHIKE"],
-  ["POWERUP_LEECH", "LEECH"],
-  ["POWERUP_QUICKSAND", "QUICKSAND"],
 ];
 const FEATURES = {
   "X-Client-Features": "characters,spinPowerups,powerups3,powerups4,ads",

@@ -359,9 +359,9 @@ describe("daily reward box powerup prizes", () => {
     const statusBody = await status.json();
     const leech = statusBody.box.powerupPool.find((p) => p.powerupType === "LEECH");
     assert.ok(leech, "premium item remains visible in the display pool");
-    assert.equal(leech.requiresGold, true);
-    assert.equal(leech.eligible, false);
-    assert.ok(!statusBody.box.eligiblePowerupTypes.includes("LEECH"));
+    assert.equal(leech.requiresGold, false);
+    assert.equal(leech.eligible, true);
+    assert.ok(statusBody.box.eligiblePowerupTypes.includes("LEECH"));
     assert.ok(!statusBody.box.eligiblePowerupTypes.includes("HITCHHIKE"));
     assert.ok(statusBody.box.eligiblePowerupTypes.includes("RED_CARD"));
 

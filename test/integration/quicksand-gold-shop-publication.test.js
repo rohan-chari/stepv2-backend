@@ -121,9 +121,9 @@ describe("Quicksand Gold shop publication — integration", () => {
         },
         {
           powerupType: "QUICKSAND",
-          requiresGold: true,
-          goldEligible: false,
-          purchaseEligibility: "GOLD_REQUIRED",
+          requiresGold: false,
+          goldEligible: true,
+          purchaseEligibility: "AVAILABLE",
         }
       );
     }
@@ -147,7 +147,7 @@ describe("Quicksand Gold shop publication — integration", () => {
       data: { coins: 1000 },
     });
 
-    const denied = await request(
+    const purchase = await request(
       server.baseUrl,
       "POST",
       "/shop/powerups/purchase",
@@ -160,8 +160,7 @@ describe("Quicksand Gold shop publication — integration", () => {
         body: { sku: "POWERUP_QUICKSAND" },
       }
     );
-    assert.equal(denied.status, 403);
-    assert.equal((await denied.json()).code, "GOLD_REQUIRED");
+    assert.equal(purchase.status, 200);
     assert.equal(
       (await prisma.user.findUnique({ where: { id: free.user.id } })).coins,
       1000

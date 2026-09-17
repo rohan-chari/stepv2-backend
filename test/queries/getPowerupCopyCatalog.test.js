@@ -346,9 +346,9 @@ test("getPowerupShopCatalog serves copy strings with additive premium state", as
   ]);
   assert.equal(item.name, "Leech", "sourced from PowerupCopy, not PowerupShopItem");
   assert.match(item.description, /^For 60 min, /);
-  assert.equal(item.requiresGold, true);
-  assert.equal(item.goldEligible, false);
-  assert.equal(item.purchaseEligibility, "GOLD_REQUIRED");
+  assert.equal(item.requiresGold, false);
+  assert.equal(item.goldEligible, true);
+  assert.equal(item.purchaseEligibility, "AVAILABLE");
 });
 
 test("getPowerupShopCatalog falls back to the shop row when a type has no copy row", async () => {

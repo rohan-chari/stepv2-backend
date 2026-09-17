@@ -1,7 +1,5 @@
 const PREMIUM_POWERUP_TYPES = new Set([
   "HITCHHIKE",
-  "LEECH",
-  "QUICKSAND",
 ]);
 
 function powerupRequiresGold(powerupType) {

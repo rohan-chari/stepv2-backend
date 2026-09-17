@@ -247,7 +247,7 @@ async function seed() {
       priceCoins: 300,
       powerupType: "LEECH",
       // Left ACTIVE deliberately. `active:false` RETIRES an item (the Cleanse
-      // precedent at sortOrder 3). Leech is Gold-only for new acquisition and
+      // precedent at sortOrder 3). Leech is available for coin purchase and
       // eligible for Gold Daily Spin, but remains excluded from mystery/race
       // boxes through balanceConfig.storeOnlyTypes.
       active: true,
@@ -301,8 +301,8 @@ async function seed() {
       sortOrder: 7,
     },
     {
-      // Store-only, powerups4-gated multi-target freeze. Gold-only for new
-      // acquisition, but eligible for Gold Daily Spin.
+      // Store-only, powerups4-gated multi-target freeze. Available for coin
+      // purchase and eligible for Gold Daily Spin.
       sku: "POWERUP_QUICKSAND",
       name: "Quicksand",
       description: "Freeze the steps of up to three rivals for 2 hours. Compression Socks block each target independently; Mirrors can't reflect it.",

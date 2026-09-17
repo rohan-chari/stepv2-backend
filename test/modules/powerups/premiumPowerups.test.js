@@ -20,26 +20,20 @@ const ITEMS = [
   { sku: "POWERUP_RAINSTORM", powerupType: "RAINSTORM", dailyRewardEligible: true },
 ];
 
-test("only Hitchhike, Leech, and Quicksand require Bara Gold", () => {
+test("only Hitchhike requires Bara Gold", () => {
   assert.deepEqual([...PREMIUM_POWERUP_TYPES].sort(), [
-    "HITCHHIKE",
-    "LEECH",
-    "QUICKSAND",
+  "HITCHHIKE",
   ]);
   assert.equal(powerupRequiresGold("HITCHHIKE"), true);
-  assert.equal(powerupRequiresGold("LEECH"), true);
-  assert.equal(powerupRequiresGold("QUICKSAND"), true);
+  assert.equal(powerupRequiresGold("LEECH"), false);
+  assert.equal(powerupRequiresGold("QUICKSAND"), false);
+  assert.equal(powerupRequiresGold("GHOST_PEPPER"), false);
   assert.equal(powerupRequiresGold("RAINSTORM"), false);
 });
 test("catalog metadata distinguishes visible premium items from free acquisition", () => {
   const item = { powerupType: "LEECH" };
   assert.deepEqual(powerupAcquisitionState(item, false), {
-    requiresGold: true,
-    goldEligible: false,
-    purchaseEligibility: "GOLD_REQUIRED",
-  });
-  assert.deepEqual(powerupAcquisitionState(item, true), {
-    requiresGold: true,
+    requiresGold: false,
     goldEligible: true,
     purchaseEligibility: "AVAILABLE",
   });
@@ -49,8 +43,8 @@ test("catalog metadata distinguishes visible premium items from free acquisition
     description: null,
     priceCoins: 300,
     powerupType: "LEECH",
-    requiresGold: true,
-    eligible: false,
+    requiresGold: false,
+    eligible: true,
   });
 });
 
@@ -66,7 +60,11 @@ test("display pool includes premium items while free eligible pool excludes them
     free.displayPool.map((item) => item.powerupType),
     ITEMS.map((item) => item.powerupType)
   );
-  assert.deepEqual(free.eligiblePool.map((item) => item.powerupType), ["RAINSTORM"]);
+  assert.deepEqual(free.eligiblePool.map((item) => item.powerupType), [
+    "LEECH",
+    "QUICKSAND",
+    "RAINSTORM",
+  ]);
 
   const gold = await getPowerupPools({
     powerupShopItemModel: model,
