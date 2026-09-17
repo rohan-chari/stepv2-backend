@@ -43,6 +43,12 @@ deploy mid-run:
 node scripts/check-prod-migrations.js
 ```
 
+The checker reads `PROD_DATABASE_URL` when it is configured. The production
+host currently uses `DATABASE_URL` for the runtime database connection, with
+`NODE_ENV=production`, so the checker safely falls back to that value only in
+that explicit production environment. It refuses to use an ambiguous local or
+staging `DATABASE_URL`.
+
 - **`VERDICT: prod is fully migrated`** → `migrate deploy` is a no-op; proceed.
 - **`VERDICT: prod is MISSING migrations`** → read the `unfinished/rolledback`
   list. A migration in a *failed* state makes `migrate deploy` refuse (P3018)

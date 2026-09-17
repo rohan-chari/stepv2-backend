@@ -5,8 +5,16 @@ const path = require("path");
 const { Client } = require("pg");
 
 const env = fs.readFileSync(path.join(__dirname, "..", ".env"), "utf8");
-const url = env
-  .match(/^PROD_DATABASE_URL=(.+)$/m)[1]
+const valueFor = (name) => env.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
+const nodeEnv = valueFor("NODE_ENV")?.trim().replace(/^"|"$/g, "");
+const configuredUrl = valueFor("PROD_DATABASE_URL") ||
+  (nodeEnv === "production" ? valueFor("DATABASE_URL") : null);
+if (!configuredUrl) {
+  throw new Error(
+    "Missing production database URL: set PROD_DATABASE_URL, or set DATABASE_URL with NODE_ENV=production",
+  );
+}
+const url = configuredUrl
   .trim()
   .replace(/^"|"$/g, "")
   .replace(/[?&]sslmode=[^&]*/g, ""); // strip sslmode so pg honors our ssl override below
