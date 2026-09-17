@@ -187,6 +187,7 @@ model User {
   seasonScores            SeasonScore[]
   rankedCohortMemberships RankedCohortMember[]
   powerupItems            UserPowerupItem[]
+  powerupUsageStates       PowerupUsageState[]
   powerupPurchaseRequests PowerupPurchaseRequest[]
   notifications           Notification[]
 
@@ -1370,6 +1371,28 @@ model UserPowerupItem {
   @@map("user_powerup_items")
 }
 
+// Current per-race availability state for shop powerups. Historical use stays
+// in RacePowerup/RacePowerupEvent; this row answers whether the same user can
+// use the same shop type again in this race.
+model PowerupUsageState {
+  id              String      @id @default(uuid())
+  raceId          String      @map("race_id")
+  userId          String      @map("user_id")
+  powerupType     PowerupType @map("powerup_type")
+  lastUsedAt      DateTime    @map("last_used_at")
+  activeUntil     DateTime?   @map("active_until")
+  nextUsableAt    DateTime    @map("next_usable_at")
+  sourcePowerupId String?     @map("source_powerup_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([raceId, userId, powerupType])
+  @@map("powerup_usage_states")
+}
+
 // Idempotency ledger for powerup-store purchases — analogous to
 // ShopPurchaseRequest but for the powerup catalog (keeps the cosmetic ledger
 // untouched). Keyed on (userId, idempotencyKey).
@@ -1589,6 +1612,7 @@ model FundedExposureGuard {
 }
 
 model Race {
+  powerupUsageStates PowerupUsageState[]
   eventFingerprintVersion RaceEventFingerprintVersion?
   effectFingerprintVersion RaceEffectFingerprintVersion?
   economicRealm String @default("production") @map("economic_realm")

@@ -326,6 +326,18 @@ describe("wrong turn", () => {
       const wt1 = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99901);
       const firstRes = await usePowerup(alice.token, raceId, wt1.id, bob.userId);
       assert.equal(firstRes.status, 200);
+      const original = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, targetUserId: bob.userId, type: "WRONG_TURN", status: "ACTIVE" },
+      });
+      const originalSnapshot = {
+        id: original.id,
+        startsAt: original.startsAt,
+        expiresAt: original.expiresAt,
+        sourceUserId: original.sourceUserId,
+        powerupId: original.powerupId,
+        status: original.status,
+        metadata: original.metadata,
+      };
 
       // Alice activates Mirror.
       const mirror = await giveHeldPowerup(raceId, alice.userId, "MIRROR", 99902);
@@ -344,6 +356,16 @@ describe("wrong turn", () => {
         where: { raceId, targetUserId: bob.userId, type: "WRONG_TURN", status: "ACTIVE" },
       });
       assert.equal(activeOnBob.length, 1);
+      const after = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+      assert.deepEqual({
+        id: after.id,
+        startsAt: after.startsAt,
+        expiresAt: after.expiresAt,
+        sourceUserId: after.sourceUserId,
+        powerupId: after.powerupId,
+        status: after.status,
+        metadata: after.metadata,
+      }, originalSnapshot);
 
       // The rejected bounce must not have consumed Alice's Mirror.
       const mirrorEffect = await prisma.raceActiveEffect.findFirst({

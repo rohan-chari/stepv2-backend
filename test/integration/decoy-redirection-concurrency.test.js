@@ -266,6 +266,71 @@ describe("Decoy redirection and concurrency — integration", () => {
     assert.equal(effects.filter((effect) => effect.targetUserId === bob.userId).length, 0);
   });
 
+  it("makes a redirected Rainstorm landing onto an existing effect a durable no-op", async () => {
+    const alice = await createUser("DuplicateTeamCaster");
+    const bob = await createUser("DuplicateTeamExisting");
+    const carol = await createUser("DuplicateTeamDecoy");
+    const dave = await createUser("DuplicateTeamVictim");
+    const raceId = await createTeamRace([alice, bob, carol, dave]);
+    const decoyPowerup = await giveHeldPowerup(raceId, carol.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, carol.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const existingPowerup = await giveHeldPowerup(raceId, bob.userId, "RAINSTORM", 1100);
+    const original = await giveActiveEffect(raceId, bob.userId, "RAINSTORM", existingPowerup.id, new Date(Date.now() + 3600000));
+    const snapshot = {
+      id: original.id, type: original.type, targetParticipantId: original.targetParticipantId,
+      targetUserId: original.targetUserId, sourceUserId: original.sourceUserId,
+      powerupId: original.powerupId, startsAt: original.startsAt, expiresAt: original.expiresAt,
+      status: original.status, metadata: original.metadata,
+    };
+    const storm = await giveHeldPowerup(raceId, alice.userId, "RAINSTORM", 2000);
+    const response = await usePowerup(alice, raceId, storm.id, {}, TEAM_POWERUPS5);
+    assert.equal(response.status, 200);
+    const effects = await activeEffects(raceId, "RAINSTORM");
+    assert.equal(effects.filter((effect) => effect.targetUserId === bob.userId).length, 1);
+    const after = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+    assert.deepEqual({
+      id: after.id, type: after.type, targetParticipantId: after.targetParticipantId,
+      targetUserId: after.targetUserId, sourceUserId: after.sourceUserId,
+      powerupId: after.powerupId, startsAt: after.startsAt, expiresAt: after.expiresAt,
+      status: after.status, metadata: after.metadata,
+    }, snapshot);
+    assert.ok(effects.some((effect) => effect.targetUserId === dave.userId));
+  });
+
+  it("combines redirected-duplicate no-op with race-scoped Rainstorm cooldown", async () => {
+    await prisma.powerupShopItem.upsert({
+      where: { sku: "POWERUP_RAINSTORM" },
+      update: { active: true },
+      create: { sku: "POWERUP_RAINSTORM", name: "Rainstorm", priceCoins: 75, powerupType: "RAINSTORM", active: true },
+    });
+    const alice = await createUser("CombinedCaster");
+    const bob = await createUser("CombinedExisting");
+    const carol = await createUser("CombinedDecoy");
+    const dave = await createUser("CombinedVictim");
+    const raceA = await createTeamRace([alice, bob, carol, dave]);
+    const decoy = await giveHeldPowerup(raceA, carol.userId, "DECOY", 1000);
+    await giveActiveEffect(raceA, carol.userId, "DECOY", decoy.id, new Date(Date.now() + 86400000));
+    const existingPowerup = await giveHeldPowerup(raceA, bob.userId, "RAINSTORM", 1100);
+    const original = await giveActiveEffect(raceA, bob.userId, "RAINSTORM", existingPowerup.id, new Date(Date.now() + 3600000));
+    const stormA = await giveHeldPowerup(raceA, alice.userId, "RAINSTORM", 1200);
+    const retryItem = await giveHeldPowerup(raceA, alice.userId, "RAINSTORM", 1300);
+    assert.equal((await usePowerup(alice, raceA, stormA.id, {}, TEAM_POWERUPS5)).status, 200);
+    assert.equal(await prisma.raceActiveEffect.count({ where: { raceId: raceA, targetUserId: bob.userId, type: "RAINSTORM", status: "ACTIVE" } }), 1);
+    assert.ok(await prisma.powerupUsageState.findUnique({ where: { raceId_userId_powerupType: { raceId: raceA, userId: alice.userId, powerupType: "RAINSTORM" } } }));
+    const retry = await usePowerup(alice, raceA, retryItem.id, {}, TEAM_POWERUPS5);
+    const retryBody = await retry.json();
+    assert.ok([400, 409].includes(retry.status), JSON.stringify(retryBody));
+    if (retry.status === 409) assert.equal(retryBody.code, "POWERUP_COOLDOWN");
+
+    const raceB = await createSoloRace([alice, await createUser("CombinedRaceBVictim")]);
+    const stormB = await giveHeldPowerup(raceB, alice.userId, "RAINSTORM", 1400);
+    assert.equal((await usePowerup(alice, raceB, stormB.id)).status, 200);
+    const unchanged = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+    assert.equal(unchanged.id, original.id);
+    assert.equal(unchanged.startsAt.getTime(), original.startsAt.getTime());
+    assert.equal(unchanged.expiresAt.getTime(), original.expiresAt.getTime());
+  });
+
   it("redirects Power Outage per victim in a 3-runner solo race", async () => {
     const alice = await createUser("OutageSoloCaster");
     const bob = await createUser("OutageSoloDecoy");
@@ -283,6 +348,25 @@ describe("Decoy redirection and concurrency — integration", () => {
     assert.equal(body.result.decoyBlockedCount, 0);
     const effects = await activeEffects(raceId, "POWER_OUTAGE");
     assert.deepEqual(effects.map((effect) => effect.targetUserId), [carol.userId]);
+  });
+
+  it("skips an already-outaged redirected recipient while preserving other AoE landings", async () => {
+    const alice = await createUser("DuplicateOutageCaster");
+    const bob = await createUser("DuplicateOutageDecoy");
+    const carol = await createUser("DuplicateOutageTarget");
+    const dave = await createUser("DuplicateOutageOther");
+    const raceId = await createSoloRace([alice, bob, carol, dave]);
+    const decoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const existingPowerup = await giveHeldPowerup(raceId, bob.userId, "POWER_OUTAGE", 1100);
+    const original = await giveActiveEffect(raceId, carol.userId, "POWER_OUTAGE", existingPowerup.id, new Date(Date.now() + 1800000), bob.userId);
+    const snapshot = { startsAt: original.startsAt, expiresAt: original.expiresAt, sourceUserId: original.sourceUserId, powerupId: original.powerupId, metadata: original.metadata };
+    const outage = await giveHeldPowerup(raceId, alice.userId, "POWER_OUTAGE", 2000);
+    assert.equal((await usePowerup(alice, raceId, outage.id)).status, 200);
+    const after = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+    assert.deepEqual({ startsAt: after.startsAt, expiresAt: after.expiresAt, sourceUserId: after.sourceUserId, powerupId: after.powerupId, metadata: after.metadata }, snapshot);
+    assert.equal((await activeEffects(raceId, "POWER_OUTAGE")).filter((effect) => effect.targetUserId === carol.userId).length, 1);
+    assert.ok((await activeEffects(raceId, "POWER_OUTAGE")).some((effect) => effect.targetUserId === dave.userId));
   });
 
   it("consumes a Decoy as a block for Rainstorm and Power Outage when head-to-head has no destination", async () => {

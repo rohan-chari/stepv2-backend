@@ -181,6 +181,7 @@ const {
 const { Race: defaultRaceModel } = require("./models/race");
 const { User: defaultUserModel } = require("../users");
 const { RacePowerup: defaultPowerupModel } = require("../powerups");
+const { PowerupUsageState } = require("../powerups/models/powerupUsageState");
 const {
   RaceActiveEffect: defaultEffectModel,
 } = require("../powerups");
@@ -1591,7 +1592,7 @@ function createRacesRouter(dependencies = {}) {
         });
       }
       const resolvedContext = { bootstrapReadContext: readContext };
-      const [progressResult, inventoryResult] = await Promise.allSettled([
+      const [progressResult, inventoryResult, cooldownResult] = await Promise.allSettled([
         // Honours the same paging query as /progress. Old clients send no view
         // and are served the whole roster exactly as before.
         capacity.measurePhase(
@@ -1602,6 +1603,7 @@ function createRacesRouter(dependencies = {}) {
           req.user.id,
           req.clientFeatures?.has("powerups4") ?? false
         ),
+        PowerupUsageState.findForRaceUser(defaultPrisma, req.params.raceId, req.user.id),
       ]);
       if (progressResult.status === "rejected") {
         logger.error("Race bootstrap progress unavailable", {
@@ -1611,6 +1613,11 @@ function createRacesRouter(dependencies = {}) {
       if (inventoryResult.status === "rejected") {
         logger.error("Race bootstrap inventory unavailable", {
           error: inventoryResult.reason?.message || "unknown",
+        });
+      }
+      if (cooldownResult.status === "rejected") {
+        logger.error("Get race powerup cooldowns error", {
+          error: cooldownResult.reason?.message || "unknown",
         });
       }
       const statusChanged = progressResult.status === "fulfilled" &&
@@ -1666,6 +1673,14 @@ function createRacesRouter(dependencies = {}) {
             : { code: "PROGRESS_UNAVAILABLE" },
         globalPowerupInventory:
           inventoryResult.status === "fulfilled" ? inventoryResult.value : null,
+        powerupCooldowns:
+          cooldownResult.status === "fulfilled"
+            ? cooldownResult.value.map((row) => ({
+                powerupType: row.powerupType,
+                activeUntil: row.activeUntil,
+                nextUsableAt: row.nextUsableAt,
+              }))
+            : null,
       };
       await attachRaceViewerState(body.race, req.user.id);
       if (resolvedContext.race?._leanProgressProjection) {

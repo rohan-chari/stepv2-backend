@@ -4,6 +4,7 @@ const { RacePowerup } = require("../models/racePowerup");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
+const { PowerupUsageState } = require("../models/powerupUsageState");
 const { Race } = require("../../races/models/race");
 const { User } = require("../../users");
 const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
@@ -84,6 +85,9 @@ const {
 const { uniqueTypesIfTrailMixUsed } = require("../services/trailMix");
 const ACTIVE_IMPACT_EXPIRY_TYPE_SET = new Set(ACTIVE_IMPACT_EXPIRY_TYPES);
 const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence");
+const {
+  shouldSkipRedirectedDuplicate,
+} = require("../constants/powerupPolicy");
 
 async function applyImmediatePenalty(
   participantModel,
@@ -1237,6 +1241,7 @@ function buildUsePowerup(dependencies = {}) {
       );
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
+
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   const immediateEvaluateHighMultiplierAlert = Object.prototype.hasOwnProperty.call(
     dependencies,
@@ -1284,6 +1289,34 @@ function buildUsePowerup(dependencies = {}) {
     // Internal observability seam. Never serialized or accepted from HTTP.
     onPerformanceContext = null,
   }, execution = null) {
+    const transactionDb = execution?.tx || db;
+    async function recordShopUsage({ usedAt, activeUntil = null }) {
+      const shopItem = await db.powerupShopItem.findFirst({
+        where: { powerupType: powerup.type, active: true },
+        select: { id: true },
+      });
+      if (!shopItem) return;
+      const usage = await PowerupUsageState.findAvailable(transactionDb, raceId, userId, powerup.type, usedAt);
+      if (usage) {
+        throw new PowerupUseError(
+          "This powerup is on cooldown",
+          409,
+          "POWERUP_COOLDOWN",
+          { retainHeld: true, nextUsableAt: usage.nextUsableAt },
+        );
+      }
+      const cooldownStart = activeUntil || usedAt;
+      await PowerupUsageState.upsertUsed({
+        db: transactionDb,
+        userId,
+        raceId,
+        powerupType: powerup.type,
+        lastUsedAt: usedAt,
+        activeUntil,
+        nextUsableAt: new Date(cooldownStart.getTime() + 60 * 60 * 1000),
+        sourcePowerupId: powerupId,
+      });
+    }
     const powerup = execution?.lockedPowerup || await powerupModel.findById(powerupId);
     if (!powerup) {
       throw new PowerupUseError("Powerup not found", 404);
@@ -2070,7 +2103,8 @@ function buildUsePowerup(dependencies = {}) {
     // These mirror the QUICKSAND/RAINSTORM early-return style: they create their
     // own effect rows, mark the item USED, and return without touching the
     // single-target Mirror/Socks switch below (they are buffs or AoE jams).
-    const finalizeSelfContainedUse = async (resolvedTarget = null) => {
+    const finalizeSelfContainedUse = async (resolvedTarget = null, activeUntil = null) => {
+      await recordShopUsage({ usedAt: now(), activeUntil });
       await consumePowerup({
         status: "USED",
         usedAt: now(),
@@ -2219,7 +2253,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: beneficiaries.length },
       });
       await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
-      await finalizeSelfContainedUse(null);
+      await finalizeSelfContainedUse(null, upEnd);
       return {
         blocked: false,
         upgradeLevel: 0,
@@ -2278,7 +2312,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: beneficiaries.length },
       });
       await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
-      await finalizeSelfContainedUse(null);
+      await finalizeSelfContainedUse(null, outageEnd);
       return {
         blocked: false,
         upgradeLevel: 0,
@@ -3987,6 +4021,16 @@ function buildUsePowerup(dependencies = {}) {
         const victims = acceptedParticipants
           .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
           .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
+        const effectsByParticipant = new Map();
+        if (typeof effectModel.findActiveForParticipants === "function") {
+          for (const effect of await effectModel.findActiveForParticipants(
+            acceptedParticipants.map((p) => p.id),
+          )) {
+            const list = effectsByParticipant.get(effect.targetParticipantId) || [];
+            list.push(effect);
+            effectsByParticipant.set(effect.targetParticipantId, list);
+          }
+        }
         const decoyResolution = await resolveAoEDecoySlots({
           victims,
           acceptedParticipants,
@@ -3994,6 +4038,7 @@ function buildUsePowerup(dependencies = {}) {
           isAliveTarget,
           isTeamRace,
           effectModel,
+          effectsByParticipant,
           random,
           now: () => currentTime,
           consumeDecoy: (input) => consumeDecoy({
@@ -4007,17 +4052,23 @@ function buildUsePowerup(dependencies = {}) {
         const blockedNames = [];
         const processedLandingIds = new Set();
 
-        for (const { landing } of decoyResolution.slots) {
+        for (const { landing, redirected } of decoyResolution.slots) {
           if (!landing || processedLandingIds.has(landing.id)) continue;
           processedLandingIds.add(landing.id);
           const victimName = landing.user?.displayName || "A runner";
+          const landingEffects = effectsByParticipant.get(landing.id) || [];
+          if (shouldSkipRedirectedDuplicate({
+            type,
+            wasRedirected: redirected === true,
+            activeEffects: landingEffects,
+          })) {
+            continue;
+          }
 
           // §3.7: an Umbrella holder is immune to the AoE rain — skipped before
           // the Socks check, and the Umbrella (a timed aura) is NOT consumed.
-          const victimUmbrella = await effectModel.findActiveByTypeForParticipant(
-            landing.id,
-            "UMBRELLA",
-            { expiresAfter: currentTime },
+          const victimUmbrella = landingEffects.find(
+            (effect) => effect.type === "UMBRELLA" && effect.expiresAt && new Date(effect.expiresAt) > currentTime,
           );
           if (victimUmbrella) {
             // V2 owns this as an indexed domain source, not hidden feed JSON.
@@ -4047,10 +4098,8 @@ function buildUsePowerup(dependencies = {}) {
             continue;
           }
 
-          const victimShield = await effectModel.findActiveByTypeForParticipant(
-            landing.id,
-            "COMPRESSION_SOCKS",
-            { expiresAfter: currentTime },
+          const victimShield = landingEffects.find(
+            (effect) => effect.type === "COMPRESSION_SOCKS" && effect.expiresAt && new Date(effect.expiresAt) > currentTime,
           );
           if (victimShield) {
             await effectModel.update(victimShield.id, { status: "BLOCKED" });
@@ -4220,6 +4269,15 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "WRONG_TURN": {
+        if (shouldSkipRedirectedDuplicate({
+          type,
+          wasRedirected: reflected || Boolean(decoyRedirectedToUserId),
+          activeEffects: await effectModel.findActiveForParticipant(targetParticipant.id),
+        })) {
+          result.outcome = reflected ? "REFLECTED_DUPLICATE" : "REDIRECTED_DUPLICATE";
+          result.affected = 0;
+          break;
+        }
         // Cancel active Leg Cramp on target if present. Only INDIRECT landings
         // (Mirror reflect / Decoy redirect) reach here with a cramped target —
         // direct uses are rejected by the LC×WT mutual-exclusion pre-check.
@@ -4794,6 +4852,14 @@ function buildUsePowerup(dependencies = {}) {
     // The outer command transaction holds this row lock. Keep the state change
     // conditional as the final concurrency fence: a concurrent/retried request
     // can never consume the same HELD item twice.
+    await recordShopUsage({
+      usedAt: currentTime,
+      activeUntil: result.effect?.expiresAt || (
+        Number.isFinite(result.durationMs) && result.durationMs > 0
+          ? new Date(currentTime.getTime() + result.durationMs)
+          : null
+      ),
+    });
     await consumePowerup({
       status: "USED",
       usedAt: currentTime,
