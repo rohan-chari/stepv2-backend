@@ -73,6 +73,7 @@ const {
 } = require("../../races/teamRaces");
 const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { buildDecoyActivityMetadata } = require("../services/racePowerupActivity");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const {
   impactDescription,
@@ -1103,7 +1104,7 @@ function buildUsePowerup(dependencies = {}) {
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
-  const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
+  const eventModelDependency = dependencies.RacePowerupEvent || RacePowerupEvent;
   const activeRaceImpact = dependencies.ActiveRaceImpact || defaultRaceImpactEvent;
   const raceModel = dependencies.Race || Race;
   const settings = dependencies.appSettings || defaultAppSettings;
@@ -1290,6 +1291,38 @@ function buildUsePowerup(dependencies = {}) {
     onPerformanceContext = null,
   }, execution = null) {
     const transactionDb = execution?.tx || db;
+    const rawEventModel = eventModelDependency;
+    let decoyActivityContext = null;
+    const buildEventData = (event, activityV1 = null) => {
+      const activity = activityV1 || decoyActivityContext;
+      if (!activity) return event;
+      return {
+        ...event,
+        metadata: buildDecoyActivityMetadata({
+          metadata: event.metadata,
+          ...activity,
+        }),
+      };
+    };
+    const createEvent = async (event, activityV1 = null) => {
+      // Injected command doubles intentionally keep their historical call
+      // shape. Production RacePowerupEvent writes explicitly through the
+      // command transaction, so activity cannot escape a rolled-back effect.
+      return rawEventModel.create({
+        ...buildEventData(event, activityV1),
+        ...(!hasInjectedDeps ? { prisma: transactionDb } : {}),
+      });
+    };
+    // Every event emitted after a Decoy resolution uses the same canonical
+    // activity context. Keep the injected test-double surface compatible,
+    // while making the production model write through the command transaction.
+    const eventModel = Object.create(rawEventModel);
+    eventModel.create = createEvent;
+    if (typeof rawEventModel.createMany === "function") {
+      eventModel.createMany = (events) => rawEventModel.createMany(
+        events.map((event) => buildEventData(event)),
+      );
+    }
     async function recordShopUsage({ usedAt, activeUntil = null }) {
       const shopItem = await db.powerupShopItem.findFirst({
         where: { powerupType: powerup.type, active: true },
@@ -3297,13 +3330,19 @@ function buildUsePowerup(dependencies = {}) {
             targetUserId: resolvedTargetUserId,
             upgradeLevel,
           });
-          await eventModel.create({
+          await createEvent({
             raceId,
             actorUserId: holder.userId,
             eventType: "POWERUP_BLOCKED",
             powerupType: type,
             targetUserId: userId,
             description: `${holder.user?.displayName || "A runner"}'s Decoy absorbed ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+          }, {
+            attackerUserId: userId,
+            originalTargetUserId: resolvedTargetUserId,
+            finalTargetUserId: null,
+            decoyOwnerUserId: holder.userId,
+            outcome: "BLOCKED",
           });
           events.emit("POWERUP_BLOCKED", {
             raceId,
@@ -3325,14 +3364,25 @@ function buildUsePowerup(dependencies = {}) {
           };
         }
         // Redirect the attack onto the new victim.
+        const originalTargetUserId = resolvedTargetUserId;
         targetParticipant = redirect;
         resolvedTargetUserId = redirect.userId;
         targetDisplayName = redirect.user?.displayName || "a runner";
         decoyRedirectedToUserId = redirect.userId;
+        decoyActivityContext = {
+          attackerUserId: userId,
+          originalTargetUserId,
+          finalTargetUserId: redirect.userId,
+          decoyOwnerUserId: holder.userId,
+          redirectedUserId: redirect.userId,
+          outcome: "REDIRECTED",
+        };
         const redirectEventAt = now();
         decoyTerminalEventAt = new Date(redirectEventAt.getTime() + 1);
-        await eventModel.create({
+        await createEvent({
           raceId,
+          // Preserve the legacy event attribution for frozen clients. The
+          // original attacker is carried only in additive activityV1 metadata.
           actorUserId: holder.userId,
           eventType: "POWERUP_REDIRECTED",
           powerupType: type,
@@ -3344,6 +3394,13 @@ function buildUsePowerup(dependencies = {}) {
             redirectedUserId: redirect.userId,
           },
           createdAt: redirectEventAt,
+        }, {
+          attackerUserId: userId,
+          originalTargetUserId,
+          finalTargetUserId: redirect.userId,
+          decoyOwnerUserId: holder.userId,
+          redirectedUserId: redirect.userId,
+          outcome: "REDIRECTED",
         });
 
         // The redirected victim's OWN Mirror still reflects (one redirect max, so
@@ -3387,6 +3444,11 @@ function buildUsePowerup(dependencies = {}) {
             myDisplayName = originalTargetName;
             targetDisplayName = originalAttackerName;
             actingUserId = redirect.userId;
+            decoyActivityContext = {
+              ...decoyActivityContext,
+              finalTargetUserId: originalAttackerUserId,
+              outcome: "REFLECTED",
+            };
             await eventModel.create({
               raceId,
               actorUserId: redirect.userId,
@@ -3430,6 +3492,14 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           upgradeLevel,
         });
+
+        if (decoyActivityContext) {
+          decoyActivityContext = {
+            ...decoyActivityContext,
+            finalTargetUserId: resolvedTargetUserId,
+            outcome: "BLOCKED",
+          };
+        }
 
         // Post-reflect, the "attacker" of the bounced hit is the Mirror holder
         // (actingUserId) and the blocker is the original caster — attribute the

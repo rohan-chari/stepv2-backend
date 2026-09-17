@@ -270,6 +270,79 @@ describe('Powerup participant lock scope — real HTTP and PostgreSQL', () => {
     assert.equal((await prisma.raceParticipant.findUnique({ where: { id: f.caster.participant.id } })).bonusSteps, 11500);
     assert.equal(await prisma.racePowerupEvent.count({ where: { raceId: f.race.id, powerupType: 'PROTEIN_SHAKE', eventType: 'POWERUP_USED' } }), 1);
   });
+  it('concurrent duplicate upgraded POSTs debit, effect, and activity exactly once', async () => {
+    const f = await fixture();
+    await prisma.user.update({ where: { id: f.caster.user.id }, data: { coins: 100 } });
+    const held = await item(f, 'LEG_CRAMP');
+    const body = { targetUserId: f.target.user.id, upgradeLevel: 1 };
+
+    const results = await Promise.all([
+      use(f, held, f.caster, body),
+      use(f, held, f.caster, body),
+    ]);
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 400]);
+    const rejected = results.find((r) => r.status === 400);
+    assert.equal(rejected.body.error, 'This powerup has already been used or discarded');
+
+    const user = await prisma.user.findUnique({ where: { id: f.caster.user.id } });
+    assert.equal(user.coins, 90);
+    const debits = await prisma.coinTransaction.findMany({
+      where: { userId: f.caster.user.id, reason: 'powerup_upgrade', refId: held.id },
+    });
+    assert.equal(debits.length, 1);
+    assert.equal(debits[0].amount, -10);
+
+    const effects = await prisma.raceActiveEffect.findMany({ where: { powerupId: held.id } });
+    assert.equal(effects.length, 1);
+    assert.equal(effects[0].targetUserId, f.target.user.id);
+    assert.equal(await prisma.racePowerupEvent.count({
+      where: { raceId: f.race.id, powerupId: undefined, eventType: 'POWERUP_USED', powerupType: 'LEG_CRAMP' },
+    }), 1);
+    assert.equal(await prisma.powerupUpgradeEvent.count({ where: { powerupId: held.id } }), 1);
+    const stored = await prisma.racePowerup.findUnique({ where: { id: held.id } });
+    assert.equal(stored.status, 'USED');
+    assert.equal(stored.upgradeLevel, 1);
+  });
+  it('public use rolls back debit, effect, activity, and upgrade rows after a post-write failure', async () => {
+    const f = await fixture();
+    await prisma.user.update({ where: { id: f.caster.user.id }, data: { coins: 100 } });
+    const held = await item(f, 'LEG_CRAMP');
+    await prisma.$executeRawUnsafe(`
+      CREATE FUNCTION test_fail_powerup_activity_insert() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced powerup activity post-write failure';
+      END $$
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER test_fail_powerup_activity_insert
+      AFTER INSERT ON race_powerup_events
+      FOR EACH ROW EXECUTE FUNCTION test_fail_powerup_activity_insert()
+    `);
+
+    try {
+      const response = await use(f, held, f.caster, {
+        targetUserId: f.target.user.id,
+        upgradeLevel: 1,
+      });
+      assert.equal(response.status, 500, JSON.stringify(response.body));
+    } finally {
+      await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_fail_powerup_activity_insert ON race_powerup_events');
+      await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_fail_powerup_activity_insert()');
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: f.caster.user.id } });
+    assert.equal(user.coins, 100);
+    assert.equal(await prisma.coinTransaction.count({
+      where: { userId: f.caster.user.id, reason: 'powerup_upgrade', refId: held.id },
+    }), 0);
+    assert.equal(await prisma.raceActiveEffect.count({ where: { powerupId: held.id } }), 0);
+    assert.equal(await prisma.racePowerupEvent.count({ where: { raceId: f.race.id } }), 0);
+    assert.equal(await prisma.powerupUpgradeEvent.count({ where: { powerupId: held.id } }), 0);
+    const stored = await prisma.racePowerup.findUnique({ where: { id: held.id } });
+    assert.equal(stored.status, 'HELD');
+    assert.equal(stored.upgradeLevel, 0);
+  });
   for (const type of ['PROTEIN_SHAKE', 'TRAIL_MIX', 'SHORTCUT']) it(`${type} preserves jam rejection and allows use after jam expiry`, async () => {
     const f = await fixture(); const held = await item(f, type);
     const jam = await defense(f, 'POWER_OUTAGE', f.caster);

@@ -36,6 +36,13 @@ function getActivePlacement(participants, userId) {
   return index >= 0 ? index + 1 : null;
 }
 
+// Terminal races remain available to the historical list, but never qualify
+// for the cross-shelf pinned presentation. The favorite row itself is durable
+// and is deliberately not cleared at completion/cancellation.
+function isPinEligibleRaceStatus(status) {
+  return status === "PENDING" || status === "ACTIVE";
+}
+
 function getFirstPlaceRacer(
   participants,
   viewerUserId,
@@ -732,6 +739,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         : {}),
       // Caller-specific participant overlay. It is loaded with the existing
       // membership summary query and never enters the stable race fragment.
+      // Preserve the durable favorite meaning for old clients. Pinned-race
+      // presentation filters terminal statuses separately.
       isFavorite: myParticipant?.favoritedAt instanceof Date,
       favoritedAt: myParticipant?.favoritedAt ?? null,
       myBuyInStatus: myParticipant?.buyInStatus || "NONE",

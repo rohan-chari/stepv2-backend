@@ -63,6 +63,7 @@ const RacePowerupEvent = {
   },
 
   async create({
+    prisma: client = defaultPrisma,
     raceId,
     actorUserId,
     eventType,
@@ -72,7 +73,7 @@ const RacePowerupEvent = {
     metadata,
     createdAt,
   }) {
-    const row = await prisma.racePowerupEvent.create({
+    const row = await client.racePowerupEvent.create({
       data: {
         raceId,
         actorUserId,

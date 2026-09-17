@@ -783,7 +783,7 @@ describe("referral rules, final-target Hitchhike, and activity clarity", () => {
       {
         eventType: "POWERUP_REDIRECTED",
         powerupType: "HITCHHIKE",
-        actorUserId: decoyOwner.user.id,
+        actorUserId: attacker.user.id,
         targetUserId: landing.user.id,
         description: "Nathan's Decoy redirected Anjali's Hitchhike to Shefali.",
       },
@@ -799,7 +799,24 @@ describe("referral rules, final-target Hitchhike, and activity clarity", () => {
       attackerUserId: attacker.user.id,
       decoyOwnerUserId: decoyOwner.user.id,
       redirectedUserId: landing.user.id,
+      activityV1: {
+        action: "POWERUP_USE",
+        version: 1,
+        originalAttackerUserId: attacker.user.id,
+        originalTargetUserId: decoyOwner.user.id,
+        finalTargetUserId: landing.user.id,
+        redirect: {
+          type: "DECOY",
+          ownerUserId: decoyOwner.user.id,
+          recipientUserId: landing.user.id,
+        },
+        outcome: "REDIRECTED",
+      },
     });
+    assert.equal(rows[1].metadata.activityV1.outcome, "BLOCKED");
+    assert.equal(rows[1].metadata.activityV1.originalAttackerUserId, attacker.user.id);
+    assert.equal(rows[1].metadata.activityV1.originalTargetUserId, decoyOwner.user.id);
+    assert.equal(rows[1].metadata.activityV1.finalTargetUserId, landing.user.id);
     assert.equal(rows[1].createdAt.getTime(), rows[0].createdAt.getTime() + 1);
 
     const activity = await systemMessages(attacker, raceId);
