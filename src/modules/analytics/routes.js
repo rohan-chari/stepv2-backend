@@ -118,6 +118,10 @@ const ALLOWED_EVENT_NAMES = new Set([
   "race_detail_visit_ended",
   "race_detail_back_exit",
   "race_detail_exit_eligible",
+  "social_reward_impression",
+  "social_reward_opened",
+  "social_reward_claimed",
+  "social_reward_claim_failed",
 ]);
 
 const METRICS_V2_EVENT_NAMES = new Set([
@@ -149,6 +153,7 @@ const RACE_DETAIL_VISIT_CONTEXT_KEYS = new Set([
 ]);
 
 const ALLOWED_CONTEXT = {
+  platform: new Set(["instagram", "tiktok", "x"]),
   source: new Set([
     "onboarding",
     "profile",
@@ -251,6 +256,7 @@ const ALLOWED_PATTERN_CONTEXT = {
   seconds_from_creation: /^(?:0|[1-9][0-9]{0,9})$/,
   qualification_latency_seconds: /^(?:0|[1-9][0-9]{0,9})$/,
 };
+const SOCIAL_PLATFORMS = new Set(["instagram", "tiktok", "x"]);
 
 const SAFE_ID = /^[A-Za-z0-9._:-]+$/;
 const ALLOWED_PLATFORMS = new Set(["ios", "android", "other"]);

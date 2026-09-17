@@ -168,6 +168,7 @@ model User {
   challengesProposed ChallengeInstance[] @relation("challengeProposer")
   deviceTokens       DeviceToken[]
   coinTransactions   CoinTransaction[]
+  socialRewardClaims SocialRewardClaim[]
   activationEvents   ActivationEvent[]
   activityDays       UserActivityDay[]
   pushDeliveries     PushDelivery[]
@@ -1123,6 +1124,22 @@ model CoinTransaction {
   @@index([userId, reason, createdAt])
   @@index([reason, createdAt])
   @@map("coin_transactions")
+}
+
+model SocialRewardClaim {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  platform     String
+  openedAt     DateTime? @map("opened_at")
+  claimedAt    DateTime? @map("claimed_at")
+  rewardAmount Int      @map("reward_amount")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@index([userId])
+  @@map("social_reward_claims")
 }
 
 // Privacy-bounded product activation telemetry. userId is always derived from

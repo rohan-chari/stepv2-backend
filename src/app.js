@@ -204,6 +204,7 @@ function createApp(dependencies = {}) {
   app.use("/powerups", createPowerupsRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));
   app.use("/coins", createCoinsRouter(dependencies));
+  app.use("/social-rewards", require("./modules/socialRewards/routes").createSocialRewardsRouter(dependencies));
   app.use(
     "/users/me/step-milestones",
     createStepMilestonesRouter(dependencies)

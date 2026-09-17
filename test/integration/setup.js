@@ -114,6 +114,7 @@ const TABLES_IN_ORDER = [
   "user_shop_items",
   "shop_items",
   "coin_transactions",
+  "social_reward_claims",
   "ad_reward_grants",
   "activation_events",
   "user_activity_days",
