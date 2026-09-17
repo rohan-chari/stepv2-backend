@@ -25,6 +25,7 @@ const {
 } = require("../modules/economy/services/adUnlockPolicy");
 const { prisma } = require("../db");
 const {
+  POWERUPS4_GATED_TYPES,
   POWERUPS5_GATED_TYPES,
 } = require("../modules/powerups/constants/powerupGating");
 const {
@@ -35,6 +36,14 @@ const {
 // SKUs of the Wave 5 store-only powerups (POWERUP_<TYPE>). Kept alongside the
 // type list so the purchase guard can reject by either sku or powerupType.
 const POWERUPS5_SKUS = POWERUPS5_GATED_TYPES.map((t) => `POWERUP_${t}`);
+const POWERUPS4_SKUS = POWERUPS4_GATED_TYPES.map((t) => `POWERUP_${t}`);
+
+function isUnsupportedPowerupRequest(body, gatedTypes, gatedSkus, features) {
+  return (
+    (gatedTypes.includes(body?.powerupType) || gatedSkus.includes(body?.sku)) &&
+    !features.has("powerups4")
+  );
+}
 
 function createShopRouter(dependencies = {}) {
   const router = Router();
@@ -101,7 +110,7 @@ function createShopRouter(dependencies = {}) {
       if (isRetiredPowerupRequest(req.body)) {
         return res.status(410).json(retiredPowerupBody("IMPOSTER"));
       }
-      if (req.body?.powerupType === "QUICKSAND" && !req.clientFeatures.has("powerups4")) {
+      if (isUnsupportedPowerupRequest(req.body, POWERUPS4_GATED_TYPES, POWERUPS4_SKUS, req.clientFeatures)) {
         return res.status(404).json({ error: "Powerup not found" });
       }
       // Wave 5 store-only powerups: reject a purchase from a non-powerups5 client
@@ -144,6 +153,9 @@ function createShopRouter(dependencies = {}) {
     try {
       if (isRetiredPowerupRequest(req.body)) {
         return res.status(410).json(retiredPowerupBody("IMPOSTER"));
+      }
+      if (isUnsupportedPowerupRequest(req.body, POWERUPS4_GATED_TYPES, POWERUPS4_SKUS, req.clientFeatures)) {
+        return res.status(404).json({ error: "Powerup not found" });
       }
       const result = await unlockPowerupWithAds({
         userId: req.user.id,

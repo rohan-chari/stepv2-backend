@@ -48,6 +48,7 @@ const BALANCE_POWERUP_TYPES = [
   "DEFENSE_SCAN",
   "HITCHHIKE",
   "QUICK_RINSE",
+  "QUICKSAND",
   // Powerups Wave 5 (store-only) — carry balance meaning (rarity is cosmetic
   // only since none are droppable), so they must be present here and in
   // rarityByType below.
