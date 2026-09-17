@@ -9,7 +9,11 @@ before(async () => { server = await getSharedServer(); });
 beforeEach(async () => { await cleanDatabase(); serial = 0; });
 
 async function goldMembership(userId) {
-  const identity = await prisma.billingIdentity.create({ data: { userId } });
+  const identity = await prisma.billingIdentity.upsert({
+    where: { userId },
+    create: { userId },
+    update: {},
+  });
   await prisma.billingSubscription.create({
     data: {
       id: `gold-character-sub-${++serial}`,
@@ -22,6 +26,7 @@ async function goldMembership(userId) {
       observedAt: new Date(),
     },
   });
+  return identity.id;
 }
 
 async function character(overrides = {}) {
@@ -39,8 +44,8 @@ async function character(overrides = {}) {
 }
 
 describe("Bara Gold character policy", () => {
-  it("returns server-owned Gold/direct-purchase policy and denies free coin purchase", async () => {
-    const user = await createTestUser({ coins: 500 });
+  it("returns temporary-access policy and preserves non-Gold purchase behavior", async () => {
+    const user = await createTestUser({ coins: 1200 });
     const mouse = await character({ sku: "mouse" });
     const catalog = await request(server.baseUrl, "GET", "/shop/characters", {
       token: user.token,
@@ -49,9 +54,12 @@ describe("Bara Gold character policy", () => {
     assert.equal(catalog.status, 200);
     const row = (await catalog.json()).characters.find((item) => item.characterKey === mouse.id);
     assert.deepEqual(row.directPurchase, { available: true, storeProductId: "bara_character_mouse_v1" });
-    assert.equal(row.goldAccess, true);
-    assert.equal(row.coinPurchaseAllowed, false);
-    assert.equal(row.canPurchase, false);
+    assert.equal(row.goldAccess, false);
+    assert.equal(row.owned, false);
+    assert.equal(row.hasAccess, false);
+    assert.equal(row.accessSource, null);
+    assert.equal(row.coinPurchaseAllowed, true);
+    assert.equal(row.canPurchase, true);
     assert.equal(row.unavailableReason, "requires_gold_or_direct_purchase");
 
     const purchase = await request(server.baseUrl, "POST", `/shop/items/${mouse.id}/purchase`, {
@@ -59,12 +67,12 @@ describe("Bara Gold character policy", () => {
       headers: { "Idempotency-Key": "gold-character-free-denied", "X-Client-Features": "characters,bara_gold_v1" },
       body: {},
     });
-    assert.equal(purchase.status, 403);
-    assert.equal((await purchase.json()).code, "GOLD_REQUIRED");
-    assert.equal((await prisma.user.findUnique({ where: { id: user.user.id } })).coins, 500);
+    assert.equal(purchase.status, 200);
+    assert.equal((await purchase.json()).purchase.coinsSpent, 1000);
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 1);
   });
 
-  it("allows only an active Gold member to buy the character with coins", async () => {
+  it("blocks permanent character purchases while Gold is active", async () => {
     const user = await createTestUser({ coins: 1200 });
     const mouse = await character({ sku: "mouse" });
     await goldMembership(user.user.id);
@@ -73,8 +81,92 @@ describe("Bara Gold character policy", () => {
       headers: { "Idempotency-Key": "gold-character-coin-buy", "X-Client-Features": "characters,bara_gold_v1" },
       body: {},
     });
-    assert.equal(purchase.status, 200);
-    assert.equal((await purchase.json()).purchase.coinsSpent, 850);
-    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 1);
+    assert.equal(purchase.status, 403);
+    assert.equal((await purchase.json()).code, "GOLD_CHARACTER_PURCHASE_UNAVAILABLE");
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 0);
+  });
+
+  it("grants temporary access to every visible character without ownership", async () => {
+    const user = await createTestUser();
+    const otter = await character({ sku: "otter", name: "Otter" });
+    await goldMembership(user.user.id);
+    const response = await request(server.baseUrl, "GET", "/shop/characters", {
+      token: user.token,
+      headers: { "X-Client-Features": "characters,bara_gold_v1" },
+    });
+    const row = (await response.json()).characters.find((item) => item.characterKey === otter.id);
+    assert.equal(row.owned, false);
+    assert.equal(row.hasAccess, true);
+    assert.equal(row.accessSource, "gold");
+    assert.equal(row.canActivate, true);
+    assert.equal(row.canPurchase, false);
+    assert.deepEqual(row.directPurchase, { available: false, storeProductId: null });
+    const wardrobe = await request(server.baseUrl, "GET", `/shop/characters/${otter.id}/wardrobe`, {
+      token: user.token,
+      headers: { "X-Client-Features": "characters,bara_gold_v1" },
+    });
+    const wardrobeBody = await wardrobe.json();
+    assert.equal(wardrobe.status, 200);
+    assert.equal(wardrobeBody.hasAccess, true);
+    const activation = await request(server.baseUrl, "PUT", "/shop/active-character", {
+      token: user.token,
+      headers: { "X-Client-Features": "characters,bara_gold_v1" },
+      body: {
+        characterKey: otter.id,
+        expectedAppearanceRevision: wardrobeBody.appearanceRevision,
+        expectedOutfitRevision: wardrobeBody.outfit.revision,
+      },
+    });
+    assert.equal(activation.status, 200, JSON.stringify(await activation.json()));
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: otter.id } }), 0);
+  });
+
+  it("repairs an expired temporary character without touching ownership or wardrobe state", async () => {
+    const user = await createTestUser();
+    const hedgehog = await character({ sku: "hedgehog", name: "Hedgehog" });
+    const identityId = await goldMembership(user.user.id);
+    const headers = { "X-Client-Features": "characters,bara_gold_v1" };
+    const before = await request(server.baseUrl, "GET", `/shop/characters/${hedgehog.id}/wardrobe`, {
+      token: user.token,
+      headers,
+    });
+    const beforeBody = await before.json();
+    const activation = await request(server.baseUrl, "PUT", "/shop/active-character", {
+      token: user.token,
+      headers,
+      body: {
+        characterKey: hedgehog.id,
+        expectedAppearanceRevision: beforeBody.appearanceRevision,
+        expectedOutfitRevision: beforeBody.outfit.revision,
+      },
+    });
+    assert.equal(activation.status, 200);
+    await prisma.billingSubscription.updateMany({
+      where: { identityId },
+      data: { accessUntil: new Date(Date.now() - 1000) },
+    });
+
+    const collection = await request(server.baseUrl, "GET", "/shop/characters", {
+      token: user.token,
+      headers,
+    });
+    assert.equal(collection.status, 200);
+    const row = (await collection.json()).characters.find((item) => item.characterKey === hedgehog.id);
+    assert.equal(row.owned, false);
+    assert.equal(row.hasAccess, false);
+    assert.equal(row.active, false);
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: hedgehog.id } }), 0);
+    assert.equal(await prisma.userEquippedAccessory.count({ where: { userId: user.user.id, slot: "CHARACTER" } }), 0);
+
+    await goldMembership(user.user.id);
+    const restored = await request(server.baseUrl, "GET", `/shop/characters/${hedgehog.id}/wardrobe`, {
+      token: user.token,
+      headers,
+    });
+    const restoredBody = await restored.json();
+    assert.equal(restored.status, 200);
+    assert.equal(restoredBody.hasAccess, true);
+    assert.equal(restoredBody.accessSource, "gold");
+    assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: hedgehog.id } }), 0);
   });
 });

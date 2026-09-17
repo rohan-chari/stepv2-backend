@@ -4,6 +4,7 @@ const {
   buildEquipmentMap,
 } = require("./shopCosmetics");
 const { findConflictingEquipment, characterAllowsAccessory } = require("./accessoryCompatibility");
+const { goldMembershipForUser, characterAccess } = require("../billing/queries/goldPolicy");
 
 class AccessoryEquipError extends Error {
   constructor(message, statusCode = 400, extras = {}) {
@@ -20,6 +21,7 @@ async function equipAccessory({
   itemId,
   channel = "prod",
   supportsCharacters = false,
+  supportsGold = false,
 }) {
   if (!ACCESSORY_SLOTS.includes(slot)) {
     throw new AccessoryEquipError("Accessory slot is invalid", 400);
@@ -57,9 +59,17 @@ async function equipAccessory({
           include: { shopItem: true },
         });
 
-        if (!ownership) {
-          throw new AccessoryEquipError("You do not own this shop item", 403);
+        if (!ownership && slot === CHARACTER_SLOT) {
+          const candidate = await tx.shopItem.findUnique({ where: { id: itemId } });
+          const { isMember } = await goldMembershipForUser(tx, userId);
+          if (
+            candidate?.slot === CHARACTER_SLOT &&
+            characterAccess(candidate, { isMember: supportsGold && isMember }).hasAccess
+          ) {
+            ownership = { shopItem: candidate };
+          }
         }
+        if (!ownership) throw new AccessoryEquipError("You do not own this shop item", 403);
 
         if (!ownership.shopItem.active) {
           throw new AccessoryEquipError(

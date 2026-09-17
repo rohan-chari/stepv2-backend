@@ -4,6 +4,8 @@ const {
 } = require("../catalog");
 const { membershipFor } = require("./bootstrap");
 
+// Kept as an export for compatibility with existing billing/IAP callers. Gold
+// character access itself is no longer limited to this historical product set.
 const GOLD_CHARACTER_SKUS = new Set(Object.keys(GOLD_CHARACTER_PRODUCTS));
 
 async function goldMembershipForUser(db, userId, now = new Date()) {
@@ -49,18 +51,36 @@ function directCharacterPurchase(sku) {
     : { available: false, storeProductId: null };
 }
 
-function characterPolicy(item, isMember) {
-  const goldAccess = isGoldCharacterSku(item?.sku);
+function characterAccess(item, { owned = item?.owned === true, isMember = false, globallyFree = false } = {}) {
+  const hasAccess = globallyFree || owned || isMember === true;
+  return {
+    owned,
+    hasAccess,
+    accessSource: globallyFree ? "free" : owned ? "owned" : hasAccess ? "gold" : null,
+  };
+}
+
+function characterPolicy(item, isMember, { allowGoldAccess = true } = {}) {
+  // Every otherwise-visible character is included with active Gold. This flag
+  // remains presentation-only and is true for the member's current view; the
+  // access predicate below is the authority.
+  const goldActive = allowGoldAccess && isMember === true;
+  const goldAccess = item?.slot === "CHARACTER" && goldActive;
   const owned = item?.owned === true;
-  const directPurchase = directCharacterPurchase(item?.sku);
-  const coinPurchaseAllowed = !goldAccess || isMember;
+  const access = characterAccess(item, { owned, isMember: goldActive });
+  const directPurchase = goldActive
+    ? { available: false, storeProductId: null }
+    : directCharacterPurchase(item?.sku);
+  const coinPurchaseAllowed = !goldActive;
   const canPurchase = !owned && item?.active === true && item?.earnOnly !== true && coinPurchaseAllowed;
   return {
     goldAccess,
     benefitVersion: goldAccess ? GOLD_BENEFIT_VERSION : null,
+    hasAccess: access.hasAccess,
+    accessSource: access.accessSource,
     coinPurchaseAllowed,
     directPurchase,
-    unavailableReason: !owned && goldAccess && !isMember
+    unavailableReason: !access.hasAccess
       ? "requires_gold_or_direct_purchase"
       : null,
     canPurchase,
@@ -83,5 +103,6 @@ module.exports = {
   goldPolicyForUser,
   isGoldCharacterSku,
   directCharacterPurchase,
+  characterAccess,
   characterPolicy,
 };

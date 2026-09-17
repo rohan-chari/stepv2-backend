@@ -5,7 +5,7 @@ const { serializeShopItem, CHARACTER_SLOT } = require("./shopCosmetics");
 const { testOnlyFilter } = require("../../shared/middleware/releaseChannel");
 const { deductCoinsAtomic } = require("../../shared/economy/deductCoinsAtomic");
 const { AppError } = require("../../shared/errors/AppError");
-const { goldMembershipForUser, isGoldCharacterSku } = require("../billing/queries/goldPolicy");
+const { goldMembershipForUser } = require("../billing/queries/goldPolicy");
 
 class ShopPurchaseError extends Error {
   constructor(message, statusCode = 400) {
@@ -98,11 +98,9 @@ async function purchaseShopItem({
       if (!item) {
         throw new ShopPurchaseError("Shop item not found", 404);
       }
-      if (item.slot === CHARACTER_SLOT && isGoldCharacterSku(item.sku)) {
+      if (item.slot === CHARACTER_SLOT) {
         const { isMember } = await goldMembershipForUser(tx, userId);
-        if (!isMember) throw new AppError("Bara Gold membership is required", "GOLD_REQUIRED", 403, {
-          unavailableReason: "requires_gold_or_direct_purchase",
-        });
+        if (isMember) throw new AppError("Character purchases are unavailable while Bara Gold is active", "GOLD_CHARACTER_PURCHASE_UNAVAILABLE", 403);
       }
       item = await pricedItem(tx, userId, item, expectedPriceCoins);
 

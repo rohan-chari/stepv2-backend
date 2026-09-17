@@ -169,15 +169,15 @@ describe("Bara Gold client capability compatibility", () => {
     const goldRows = characters.characters.filter((row) => ["mouse", "hedgehog", "sea_lion"].includes(row.item?.sku));
     assert.equal(goldRows.length, 3);
     assert.ok(goldRows.every((row) => row.goldAccess === true));
-    assert.ok(goldRows.every((row) => row.directPurchase?.available === true));
-    assert.ok(goldRows.every((row) => row.coinPurchaseAllowed === true));
+    assert.ok(goldRows.every((row) => row.directPurchase?.available === false));
+    assert.ok(goldRows.every((row) => row.coinPurchaseAllowed === false));
     assert.equal(billing.credits.paid, 0);
   });
 
   it("normalizes whitespace, duplicate tokens, and casing without enabling invalid separators", async () => {
     const valid = await readCase({ features: " characters, BARA_GOLD_V1,characters " });
     assert.equal(valid.billing.goldPolicy.version, "bara_gold_v1");
-    assert.equal(valid.characters.characters.filter((row) => row.goldAccess).length, 3);
+    assert.equal(valid.characters.characters.filter((row) => row.goldAccess).length, 0);
     const invalid = await readCase({ features: "characters;bara_gold_v1" });
     assert.equal(invalid.billing.goldPolicy, undefined);
     assert.equal(invalid.characters.characters.some((row) => row.goldAccess), false);
@@ -192,7 +192,7 @@ describe("Bara Gold client capability compatibility", () => {
     const goldBootstrap = await response.json();
     assert.equal(goldBootstrap.goldPolicy.version, "bara_gold_v1");
     response = await request(server.baseUrl, "GET", "/shop/characters", { token: account.token, headers: full });
-    assert.equal((await response.json()).characters.filter((row) => row.goldAccess).length, 3);
+    assert.equal((await response.json()).characters.filter((row) => row.goldAccess).length, 4);
 
     response = await request(server.baseUrl, "GET", "/billing/bootstrap?platform=ios", { token: account.token });
     const downgraded = await response.json();
@@ -218,7 +218,7 @@ describe("Bara Gold client capability compatibility", () => {
     const freeCharacters = await request(server.baseUrl, "GET", "/shop/characters", { token: free.token, headers });
     const goldMouse = (await goldCharacters.json()).characters.find((row) => row.item?.sku === "mouse");
     const freeMouse = (await freeCharacters.json()).characters.find((row) => row.item?.sku === "mouse");
-    assert.equal(goldMouse.coinPurchaseAllowed, true);
-    assert.equal(freeMouse.coinPurchaseAllowed, false);
+    assert.equal(goldMouse.coinPurchaseAllowed, false);
+    assert.equal(freeMouse.coinPurchaseAllowed, true);
   });
 });

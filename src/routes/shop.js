@@ -184,6 +184,7 @@ function createShopRouter(dependencies = {}) {
       const result = await getShopCatalog(req.user.id, {
         channel: req.releaseChannel,
         supportsCharacters: req.clientFeatures.has("characters"),
+        supportsGold: req.clientFeatures.has("bara_gold_v1"),
         supportsRemoteAssets: req.clientFeatures.has("remote_assets"),
       });
       res.json(await attachAdUnlock(result, req));

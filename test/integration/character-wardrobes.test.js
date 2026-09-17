@@ -86,6 +86,8 @@ describe("character wardrobe public contract", () => {
         name: "Capybara",
         item: null,
         owned: true,
+        hasAccess: true,
+        accessSource: "free",
         active: true,
         canPurchase: false,
         canActivate: true,

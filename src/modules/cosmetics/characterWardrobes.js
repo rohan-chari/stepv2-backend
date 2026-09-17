@@ -12,7 +12,7 @@ const {
   priceFields,
 } = require("../billing/services/memberPrice");
 const { buildAdUnlockBlock } = require("../economy/services/adUnlockPolicy");
-const { goldMembershipForUser, characterPolicy } = require("../billing/queries/goldPolicy");
+const { goldMembershipForUser, characterPolicy, characterAccess } = require("../billing/queries/goldPolicy");
 const {
   SLOTS,
   CONTRACT,
@@ -133,15 +133,21 @@ function paging(opts, resource) {
 }
 const visibilitySql = (opts) =>
   Prisma.sql`(${opts.channel === "testflight"} OR NOT i.test_only) AND (${!!opts.supportsRemoteAssets} OR NOT i.remote_only)`;
-async function character(tx, key, opts, requireOwned = true) {
+async function character(tx, key, opts, requireAccess = true) {
   if (key === "default")
-    return { id: "default", name: "Capybara", owned: true, active: true };
+    return { id: "default", name: "Capybara", ...characterAccess(null, { globallyFree: true }), active: true };
   const rows =
     await tx.$queryRaw`SELECT i.*, EXISTS(SELECT 1 FROM user_shop_items o WHERE o.user_id=${opts.userId} AND o.shop_item_id=i.id) AS owned FROM shop_items i WHERE i.id=${key} AND i.slot='CHARACTER'`;
   const i = itemFromDb(rows[0]);
   if (!visible(i, opts)) fail("CHARACTER_NOT_FOUND", 404);
-  if (requireOwned && !i.owned) fail("CHARACTER_NOT_OWNED", 403);
-  return i;
+  if (i.owned) return { ...i, ...characterAccess(i, { owned: true }) };
+  const { isMember } = await goldMembershipForUser(tx, opts.userId);
+  const access = characterAccess(i, { owned: i.owned, isMember: isMember && opts.supportsGold });
+  if (requireAccess && !access.hasAccess) fail("CHARACTER_NOT_OWNED", 403);
+  return {
+    ...i,
+    ...access,
+  };
 }
 async function quotes(opts, db = prisma) {
   const discount = await memberDiscount(db, opts.userId);
@@ -164,7 +170,21 @@ async function readSnapshot(callback, db = prisma) {
     { isolationLevel: "RepeatableRead", timeout: 10000 },
   );
 }
+async function repairExpiredGoldCharacter(opts, db = prisma) {
+  const active = await db.userEquippedAccessory.findFirst({ where: { userId: opts.userId, slot: "CHARACTER" }, select: { shopItemId: true } });
+  if (!active) return false;
+  const owned = await db.userShopItem.findUnique({ where: { userId_shopItemId: { userId: opts.userId, shopItemId: active.shopItemId } }, select: { shopItemId: true } });
+  if (owned || (await goldMembershipForUser(db, opts.userId)).isMember) return false;
+  const result = await withWriter(opts.userId, [active.shopItemId, "default"], async (tx, state) => {
+    if (activeKey(state.equipment) !== active.shopItemId) return { appearanceChanged: false };
+    const before = state.equipment;
+    await checkpoint(tx, opts.userId, state);
+    return { appearanceChanged: await project(tx, opts.userId, before, before.filter((entry) => entry.slot !== "CHARACTER")) };
+  }, { prisma: db });
+  return result.appearanceChanged === true;
+}
 async function getCharacters(opts, db = prisma) {
+  await repairExpiredGoldCharacter(opts, db);
   const page = paging(opts, "characters");
   const result = await readSnapshot(async (tx) => {
     const count = page.limit - (!page.last ? 1 : 0),
@@ -194,22 +214,26 @@ async function getCharacters(opts, db = prisma) {
   const { state } = result;
   const characterRow = (i) => {
     const key = i.id,
-      owned = i.owned,
-      o = owned ? outfitView(state, key, opts, i.active) : null;
-    const policy = characterPolicy({ ...i, owned }, isMember);
+      owned = i.owned;
+    const policy = characterPolicy({ ...i, owned }, isMember, { allowGoldAccess: opts.supportsGold });
+    const o = policy.hasAccess ? outfitView(state, key, opts, i.active) : null;
     return {
       characterKey: key,
       name: i.name,
       item: key === "default" ? null : serialized(i, discount),
       owned,
-      active: owned && activeKey(state.equipment) === key,
-      canPurchase: key !== "default" && !owned && i.active && !i.earnOnly && (!opts.supportsGold || policy.coinPurchaseAllowed),
-      canActivate: owned && i.active,
-      canEdit: !!o?.editable,
+      hasAccess: key === "default" || policy.hasAccess,
+      accessSource: key === "default" ? "free" : policy.accessSource,
+      active: (key === "default" || policy.hasAccess) && activeKey(state.equipment) === key,
+      canPurchase: key !== "default" && policy.canPurchase && (!opts.supportsGold || policy.coinPurchaseAllowed),
+      canActivate: (key === "default" || policy.hasAccess) && i.active,
+      canEdit: (key === "default" || policy.hasAccess) && !!o?.editable,
       availability: i.active ? "available" : "unavailable",
       outfit: o,
       ...(opts.supportsGold && key !== "default" ? {
         goldAccess: policy.goldAccess,
+        hasAccess: policy.hasAccess,
+        accessSource: policy.accessSource,
         benefitVersion: policy.benefitVersion,
         coinPurchaseAllowed: policy.coinPurchaseAllowed,
         directPurchase: policy.directPurchase,
@@ -240,6 +264,7 @@ async function getCharacters(opts, db = prisma) {
 }
 async function getCharacterWardrobe(opts, db = prisma) {
   keySyntax(opts.characterKey);
+  await repairExpiredGoldCharacter(opts, db);
   const page = paging(opts, `wardrobe:${opts.characterKey}`);
   const result = await readSnapshot(async (tx) => {
     const c = await character(tx, opts.characterKey, opts),
@@ -260,9 +285,12 @@ async function getCharacterWardrobe(opts, db = prisma) {
     ...identity(state, opts),
     characterKey: opts.characterKey,
     name: c.name,
+    owned: c.owned === true,
+    hasAccess: c.hasAccess === true,
+    accessSource: c.accessSource || null,
     active: activeKey(state.equipment) === opts.characterKey,
-    canActivate: c.active,
-    outfit: outfitView(state, opts.characterKey, opts, c.active),
+    canActivate: c.hasAccess && c.active,
+    outfit: outfitView(state, opts.characterKey, opts, c.hasAccess && c.active),
     coins: state.coins,
     adUnlock,
     accessories: rows.slice(0, page.limit).map((i) => {
@@ -470,7 +498,7 @@ async function mutate(opts, activation) {
       conflict(state, opts.characterKey, opts, "APPEARANCE_CHANGED");
     if (before.revision !== opts.expectedOutfitRevision)
       conflict(state, opts.characterKey, opts, "OUTFIT_CHANGED");
-    if (!outfitView(state, opts.characterKey, opts, c.active).editable)
+    if (!outfitView(state, opts.characterKey, opts, c.hasAccess && c.active).editable)
       fail("WARDROBE_NOT_EDITABLE");
     const rows = await validateItems(
       tx,
@@ -527,4 +555,5 @@ module.exports = {
   getCharacterWardrobe,
   saveCharacterOutfit,
   activateCharacter,
+  repairExpiredGoldCharacter,
 };

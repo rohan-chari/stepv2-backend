@@ -23,6 +23,7 @@ redis.call('del', KEYS[2], KEYS[2] .. ':ce:v1')
 return generation
 `;
 
+
 const USER_SELECT = {
   id: true,
   displayName: true,
@@ -220,6 +221,7 @@ function buildUserPresentationCache(dependencies = {}) {
       return loaded;
     }
 
+
     if (!(await guardEnabled())) {
       const out = new Map();
       await Promise.all(unique.map(async (id) => {
@@ -367,19 +369,26 @@ function buildUserPresentationCache(dependencies = {}) {
 
   async function invalidateCommitted(userId) {
     if (!userId || !redisCache.isEnabled()) return true;
-    await require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([
-      { domain: "presentation", identity: userId },
-    ]);
+    // These are independent cache domains. A failure in the broad cache-
+    // efficiency marker must not prevent the presentation payload's own
+    // invalidation and read bypass from being established.
+    const efficiencyInvalidation = Promise.resolve()
+      .then(() => require("../../../shared/cache/cacheEfficiencyInvalidation").afterCommit([
+        { domain: "presentation", identity: userId },
+      ]))
+      .catch(() => false);
     const payloadKey = cacheKeys.userCosmetics(userId);
     const extendedKey = `${payloadKey}:ce:v1`;
     if (!(await guardEnabled())) {
-      return derivedCache.invalidate({
+      const result = await derivedCache.invalidate({
         prefix: payloadKey,
         run: async () => ({ ok: await redisCache.del([payloadKey, extendedKey]), disabled: false }),
       });
+      await efficiencyInvalidation;
+      return result;
     }
     const generationKey = cacheKeys.userCosmeticsVersion(userId);
-    return derivedCache.invalidate({
+    const result = await derivedCache.invalidate({
       prefix: payloadKey,
       run: () => redisCache.evalLua(
         ADVANCE_AND_DELETE_LUA,
@@ -387,6 +396,8 @@ function buildUserPresentationCache(dependencies = {}) {
         [GENERATION_TTL_SECONDS]
       ),
     });
+    await efficiencyInvalidation;
+    return result;
   }
 
   return { getMany, invalidate, loadMany };
