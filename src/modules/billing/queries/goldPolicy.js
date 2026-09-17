@@ -65,15 +65,18 @@ function characterPolicy(item, isMember, { allowGoldAccess = true } = {}) {
   // remains presentation-only and is true for the member's current view; the
   // access predicate below is the authority.
   const goldActive = allowGoldAccess && isMember === true;
-  const goldAccess = item?.slot === "CHARACTER" && goldActive;
+  const goldAccess =
+    item?.slot === "CHARACTER" &&
+    goldActive &&
+    isGoldCharacterSku(item?.sku);
   const owned = item?.owned === true;
-  const access = characterAccess(item, { owned, isMember: goldActive });
+  const access = characterAccess(item, { owned, isMember: goldAccess });
   const directPurchase = goldActive
     ? { available: false, storeProductId: null }
     : directCharacterPurchase(item?.sku);
   // Gold characters are never coin merchandise. Non-members acquire them via
   // their configured store product; Gold members receive temporary access.
-  const coinPurchaseAllowed = !goldActive && !isGoldCharacterSku(item?.sku);
+  const coinPurchaseAllowed = !isGoldCharacterSku(item?.sku);
   const canPurchase = !owned && item?.active === true && item?.earnOnly !== true && coinPurchaseAllowed;
   return {
     goldAccess,

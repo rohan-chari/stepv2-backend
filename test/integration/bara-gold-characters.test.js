@@ -86,7 +86,7 @@ describe("Bara Gold character policy", () => {
     assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: mouse.id } }), 0);
   });
 
-  it("grants temporary access to every visible character without ownership", async () => {
+  it("grants temporary access only to Gold characters", async () => {
     const user = await createTestUser();
     const otter = await character({ sku: "otter", name: "Otter" });
     await goldMembership(user.user.id);
@@ -96,28 +96,28 @@ describe("Bara Gold character policy", () => {
     });
     const row = (await response.json()).characters.find((item) => item.characterKey === otter.id);
     assert.equal(row.owned, false);
-    assert.equal(row.hasAccess, true);
-    assert.equal(row.accessSource, "gold");
-    assert.equal(row.canActivate, true);
-    assert.equal(row.canPurchase, false);
+    assert.equal(row.hasAccess, false);
+    assert.equal(row.accessSource, null);
+    assert.equal(row.canActivate, false);
+    assert.equal(row.canPurchase, true);
     assert.deepEqual(row.directPurchase, { available: false, storeProductId: null });
     const wardrobe = await request(server.baseUrl, "GET", `/shop/characters/${otter.id}/wardrobe`, {
       token: user.token,
       headers: { "X-Client-Features": "characters,bara_gold_v1" },
     });
     const wardrobeBody = await wardrobe.json();
-    assert.equal(wardrobe.status, 200);
-    assert.equal(wardrobeBody.hasAccess, true);
+    assert.equal(wardrobe.status, 403);
+    assert.equal(wardrobeBody.code, "CHARACTER_NOT_OWNED");
     const activation = await request(server.baseUrl, "PUT", "/shop/active-character", {
       token: user.token,
       headers: { "X-Client-Features": "characters,bara_gold_v1" },
       body: {
         characterKey: otter.id,
-        expectedAppearanceRevision: wardrobeBody.appearanceRevision,
-        expectedOutfitRevision: wardrobeBody.outfit.revision,
+        expectedAppearanceRevision: 0,
+        expectedOutfitRevision: 0,
       },
     });
-    assert.equal(activation.status, 200, JSON.stringify(await activation.json()));
+    assert.equal(activation.status, 403, JSON.stringify(await activation.json()));
     assert.equal(await prisma.userShopItem.count({ where: { userId: user.user.id, shopItemId: otter.id } }), 0);
   });
 

@@ -142,7 +142,7 @@ async function character(tx, key, opts, requireAccess = true) {
   if (!visible(i, opts)) fail("CHARACTER_NOT_FOUND", 404);
   if (i.owned) return { ...i, ...characterAccess(i, { owned: true }) };
   const { isMember } = await goldMembershipForUser(tx, opts.userId);
-  const access = characterAccess(i, { owned: i.owned, isMember: isMember && opts.supportsGold });
+  const access = characterPolicy(i, isMember, { allowGoldAccess: opts.supportsGold });
   if (requireAccess && !access.hasAccess) fail("CHARACTER_NOT_OWNED", 403);
   return {
     ...i,
