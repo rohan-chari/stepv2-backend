@@ -174,6 +174,23 @@ describe("Bara Gold client capability compatibility", () => {
     assert.equal(billing.credits.paid, 0);
   });
 
+  it("fully capable non-Gold client receives direct Gold-character products", async () => {
+    const { billing, characters } = await readCase({
+      features: "characters,bara_gold_v1,billing_v1",
+      member: false,
+    });
+    const productIds = new Set(billing.products.map((row) => row.id));
+    for (const id of ["character_mouse", "character_hedgehog", "character_sea_lion"]) {
+      assert.equal(productIds.has(id), true);
+    }
+    const goldRows = characters.characters.filter((row) =>
+      ["mouse", "hedgehog", "sea_lion"].includes(row.item?.sku),
+    );
+    assert.equal(goldRows.length, 3);
+    assert.ok(goldRows.every((row) => row.directPurchase?.available === true));
+    assert.ok(goldRows.every((row) => row.goldAccess === false));
+  });
+
   it("normalizes whitespace, duplicate tokens, and casing without enabling invalid separators", async () => {
     const valid = await readCase({ features: " characters, BARA_GOLD_V1,characters " });
     assert.equal(valid.billing.goldPolicy.version, "bara_gold_v1");
@@ -192,7 +209,7 @@ describe("Bara Gold client capability compatibility", () => {
     const goldBootstrap = await response.json();
     assert.equal(goldBootstrap.goldPolicy.version, "bara_gold_v1");
     response = await request(server.baseUrl, "GET", "/shop/characters", { token: account.token, headers: full });
-    assert.equal((await response.json()).characters.filter((row) => row.goldAccess).length, 4);
+    assert.equal((await response.json()).characters.filter((row) => row.goldAccess).length, 3);
 
     response = await request(server.baseUrl, "GET", "/billing/bootstrap?platform=ios", { token: account.token });
     const downgraded = await response.json();

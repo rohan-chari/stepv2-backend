@@ -26,8 +26,8 @@ function productForPurchase(product, goldContract) {
 }
 function catalogFor(platform, { gold = false } = {}) {
  const products = gold
-  ? PRODUCTS.filter(p => p.id === 'coins_500' || p.id === 'coins_2800' || p.id === 'coins_6000' || (p.gold && !['plus_annual','plus_permanent'].includes(p.id)))
-  : PRODUCTS.filter(p => ['coins_500','coins_2800','coins_6000','plus_monthly'].includes(p.id));
+  ? PRODUCTS.filter(p => p.id === 'coins_500' || p.id === 'coins_2800' || p.id === 'coins_6000' || p.id === 'character_mouse' || p.id === 'character_hedgehog' || p.id === 'character_sea_lion' || (p.gold && !['plus_annual','plus_permanent'].includes(p.id)))
+  : PRODUCTS.filter(p => ['coins_500','coins_2800','coins_6000','plus_monthly','character_mouse','character_hedgehog','character_sea_lion'].includes(p.id));
  return products.map(p=>{
   const view=productForPurchase(p,gold);
   return {id:view.id,kind:view.kind,coins:view.coins,credits:view.credits,plan:view.plan,storeProductId:view[platform],...(gold&&view.gold?{trialCoins:view.trialCoins||0,benefitVersion:GOLD_BENEFIT_VERSION}: {})};
