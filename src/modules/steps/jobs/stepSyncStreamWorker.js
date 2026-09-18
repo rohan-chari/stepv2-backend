@@ -132,7 +132,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
           requestHash: message.requestHash,
           resolutionTimeZone: message.timeZone,
           leaseMs: LEASE_MS,
-          now: requestedAt,
+          now: now(),
         }, tx);
         return execute(tx, reservation);
       }, { timeout: 15_000, maxWait: 10_000 });
