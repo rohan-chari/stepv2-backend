@@ -53,19 +53,21 @@ function buildRaceDirtyStreamWorker(dependencies = {}) {
     // as the proven generation/fencing state used by the authoritative scoring
     // engine; this worker targets the race immediately rather than polling that
     // table as a queue.
-    const job = await jobModel.enqueue({
-      raceId: message.raceId,
-      userId: message.userId,
-      resolutionTimeZone: null,
-      now: now(),
-      dirtyEnvelope: dirtyEnvelopeFor(message),
-      burstCoalescing: false,
-      queuedGenerationMerge: true,
-      bypassDebounce: true,
-      queuePriority: "LIVE",
-    });
+    const job = message.jobGeneration
+      ? await jobModel.findByRaceId(message.raceId)
+      : await jobModel.enqueue({
+          raceId: message.raceId,
+          userId: message.userId,
+          resolutionTimeZone: null,
+          now: now(),
+          dirtyEnvelope: dirtyEnvelopeFor(message),
+          burstCoalescing: false,
+          queuedGenerationMerge: true,
+          bypassDebounce: true,
+          queuePriority: "LIVE",
+        });
     if (!job) return { skipped: true };
-    const generation = Number(job.generation);
+    const generation = message.jobGeneration || Number(job.generation);
     const processed = await resolver.processRace({
       raceId: message.raceId,
       generation,
