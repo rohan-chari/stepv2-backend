@@ -4,14 +4,12 @@ const {
   readGroup,
   ack,
   reclaimIdle,
-  publish,
   STREAMS,
   GROUPS,
   consumerName,
 } = require("../../../shared/queues/redisStreams");
 const {
   parsePowerupRecalc,
-  RACE_DIRTY_VERSION,
 } = require("../../../shared/queues/workMessages");
 const {
   computeRaceState: defaultComputeRaceState,
@@ -19,6 +17,9 @@ const {
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../../races/services/racePowerupStateSync");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../../races/services/enqueueRaceResolution");
 
 const RECLAIM_IDLE_MS = 30_000;
 const READ_COUNT = 10;
@@ -29,6 +30,8 @@ function buildPowerupRecalcStreamWorker(dependencies = {}) {
   const computeRaceState = dependencies.computeRaceState || defaultComputeRaceState;
   const syncRacePowerupState =
     dependencies.syncRacePowerupState || defaultSyncRacePowerupState;
+  const enqueueRaceResolution =
+    dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
 
@@ -64,6 +67,8 @@ function buildPowerupRecalcStreamWorker(dependencies = {}) {
     }
 
     let syncResult;
+    let changed = false;
+    let raceResolution = null;
     await prisma.$transaction(async (tx) => {
       syncResult = await syncRacePowerupState({
         raceId: message.raceId,
@@ -71,24 +76,36 @@ function buildPowerupRecalcStreamWorker(dependencies = {}) {
         boxEffectiveSteps: Number(boxEffectiveSteps),
         tx,
       });
+
+      changed =
+        (syncResult?.newMysteryBoxes?.length || 0) > 0 ||
+        Number(syncResult?.newQueuedBoxes || 0) > 0;
+
+      if (changed) {
+        // The powerup mutation and its durable race-resolution handoff must
+        // commit atomically. enqueueRaceResolution writes the race-keyed
+        // Postgres generation/fence row inside this transaction and defers the
+        // Redis RACE_DIRTY wake until after commit. If that wake is lost, the
+        // existing race-job recovery scan can republish it without depending on
+        // this POWERUP_RECALC message to infer whether a mutation already ran.
+        raceResolution = await enqueueRaceResolution(
+          {
+            raceId: message.raceId,
+            userId: message.userId,
+            timeZone: raceMeta.timezone || "UTC",
+            now: now(),
+            reason: "POWERUP_MUTATION",
+            dirtyUserIds: [message.userId],
+            dirtyParticipantIds: [message.participantId],
+            priority: "IMMEDIATE",
+            queuePriority: "LIVE",
+          },
+          tx,
+        );
+      }
     }, { timeout: 15_000, maxWait: 10_000 });
 
-    const changed =
-      (syncResult?.newMysteryBoxes?.length || 0) > 0 ||
-      Number(syncResult?.newQueuedBoxes || 0) > 0;
-
-    if (changed) {
-      await publish(STREAMS.RACE_DIRTY, {
-        schemaVersion: RACE_DIRTY_VERSION,
-        raceId: message.raceId,
-        userId: message.userId,
-        sourceGeneration: String(message.sourceGeneration),
-        reason: "POWERUP_MUTATION",
-        requestedAt: now().toISOString(),
-      });
-    }
-
-    return { changed, syncResult };
+    return { changed, syncResult, raceResolution };
   }
 
   async function processEntry(entry) {
