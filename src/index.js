@@ -295,6 +295,17 @@ function startServer({
         return;
       }
       if (processRole === "notification") {
+        retainStopHandle(scheduleDomainEventProjectionJob());
+        retainStopHandle(scheduleNotificationScheduleReleaseJob({
+          startupBarrier: notificationAdmissionStartupBarrier,
+        }));
+        retainStopHandle(scheduleNotificationCompletenessReconcilerJob({
+          startupBarrier: notificationAdmissionStartupBarrier,
+        }));
+        retainStopHandle(scheduleInboxDeliveryJob({
+          subscribeNotificationWakeup,
+          startupBarrier: notificationAdmissionStartupBarrier,
+        }));
         retainStopHandle(scheduleNotificationDeliveryStreamWorkerJob());
         return;
       }
@@ -385,17 +396,10 @@ function startServer({
         scheduleInboxExpiryJob();
       }
       if (!userFanoutDisabled("INBOX_DELIVERY_DISABLED")) {
-        retainStopHandle(scheduleDomainEventProjectionJob());
-        retainStopHandle(scheduleNotificationScheduleReleaseJob({ startupBarrier: notificationAdmissionStartupBarrier }));
-        retainStopHandle(scheduleNotificationCompletenessReconcilerJob({ startupBarrier: notificationAdmissionStartupBarrier }));
-        // The cron owner is the only process that subscribes to the ephemeral
-        // wake channel. Postgres polling remains the durable recovery path.
-        retainStopHandle(scheduleInboxDeliveryJob({
-          subscribeNotificationWakeup,
-          startupBarrier: notificationAdmissionStartupBarrier,
-        }));
+        // Device-token cleanup remains periodic maintenance. Normal notification
+        // projection, release, delivery, and stream draining belong exclusively
+        // to the dedicated notification process.
         retainStopHandle(scheduleDeviceTokenCleanupJob());
-        retainStopHandle(scheduleNotificationDeliveryStreamWorkerJob());
       }
       retainStopHandle(scheduleDomainEventRetentionJob());
       retainStopHandle(scheduleDomainEventReceiptRecoveryJob());
