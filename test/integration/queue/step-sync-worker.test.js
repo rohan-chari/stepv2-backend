@@ -112,7 +112,7 @@ async function createRaceForUser(userId, {
       rawSteps: 0,
       nextBoxAtSteps: powerupsEnabled && powerupStepInterval
         ? powerupStepInterval
-        : null,
+        : 0,
       forfeitedAt: forfeited ? new Date() : null,
     },
   });
@@ -370,17 +370,17 @@ describe("STEP_SYNC queue worker core behavior", () => {
 
   it("an older same-user sync processed after a newer sync cannot overwrite newer state", async () => {
     const { user, token } = await createTestUser();
-    const olderSample = sampleWindow(1000, 20);
-    const newerSample = sampleWindow(2000, 10);
+    const olderSample = sampleWindow(2000, 20);
+    const newerSample = sampleWindow(1000, 10);
 
     const older = await queueSync(token, {
       key: crypto.randomUUID(),
-      steps: 1000,
+      steps: 2000,
       samples: [olderSample],
     });
     const newer = await queueSync(token, {
       key: crypto.randomUUID(),
-      steps: 2000,
+      steps: 1000,
       samples: [newerSample],
     });
     assert.equal(older.status, 202);
@@ -399,8 +399,8 @@ describe("STEP_SYNC queue worker core behavior", () => {
     });
     assert.equal(
       daily.steps,
-      2000,
-      "older payload must never roll the canonical daily total backward",
+      1000,
+      "the latest accepted payload must remain authoritative even when it is a legitimate downward correction",
     );
 
     const samples = await prisma.stepSample.findMany({
@@ -408,6 +408,6 @@ describe("STEP_SYNC queue worker core behavior", () => {
       orderBy: { periodStart: "asc" },
     });
     assert.equal(samples.length, 2);
-    assert.deepEqual(samples.map((sample) => sample.steps), [1000, 2000]);
+    assert.deepEqual(samples.map((sample) => sample.steps), [2000, 1000]);
   });
 });
