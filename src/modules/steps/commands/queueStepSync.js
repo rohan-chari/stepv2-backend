@@ -4,6 +4,7 @@ const {
   validateIdempotencyKey,
 } = require("../stepSyncCanonical");
 const { publish, STREAMS } = require("../../../shared/queues/redisStreams");
+const { normalizeSamples } = require("./recordStepSamples");
 const { STEP_SYNC_VERSION } = require("../../../shared/queues/workMessages");
 
 async function queueStepSync({
@@ -17,6 +18,9 @@ async function queueStepSync({
 }) {
   validateIdempotencyKey(idempotencyKey);
   const { canonical, hash, json } = canonicalizeStepSyncRequest(body);
+  // Preserve validation that previously happened during persistence. Queue-first
+  // intake must reject a permanently invalid/manual sample before returning 202.
+  normalizeSamples(canonical.samples);
   const syncId = crypto.randomUUID();
   const acceptedAt = now();
   await publish(STREAMS.STEP_SYNC, {
