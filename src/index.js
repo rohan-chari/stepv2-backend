@@ -36,6 +36,9 @@ const {
   scheduleGlobalEventBoundaryDrain,
   scheduleGlobalEventEntitlementEventReconciler,
   scheduleStepSyncStreamWorker,
+  scheduleGlobalEventBoundaryStreamScheduler,
+  scheduleGlobalEventBoundaryStreamWorker,
+  scheduleGlobalEventRedisScheduleHydrator,
 } = require("./modules/steps");
 const { scheduleStepSampleRetention } = require("./modules/steps");
 const {
@@ -47,6 +50,7 @@ const {
   scheduleNotificationScheduleRelease,
   scheduleNotificationCompletenessReconciler,
   scheduleDeviceTokenCleanup,
+  scheduleNotificationDeliveryStreamWorker,
 } = require("./modules/notifications");
 const { scheduleInboxExpiry, scheduleInboxDelivery } = require("./modules/inbox");
 const { subscribeNotificationWakeup } = require("./shared/cache/redisCache");
@@ -127,6 +131,12 @@ function startServer({
   scheduleGlobalEventBoundaryDrain: scheduleGlobalEventBoundaryDrainJob = scheduleGlobalEventBoundaryDrain,
   scheduleGlobalEventEntitlementEventReconciler:
     scheduleGlobalEventEntitlementEventReconcilerJob = scheduleGlobalEventEntitlementEventReconciler,
+  scheduleGlobalEventBoundaryStreamScheduler:
+    scheduleGlobalEventBoundaryStreamSchedulerJob = scheduleGlobalEventBoundaryStreamScheduler,
+  scheduleGlobalEventBoundaryStreamWorker:
+    scheduleGlobalEventBoundaryStreamWorkerJob = scheduleGlobalEventBoundaryStreamWorker,
+  scheduleGlobalEventRedisScheduleHydrator:
+    scheduleGlobalEventRedisScheduleHydratorJob = scheduleGlobalEventRedisScheduleHydrator,
   scheduleStepSampleRetention: scheduleStepRetention = scheduleStepSampleRetention,
   scheduleAutoStartScheduledRaces:
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
@@ -142,6 +152,8 @@ function startServer({
   scheduleNotificationCompletenessReconciler:
     scheduleNotificationCompletenessReconcilerJob = scheduleNotificationCompletenessReconciler,
   scheduleDeviceTokenCleanup: scheduleDeviceTokenCleanupJob = scheduleDeviceTokenCleanup,
+  scheduleNotificationDeliveryStreamWorker:
+    scheduleNotificationDeliveryStreamWorkerJob = scheduleNotificationDeliveryStreamWorker,
   scheduleActivationEventCleanup:
     scheduleActivationCleanup = scheduleActivationEventCleanup,
   scheduleAdminMetricsActivityCleanup:
@@ -268,6 +280,7 @@ function startServer({
       if (processRole === "http") return;
       if (processRole === "resolution") {
         scheduleQueueFirstRacePipeline();
+        retainStopHandle(scheduleGlobalEventBoundaryStreamWorkerJob());
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
@@ -290,9 +303,10 @@ function startServer({
         return;
       }
       if (capacityGlobalEventOnly) {
-        retainStopHandle(scheduleGlobalEvents());
-        retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
-        retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
+        retainStopHandle(scheduleGlobalEvents({ queueFirstBoundaryTransport: true }));
+        retainStopHandle(scheduleGlobalEventRedisScheduleHydratorJob());
+        retainStopHandle(scheduleGlobalEventBoundaryStreamSchedulerJob());
+        retainStopHandle(scheduleNotificationDeliveryStreamWorkerJob());
         retainStopHandle(scheduleDomainEventProjectionJob());
         retainStopHandle(scheduleNotificationScheduleReleaseJob({ startupBarrier: notificationAdmissionStartupBarrier }));
         retainStopHandle(scheduleNotificationCompletenessReconcilerJob({ startupBarrier: notificationAdmissionStartupBarrier }));
@@ -307,9 +321,9 @@ function startServer({
         return;
       }
       if (capacityGlobalEventSync) {
-        retainStopHandle(scheduleGlobalEvents());
-        retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
-        retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
+        retainStopHandle(scheduleGlobalEvents({ queueFirstBoundaryTransport: true }));
+        retainStopHandle(scheduleGlobalEventRedisScheduleHydratorJob());
+        retainStopHandle(scheduleGlobalEventBoundaryStreamSchedulerJob());
         return;
       }
       // Home-open capacity runs retain the production cron process and its
@@ -335,9 +349,9 @@ function startServer({
       scheduleTournamentRenewal();
       scheduleRanks();
       scheduleRankedWeeks();
-      retainStopHandle(scheduleGlobalEvents());
-      retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
-      retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
+      retainStopHandle(scheduleGlobalEvents({ queueFirstBoundaryTransport: true }));
+      retainStopHandle(scheduleGlobalEventRedisScheduleHydratorJob());
+      retainStopHandle(scheduleGlobalEventBoundaryStreamSchedulerJob());
       scheduleAutoStartRaces();
       // Established fan-outs share the single operational brake.
       if (!userFanoutDisabled("LIVE_PLACEMENT_DISABLED")) {
@@ -361,6 +375,7 @@ function startServer({
           startupBarrier: notificationAdmissionStartupBarrier,
         }));
         retainStopHandle(scheduleDeviceTokenCleanupJob());
+        retainStopHandle(scheduleNotificationDeliveryStreamWorkerJob());
       }
       retainStopHandle(scheduleDomainEventRetentionJob());
       retainStopHandle(scheduleDomainEventReceiptRecoveryJob());
@@ -421,6 +436,7 @@ function startServer({
       // injected startup logger.
       if (processRole !== "cron") {
         scheduleQueueFirstRacePipeline();
+        retainStopHandle(scheduleGlobalEventBoundaryStreamWorkerJob());
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
