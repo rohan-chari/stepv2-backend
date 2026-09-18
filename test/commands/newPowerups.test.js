@@ -783,6 +783,11 @@ test("Trail Mine triggers when the next runner crosses its step position", async
         feedEvents.push(data);
       },
     },
+    GlobalStepEvent: {
+      async findActiveInRange() {
+        return [];
+      },
+    },
     completeRace: async () => {},
     now: () => new Date("2026-05-14T12:00:00Z"),
   });
