@@ -9,7 +9,6 @@ const {
 } = require("../setup");
 const {
   startTestRedis,
-  closedPort,
 } = require("../redisTestServer");
 const {
   STREAMS,
@@ -18,7 +17,6 @@ const {
   publish,
   ensureGroup,
   readGroup,
-  reclaimIdle,
   pendingSummary,
   close: closeQueueRedis,
 } = require("../../../src/shared/queues/redisStreams");
@@ -28,6 +26,9 @@ const {
 const {
   buildPowerupRecalcStreamWorker,
 } = require("../../../src/modules/powerups/jobs/powerupRecalcStreamWorker");
+const {
+  RaceResolutionJobV2,
+} = require("../../../src/modules/races/models/raceResolutionJobV2");
 
 let ownedRedis = null;
 let redisUrl;
@@ -96,6 +97,43 @@ function workerForSteps(userId, boxEffectiveSteps) {
     }),
     logger: { log() {}, warn() {}, error() {} },
   });
+}
+
+function workerForAnyUser(boxEffectiveSteps, dependencies = {}) {
+  return buildPowerupRecalcStreamWorker({
+    computeRaceState: async ({ raceId, userIds = [] }) => ({
+      result: { race: { id: raceId } },
+      boxEffectiveStepsByUser: Object.fromEntries(
+        userIds.map((userId) => [userId, boxEffectiveSteps]),
+      ),
+    }),
+    logger: { log() {}, warn() {}, error() {} },
+    ...dependencies,
+  });
+}
+
+async function addParticipants(raceId, count) {
+  const now = Date.now();
+  const users = Array.from({ length: count }, (_, index) => ({
+    id: crypto.randomUUID(),
+    appleId: `queue-burst-${now}-${index}-${crypto.randomUUID()}`,
+    email: `queue-burst-${now}-${index}@example.com`,
+  }));
+  await prisma.user.createMany({ data: users });
+  const joinedAt = new Date(Date.now() - 60 * 60 * 1000);
+  const participants = users.map((user) => ({
+    id: crypto.randomUUID(),
+    raceId,
+    userId: user.id,
+    status: "ACCEPTED",
+    joinedAt,
+    totalSteps: 0,
+    rawSteps: 0,
+    nextBoxAtSteps: 5000,
+    powerupSlots: 3,
+  }));
+  await prisma.raceParticipant.createMany({ data: participants });
+  return participants;
 }
 
 async function publishRecalc({ raceId, userId, participantId, generation = 1 }) {
@@ -221,6 +259,11 @@ describe("POWERUP_RECALC queue worker", () => {
     assert.equal(boxes[0].status, "MYSTERY_BOX");
     assert.equal(boxes[0].earnedAtSteps, 5000);
     assert.equal(await raceDirtyCount(), 1);
+    assert.equal(
+      await prisma.raceResolutionJobV2.count({ where: { raceId: race.id } }),
+      1,
+      "powerup mutation must durably enqueue the race in Postgres",
+    );
     assert.equal(
       (await pendingSummary(STREAMS.POWERUP_RECALC, GROUPS.POWERUP_RECALC)).count,
       0,
@@ -384,71 +427,171 @@ describe("POWERUP_RECALC queue worker", () => {
     );
   });
 
-  it("recovers after DB commit + downstream publish failure without losing RACE_DIRTY or duplicating the box", async () => {
+  it("keeps a durable race recovery candidate when the Redis wake is lost after the powerup commit", async () => {
     const { user } = await createTestUser();
     const { race, participant } = await seedRace({ userId: user.id });
-    const worker = workerForSteps(user.id, 5000);
+
+    // Simulate the exact failure window: the durable race generation is written
+    // in the SAME transaction as the box, but the after-commit Redis wake never
+    // makes it to the stream. The POWERUP_RECALC itself can still ACK safely
+    // because recovery no longer depends on replaying the powerup mutation.
+    const worker = workerForAnyUser(5000, {
+      enqueueRaceResolution: async (args, tx) =>
+        RaceResolutionJobV2.enqueue(
+          {
+            raceId: args.raceId,
+            userId: args.userId,
+            resolutionTimeZone: args.timeZone,
+            now: args.now,
+            dirtyEnvelope: {
+              reason: "POWERUP_MUTATION",
+              dirtyUserIds: [args.userId],
+              dirtyParticipantIds: args.dirtyParticipantIds || [],
+              powerupTypes: [],
+              priority: "IMMEDIATE",
+            },
+            queuedGenerationMerge: true,
+            bypassDebounce: true,
+            queuePriority: "LIVE",
+          },
+          tx,
+        ),
+    });
 
     await publishRecalc({
       raceId: race.id,
       userId: user.id,
       participantId: participant.id,
     });
-    const [entry] = await readRecalc("powerup-first-attempt");
+    const [entry] = await readRecalc("powerup-lost-wake");
     assert.ok(entry);
 
-    const deadPort = await closedPort();
-    await closeQueueRedis();
-    process.env.REDIS_URL = `redis://127.0.0.1:${deadPort}/15`;
-
-    assert.equal(
-      await worker.processEntry(entry),
-      false,
-      "downstream publish failure must leave the original message unacked",
-    );
-
+    assert.equal(await worker.processEntry(entry), true);
     assert.equal(
       await prisma.racePowerup.count({ where: { participantId: participant.id } }),
       1,
-      "the first attempt committed the box before the downstream failure",
-    );
-
-    await closeQueueRedis();
-    process.env.REDIS_URL = redisUrl;
-
-    assert.equal(
-      (await pendingSummary(STREAMS.POWERUP_RECALC, GROUPS.POWERUP_RECALC)).count,
-      1,
-      "failed work must remain pending for reclaim",
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const reclaimed = await reclaimIdle({
-      stream: STREAMS.POWERUP_RECALC,
-      group: GROUPS.POWERUP_RECALC,
-      consumer: "powerup-retry",
-      minIdleMs: 1,
-      count: 10,
-    });
-    assert.equal(reclaimed.length, 1);
-    assert.equal(reclaimed[0].id, entry.id);
-
-    assert.equal(await worker.processEntry(reclaimed[0]), true);
-
-    assert.equal(
-      await prisma.racePowerup.count({ where: { participantId: participant.id } }),
-      1,
-      "retry must not mint the threshold twice",
-    );
-    assert.equal(
-      await raceDirtyCount(),
-      1,
-      "retry must recover the downstream race handoff that failed after the DB commit",
+      "the powerup mutation committed",
     );
     assert.equal(
       (await pendingSummary(STREAMS.POWERUP_RECALC, GROUPS.POWERUP_RECALC)).count,
       0,
-      "recovered work must eventually ACK",
+      "the original powerup message is safely ACKed",
+    );
+    assert.equal(await raceDirtyCount(), 0, "the Redis wake was intentionally lost");
+
+    const durableJob = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    assert.equal(durableJob.state, "QUEUED");
+
+    const candidates = await RaceResolutionJobV2.listRecoveryCandidates({
+      now: new Date(Date.now() + 60_000),
+      queuedLimit: 50,
+      runningLimit: 50,
+    });
+    assert.ok(
+      candidates.some((candidate) => candidate.raceId === race.id),
+      "lost Redis wake must remain discoverable from durable Postgres state",
+    );
+  });
+
+  it("rolls back the box when durable race handoff persistence fails", async () => {
+    const { user } = await createTestUser();
+    const { race, participant } = await seedRace({ userId: user.id });
+    const worker = workerForAnyUser(5000, {
+      enqueueRaceResolution: async () => {
+        throw new Error("forced durable handoff failure");
+      },
+    });
+
+    await publishRecalc({
+      raceId: race.id,
+      userId: user.id,
+      participantId: participant.id,
+    });
+    const [entry] = await readRecalc("powerup-handoff-failure");
+    assert.ok(entry);
+
+    assert.equal(await worker.processEntry(entry), false);
+    assert.equal(
+      await prisma.racePowerup.count({ where: { participantId: participant.id } }),
+      0,
+      "box and durable handoff are one atomic transaction",
+    );
+    assert.equal(
+      await prisma.raceResolutionJobV2.count({ where: { raceId: race.id } }),
+      0,
+    );
+    assert.equal(
+      (await pendingSummary(STREAMS.POWERUP_RECALC, GROUPS.POWERUP_RECALC)).count,
+      1,
+      "failed transaction remains retryable",
+    );
+  });
+
+  it("absorbs a 100-user same-race box burst with production-like concurrency and one durable race row", async () => {
+    const { user } = await createTestUser();
+    const { race } = await seedRace({
+      userId: user.id,
+      nextBoxAtSteps: 10000,
+    });
+    const participants = await addParticipants(race.id, 100);
+    const worker = workerForAnyUser(5000);
+
+    for (const [index, participant] of participants.entries()) {
+      await publishRecalc({
+        raceId: race.id,
+        userId: participant.userId,
+        participantId: participant.id,
+        generation: index + 1,
+      });
+    }
+
+    const processed = [];
+    while (processed.length < participants.length) {
+      const batch = await readRecalc(`powerup-burst-${processed.length}`);
+      if (!batch.length) break;
+
+      let cursor = 0;
+      async function consume() {
+        while (true) {
+          const index = cursor++;
+          if (index >= batch.length) return;
+          const ok = await worker.processEntry(batch[index]);
+          assert.equal(ok, true);
+          processed.push(batch[index].id);
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(3, batch.length) }, consume),
+      );
+    }
+
+    assert.equal(processed.length, 100, "every queued recalculation was processed");
+    assert.equal(
+      await prisma.racePowerup.count({
+        where: {
+          raceId: race.id,
+          participantId: { in: participants.map((participant) => participant.id) },
+        },
+      }),
+      100,
+      "every threshold crossing minted exactly one box",
+    );
+    assert.equal(
+      await prisma.raceResolutionJobV2.count({ where: { raceId: race.id } }),
+      1,
+      "same-race burst must coalesce into one durable race job row",
+    );
+    const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    assert.ok(Number(job.generation) >= 1);
+    assert.ok(Number(job.generation) <= 100);
+    assert.equal(
+      (await pendingSummary(STREAMS.POWERUP_RECALC, GROUPS.POWERUP_RECALC)).count,
+      0,
+      "the burst drains cleanly",
     );
   });
 });
