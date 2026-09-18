@@ -159,3 +159,109 @@ test("normal startup ignores CAPACITY_HTTP_RESOLUTION_ONLY and keeps queue-first
   assert.ok(calls.includes("recovery"));
   assert.equal(calls.includes("legacy-resolution"), false);
 });
+
+
+test("production step role owns only STEP_SYNC queue intake", () => {
+  const calls = [];
+  startServer(baseDeps({
+    processRole: "step",
+    scheduleStepSyncStreamWorker() { calls.push("step"); },
+    schedulePowerupRecalcStreamWorker() { calls.push("powerup"); },
+    scheduleRaceDirtyStreamWorker() { calls.push("dirty"); },
+    scheduleGlobalEventBoundaryStreamWorker() { calls.push("event-boundary"); },
+    scheduleNotificationDeliveryStreamWorker() { calls.push("notification"); },
+  }));
+  assert.deepEqual(calls, ["step"]);
+});
+
+test("production resolution role owns race/powerup work but not step or event transport", () => {
+  const calls = [];
+  startServer(baseDeps({
+    processRole: "resolution",
+    scheduleStepSyncStreamWorker() { calls.push("step"); },
+    schedulePowerupRecalcStreamWorker() { calls.push("powerup"); },
+    scheduleRaceDirtyStreamWorker() { calls.push("dirty"); },
+    scheduleRaceResolutionRecoverySweep() { calls.push("recovery"); },
+    scheduleGlobalEventBoundaryStreamWorker() { calls.push("event-boundary"); },
+    scheduleHistoricalRaceReconciliationWorker() { calls.push("historical"); },
+    scheduleRacePlacementTransitions() { calls.push("placement"); },
+    scheduleRaceAdminCommands() { calls.push("admin"); },
+    scheduleResolvedImpactBoundaries() { calls.push("impact"); },
+    scheduleEffectDeadlines() { calls.push("effects"); },
+    scheduleRaceSeriesRenewal() { calls.push("series"); },
+    scheduleRaceResolutionPostTasks() { calls.push("post"); },
+  }));
+  assert.deepEqual(calls, [
+    "powerup",
+    "dirty",
+    "recovery",
+    "historical",
+    "placement",
+    "admin",
+    "impact",
+    "effects",
+    "series",
+    "post",
+  ]);
+});
+
+test("production event role exclusively owns global-event Redis transport", () => {
+  const calls = [];
+  startServer(baseDeps({
+    processRole: "event",
+    scheduleGlobalEventRedisScheduleHydrator() { calls.push("hydrate"); },
+    scheduleGlobalEventBoundaryStreamScheduler() { calls.push("schedule"); },
+    scheduleGlobalEventBoundaryStreamWorker() { calls.push("boundary"); },
+    scheduleStepSyncStreamWorker() { calls.push("step"); },
+    scheduleNotificationDeliveryStreamWorker() { calls.push("notification"); },
+  }));
+  assert.deepEqual(calls, ["hydrate", "schedule", "boundary"]);
+});
+
+test("production notification role exclusively owns notification projection and delivery", () => {
+  const calls = [];
+  startServer(baseDeps({
+    processRole: "notification",
+    scheduleDomainEventProjection() { calls.push("projection"); },
+    scheduleNotificationScheduleRelease() { calls.push("release"); },
+    scheduleNotificationCompletenessReconciler() { calls.push("reconcile"); },
+    scheduleInboxDelivery() { calls.push("inbox"); },
+    scheduleNotificationDeliveryStreamWorker() { calls.push("delivery"); },
+    scheduleStepSyncStreamWorker() { calls.push("step"); },
+    scheduleGlobalEventBoundaryStreamWorker() { calls.push("event"); },
+  }));
+  assert.deepEqual(calls, [
+    "projection",
+    "release",
+    "reconcile",
+    "inbox",
+    "delivery",
+  ]);
+});
+
+test("production cron owns periodic event creation and trimming, not queue consumers", () => {
+  const calls = [];
+  startServer(baseDeps({
+    processRole: "cron",
+    scheduleBillingReconciliation() { calls.push("billing"); },
+    scheduleRedisStreamTrimmer() { calls.push("trim"); },
+    scheduleGlobalStepEvents() { calls.push("global-events"); },
+    scheduleGlobalEventRedisScheduleHydrator() { calls.push("hydrate"); },
+    scheduleGlobalEventBoundaryStreamScheduler() { calls.push("boundary-scheduler"); },
+    scheduleGlobalEventBoundaryStreamWorker() { calls.push("boundary-worker"); },
+    scheduleStepSyncStreamWorker() { calls.push("step"); },
+    schedulePowerupRecalcStreamWorker() { calls.push("powerup"); },
+    scheduleRaceDirtyStreamWorker() { calls.push("dirty"); },
+    scheduleNotificationDeliveryStreamWorker() { calls.push("notification"); },
+  }));
+
+  assert.ok(calls.includes("billing"));
+  assert.ok(calls.includes("trim"));
+  assert.ok(calls.includes("global-events"));
+  for (const forbidden of [
+    "hydrate", "boundary-scheduler", "boundary-worker",
+    "step", "powerup", "dirty", "notification",
+  ]) {
+    assert.equal(calls.includes(forbidden), false, `${forbidden} must not run in cron`);
+  }
+});
