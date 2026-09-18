@@ -394,7 +394,7 @@ describe("STEP_SYNC queue worker core behavior", () => {
     assert.equal(await worker().processEntry(entries[1]), true);
     assert.equal(await worker().processEntry(entries[0]), true);
 
-    const daily = await prisma.steps.findFirstOrThrow({
+    const daily = await prisma.step.findFirstOrThrow({
       where: { userId: user.id, date: new Date(dateKey()) },
     });
     assert.equal(
