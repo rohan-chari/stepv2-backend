@@ -105,6 +105,30 @@ async function getProgress(token, raceId) {
   return (await res.json()).progress;
 }
 
+async function setParticipantTotals(raceId, userId, { totalSteps, rawSteps = totalSteps }) {
+  await prisma.raceParticipant.updateMany({
+    where: { raceId, userId, status: "ACCEPTED" },
+    data: { totalSteps, rawSteps },
+  });
+}
+
+async function seedMysteryBox(raceId, userId) {
+  const participant = await prisma.raceParticipant.findFirstOrThrow({
+    where: { raceId, userId, status: "ACCEPTED" },
+  });
+  return prisma.racePowerup.create({
+    data: {
+      raceId,
+      participantId: participant.id,
+      userId,
+      type: null,
+      rarity: null,
+      status: "MYSTERY_BOX",
+      earnedAtSteps: 5000,
+    },
+  });
+}
+
 // Write a config row directly and clear the process cache, so the test controls
 // exactly which version is active.
 async function activateConfig(config, version) {
@@ -240,8 +264,11 @@ describe("balance config — player-facing (§5.3)", () => {
   it("the trailing racer is quoted better RARE odds than the leader", async () => {
     await activateConfig(defaultConfig(), 1);
     const { alice, bob, raceId } = await createActiveRace();
-    await recordSteps(alice.token, 20000);
-    await recordSteps(bob.token, 1000);
+    // Queue-first step intake no longer synchronously persists race totals.
+    // This contract owns the odds projection, so seed the authoritative persisted
+    // totals/rawSteps directly instead of depending on worker timing.
+    await setParticipantTotals(raceId, alice.userId, { totalSteps: 20000 });
+    await setParticipantTotals(raceId, bob.userId, { totalSteps: 1000 });
 
     const leader = await getProgress(alice.token, raceId);
     const trailer = await getProgress(bob.token, raceId);
@@ -309,13 +336,8 @@ describe("balance config — player-facing (§5.3)", () => {
   it("an opened box records the configVersion that produced it", async () => {
     await activateConfig(defaultConfig(), 7);
     const { alice, raceId } = await createActiveRace();
-    await recordSteps(alice.token, 6000);
-    await getProgress(alice.token, raceId);
-
-    const box = await prisma.racePowerup.findFirst({
-      where: { raceId, userId: alice.userId, status: "MYSTERY_BOX" },
-    });
-    assert.ok(box, "a mystery box should have been earned");
+    await setParticipantTotals(raceId, alice.userId, { totalSteps: 6000 });
+    const box = await seedMysteryBox(raceId, alice.userId);
     // Unopened boxes are NOT stamped — rollPowerup mints them without rolling
     // rarity, so a version there would record a config that decided nothing.
     assert.equal(box.configVersion, null);
@@ -450,7 +472,8 @@ describe("balance config — player-facing (§5.3)", () => {
   it("drops still roll from code defaults when the config table is unreadable", async () => {
     await activateConfig(defaultConfig(), 1);
     const { alice, raceId } = await createActiveRace();
-    await recordSteps(alice.token, 6000);
+    await setParticipantTotals(raceId, alice.userId, { totalSteps: 6000 });
+    const box = await seedMysteryBox(raceId, alice.userId);
 
     // Simulate the table being gone (rolled-back migration / DB blip). The
     // service must swallow this and serve code defaults, not 500.
@@ -482,11 +505,7 @@ describe("balance config — player-facing (§5.3)", () => {
         [0, 5, 15, 45]
       );
 
-      // And a box can still actually be opened.
-      const box = await prisma.racePowerup.findFirst({
-        where: { raceId, userId: alice.userId, status: "MYSTERY_BOX" },
-      });
-      assert.ok(box);
+      // And an already-earned box can still actually be opened.
       const openRes = await request(
         server.baseUrl,
         "POST",
