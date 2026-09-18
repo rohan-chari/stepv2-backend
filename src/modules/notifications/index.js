@@ -16,4 +16,5 @@ Object.assign(module.exports, require("./dailyMover"));
 Object.assign(module.exports, require("./jobs/notificationScheduleRelease"));
 Object.assign(module.exports, require("./jobs/notificationCompletenessReconciler"));
 Object.assign(module.exports, require("./jobs/deviceTokenCleanup"));
+Object.assign(module.exports, require("./jobs/notificationDeliveryStreamWorker"));
 Object.assign(module.exports, require("./routes"));
