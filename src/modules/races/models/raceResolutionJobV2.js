@@ -1721,6 +1721,91 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         .map((candidate) => candidate.raceId);
     },
 
+
+    // Queue-first safety net: return at most a tiny bounded set of race jobs
+    // whose Redis RACE_DIRTY publish may have been lost after the Postgres
+    // generation/fence row committed. These two index-driven probes deliberately
+    // avoid scanning terminal history.
+    async listRecoveryCandidates({
+      now = new Date(),
+      queuedLimit = 50,
+      runningLimit = 50,
+    } = {}) {
+      const safeQueuedLimit = Math.min(50, Math.max(1, Number(queuedLimit) || 50));
+      const safeRunningLimit = Math.min(50, Math.max(1, Number(runningLimit) || 50));
+
+      const queued = await prisma.$queryRawUnsafe(
+        `SELECT id,
+                race_id AS "raceId",
+                generation,
+                resolution_time_zone AS "resolutionTimeZone",
+                requested_at AS "requestedAt"
+           FROM race_resolution_jobs_v2
+          WHERE state='queued'
+            AND requested_at <= $1
+            AND (retry_at IS NULL OR retry_at <= $1)
+            AND (not_before_at IS NULL OR not_before_at <= $1)
+          ORDER BY requested_at ASC, race_id ASC
+          LIMIT $2`,
+        now,
+        safeQueuedLimit,
+      );
+
+      const running = await prisma.$queryRawUnsafe(
+        `SELECT id,
+                race_id AS "raceId",
+                generation,
+                resolution_time_zone AS "resolutionTimeZone",
+                requested_at AS "requestedAt",
+                lease_expires_at AS "leaseExpiresAt"
+           FROM race_resolution_jobs_v2
+          WHERE state='running'
+            AND lease_expires_at IS NOT NULL
+            AND lease_expires_at <= $1
+          ORDER BY lease_expires_at ASC, race_id ASC
+          LIMIT $2`,
+        now,
+        safeRunningLimit,
+      );
+
+      const byRaceId = new Map();
+      for (const row of [...queued, ...running]) {
+        if (!row?.raceId || byRaceId.has(row.raceId)) continue;
+        byRaceId.set(row.raceId, normalizeRow(row));
+      }
+      return [...byRaceId.values()];
+    },
+
+    // Terminal rows are only retained for debugging/status visibility. Cleanup
+    // is deliberately bounded so a large historical table can never produce a
+    // long-running mass DELETE or vacuum shock.
+    async cleanupTerminalJobs({
+      before = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
+      limit = 1000,
+    } = {}) {
+      const safeLimit = Math.min(5000, Math.max(1, Number(limit) || 1000));
+      const [result = {}] = await prisma.$queryRawUnsafe(
+        `WITH candidates AS MATERIALIZED (
+           SELECT id
+             FROM race_resolution_jobs_v2
+            WHERE state IN ('succeeded','failed')
+              AND updated_at < $1
+            ORDER BY updated_at ASC, id ASC
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+         ), deleted AS (
+           DELETE FROM race_resolution_jobs_v2 job
+            USING candidates
+            WHERE job.id=candidates.id
+           RETURNING job.id
+         )
+         SELECT COUNT(*)::int AS deleted FROM deleted`,
+        before,
+        safeLimit,
+      );
+      return Number(result.deleted || 0);
+    },
+
     // Backpressure metric (§5a "Worker capacity"): max age of an unserviced
     // request. Alarm threshold is 30s; the worker logs it once a minute.
     async queueLagMs(now = new Date()) {
