@@ -12,6 +12,7 @@ const {
   ack,
   reclaimIdle,
   pendingSummary,
+  queueHealth,
   close: closeQueueRedis,
 } = require("../../../src/shared/queues/redisStreams");
 const {
@@ -217,6 +218,29 @@ describe("queue-first Redis Streams transport", () => {
 
     await closeQueueRedis();
     process.env.QUEUE_REDIS_URL = redisUrl;
+  });
+
+  it("reports pending, waiting, oldest age, and consumer count", async () => {
+    await ensureGroup(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC);
+    await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "health-1" });
+    await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "health-2" });
+
+    const [entry] = await readGroup({
+      stream: STREAMS.STEP_SYNC,
+      group: GROUPS.STEP_SYNC,
+      consumer: "health-consumer",
+      count: 1,
+      blockMs: 5,
+    });
+    assert.ok(entry);
+
+    const health = await queueHealth(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, {
+      nowMs: Date.now() + 1000,
+    });
+    assert.equal(health.pendingCount, 1);
+    assert.equal(health.waitingCount, 1);
+    assert.equal(health.consumerCount, 1);
+    assert.ok(health.oldestPendingAgeMs >= 1000);
   });
 
   it("keeps queue types isolated from each other", async () => {
