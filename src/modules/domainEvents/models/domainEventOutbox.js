@@ -497,259 +497,39 @@ async function projectScheduledEntitlementEventsBatch({
   batchSize = 100,
 } = {}) {
   const limit = Math.min(500, Math.max(1, Number(batchSize) || 100));
-  const scanLimit = Math.max(500, limit * 5);
-  const projectionLane = "internal:GLOBAL_EVENT_SCHEDULED_PROJECTION";
-  // This producer only creates ADMISSION_PENDING schedules. The statement is
-  // atomic, and admission_sequence is a deterministic hash, so it shares no
-  // mutable lane state with the provider token bucket. Holding that lane row
-  // while validating and projecting 100 JSON envelopes serialized the entire
-  // provider drain behind this comparatively long transaction at event open.
-  // The release/claim consumers remain lane-locked; rows committed after a
-  // claim simply join the deterministic first-attempt queue on its next tick.
-  const rows = await prisma.$transaction(async (tx) => {
-    const [gate] = await tx.$queryRawUnsafe(
-      `/* steps:prepared-query:v1 */ SELECT pg_try_advisory_xact_lock(
-         hashtextextended('global-event-scheduled-entitlement-projector-v1',0)
-       ) AS acquired`,
-    );
-    // Keep the expensive JSON validation/projection statement out of the
-    // loser's query plan entirely. A gate CTE still let Postgres plan and scan
-    // the candidate relation before learning that the advisory lock was lost.
-    if (!gate?.acquired) return [{ processed: 0 }];
-    await tx.$executeRawUnsafe(
-      `INSERT INTO notification_release_lanes (
-         admission_class,next_token_at,created_at,updated_at
-       ) VALUES ($1,$2,$2,$2)
-       ON CONFLICT (admission_class) DO NOTHING`,
-      projectionLane,
-      now,
-    );
-    const [lane] = await tx.$queryRawUnsafe(
-      `/* steps:prepared-query:v1 */ SELECT next_token_at AS "nextTokenAt"
-         FROM notification_release_lanes
-        WHERE admission_class=$1
-        FOR UPDATE`,
-      projectionLane,
-    );
-    if (lane?.nextTokenAt && new Date(lane.nextTokenAt).getTime() > now.getTime()) {
-      return [{ processed: 0 }];
-    }
-    await tx.$executeRawUnsafe(
-      `UPDATE notification_release_lanes
-          SET next_token_at=$2::timestamptz+interval '1 second',
-              updated_at=$2::timestamptz
-        WHERE admission_class=$1`,
-      projectionLane,
-      now,
-    );
-    const projected = await tx.$queryRawUnsafe(
-    `/* steps:prepared-query:v1 */ WITH due_ids AS MATERIALIZED (
+  const [result = {}] = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
+    `/* steps:prepared-query:v1 */ WITH candidates AS MATERIALIZED (
        SELECT event.id
          FROM domain_event_outbox event
         WHERE event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
           AND event.schema_version=1
-          AND event.status IN ('PENDING','RETRY','EXPANDING')
+          AND event.status IN ('PENDING','RETRY','EXPANDING','PROJECTING')
           AND event.available_at <= $1
           AND (event.lease_until IS NULL OR event.lease_until <= $1)
-        ORDER BY event.available_at ASC,event.occurred_at ASC,event.id ASC
-        LIMIT $3
-        FOR UPDATE SKIP LOCKED
-     ), candidate_ids AS MATERIALIZED (
-       SELECT event.id
-         FROM domain_event_outbox event
-         JOIN due_ids due ON due.id=event.id
-        WHERE event.payload ?& ARRAY[
-            'eventId','entitlementId','userId','startsAt','endsAt','scheduleRevision'
-          ]
-          AND jsonb_typeof(event.payload->'eventId')='string'
-          AND jsonb_typeof(event.payload->'entitlementId')='string'
-          AND jsonb_typeof(event.payload->'userId')='string'
-          AND jsonb_typeof(event.payload->'startsAt')='string'
-          AND jsonb_typeof(event.payload->'endsAt')='string'
-          AND event.aggregate_id=event.payload->>'entitlementId'
-          AND EXISTS (
-            SELECT 1
-              FROM global_step_event_entitlements entitlement
-             WHERE entitlement.id=event.payload->>'entitlementId'
-               AND entitlement.event_id=event.payload->>'eventId'
-               AND entitlement.user_id=event.payload->>'userId'
-               AND entitlement.ends_at > $1
-          )
-          AND EXISTS (
-            SELECT 1
-              FROM domain_event_audiences audience
-              JOIN users recipient ON recipient.id=audience.recipient_id
-             WHERE audience.domain_event_id=event.id
-               AND audience.recipient_id=event.payload->>'userId'
-             GROUP BY audience.domain_event_id
-            HAVING count(*)=1
-          )
-          AND NOT EXISTS (
-            SELECT 1
-              FROM domain_event_outbox older
-             WHERE older.aggregate_type=event.aggregate_type
-               AND older.aggregate_id=event.aggregate_id
-               AND older.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
-               AND (older.occurred_at < event.occurred_at OR
-                    (older.occurred_at=event.occurred_at AND older.id < event.id))
-          )
-        ORDER BY event.available_at ASC,event.occurred_at ASC,event.id ASC
+        ORDER BY event.available_at,event.occurred_at,event.id
         LIMIT $2
         FOR UPDATE SKIP LOCKED
-     ), records AS MATERIALIZED (
-       SELECT event.id AS event_id,event.available_at,event.payload,
-              audience.recipient_id,global_event.multiplier,
-              entitlement.starts_at,entitlement.ends_at,
-              entitlement.schedule_revision AS source_revision
-         FROM candidate_ids candidate
-         JOIN domain_event_outbox event ON event.id=candidate.id
-         JOIN domain_event_audiences audience
-           ON audience.domain_event_id=event.id
-          AND audience.recipient_id=event.payload->>'userId'
-         JOIN global_step_event_entitlements entitlement
-           ON entitlement.id=event.payload->>'entitlementId'
-          AND entitlement.event_id=event.payload->>'eventId'
-          AND entitlement.user_id=event.payload->>'userId'
-         JOIN global_step_events global_event ON global_event.id=entitlement.event_id
-     ), receipt_decisions AS MATERIALIZED (
-       SELECT record.*,
-              receipt.source_kind AS receipt_source_kind,
-              receipt.source_type AS receipt_source_type,
-              receipt.source_id AS receipt_source_id,
-              receipt.source_revision AS receipt_source_revision,
-              receipt.terminal_status AS receipt_terminal_status,
-              receipt.schedule_present AS receipt_schedule_present,
-              EXISTS (
-                SELECT 1 FROM notification_schedules schedule
-                 WHERE schedule.recipient_user_id=record.recipient_id
-                   AND schedule.delivery_key=
-                     'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
-                       (record.payload->>'eventId')
-              ) AS live_schedule_exists
-         FROM records record
-         LEFT JOIN notification_schedule_receipts receipt
-           ON receipt.recipient_user_id=record.recipient_id
-          AND receipt.delivery_key=
-            'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
-              (record.payload->>'eventId')
-     ), inserted_projections AS (
-       INSERT INTO domain_event_notification_projections (
-         id,domain_event_id,recipient_user_id,delivery_key,projection_kind,
-         status,available_at,completed_at,created_at,updated_at
-       )
-       SELECT gen_random_uuid(),record.event_id,record.recipient_id,
-              'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
-                (record.payload->>'eventId'),
-              'VISIBLE','COMPLETED',record.available_at,$1,$1,$1
-         FROM receipt_decisions record
-       ON CONFLICT (domain_event_id,recipient_user_id,delivery_key,projection_kind)
-       DO NOTHING
-       RETURNING domain_event_id
-     ), inserted_schedule_receipts AS (
-       INSERT INTO notification_schedule_receipts (
-         recipient_user_id,delivery_key,source_kind,source_type,source_id,
-         source_revision,created_at,updated_at
-       )
-       SELECT record.recipient_id,
-              'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
-                (record.payload->>'eventId'),
-              'SOURCE_BACKED','GLOBAL_STEP_EVENT_ENTITLEMENT',
-              record.payload->>'entitlementId',record.source_revision,$1,$1
-         FROM receipt_decisions record
-       ON CONFLICT (recipient_user_id,delivery_key) DO UPDATE
-         SET source_revision=EXCLUDED.source_revision,
-             terminal_status=NULL,completed_at=NULL,updated_at=EXCLUDED.updated_at
-       WHERE notification_schedule_receipts.source_kind='SOURCE_BACKED'
-         AND notification_schedule_receipts.source_type='GLOBAL_STEP_EVENT_ENTITLEMENT'
-         AND notification_schedule_receipts.source_id=EXCLUDED.source_id
-         AND notification_schedule_receipts.source_revision < EXCLUDED.source_revision
-       RETURNING recipient_user_id,delivery_key
-     ), schedule_receipt_conflicts AS MATERIALIZED (
-       SELECT record.event_id
-         FROM receipt_decisions record
-        WHERE record.receipt_source_kind IS NOT NULL
-          AND (record.receipt_source_kind <> 'SOURCE_BACKED'
-           OR record.receipt_source_type <> 'GLOBAL_STEP_EVENT_ENTITLEMENT'
-           OR record.receipt_source_id <> record.payload->>'entitlementId')
-     ), upserted_schedules AS (
-       INSERT INTO notification_schedules (
-         id,recipient_user_id,type,title,body,payload,delivery_key,
-         available_at,expires_at,status,source_ref,source_revision,
-         admission_class,admission_sequence,created_at,updated_at
-       )
-       SELECT gen_random_uuid()::text,record.recipient_id,'GLOBAL_EVENT_STARTED',
-              record.multiplier::text || 'x STEPS EVENT',
-              'Double steps are LIVE for 30 minutes. Every step counts ' ||
-                record.multiplier::text || 'x in your races! Go!',
-              jsonb_build_object(
-                'type','GLOBAL_EVENT_STARTED','route','home',
-                'eventId',record.payload->>'eventId','multiplier',record.multiplier,
-                'entitlementId',record.payload->>'entitlementId'
-              ),
-              'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
-                (record.payload->>'eventId'),
-              record.starts_at,
-              record.ends_at-interval '60 seconds',
-              'ADMISSION_PENDING',record.payload->>'entitlementId',record.source_revision,$4,
-              (('x'||substr(encode(digest(
-                'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
-                  (record.payload->>'eventId'),'sha256'),'hex'),1,16))::bit(64)::bigint & 9223372036854775807),
-              $1,$1
-         FROM receipt_decisions record
-        WHERE NOT EXISTS (
-          SELECT 1 FROM schedule_receipt_conflicts conflict
-           WHERE conflict.event_id=record.event_id
-        )
-          AND (
-            record.receipt_source_kind IS NULL
-            OR record.source_revision > record.receipt_source_revision
-            OR record.live_schedule_exists
-            OR (record.receipt_terminal_status IS NULL AND
-                record.receipt_schedule_present=false AND
-                record.source_revision=record.receipt_source_revision AND
-                record.payload->>'scheduleRevision'=record.receipt_source_revision::text)
-          )
-       ON CONFLICT (recipient_user_id,delivery_key) DO UPDATE
-         SET available_at=EXCLUDED.available_at,
-             expires_at=EXCLUDED.expires_at,
-             payload=EXCLUDED.payload,
-             title=EXCLUDED.title,
-             body=EXCLUDED.body,
-             type=EXCLUDED.type,
-             source_ref=EXCLUDED.source_ref,
-             source_revision=EXCLUDED.source_revision,
-             admission_class=EXCLUDED.admission_class,
-             admission_sequence=EXCLUDED.admission_sequence,
-             status=CASE WHEN notification_schedules.status='PENDING'
-                         THEN 'ADMISSION_PENDING' ELSE notification_schedules.status END,
-             updated_at=EXCLUDED.updated_at
-       WHERE notification_schedules.status IN ('PENDING','ADMISSION_PENDING')
-         AND notification_schedules.source_revision <= EXCLUDED.source_revision
-       RETURNING id
-     ), completed_events AS (
+     ), completed AS (
        UPDATE domain_event_outbox event
-          SET status='COMPLETED',expansion_cursor='0',expansion_completed_at=$1,
-              completed_at=$1,lease_token=NULL,lease_until=NULL,
-              last_error_code=NULL,last_error_at=NULL,updated_at=$1
-         FROM candidate_ids candidate
-        WHERE event.id=candidate.id
+          SET status='COMPLETED',
+              expansion_cursor=COALESCE(event.expansion_cursor,'0'),
+              expansion_completed_at=COALESCE(event.expansion_completed_at,$1),
+              completed_at=COALESCE(event.completed_at,$1),
+              lease_token=NULL,
+              lease_until=NULL,
+              last_error_code=NULL,
+              last_error_at=NULL,
+              updated_at=$1
+         FROM candidates
+        WHERE event.id=candidates.id
        RETURNING event.id
      )
-     SELECT count(*)::int AS processed,
-            (SELECT count(*)::int FROM schedule_receipt_conflicts) AS conflicts
-       FROM completed_events`,
-      now, limit, scanLimit, ADMISSION_CLASS_GLOBAL_EVENT_STARTED,
-    );
-    if (Number(projected[0]?.conflicts || 0) > 0) {
-      const error = new Error("notification schedule receipt immutable identity mismatch");
-      error.code = "NOTIFICATION_SCHEDULE_RECEIPT_COLLISION";
-      throw error;
-    }
-    return projected;
-  });
-  return { processed: Number(rows[0]?.processed || 0) };
+     SELECT count(*)::int AS processed FROM completed`,
+    now,
+    limit,
+  ));
+  return { processed: Number(result.processed || 0) };
 }
-
 // A restored or restarted worker can inherit a large placement-refresh backlog.
 // Recipients without an eligible device have no provider side effect, so finish
 // those projections in one bounded statement instead of paying the generic
