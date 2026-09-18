@@ -27,6 +27,12 @@ const { buildHistoricalRaceDiscovery } = require("../../races/services/historica
 const { buildHistoricalRaceReconciliationIntentModel } = require("../../races/models/historicalRaceReconciliationIntent");
 const { buildHistoricalRaceDiscoveryCursorModel } = require("../../races/models/historicalRaceDiscoveryCursor");
 const lateEventTimeMetrics = require("../../../shared/observability/lateEventTimeMetrics");
+const {
+  publish: publishStream,
+  STREAMS,
+} = require("../../../shared/queues/redisStreams");
+const { RACE_DIRTY_VERSION } = require("../../../shared/queues/workMessages");
+const { deferUntilAfterCommit, isInPrismaTransactionScope } = require("../../../db");
 
 function generationsEqual(left, right) {
   if (left == null || right == null) return false;
@@ -366,6 +372,22 @@ function buildStepInputIntake(dependencies = {}) {
     };
   }
 
+  async function publishRaceJobs(result, input) {
+    if (!Array.isArray(result?.jobs) || result.jobs.length === 0) return;
+    await Promise.all(result.jobs.filter(Boolean).map((job) =>
+      publishStream(STREAMS.RACE_DIRTY, {
+        schemaVersion: RACE_DIRTY_VERSION,
+        raceId: job.raceId,
+        userId: input.userId || "",
+        timeZone: input.timeZone || "",
+        sourceGeneration: job.generation ? String(job.generation) : "",
+        jobGeneration: job.generation ? String(job.generation) : "",
+        reason: "STEP_INPUT_CHANGED",
+        requestedAt: new Date(input.requestTimestamp || now()).toISOString(),
+      })
+    ));
+  }
+
   return async function stepInputIntake(input, tx = null) {
     // Keep the established capacity-telemetry surface name stable. The
     // implementation beneath it is now the single canonical intake path, but
@@ -394,6 +416,13 @@ function buildStepInputIntake(dependencies = {}) {
             }
           })();
       outcome = result.scoringChanged ? "changed" : "scoring_noop";
+      if (result.jobs?.length) {
+        if (tx && isInPrismaTransactionScope()) {
+          await deferUntilAfterCommit(() => publishRaceJobs(result, input));
+        } else if (!tx) {
+          await publishRaceJobs(result, input);
+        }
+      }
       capacity.setCounts({
         enqueueRaceCount: result.activeRaceCount,
         storageChanged: result.storageChanged ? 1 : 0,
