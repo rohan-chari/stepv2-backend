@@ -36,4 +36,5 @@ Object.assign(module.exports, require("./commands/openMysteryBox"));
 Object.assign(module.exports, require("./commands/openMysteryBoxBatch"));
 Object.assign(module.exports, require("./commands/rerollMysteryBox"));
 Object.assign(module.exports, require("./commands/rerollMysteryBoxBatch"));
+Object.assign(module.exports, require("./jobs/powerupRecalcStreamWorker"));
 Object.assign(module.exports, require("./routes")); // createPowerupsRouter — LAST
