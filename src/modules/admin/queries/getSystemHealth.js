@@ -1,6 +1,7 @@
 const { ValidationError } = require("../../../shared/errors/AppError");
 const redisCacheDefault = require("../../../shared/cache/redisCache");
 const cacheKeysDefault = require("../../../shared/cache/cacheKeys");
+const redisStreamsDefault = require("../../../shared/queues/redisStreams");
 const {
   ENDPOINTS,
   createHistogram,
@@ -453,6 +454,24 @@ function buildGetSystemHealth(dependencies = {}) {
   const redisCache = dependencies.redisCache || redisCacheDefault;
   const cacheKeys = dependencies.cacheKeys || cacheKeysDefault;
   const now = dependencies.now || (() => new Date());
+  const queueHealthReader = dependencies.queueHealthReader || (async ({ nowMs }) => {
+    const specs = [
+      ["step-sync", redisStreamsDefault.STREAMS.STEP_SYNC, redisStreamsDefault.GROUPS.STEP_SYNC],
+      ["powerup-recalc", redisStreamsDefault.STREAMS.POWERUP_RECALC, redisStreamsDefault.GROUPS.POWERUP_RECALC],
+      ["race-dirty", redisStreamsDefault.STREAMS.RACE_DIRTY, redisStreamsDefault.GROUPS.RACE_DIRTY],
+      ["global-event-boundary", redisStreamsDefault.STREAMS.GLOBAL_EVENT_BOUNDARY, redisStreamsDefault.GROUPS.GLOBAL_EVENT_BOUNDARY],
+      ["notification-delivery", redisStreamsDefault.STREAMS.NOTIFICATION_DELIVERY, redisStreamsDefault.GROUPS.NOTIFICATION_DELIVERY],
+    ];
+    try {
+      const queues = await Promise.all(specs.map(async ([name, stream, group]) => ({
+        name,
+        ...(await redisStreamsDefault.queueHealth(stream, group, { nowMs })),
+      })));
+      return { status: "available", queues };
+    } catch {
+      return { status: "unavailable", queues: [] };
+    }
+  });
   const snapshotReader = dependencies.snapshotReader || (() =>
     redisCache.readDatabasePoolTelemetrySnapshots(
       EXPECTED.map(({ role, instance }) => cacheKeys.databasePoolTelemetry(role, instance)),
@@ -496,10 +515,11 @@ function buildGetSystemHealth(dependencies = {}) {
     if (window !== "60m") throw new ValidationError("Unsupported system-health window", "INVALID_WINDOW");
     const current = now();
     const nowMs = current.getTime();
-    const [snapshotResult, history, eventSurgeResult] = await Promise.all([
+    const [snapshotResult, history, eventSurgeResult, queueHealth] = await Promise.all([
       snapshotReader(),
       historyReader({ nowMs }),
       eventSurgeReader(),
+      queueHealthReader({ nowMs }),
     ]);
     const eventSurge = eventSurgeStatus(eventSurgeResult, nowMs);
     const historyStatus = resolvedHistoryStatus(history, nowMs);
@@ -542,6 +562,7 @@ function buildGetSystemHealth(dependencies = {}) {
         stepIngestion: null,
         failureWindows: failureWindows(history, nowMs),
         eventSurge,
+        queueHealth,
       };
     }
     const processes = valid.map(processRow);
@@ -560,6 +581,7 @@ function buildGetSystemHealth(dependencies = {}) {
       stepIngestion: combinedStepIngestion(valid),
       failureWindows: failureWindows(history, nowMs),
       eventSurge,
+      queueHealth,
     };
   };
 }
