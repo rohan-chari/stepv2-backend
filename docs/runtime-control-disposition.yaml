@@ -1103,9 +1103,9 @@
       "adminExposed": false,
       "disposition": "deployment_config",
       "permanentValue": null,
-      "polarityDefault": "canonical integer 1..50; production target 4",
+      "polarityDefault": "canonical integer 1..50; production target 3",
       "deployFamily": "database_capacity",
-      "rollbackValue": 4
+      "rollbackValue": 3
     },
     {
       "id": "env:DATABASE_POOL_MAX_DEFAULT",
@@ -1119,6 +1119,19 @@
       "polarityDefault": "canonical integer 1..50; optional non-production fallback before compatibility default 20",
       "deployFamily": "database_capacity",
       "rollbackValue": 20
+    },
+    {
+      "id": "env:DATABASE_POOL_MAX_EVENT",
+      "name": "DATABASE_POOL_MAX_EVENT",
+      "kind": "numeric_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "canonical integer 1..50; production target 3",
+      "deployFamily": "database_capacity",
+      "rollbackValue": 3
     },
     {
       "id": "env:DATABASE_POOL_MAX_HTTP",
@@ -1147,6 +1160,19 @@
       "rollbackValue": 2
     },
     {
+      "id": "env:DATABASE_POOL_MAX_NOTIFICATION",
+      "name": "DATABASE_POOL_MAX_NOTIFICATION",
+      "kind": "numeric_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "canonical integer 1..50; production target 4",
+      "deployFamily": "database_capacity",
+      "rollbackValue": 4
+    },
+    {
       "id": "env:DATABASE_POOL_MAX_RESOLUTION",
       "name": "DATABASE_POOL_MAX_RESOLUTION",
       "kind": "numeric_environment",
@@ -1155,9 +1181,22 @@
       "adminExposed": false,
       "disposition": "deployment_config",
       "permanentValue": null,
-      "polarityDefault": "canonical integer 1..50; production target 8",
+      "polarityDefault": "canonical integer 1..50; production target 6",
       "deployFamily": "database_capacity",
-      "rollbackValue": 8
+      "rollbackValue": 6
+    },
+    {
+      "id": "env:DATABASE_POOL_MAX_STEP",
+      "name": "DATABASE_POOL_MAX_STEP",
+      "kind": "numeric_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "canonical integer 1..50; production target 3",
+      "deployFamily": "database_capacity",
+      "rollbackValue": 3
     },
     {
       "id": "env:DATABASE_POOL_TOTAL_BUDGET",
@@ -1168,9 +1207,9 @@
       "adminExposed": false,
       "disposition": "deployment_config",
       "permanentValue": null,
-      "polarityDefault": "production PM2 topology invariant; reviewed aggregate 32",
+      "polarityDefault": "production PM2 topology invariant; reviewed aggregate 39",
       "deployFamily": "database_capacity",
-      "rollbackValue": 32
+      "rollbackValue": 39
     },
     {
       "id": "env:DATABASE_URL",
@@ -1940,19 +1979,6 @@
       "rollbackValue": null
     },
     {
-      "id": "env:RACE_ENDING_REMINDER_DISABLED",
-      "name": "RACE_ENDING_REMINDER_DISABLED",
-      "kind": "boolean_environment",
-      "evidenceTimestamp": "2026-08-20T04:23:00Z",
-      "compatibilityConsumers": [],
-      "adminExposed": false,
-      "disposition": "retired_env",
-      "permanentValue": false,
-      "polarityDefault": "fan-out runs behind OPS_USER_FANOUTS_DISABLED",
-      "deployFamily": "environment_cleanup",
-      "rollbackValue": false
-    },
-    {
       "id": "env:QUEUE_REDIS_URL",
       "name": "QUEUE_REDIS_URL",
       "kind": "string_environment",
@@ -1964,6 +1990,19 @@
       "polarityDefault": "dedicated Redis connection URL for durable queue transport and stream trimming; required by queue-owning processes",
       "deployFamily": "queue_transport",
       "rollbackValue": null
+    },
+    {
+      "id": "env:RACE_ENDING_REMINDER_DISABLED",
+      "name": "RACE_ENDING_REMINDER_DISABLED",
+      "kind": "boolean_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "retired_env",
+      "permanentValue": false,
+      "polarityDefault": "fan-out runs behind OPS_USER_FANOUTS_DISABLED",
+      "deployFamily": "environment_cleanup",
+      "rollbackValue": false
     },
     {
       "id": "env:RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS",
