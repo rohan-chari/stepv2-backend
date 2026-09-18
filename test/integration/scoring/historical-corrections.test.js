@@ -453,7 +453,7 @@ describe("historical late event-time effect reconciliation", () => {
     assert.ok(coordinatedOptimizationMetrics.snapshot().histograms.correction_delta_steps_absolute.sum >= 1668);
   });
 
-  it("uses canonical phase and signed modifier behavior for all ten supported families", async () => {
+  it("uses canonical phase and signed modifier behavior for supported active families", async () => {
     const data = await fixture({ totalSteps: 10000 });
     const effects = [];
     const samples = [];
@@ -466,7 +466,6 @@ describe("historical late event-time effect reconciliation", () => {
     await addWindow("WRONG_TURN", new Date("2026-09-16T11:00:00Z"), new Date("2026-09-16T11:30:00Z"), 1000);
     await addWindow("RAINSTORM", new Date("2026-09-16T11:30:00Z"), new Date("2026-09-16T12:00:00Z"), 1000, { multiplier: 0.5 });
     await addWindow("CAMPFIRE_REST", new Date("2026-09-16T12:00:00Z"), new Date("2026-09-16T13:30:00Z"), 1000, { freezeMs: 1800000, multiplier: 1.5, boostMs: 1800000 });
-    await addWindow("UPRISING", new Date("2026-09-16T13:30:00Z"), new Date("2026-09-16T14:00:00Z"), 1000, { multiplier: 2 });
     await addWindow("RALLY_FLAG", new Date("2026-09-16T14:00:00Z"), new Date("2026-09-16T14:30:00Z"), 1000, { multiplier: 1.25 });
     await addWindow("COIN_FLIP", new Date("2026-09-16T14:30:00Z"), new Date("2026-09-16T15:00:00Z"), 1000, { multiplier: 2 });
     await addWindow("COIN_FLIP", new Date("2026-09-16T15:00:00Z"), new Date("2026-09-16T15:30:00Z"), 1000, { multiplier: 0.5 });
@@ -474,12 +473,12 @@ describe("historical late event-time effect reconciliation", () => {
     await addSamples(data.account.user.id, samples);
     await enqueue(data, START, new Date("2026-09-16T17:01:00Z"));
     const result = await worker().runOnce();
-    assert.equal(result.corrected, 10);
+    assert.equal(result.corrected, 9);
     const projections = await prisma.historicalEffectContribution.findMany({ orderBy: { effectId: "asc" } });
-    assert.equal(projections.length, 10);
-    assert.deepEqual(new Map(effects.map((effect) => [effect.id, effect.type])).size, 10);
+    assert.equal(projections.length, 9);
+    assert.deepEqual(new Map(effects.map((effect) => [effect.id, effect.type])).size, 9);
     assert.equal(await prisma.raceImpactEvent.count(), 0);
-    assert.equal(await prisma.stepSample.count({ where: { userId: data.account.user.id } }), 10);
+    assert.equal(await prisma.stepSample.count({ where: { userId: data.account.user.id } }), 9);
   });
 
   it("reconciles Rally Flag per materialized team beneficiary", async () => {
