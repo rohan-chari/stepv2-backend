@@ -231,6 +231,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
         schemaVersion: RACE_DIRTY_VERSION,
         raceId: race.raceId,
         userId: message.userId,
+        timeZone: message.timeZone,
         sourceGeneration: generation,
         reason: "STEP_INPUT_CHANGED",
         requestedAt: now().toISOString(),
