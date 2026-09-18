@@ -73,4 +73,36 @@ async function hydrateGlobalEventRedisSchedule({
   return { scheduled };
 }
 
-module.exports = { hydrateGlobalEventRedisSchedule };
+function scheduleGlobalEventRedisScheduleHydrator(dependencies = {}) {
+  const run = dependencies.run || (() => hydrateGlobalEventRedisSchedule(dependencies));
+  const logger = dependencies.logger || console;
+  const intervalMs = Math.max(60_000, Number(dependencies.intervalMs) || 5 * 60_000);
+  let stopped = false;
+  let running = null;
+
+  const tick = () => {
+    if (stopped || running) return running;
+    running = Promise.resolve()
+      .then(run)
+      .catch((error) => logger.error?.("[GLOBAL_EVENT_QUEUE] schedule hydration failed", error))
+      .finally(() => { running = null; });
+    return running;
+  };
+
+  void tick();
+  const interval = setInterval(tick, intervalMs);
+  interval.unref?.();
+  return {
+    tick,
+    async stop() {
+      stopped = true;
+      clearInterval(interval);
+      await running;
+    },
+  };
+}
+
+module.exports = {
+  hydrateGlobalEventRedisSchedule,
+  scheduleGlobalEventRedisScheduleHydrator,
+};
