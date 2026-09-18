@@ -74,6 +74,40 @@ function raceRanksOnRawSteps(accepted) {
 // Returns { position, totalParticipants, usedRawSteps, myTeamValid }.
 // `position` is 0 when the user is not among the accepted rows, which is the
 // pre-existing behaviour of the three sites this replaced.
+
+// The mystery-box odds position from the EFFECTIVE leaderboard total.
+// This intentionally follows the same persisted totalSteps ranking the player
+// sees on the leaderboard, including powerup/event boosts already folded into
+// those totals. Team races rank by summed team totalSteps.
+function leaderboardPositionFor({ participants, race, userId }) {
+  const accepted = (Array.isArray(participants) ? participants : []).filter(
+    (p) => p && (p.status === undefined || p.status === "ACCEPTED")
+  );
+  const stepsOf = (p) => totalFor(p);
+
+  if (race && race.isTeamRace) {
+    const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
+    for (const p of accepted) {
+      if (p.team === "TEAM_A") teamTotals.TEAM_A += stepsOf(p);
+      else if (p.team === "TEAM_B") teamTotals.TEAM_B += stepsOf(p);
+    }
+    const myTeam = accepted.find((p) => p.userId === userId)?.team ?? null;
+    const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+    return {
+      position: teamTotals[myTeam] < teamTotals[otherTeam] ? 2 : 1,
+      totalParticipants: 2,
+      myTeamValid: myTeam === "TEAM_A" || myTeam === "TEAM_B",
+    };
+  }
+
+  const sorted = [...accepted].sort((a, b) => stepsOf(b) - stepsOf(a));
+  return {
+    position: sorted.findIndex((p) => p.userId === userId) + 1,
+    totalParticipants: sorted.length,
+    myTeamValid: true,
+  };
+}
+
 function rawPositionFor({ participants, race, userId }) {
   const accepted = (Array.isArray(participants) ? participants : []).filter(
     (p) => p && (p.status === undefined || p.status === "ACCEPTED")
@@ -107,4 +141,4 @@ function rawPositionFor({ participants, race, userId }) {
   };
 }
 
-module.exports = { rawPositionFor, nextRawSteps, rawOf, totalFor };
+module.exports = { leaderboardPositionFor, rawPositionFor, nextRawSteps, rawOf, totalFor };
