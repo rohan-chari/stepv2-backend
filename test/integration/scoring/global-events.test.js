@@ -803,6 +803,119 @@ before(async () => { server = await startServer(); });
 beforeEach(async () => cleanDatabase());
 after(async () => { await server.close(); await disconnectDatabase(); });
 
+
+function transactionCountingPrisma(client) {
+  let transactions = 0;
+  const proxy = new Proxy(client, {
+    get(target, property, receiver) {
+      if (property === "$transaction") {
+        return async (...args) => {
+          transactions += 1;
+          return target.$transaction(...args);
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  return {
+    prisma: proxy,
+    get transactionCount() { return transactions; },
+  };
+}
+
+async function createDueStartCohort(count, now) {
+  const users = [];
+  for (let index = 0; index < count; index += 1) {
+    users.push((await createTestUser()).user);
+  }
+  const event = await prisma.globalStepEvent.create({
+    data: {
+      eventDay: "2098-11-30",
+      scheduleMode: "LOCAL_ENTITLEMENTS",
+      localStartMinute: 720,
+      durationMinutes: 30,
+      startsAt: new Date(now.getTime() - 60 * 60 * 1000),
+      endsAt: new Date(now.getTime() + 60 * 60 * 1000),
+      multiplier: 2,
+    },
+  });
+  await prisma.globalStepEventEntitlement.createMany({
+    data: users.map((user) => ({
+      eventId: event.id,
+      userId: user.id,
+      timezone: "UTC",
+      localDate: "2098-11-30",
+      startsAt: new Date(now.getTime() - 60_000),
+      endsAt: new Date(now.getTime() + 30 * 60_000),
+    })),
+  });
+  return { event, users };
+}
+
+test("daily 2x start boundary processes one cohort in one transaction", async () => {
+  const now = new Date("2098-11-30T12:01:00.000Z");
+  const { event } = await createDueStartCohort(5, now);
+  const counted = transactionCountingPrisma(prisma);
+
+  const result = await processDueEntitlementBoundaries({
+    prisma: counted.prisma,
+    now,
+    batchSize: 5,
+    tickBudgetMs: 30_000,
+  });
+
+  assert.equal(result.starts, 5);
+  assert.equal(result.failures, 0);
+  assert.equal(counted.transactionCount, 1, "one due start cohort should share one transaction");
+  const rows = await prisma.globalStepEventEntitlement.findMany({
+    where: { eventId: event.id },
+    orderBy: { userId: "asc" },
+  });
+  assert.equal(rows.length, 5);
+  assert.ok(rows.every((row) => row.startOutcome === "NO_ACTIVE_RACES"));
+  assert.ok(rows.every((row) => row.startProcessedAt != null));
+});
+
+test("daily 2x start boundary drains multiple batches exactly once", async () => {
+  const now = new Date("2098-11-30T13:01:00.000Z");
+  const { event } = await createDueStartCohort(5, now);
+  const counted = transactionCountingPrisma(prisma);
+
+  const observedStarts = [];
+  for (let pass = 0; pass < 3; pass += 1) {
+    const result = await processDueEntitlementBoundaries({
+      prisma: counted.prisma,
+      now,
+      batchSize: 2,
+      tickBudgetMs: 30_000,
+    });
+    observedStarts.push(result.starts);
+  }
+
+  assert.deepEqual(observedStarts, [2, 2, 1]);
+  assert.equal(counted.transactionCount, 3, "each micro-batch should use one transaction");
+  const rows = await prisma.globalStepEventEntitlement.findMany({
+    where: { eventId: event.id },
+  });
+  assert.equal(rows.length, 5);
+  assert.equal(rows.filter((row) => row.startProcessedAt != null).length, 5);
+  assert.equal(rows.filter((row) => row.startOutcome === "NO_ACTIVE_RACES").length, 5);
+
+  const afterDrain = await processDueEntitlementBoundaries({
+    prisma: counted.prisma,
+    now,
+    batchSize: 2,
+    tickBudgetMs: 30_000,
+  });
+  assert.equal(afterDrain.starts, 0);
+  assert.equal(
+    await prisma.globalStepEventEntitlement.count({
+      where: { eventId: event.id, startProcessedAt: { not: null } },
+    }),
+    5,
+  );
+});
+
 test("new local parents persist the weighted boundary minute and policy version 2", async () => {
   let draws = 0;
   const result = await GlobalStepEvent.createLocalParentIfAbsent({
