@@ -175,6 +175,7 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleComputeRankedWeeks: track("computeRankedWeeks"),
     scheduleGlobalStepEvents: track("globalStepEvents"),
     scheduleGenerationHeartbeat: track("generationHeartbeat"),
+    scheduleStepSyncStreamWorker: track("stepStream"),
     scheduleGlobalEventBoundaryDrain: track("globalEventBoundaryDrain"),
     scheduleGlobalEventEntitlementEventReconciler: track("globalEventEntitlementEventReconciler"),
     scheduleGlobalEventBoundaryStreamScheduler: track("globalEventBoundaryStreamScheduler"),
