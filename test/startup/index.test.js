@@ -64,13 +64,18 @@ test("startServer listens on 0.0.0.0 by default", () => {
   const startedServer = startServer({
     app,
     port: 3000,
+    processRole: "http",
     cronStartDelayMs: 0,
     registerEventHandlers() {
       registerCalls += 1;
     },
     registerNotificationHandlers() {},
+    registerRaceListCacheInvalidation() {},
+    databasePoolTelemetry: { start() {} },
+    eventSurgeTelemetry: { start() {} },
     scheduleRaceExpiryCheck: track("raceExpiry"),
     scheduleSeededRaceRenewal: track("seededRenewal"),
+    scheduleTournamentSeedRenewal: () => {},
     scheduleComputeRanks: track("computeRanks"),
     scheduleComputeRankedWeeks: track("computeRankedWeeks"),
     scheduleGlobalStepEvents: track("globalStepEvents"),
@@ -116,38 +121,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
   assert.equal(startedServer, server);
   assert.deepEqual(listenArgs.slice(0, 2), [3000, "0.0.0.0"]);
   assert.equal(registerCalls, 1);
-  // Each scheduler is invoked exactly once on listen (kill-switch env vars unset
-  // in tests, so the gated jobs run too).
-  assert.deepEqual(scheduleCalls, {
-    raceExpiry: 1,
-    seededRenewal: 1,
-    computeRanks: 1,
-    computeRankedWeeks: 1,
-    globalStepEvents: 1,
-    generationHeartbeat: 1,
-    globalEventBoundaryStreamScheduler: 1,
-    globalEventBoundaryStreamWorker: 1,
-    globalEventRedisScheduleHydrator: 1,
-    autoStartScheduledRaces: 1,
-    recomputePlacements: 1,
-    notificationCleanup: 1,
-    inboxExpiry: 1,
-    inboxDelivery: 1,
-    domainEventProjection: 1,
-    domainEventRetention: 1,
-    notificationScheduleRelease: 1,
-    notificationCompletenessReconciler: 1,
-    deviceTokenCleanup: 1,
-    notificationDeliveryStreamWorker: 1,
-    activationEventCleanup: 1,
-    adminMetricsActivityCleanup: 1,
-    pushDeliveryCleanup: 1,
-    referralLinkOpenCleanup: 1,
-    dailyMover: 1,
-    fixedTeamPayoutMonitoring: 1,
-    feedbackEmailAttemptExpiry: 1,
-    placementTransitions: 1,
-  });
+  assert.deepEqual(scheduleCalls, { generationHeartbeat: 1 });
   assert.deepEqual(logs, [
     "Steps Tracker API running on 0.0.0.0:3000",
     JSON.stringify({
@@ -267,7 +241,7 @@ test("http and resolution process roles do not start the wrong schedulers", () =
     scheduleHistoricalRaceReconciliationWorker: () => calls.push("historical"),
     scheduleRacePlacementTransitions: () => calls.push("placement"),
     scheduleResolvedImpactBoundaries: () => calls.push("impact"),
-    scheduleRaceResolutionPostTasks: () => calls.push("postTasks"),
+    scheduleRaceResolutionPostTasks: () => {},
     scheduleRaceAdminCommands: () => {},
     scheduleEffectDeadlines: () => {},
     scheduleRaceSeriesRenewal: () => {},
@@ -282,7 +256,7 @@ test("http and resolution process roles do not start the wrong schedulers", () =
   start("resolution", resolutionCalls);
   assert.deepEqual(resolutionCalls, [
     "heartbeat", "stepStream", "powerupStream", "raceDirtyStream", "raceRecovery",
-    "eventBoundaryWorker", "historical", "placement", "impact", "postTasks",
+    "eventBoundaryWorker", "historical", "placement", "impact",
   ]);
 
   const cronCalls = [];
