@@ -1961,8 +1961,8 @@
       "adminExposed": false,
       "disposition": "deployment_config",
       "permanentValue": null,
-      "polarityDefault": "runtime value; see source consumers",
-      "deployFamily": "runtime_configuration",
+      "polarityDefault": "dedicated Redis connection URL for durable queue transport and stream trimming; required by queue-owning processes",
+      "deployFamily": "queue_transport",
       "rollbackValue": null
     },
     {
