@@ -236,20 +236,20 @@ const RaceParticipant = {
         WHERE rp.race_id = $1
           AND rp.status = 'accepted'::"RaceParticipantStatus"
         ORDER BY
-          CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END,
-          CASE WHEN rp.finished_at IS NOT NULL THEN rp.placement END ASC NULLS LAST,
-          CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC NULLS LAST,
-          CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
+          CASE WHEN rp.finished_at IS NOT NULL
+            THEN COALESCE(rp.finish_total_steps, rp.total_steps, 0)
+            ELSE COALESCE(rp.total_steps, 0)
+          END DESC,
           rp.joined_at ASC,
           rp.id ASC
         OFFSET $2 LIMIT $3
       ), ranked AS (
         SELECT page.*, (ROW_NUMBER() OVER (
           ORDER BY
-            CASE WHEN "finishedAt" IS NOT NULL THEN 0 ELSE 1 END,
-            CASE WHEN "finishedAt" IS NOT NULL THEN placement END ASC NULLS LAST,
-            CASE WHEN "finishedAt" IS NOT NULL THEN "finishedAt" END ASC NULLS LAST,
-            CASE WHEN "finishedAt" IS NULL THEN "totalSteps" END DESC NULLS LAST,
+            CASE WHEN "finishedAt" IS NOT NULL
+              THEN COALESCE("finishTotalSteps", "totalSteps", 0)
+              ELSE COALESCE("totalSteps", 0)
+            END DESC,
             "joinedAt" ASC, "participantId" ASC
         ) + $2)::int AS "computedPlacement"
         FROM page
@@ -266,29 +266,39 @@ const RaceParticipant = {
     );
   },
 
-  // One-row solo box disclosure context. Match leaderboardPositionFor's whole-race
-  // fallback and stable joinedAt tie order, plus the roll's persisted totals.
+  // One-row solo box disclosure context. Match rawPositionFor's whole-race
+  // rawSteps fallback and stable joinedAt/id tie order, while preserving the
+  // effective-total min/max values used by use-time eligibility gates.
   // Window aggregates scan only this race's accepted rows; no roster hydration.
   async findMysteryBoxPreviewContext(raceId, userId) {
     const rows = await prisma.$queryRaw`
       WITH accepted AS (
-        SELECT user_id, joined_at, total_steps,
+        SELECT id, user_id, joined_at, total_steps, raw_steps,
           CASE WHEN finished_at IS NOT NULL
             THEN COALESCE(finish_total_steps, total_steps, 0)
             ELSE COALESCE(total_steps, 0) END AS leaderboard_steps,
           COUNT(*) OVER ()::int AS "totalParticipants",
+          COUNT(*) FILTER (WHERE raw_steps IS NULL) OVER ()::int AS "missingRawSteps",
           MIN(COALESCE(total_steps, 0)) OVER () AS "minTotalSteps",
           MAX(COALESCE(total_steps, 0)) OVER () AS "maxTotalSteps"
         FROM race_participants
         WHERE race_id = ${raceId} AND status = 'accepted'::"RaceParticipantStatus"
       ), ranked AS (
         SELECT *, ROW_NUMBER() OVER (
-          ORDER BY leaderboard_steps DESC, joined_at ASC
+          ORDER BY
+            CASE WHEN "missingRawSteps" = 0
+              THEN COALESCE(raw_steps, 0)
+              ELSE leaderboard_steps
+            END DESC,
+            joined_at ASC,
+            id ASC
         )::int AS position
         FROM accepted
       )
       SELECT position, "totalParticipants", "minTotalSteps", "maxTotalSteps",
-        COALESCE(total_steps, 0) AS "myTotalSteps"
+        COALESCE(total_steps, 0) AS "myTotalSteps",
+        ("missingRawSteps" = 0) AS "usedRawSteps",
+        true AS "myTeamValid"
       FROM ranked WHERE user_id = ${userId} LIMIT 1
     `;
     return rows[0] || null;
