@@ -53,7 +53,12 @@
     "load-test:k6:home-open": "node scripts/k6-home-open.js",
     "cohort:repair": "node scripts/repair-signup-seeded-cohort.js",
     "team-payouts:repair": "node scripts/repair-open-fixed-team-payouts.js",
-    "race-effects:backfill-deadlines": "node scripts/backfill-race-effect-deadlines.js"
+    "race-effects:backfill-deadlines": "node scripts/backfill-race-effect-deadlines.js",
+    "test:performance": "node scripts/run-local-integration-tests.cjs 'test/performance/**/*.test.js'",
+    "test:reliability": "node scripts/run-local-integration-tests.cjs 'test/reliability/**/*.test.js'",
+    "test:contracts": "node scripts/run-local-integration-tests.cjs 'test/contracts/**/*.test.js'",
+    "test:http-service": "node scripts/run-local-integration-tests.cjs 'test/http-and-service/**/*.test.js'",
+    "test:maintenance": "node scripts/run-local-integration-tests.cjs 'test/maintenance/**/*.test.js'"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
