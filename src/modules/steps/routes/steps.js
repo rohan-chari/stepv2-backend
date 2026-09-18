@@ -3,8 +3,8 @@ const { recordSteps } = require("../commands/recordSteps");
 const { assertFineSamplesAllowed } = require("../stepSyncCanonical");
 const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
 const {
-  recordStepSyncV2: defaultRecordStepSyncV2,
-} = require("../commands/recordStepSyncV2");
+  queueStepSync: defaultQueueStepSync,
+} = require("../commands/queueStepSync");
 const {
   RaceResolutionJob: defaultRaceResolutionJobModel,
   serializeRaceResolutionStatus,
@@ -69,8 +69,8 @@ function createStepsRouter(dependencies = {}) {
   const readStepsByDate = dependencies.getStepsByDate || getStepsByDate;
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
   const recordSamples = dependencies.recordStepSamples || defaultRecordStepSamples;
-  const recordStepSyncV2 =
-    dependencies.recordStepSyncV2 || defaultRecordStepSyncV2;
+  const queueStepSync =
+    dependencies.queueStepSync || dependencies.recordStepSyncV2 || defaultQueueStepSync;
   const raceResolutionJobModel =
     dependencies.RaceResolutionJob || defaultRaceResolutionJobModel;
   const raceResolutionJobV2Model =
@@ -292,7 +292,7 @@ function createStepsRouter(dependencies = {}) {
         Array.isArray(req.body?.samples) ? req.body.samples : [],
         req.headers["x-app-version"]
       );
-      const response = await recordStepSyncV2({
+      const response = await queueStepSync({
         userId: req.user.id,
         body: req.body,
         idempotencyKey: req.headers["idempotency-key"],
@@ -350,6 +350,17 @@ function createStepsRouter(dependencies = {}) {
         return res.status(409).json({
           error: "Idempotency key already used",
           code: "IDEMPOTENCY_CONFLICT",
+        });
+      }
+      if (
+        error.code === "QUEUE_REDIS_UNAVAILABLE" ||
+        error.code === "ECONNREFUSED" ||
+        error.code === "ETIMEDOUT"
+      ) {
+        res.locals.stepTelemetryOutcome = "queue_unavailable";
+        return res.status(503).json({
+          error: "Step sync temporarily unavailable",
+          code: "STEP_SYNC_QUEUE_UNAVAILABLE",
         });
       }
       res.locals.stepTelemetryOutcome = classifyCaughtStepServerError(error);
