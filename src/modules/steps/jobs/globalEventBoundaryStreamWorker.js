@@ -237,7 +237,7 @@ function buildGlobalEventBoundaryStreamWorker(dependencies = {}) {
         schemaVersion: NOTIFICATION_DELIVERY_VERSION,
         recipientUserId: notify.recipientUserId,
         type: "GLOBAL_EVENT_STARTED",
-        deliveryKey: `global-event-start:${notify.entitlementId}:${notify.scheduleRevision}`,
+        deliveryKey: `visible:GLOBAL_EVENT_STARTED:${notify.recipientUserId}:${notify.eventId}`,
         sourceType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
         sourceId: notify.entitlementId,
         sourceRevision: notify.scheduleRevision,
