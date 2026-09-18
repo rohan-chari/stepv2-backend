@@ -187,6 +187,45 @@ return {0, redis.call("PTTL", KEYS[1])}
   };
 }
 
+function pairsToObject(raw) {
+  const out = {};
+  if (!Array.isArray(raw)) return out;
+  for (let index = 0; index < raw.length; index += 2) {
+    out[String(raw[index])] = raw[index + 1];
+  }
+  return out;
+}
+
+function streamIdTimestamp(id) {
+  if (typeof id !== "string") return null;
+  const milliseconds = Number(id.split("-", 1)[0]);
+  return Number.isSafeInteger(milliseconds) && milliseconds >= 0
+    ? milliseconds
+    : null;
+}
+
+async function queueHealth(stream, group, { nowMs = Date.now() } = {}) {
+  const redis = await commandClient();
+  const physicalStream = streamName(stream);
+  const [pending, groups] = await Promise.all([
+    redis.xpending(physicalStream, group),
+    redis.xinfo("GROUPS", physicalStream),
+  ]);
+  const groupRow = (groups || [])
+    .map(pairsToObject)
+    .find((row) => row.name === group) || {};
+  const pendingCount = Number(pending?.[0] || 0);
+  const oldestPendingAtMs = streamIdTimestamp(pending?.[1] || null);
+  return {
+    pendingCount,
+    waitingCount: Math.max(0, Number(groupRow.lag || 0)),
+    consumerCount: Math.max(0, Number(groupRow.consumers || 0)),
+    oldestPendingAgeMs: oldestPendingAtMs == null
+      ? 0
+      : Math.max(0, Number(nowMs) - oldestPendingAtMs),
+  };
+}
+
 async function pendingSummary(stream, group) {
   const redis = await commandClient();
   const result = await redis.xpending(streamName(stream), group);
@@ -222,5 +261,6 @@ module.exports = {
   reclaimIdle,
   claimIdempotentWindow,
   pendingSummary,
+  queueHealth,
   close,
 };
