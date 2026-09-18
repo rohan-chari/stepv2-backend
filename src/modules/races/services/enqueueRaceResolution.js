@@ -59,6 +59,7 @@ function resolutionWakeOptions({ queuedGenerationMerge, dirtyEnvelope }) {
 
 async function publishRaceDirty(row, {
   userId = null,
+  timeZone = null,
   reason = "FULL",
   requestedAt = new Date(),
 } = {}) {
@@ -67,6 +68,7 @@ async function publishRaceDirty(row, {
     schemaVersion: RACE_DIRTY_VERSION,
     raceId: row.raceId,
     userId: userId || "",
+    timeZone: timeZone || "",
     sourceGeneration: row.generation ? String(row.generation) : "",
     jobGeneration: row.generation ? String(row.generation) : "",
     reason: reason || "FULL",
@@ -196,7 +198,7 @@ async function enqueueRaceResolution(
         if (!tx) {
           await publishRaceDirty(
             { raceId, generation: covered.generation || null },
-            { userId, reason: "DISPLAY_REFRESH", requestedAt: now },
+            { userId, timeZone, reason: "DISPLAY_REFRESH", requestedAt: now },
           );
         }
         return covered;
@@ -266,6 +268,7 @@ async function enqueueRaceResolution(
   });
   const publishResult = (row) => publishRaceDirty(row, {
     userId,
+    timeZone,
     reason: reason || "FULL",
     requestedAt: now,
   });
@@ -392,6 +395,7 @@ async function enqueueRaceResolutionForUser(
       await deferUntilAfterCommit(() => Promise.all(
         result.map((row) => publishRaceDirty(row, {
           userId,
+          timeZone,
           reason: reason || "FULL",
           requestedAt: now,
         }))
