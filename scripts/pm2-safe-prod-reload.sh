@@ -25,69 +25,69 @@ LATEST_APP_VERSION="$(node -e '
   process.stdout.write(value);
 ')"
 export CONFIG GUARD MIN_SUPPORTED_APP_VERSION LATEST_APP_VERSION
+
 exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
-  BASELINE_DIR="$(mktemp -d /run/steps-pool-baseline.XXXXXX)"
-  BASELINE_FILE="$BASELINE_DIR/live.json"
-  trap '\''rm -f -- "$BASELINE_FILE"; rmdir -- "$BASELINE_DIR"'\'' EXIT HUP INT TERM
+  stop_and_wait_if_present() {
+    NAME="$1"
+    PID="$(pm2 pid "$NAME" 2>/dev/null | tail -n 1 | tr -d "[:space:]" || true)"
+    case "$PID" in
+      ""|0) return 0 ;;
+      *[!0-9]*) echo "invalid PID for $NAME: $PID" >&2; exit 1 ;;
+    esac
 
+    START="$(awk "{print \$22}" "/proc/$PID/stat" 2>/dev/null || true)"
+    [ -n "$START" ] || { echo "cannot identify live $NAME process $PID" >&2; exit 1; }
+
+    pm2 stop "$NAME"
+    DEADLINE="$(( $(date +%s) + 120 ))"
+    while kill -0 "$PID" 2>/dev/null; do
+      CURRENT_START="$(awk "{print \$22}" "/proc/$PID/stat" 2>/dev/null || true)"
+      [ "$CURRENT_START" != "$START" ] && break
+      [ "$(date +%s)" -ge "$DEADLINE" ] && {
+        echo "$NAME PID $PID did not exit before safe-reload deadline" >&2
+        exit 1
+      }
+      sleep 1
+    done
+  }
+
+  # Target config must be internally valid before any PID changes. The live
+  # source may be the reviewed legacy 4-process topology on the first rollout
+  # or the split 7-process topology on every later rollout. No partial topology
+  # is accepted.
   node "$GUARD" --pool-budget-mode=static
-  node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
-  node "$GUARD" --pool-budget-mode=baseline --baseline-file="$BASELINE_FILE"
+  node "$GUARD" --source-topology
 
-  # Remove every old HTTP targeted-claim path before the candidate dedicated
-  # resolution owner is allowed to start. The cluster reload remains graceful
-  # and preserves both HTTP instances throughout the handoff.
+  # HTTP becomes producer-only first. A rolling cluster reload preserves both
+  # public workers while removing any historical background ownership from the
+  # request tier.
   pm2 startOrReload "$CONFIG" --only steps-tracker --update-env
-  node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
-  node "$GUARD" --pool-budget-mode=transition --transitioned-roles=http --baseline-file="$BASELINE_FILE"
 
-  OLD_CRON_PID="$(pm2 pid steps-tracker-cron | tail -n 1 | tr -d "[:space:]")"
-  case "$OLD_CRON_PID" in
-    ""|0|*[!0-9]*) echo "safe reload requires one live steps-tracker-cron PID" >&2; exit 1 ;;
-  esac
-  OLD_CRON_START="$(awk "{print \$22}" "/proc/$OLD_CRON_PID/stat")"
-  pm2 stop steps-tracker-cron
-  CRON_EXIT_DEADLINE="$(( $(date +%s) + 120 ))"
-  while kill -0 "$OLD_CRON_PID" 2>/dev/null; do
-    CURRENT_CRON_START="$(awk "{print \$22}" "/proc/$OLD_CRON_PID/stat" 2>/dev/null || true)"
-    [ "$CURRENT_CRON_START" != "$OLD_CRON_START" ] && break
-    [ "$(date +%s)" -ge "$CRON_EXIT_DEADLINE" ] && {
-      echo "old cron PID did not exit before safe-reload deadline" >&2
-      exit 1
-    }
-    sleep 1
-  done
-  # The exact old owner is gone. Wait the full legacy delivery lease before a
-  # new cron can claim any row that an old binary might have held.
+  # Stop every possible old background owner before any candidate consumer
+  # starts. Missing split roles are expected on the first rollout.
+  stop_and_wait_if_present steps-tracker-cron
+  stop_and_wait_if_present steps-tracker-notification
+  stop_and_wait_if_present steps-tracker-event
+  stop_and_wait_if_present steps-tracker-step
+  stop_and_wait_if_present steps-tracker-resolution
+
+  # Redis stream reclaim and database delivery leases use 30-second windows.
+  # Waiting here prevents the new artifact from racing an old claimed message
+  # whose process just exited.
   sleep 30
 
-  # A resolution process runs both the core queue and the post-task runner.
-  # Never overlap artifacts here: an older runner would accept the additive
-  # snapshot JSON, ignore effectExpiryParticipantSteps, and falsely mark it
-  # complete. Stop and prove the exact old process is gone before starting the
-  # candidate artifact.
-  OLD_RESOLUTION_PID="$(pm2 pid steps-tracker-resolution | tail -n 1 | tr -d "[:space:]")"
-  case "$OLD_RESOLUTION_PID" in
-    ""|0|*[!0-9]*) echo "safe reload requires one live steps-tracker-resolution PID" >&2; exit 1 ;;
-  esac
-  OLD_RESOLUTION_START="$(awk "{print \$22}" "/proc/$OLD_RESOLUTION_PID/stat")"
-  pm2 stop steps-tracker-resolution
-  RESOLUTION_EXIT_DEADLINE="$(( $(date +%s) + 120 ))"
-  while kill -0 "$OLD_RESOLUTION_PID" 2>/dev/null; do
-    CURRENT_RESOLUTION_START="$(awk "{print \$22}" "/proc/$OLD_RESOLUTION_PID/stat" 2>/dev/null || true)"
-    [ "$CURRENT_RESOLUTION_START" != "$OLD_RESOLUTION_START" ] && break
-    [ "$(date +%s)" -ge "$RESOLUTION_EXIT_DEADLINE" ] && {
-      echo "old resolution PID did not exit before safe-reload deadline" >&2
-      exit 1
-    }
-    sleep 1
-  done
+  # Start only the candidate artifact, in dependency order. Queue intake can
+  # accumulate safely while background owners are down.
+  pm2 start "$CONFIG" --only steps-tracker-step
   pm2 start "$CONFIG" --only steps-tracker-resolution
-  # Only the new canonical worker can consume reservation-backed shells.
-  # Keep cron stopped until that worker has replaced the old artifact.
+  pm2 start "$CONFIG" --only steps-tracker-event
+  pm2 start "$CONFIG" --only steps-tracker-notification
   pm2 start "$CONFIG" --only steps-tracker-cron
+
+  # Save only after exact topology, HTTP memory safety and the reviewed
+  # 39-connection role budget are all proven live.
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory --verify-live-config
-  node "$GUARD" --pool-budget-mode=final --baseline-file="$BASELINE_FILE"
+  node "$GUARD" --pool-budget-mode=final
   pm2 save
 '
