@@ -11,7 +11,7 @@ const {
   pickTypeForRarity,
   canonicalRarityFor,
 } = require("../powerupOdds");
-const { rawPositionFor } = require("../rawPosition");
+const { leaderboardPositionFor } = require("../rawPosition");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
@@ -166,18 +166,15 @@ function buildOpenMysteryBox(dependencies = {}) {
 
     const maxSlots = participant.powerupSlots || DEFAULT_POWERUP_SLOTS;
 
-    // Current position for odds, from RAW WALKED steps (2026-08-09,
-    // docs/box-raw-steps-position-and-option-h-requirements.md). Raw steps only
-    // grow by walking, so neither box banking nor powerup hoarding can move a
-    // player's odds tier. The helper owns the solo sort, the team sums (TR-655:
-    // team races roll on TEAM position, 1-of-2 / 2-of-2, a tie counting both as
-    // leading) and the per-race all-or-nothing NULL fallback to `totalSteps`.
-    // getRaceProgress's disclosure calls the SAME helper over the SAME
-    // persisted rows, so the quoted odds and this roll cannot drift.
+    // Current position for odds, from the EFFECTIVE leaderboard totals.
+    // This intentionally follows the same boosted/effect-sensitive totalSteps
+    // ranking the player sees. Team races use summed team totalSteps.
+    // getRaceProgress disclosure uses the same position contract so the quoted
+    // odds and the actual roll cannot drift.
     const allParticipants = participantsFromRace
       ? participantsFromRace.filter((entry) => entry.status === "ACCEPTED")
       : await participantModel.findAcceptedByRace(raceId);
-    const { position, totalParticipants } = rawPositionFor({
+    const { position, totalParticipants } = leaderboardPositionFor({
       participants: allParticipants,
       race,
       userId,
