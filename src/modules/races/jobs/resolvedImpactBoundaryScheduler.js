@@ -1,8 +1,7 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const {
-  RaceResolutionJobV2: defaultJobModel,
-} = require("../models/raceResolutionJobV2");
-const redisCache = require("../../../shared/cache/redisCache");
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
 
 const POLL_INTERVAL_MS = 1000;
 const DEFAULT_LIMIT = 50;
@@ -16,13 +15,10 @@ function shouldResolveUmbrellaImpacts(job) {
 
 function buildResolvedImpactBoundaryScheduler(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
-  const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
+  const enqueueRaceResolution =
+    dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const now = dependencies.now || (() => new Date());
   const limit = Math.max(1, Math.min(200, Number(dependencies.limit) || DEFAULT_LIMIT));
-  const publishResolutionWake = dependencies.publishResolutionWake ||
-    (() => redisCache.publishDurableQueueWakeup(
-      "resolution", { workKind: "ordinary" },
-    ));
 
   return {
     async tick() {
@@ -42,20 +38,18 @@ function buildResolvedImpactBoundaryScheduler(dependencies = {}) {
       );
       const raceIds = [...new Set(rows.map((row) => row.raceId).filter(Boolean))].sort();
       if (raceIds.length === 0) return 0;
-      const dirtyEnvelopeByRaceId = new Map(raceIds.map((raceId) => [raceId, {
-        reason: "EFFECT_BOUNDARY",
-        dirtyUserIds: [],
-        dirtyParticipantIds: [],
-        powerupTypes: ["UMBRELLA"],
-        priority: "IMMEDIATE",
-      }]));
-      await jobModel.enqueueMany({
-        raceIds,
-        now: now(),
-        dirtyEnvelopeByRaceId,
-        bypassDebounce: true,
-      });
-      await publishResolutionWake();
+      await Promise.all(raceIds.map((raceId) =>
+        enqueueRaceResolution({
+          raceId,
+          now: now(),
+          reason: "EFFECT_BOUNDARY",
+          dirtyUserIds: [],
+          dirtyParticipantIds: [],
+          powerupTypes: ["UMBRELLA"],
+          priority: "IMMEDIATE",
+          queuePriority: "RECOVERY",
+        })
+      ));
       return raceIds.length;
     },
   };
