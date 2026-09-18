@@ -2471,7 +2471,7 @@ describe("Quicksand real HTTP contract", () => {
     assert.equal(final.currentDeltaSteps, -1200);
   });
 
-  it("keeps Quicksand visible to free users but only eligible for Gold Daily Spin selection", async () => {
+  it("keeps Quicksand visible and Daily Spin-eligible for free and Gold users", async () => {
     await seedQuicksandCatalog();
     const free = await createTestUser();
     const gold = await createTestUser();
@@ -2485,7 +2485,7 @@ describe("Quicksand real HTTP contract", () => {
     assert.equal(freeStatus.status, 200);
     assert.equal(goldStatus.status, 200);
     assert.ok(freeBody.box.powerupPool.some((item) => item.powerupType === "QUICKSAND"));
-    assert.ok(!freeBody.box.eligiblePowerupTypes.includes("QUICKSAND"));
+    assert.ok(freeBody.box.eligiblePowerupTypes.includes("QUICKSAND"));
     assert.ok(goldBody.box.eligiblePowerupTypes.includes("QUICKSAND"));
   });
 
