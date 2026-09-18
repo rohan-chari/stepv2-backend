@@ -97,4 +97,4 @@ DROP INDEX CONCURRENTLY IF EXISTS users_discoverable_name_search_trgm_idx;
 If extension creation fails for privileges, stop and have the database owner
 install `pg_trgm`; do not mark the rollout verified until the extension and both
 valid indexes are present. Schema/backfill recovery remains governed by the
-normal Prisma failed-migration procedure in `DEPLOY_RUNBOOK.md`.
+normal Prisma failed-migration procedure in `OPERATIONS.md`.
