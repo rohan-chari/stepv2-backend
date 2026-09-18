@@ -35,6 +35,9 @@ Object.assign(module.exports, require("./jobs/globalEventBoundaryDrain"));
 Object.assign(module.exports, require("./jobs/globalEventEntitlementEventReconciler"));
 Object.assign(module.exports, require("./jobs/stepSampleRetention"));
 Object.assign(module.exports, require("./jobs/stepSyncStreamWorker"));
+Object.assign(module.exports, require("./jobs/globalEventBoundaryStreamScheduler"));
+Object.assign(module.exports, require("./jobs/globalEventBoundaryStreamWorker"));
+Object.assign(module.exports, require("./jobs/globalEventRedisScheduleHydrator"));
 
 Object.assign(module.exports, require("./routes/steps"));
 Object.assign(module.exports, require("./routes/stepMilestones"));
