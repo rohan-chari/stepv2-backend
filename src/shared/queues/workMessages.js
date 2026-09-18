@@ -59,6 +59,7 @@ function parseRaceDirty(fields) {
     schemaVersion: RACE_DIRTY_VERSION,
     raceId: required(fields, "raceId"),
     userId: fields.userId || null,
+    timeZone: fields.timeZone || null,
     sourceGeneration: fields.sourceGeneration
       ? integerString(fields.sourceGeneration, "sourceGeneration")
       : null,
