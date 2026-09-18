@@ -35,7 +35,10 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
    return {mapped,appId:product.app_id};
   }
   function ownership(row) {
-   if(row.customer_id!==identity.id||row.original_customer_id!==identity.id||row.ownership!=='purchased')throw new AppError('Purchase belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
+   // RevenueCat retains original_customer_id as provenance after a configured
+   // transfer. The current customer_id is the ownership authority; requiring
+   // the provenance ID to match rejects legitimate transferred receipts.
+   if(row.customer_id!==identity.id||row.ownership!=='purchased')throw new AppError('Purchase belongs to another Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
    if(!['production','sandbox'].includes(row.environment)||!['production','sandbox'].includes(identity.environment))throw new AppError('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
    return row.environment===identity.environment;
   }

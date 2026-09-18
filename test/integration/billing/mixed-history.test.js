@@ -54,14 +54,23 @@ it('keeps an opposite-realm-only transaction hint pending without granting',asyn
   const response=await sync(owner,{transactionId:'test-only'});assert.equal(response.status,202);assert.equal((await response.json()).coins,100);
   assert.equal(await prisma.billingPurchase.count(),0);assert.equal(await prisma.coinTransaction.count(),0);
 });
-for(const source of ['purchase','subscription']) for(const invalid of ['missing-environment','unknown-environment','foreign-owner']) {
+for(const source of ['purchase','subscription']) for(const invalid of ['missing-environment','unknown-environment','foreign-current-customer']) {
   it(`rejects ${source} ${invalid} without granting valid adjacent purchases`,async()=>{
     const owner=await fixture();const bad=purchase('bad','sandbox');
     if(invalid==='missing-environment')delete bad.environment;
     if(invalid==='unknown-environment')bad.environment='unexpected';
-    if(invalid==='foreign-owner')bad.original_customer_id='someone-else';
+    if(invalid==='foreign-current-customer')bad.customer_id='someone-else';
     rows=[purchase('valid')];if(source==='purchase')rows.push(bad);else subscriptions=[bad];
-    const response=await sync(owner);assert.equal(response.status,409);assert.equal((await response.json()).code,invalid==='foreign-owner'?'PURCHASE_ACCOUNT_MISMATCH':'BILLING_REALM_MISMATCH');
+    const response=await sync(owner);assert.equal(response.status,409);assert.equal((await response.json()).code,invalid==='foreign-current-customer'?'PURCHASE_ACCOUNT_MISMATCH':'BILLING_REALM_MISMATCH');
     assert.equal(await prisma.billingPurchase.count(),0);assert.equal(await prisma.coinTransaction.count(),0);
   });
 }
+it('fulfills a sandbox receipt RevenueCat transferred to the current Bara billing identity',async()=>{
+  const owner=await fixture('sandbox');
+  rows=[purchase('transferred-paid-1','sandbox',{original_customer_id:'former-bara-identity'})];
+  const response=await sync(owner,{transactionId:'transferred-paid-1'});
+  assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
+  assert.equal((await response.json()).coins,3100);
+  assert.equal(await prisma.billingPurchase.count({where:{identityId:identity,transactionId:'transferred-paid-1'}}),1);
+  assert.equal(await prisma.coinTransaction.count({where:{userId:owner.user.id,reason:'billing_purchase'}}),1);
+});
