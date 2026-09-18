@@ -17,6 +17,8 @@ test("backend operational docs have one live source of truth", () => {
   const deployment = read("DEPLOYMENT.md");
   const deployRunbook = read("DEPLOY_RUNBOOK.md");
   const backup = read("BACKUP.md");
+  const preDeploy = read("PRE_DEPLOY_README.md");
+  const postDeploy = read("POST_DEPLOY_README.md");
 
   assert.match(readme, /OPERATIONS\.md/);
   assert.match(deployment, /OPERATIONS\.md/);
@@ -25,6 +27,8 @@ test("backend operational docs have one live source of truth", () => {
   assert.match(agents, /OPERATIONS\.md/);
   assert.match(claude, /AGENTS\.md/);
   assert.match(claude, /OPERATIONS\.md/);
+  assert.match(operations, /PRE_DEPLOY_README\.md/);
+  assert.match(operations, /POST_DEPLOY_README\.md/);
 
   for (const [name, source] of Object.entries({
     README: readme,
@@ -40,9 +44,18 @@ test("backend operational docs have one live source of truth", () => {
   }
 
   assert.match(operations, /QUEUE_REDIS_URL/);
-  assert.match(operations, /notification delivery has an explicit production owner/i);
+  assert.match(operations, /steps-tracker-notification/);
+  assert.match(operations, /Reviewed aggregate database pool budget: \*\*39\*\*/);
   assert.match(operations, /ecosystem\.config\.js/);
   assert.match(operations, /pm2-safe-prod-reload\.sh/);
+
+  assert.match(preDeploy, /queue Redis/i);
+  assert.match(preDeploy, /DATABASE_POOL_TOTAL_BUDGET=39/);
+  assert.match(preDeploy, /queues:preflight/);
+  assert.match(preDeploy, /production database backup/i);
+  assert.match(postDeploy, /queues:health/);
+  assert.match(postDeploy, /steps-tracker-notification/);
+  assert.match(postDeploy, /Daily 2x event checkpoint/);
 });
 
 test("archive is explicitly non-authoritative", () => {
