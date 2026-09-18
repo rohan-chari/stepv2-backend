@@ -51,10 +51,15 @@ test("visible-handler registry, V1 producer matrix, and literal key fixtures hav
 
 test("every active producer row is named by real integration-path coverage", () => {
   const integrationRoot = path.join(ROOT, "test/integration");
-  const integrationSource = fs.readdirSync(integrationRoot)
-    .filter((name) => name.endsWith(".test.js"))
-    .map((name) => fs.readFileSync(path.join(integrationRoot, name), "utf8"))
-    .join("\n");
+  const readIntegrationTests = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return readIntegrationTests(full);
+      return entry.isFile() && entry.name.endsWith(".test.js")
+        ? [fs.readFileSync(full, "utf8")]
+        : [];
+    });
+  const integrationSource = readIntegrationTests(integrationRoot).join("\n");
   const dormant = new Set([
     "RACE_BUYIN_CHANGED_V1",
     "DAILY_REWARD_REMINDER_V1",
