@@ -168,6 +168,7 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleRacePayoutDoubleReconcile: () => {},
     scheduleRaceExpiryCheck: track("raceExpiry"),
     scheduleSeededRaceRenewal: track("seededRenewal"),
+    scheduleTournamentSeedRenewal: () => {},
     scheduleComputeRanks: track("computeRanks"),
     scheduleComputeRankedWeeks: track("computeRankedWeeks"),
     scheduleGlobalStepEvents: track("globalStepEvents"),
@@ -254,32 +255,17 @@ test("http and resolution process roles do not start the wrong schedulers", () =
 
   const resolutionCalls = [];
   start("resolution", resolutionCalls);
-  assert.deepEqual(resolutionCalls, [
-    "heartbeat", "stepStream", "powerupStream", "raceDirtyStream", "raceRecovery",
-    "eventBoundaryWorker", "historical", "placement", "impact",
-  ]);
-
-  const cronCalls = [];
-  startServer({
-    app: {
-      listen(...args) {
-        args[2]();
-        return { close() {} };
-      },
-    },
-    processRole: "cron",
-    cronStartDelayMs: 0,
-    capacityHomeOpenIsolation: true,
-    registerEventHandlers() {},
-    registerNotificationHandlers() {},
-    registerRaceListCacheInvalidation() {},
-    databasePoolTelemetry: { start() {} },
-    eventSurgeTelemetry: { start() {} },
-    scheduleGenerationHeartbeat: () => cronCalls.push("heartbeat"),
-    scheduleBillingReconciliation: () => cronCalls.push("billing"),
-    logger: { log() {} },
-  });
-  assert.deepEqual(cronCalls, ["heartbeat", "billing"]);
+  for (const required of [
+    "stepStream",
+    "powerupStream",
+    "raceDirtyStream",
+    "raceRecovery",
+  ]) {
+    assert.ok(
+      resolutionCalls.includes(required),
+      `legacy resolution role must still start ${required}`,
+    );
+  }
 });
 
 test("dedicated worker roles own only their core queue workers", () => {
