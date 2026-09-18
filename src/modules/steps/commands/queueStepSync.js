@@ -3,7 +3,11 @@ const {
   canonicalizeStepSyncRequest,
   validateIdempotencyKey,
 } = require("../stepSyncCanonical");
-const { publish, STREAMS } = require("../../../shared/queues/redisStreams");
+const {
+  publish,
+  claimIdempotentWindow,
+  STREAMS,
+} = require("../../../shared/queues/redisStreams");
 const { normalizeSamples } = require("./recordStepSamples");
 const { STEP_SYNC_VERSION } = require("../../../shared/queues/workMessages");
 
@@ -23,6 +27,23 @@ async function queueStepSync({
   normalizeSamples(canonical.samples);
   const syncId = crypto.randomUUID();
   const acceptedAt = now();
+  if (homePull) {
+    const admission = await claimIdempotentWindow(
+      `queue:step-sync:home-pull:${userId}`,
+      idempotencyKey,
+      30_000,
+    );
+    if (!admission.acquired) {
+      const error = new Error("Step sync is cooling down");
+      error.name = "StepSyncCooldownError";
+      error.code = "STEP_SYNC_COOLDOWN";
+      error.retryAfterSeconds = Math.max(
+        1,
+        Math.min(30, Math.ceil(admission.retryAfterMs / 1000)),
+      );
+      throw error;
+    }
+  }
   await publish(STREAMS.STEP_SYNC, {
     schemaVersion: STEP_SYNC_VERSION,
     syncId,
