@@ -77,6 +77,9 @@ test("startServer listens on 0.0.0.0 by default", () => {
     scheduleGenerationHeartbeat: track("generationHeartbeat"),
     scheduleGlobalEventBoundaryDrain: track("globalEventBoundaryDrain"),
     scheduleGlobalEventEntitlementEventReconciler: track("globalEventEntitlementEventReconciler"),
+    scheduleGlobalEventBoundaryStreamScheduler: track("globalEventBoundaryStreamScheduler"),
+    scheduleGlobalEventBoundaryStreamWorker: track("globalEventBoundaryStreamWorker"),
+    scheduleGlobalEventRedisScheduleHydrator: track("globalEventRedisScheduleHydrator"),
     scheduleGlobalEventSummaryTick: track("globalEventSummary"),
     scheduleAutoStartScheduledRaces: track("autoStartScheduledRaces"),
     scheduleRecomputePlacements: track("recomputePlacements"),
@@ -88,6 +91,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
     scheduleNotificationScheduleRelease: track("notificationScheduleRelease"),
     scheduleNotificationCompletenessReconciler: track("notificationCompletenessReconciler"),
     scheduleDeviceTokenCleanup: track("deviceTokenCleanup"),
+    scheduleNotificationDeliveryStreamWorker: track("notificationDeliveryStreamWorker"),
     scheduleActivationEventCleanup: track("activationEventCleanup"),
     scheduleAdminMetricsActivityCleanup: track("adminMetricsActivityCleanup"),
     schedulePushDeliveryCleanup: track("pushDeliveryCleanup"),
@@ -121,8 +125,9 @@ test("startServer listens on 0.0.0.0 by default", () => {
     computeRankedWeeks: 1,
     globalStepEvents: 1,
     generationHeartbeat: 1,
-    globalEventBoundaryDrain: 1,
-    globalEventEntitlementEventReconciler: 1,
+    globalEventBoundaryStreamScheduler: 1,
+    globalEventBoundaryStreamWorker: 1,
+    globalEventRedisScheduleHydrator: 1,
     autoStartScheduledRaces: 1,
     recomputePlacements: 1,
     notificationCleanup: 1,
@@ -133,6 +138,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
     notificationScheduleRelease: 1,
     notificationCompletenessReconciler: 1,
     deviceTokenCleanup: 1,
+    notificationDeliveryStreamWorker: 1,
     activationEventCleanup: 1,
     adminMetricsActivityCleanup: 1,
     pushDeliveryCleanup: 1,
@@ -181,6 +187,9 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleGenerationHeartbeat: track("generationHeartbeat"),
     scheduleGlobalEventBoundaryDrain: track("globalEventBoundaryDrain"),
     scheduleGlobalEventEntitlementEventReconciler: track("globalEventEntitlementEventReconciler"),
+    scheduleGlobalEventBoundaryStreamScheduler: track("globalEventBoundaryStreamScheduler"),
+    scheduleGlobalEventBoundaryStreamWorker: track("globalEventBoundaryStreamWorker"),
+    scheduleGlobalEventRedisScheduleHydrator: track("globalEventRedisScheduleHydrator"),
     scheduleGlobalEventSummaryTick: track("globalEventSummary"),
     scheduleAutoStartScheduledRaces: track("autoStartScheduledRaces"),
     scheduleRecomputePlacements: track("recomputePlacements"),
@@ -192,6 +201,7 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleNotificationScheduleRelease: track("notificationScheduleRelease"),
     scheduleNotificationCompletenessReconciler: track("notificationCompletenessReconciler"),
     scheduleDeviceTokenCleanup: track("deviceTokenCleanup"),
+    scheduleNotificationDeliveryStreamWorker: track("notificationDeliveryStreamWorker"),
     scheduleActivationEventCleanup: track("activationEventCleanup"),
     scheduleAdminMetricsActivityCleanup: track("adminMetricsActivityCleanup"),
     schedulePushDeliveryCleanup: track("pushDeliveryCleanup"),
@@ -233,6 +243,12 @@ test("http and resolution process roles do not start the wrong schedulers", () =
     registerNotificationHandlers() {},
     scheduleGenerationHeartbeat: () => calls.push("heartbeat"),
     scheduleRaceResolutionWorker: () => calls.push("resolution"),
+    scheduleStepSyncStreamWorker: () => calls.push("stepStream"),
+    schedulePowerupRecalcStreamWorker: () => calls.push("powerupStream"),
+    scheduleRaceDirtyStreamWorker: () => calls.push("raceDirtyStream"),
+    scheduleRaceResolutionRecoverySweep: () => calls.push("raceRecovery"),
+    scheduleGlobalEventBoundaryStreamWorker: () => calls.push("eventBoundaryWorker"),
+    scheduleHistoricalRaceReconciliationWorker: () => calls.push("historical"),
     scheduleRacePlacementTransitions: () => calls.push("placement"),
     scheduleResolvedImpactBoundaries: () => calls.push("impact"),
     scheduleRaceResolutionPostTasks: () => calls.push("postTasks"),
@@ -246,7 +262,8 @@ test("http and resolution process roles do not start the wrong schedulers", () =
   const resolutionCalls = [];
   start("resolution", resolutionCalls);
   assert.deepEqual(resolutionCalls, [
-    "heartbeat", "resolution", "placement", "impact", "postTasks",
+    "heartbeat", "stepStream", "powerupStream", "raceDirtyStream", "raceRecovery",
+    "eventBoundaryWorker", "historical", "placement", "impact", "postTasks",
   ]);
 
   const cronCalls = [];
@@ -286,6 +303,8 @@ test("home-open capacity keeps the cron process idle", () => {
       scheduleGlobalStepEvents: track("globalEvents"),
       scheduleGlobalEventBoundaryDrain: track("globalBoundary"),
       scheduleGlobalEventEntitlementEventReconciler: track("globalEntitlementReconciler"),
+      scheduleGlobalEventBoundaryStreamScheduler: track("globalBoundaryScheduler"),
+      scheduleGlobalEventRedisScheduleHydrator: track("globalScheduleHydrator"),
       scheduleGlobalEventSummaryTick: track("globalSummary"),
       scheduleAutoStartScheduledRaces: track("autoStart"),
       scheduleRecomputePlacements: track("placements"),
@@ -296,6 +315,7 @@ test("home-open capacity keeps the cron process idle", () => {
       scheduleNotificationScheduleRelease: track("notificationRelease"),
       scheduleNotificationCompletenessReconciler: track("notificationCompleteness"),
       scheduleDeviceTokenCleanup: track("deviceTokenCleanup"),
+      scheduleNotificationDeliveryStreamWorker: track("notificationStream"),
       scheduleActivationEventCleanup: track("activationCleanup"),
       scheduleAdminMetricsActivityCleanup: track("metricsCleanup"),
       schedulePushDeliveryCleanup: track("pushCleanup"),
@@ -338,6 +358,9 @@ test("capacity event-only cron starts the event and delivery pipeline without un
     scheduleGlobalStepEvents: track("globalEvents"),
     scheduleGlobalEventBoundaryDrain: track("boundary"),
     scheduleGlobalEventEntitlementEventReconciler: track("entitlementReconciler"),
+    scheduleGlobalEventBoundaryStreamScheduler: track("boundaryScheduler"),
+    scheduleGlobalEventRedisScheduleHydrator: track("scheduleHydrator"),
+    scheduleNotificationDeliveryStreamWorker: track("notificationStream"),
     scheduleDomainEventProjection: track("projection"),
     scheduleNotificationScheduleRelease: track("release"),
     scheduleNotificationCompletenessReconciler: track("completeness"),
@@ -374,8 +397,8 @@ test("capacity event-only cron starts the event and delivery pipeline without un
     logger: { log() {} },
   });
   assert.deepEqual(calls, [
-    "heartbeat", "globalEvents", "boundary", "entitlementReconciler",
-    "projection", "release", "completeness", "delivery", "tokenCleanup",
+    "heartbeat", "globalEvents", "scheduleHydrator", "boundaryScheduler",
+    "notificationStream", "projection", "release", "completeness", "delivery", "tokenCleanup",
   ]);
   assert.equal(deliveryDependencies.userFanoutDisabled("INBOX_DELIVERY_DISABLED"), false);
 });
