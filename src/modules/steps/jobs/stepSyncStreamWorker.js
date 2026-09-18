@@ -312,6 +312,20 @@ function buildStepSyncStreamWorker(dependencies = {}) {
       });
     }
 
+    if (message.legacyEventRecap && message.canonical.samples.length > 0) {
+      try {
+        await require("../../home/services/legacyEventRecapInput").finalizeLegacyEventRecap({
+          userId: message.userId,
+          prisma,
+          now,
+        });
+      } catch (error) {
+        logger.warn?.("[STEP_STREAM] legacy recap deferred", {
+          code: error?.code || error?.name,
+        });
+      }
+    }
+
     await reconcileHistorical(message, persisted);
     await publishDownstream(message, persisted);
   }
