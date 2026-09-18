@@ -33,10 +33,27 @@ function buildPowerupRecalcStreamWorker(dependencies = {}) {
   const logger = dependencies.logger || console;
 
   async function processMessage(message) {
+    const raceMeta = await prisma.race.findUnique({
+      where: { id: message.raceId },
+      select: {
+        status: true,
+        timezone: true,
+        powerupsEnabled: true,
+        powerupStepInterval: true,
+      },
+    });
+    if (
+      !raceMeta ||
+      raceMeta.status !== "ACTIVE" ||
+      raceMeta.powerupsEnabled !== true ||
+      !(Number(raceMeta.powerupStepInterval) > 0)
+    ) {
+      return { changed: false, skipped: true };
+    }
     const computed = await computeRaceState({
       raceId: message.raceId,
       userIds: [message.userId],
-      timeZone: "UTC",
+      timeZone: raceMeta.timezone || "UTC",
     });
     if (!computed?.result?.race) return { changed: false, skipped: true };
 
