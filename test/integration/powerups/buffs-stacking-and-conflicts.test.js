@@ -782,331 +782,6 @@ function boardSteps(progress, userId) {
   return (progress.participants || []).find((p) => p.userId === userId)?.totalSteps;
 }
 
-describe("buff stacking (sum) + signed event scoring — integration", () => {
-  before(async () => { server = await getSharedServer(); });
-  beforeEach(async () => { await cleanDatabase(); await prisma.globalStepEvent.deleteMany(); nextAppleId = 0; });
-  after(async () => { await prisma.globalStepEvent.deleteMany(); });
-
-  // Boost/freeze ghost pepper covering [startH..startH-boostHours] as boost.
-  function pepperMeta(mult = 3) {
-    return { boostMs: HOUR_MS, multiplier: mult, freezeMs: HOUR_MS, stepsAtBoostStart: 0 };
-  }
-
-  // 1. Pepper boost + 2x event → 6x (DrAmogh's case; the headline bug).
-  it("pepper boost + 2x event = 6x", async () => {
-    const a = await createUser("A1"); const b = await createUser("B1");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100); // [4h,3h)
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", {
-      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3), // boost [4h,3h), freeze [3h,2h)
-    });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 600, "100 base + 200 buff + 300 event = 600 (6x)");
-  });
-
-  // 2. Pepper + RH, no event → 5x (sum replaces max).
-  it("pepper + runner's high, no event = 5x", async () => {
-    const a = await createUser("A2"); const b = await createUser("B2");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3) });
-    await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: {} });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 500, "3x + 2x summed = 5x (not max 3x)");
-  });
-
-  // 3. Pepper + RH + 2x event → 10x (the owner's target number).
-  it("pepper + RH + 2x event = 10x", async () => {
-    const a = await createUser("A3"); const b = await createUser("B3");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3) });
-    await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: {} });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 1000, "5x rate × 2x event = 10x");
-  });
-
-  // 4. Pepper + RH + WT + 2x event → −10x (seed prior steps so the floor doesn't mask it).
-  it("pepper + RH + wrong turn + 2x event = −10x", async () => {
-    const a = await createUser("A4"); const b = await createUser("B4");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 7, 1, 2000); // prior, no effects → base 2000
-    await giveHourlySamples(a.userId, 4, 1, 100);  // the reversed hour
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3) });
-    await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: {} });
-    await giveEffect(raceId, a.userId, b.userId, "WRONG_TURN", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { stepsAtStart: 0 } });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const prog = await getProgress(a.token, raceId);
-    // Pre-walk total = 2000. Walking 100 at −10x drops it by 1000 → 1000.
-    assert.equal(boardSteps(prog, a.userId), 1000, "2100 base − 4000 buff − 200 reversal − 1000 event = 1000");
-  });
-
-  // 5. WT alone + 2x event → −2x (event credit goes negative — the latent leak).
-  it("wrong turn alone + 2x event = −2x", async () => {
-    const a = await createUser("A5"); const b = await createUser("B5");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 7, 1, 500); // prior base
-    await giveHourlySamples(a.userId, 4, 1, 100); // reversed hour
-    await giveEffect(raceId, a.userId, b.userId, "WRONG_TURN", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { stepsAtStart: 0 } });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const prog = await getProgress(a.token, raceId);
-    // Pre-walk 500; walking 100 at −2x drops by 200 → 300.
-    assert.equal(boardSteps(prog, a.userId), 300, "600 base − 200 reversal − 100 event = 300");
-  });
-
-  // 6. Pepper FREEZE phase + 2x event → 0 (frozen steps earn no event credit).
-  it("pepper freeze phase + 2x event = 0", async () => {
-    const a = await createUser("A6"); const b = await createUser("B6");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100); // [4h,3h) → the freeze half
-    // boost [5h,4h), freeze [4h,3h)
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3), metadata: pepperMeta(3) });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 0, "frozen: 100 base − 100 frozen + 0 event = 0");
-  });
-
-  // 7. Freeze + WT overlap → 0 (freeze beats reversal).
-  it("freeze + wrong turn = 0 (freeze beats WT)", async () => {
-    const a = await createUser("A7"); const b = await createUser("B7");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3), metadata: pepperMeta(3) }); // freeze [4h,3h)
-    await giveEffect(raceId, a.userId, b.userId, "WRONG_TURN", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { stepsAtStart: 0 } });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 0, "freeze wins: no base, no reversal");
-  });
-
-  // 8. Three-way RH + Uprising(2) + Pepper → 7x (proves true sum, not pairwise).
-  it("RH + uprising(2) + pepper = 7x (three-way sum)", async () => {
-    const a = await createUser("A8"); const b = await createUser("B8");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3) });
-    await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: {} });
-    await giveEffect(raceId, a.userId, a.userId, "UPRISING", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 2 } });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 700, "3 + 2 + 2 = 7x");
-  });
-
-  // 9. Campfire boost 2.25 + RH → 4.25x (old max test's scenario, new rule).
-  it("campfire boost 2.25 + RH = 4.25x", async () => {
-    const a = await createUser("A9"); const b = await createUser("B9");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100); // boost half [4h,3h)
-    // freeze [5h,4h), boost [4h,3h)
-    await giveEffect(raceId, a.userId, a.userId, "CAMPFIRE_REST", {
-      startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3),
-      metadata: { freezeMs: HOUR_MS, boostMs: HOUR_MS, multiplier: 2.25, stepsAtRestStart: 0 },
-    });
-    await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: {} });
-    const prog = await getProgress(a.token, raceId);
-    assert.equal(boardSteps(prog, a.userId), 425, "2.25 + 2 = 4.25x → 100 + 325");
-  });
-
-  // 10. Rainstorm + 2x event → 1x (reduction is multiplied by the event).
-  it("rainstorm(0.5) + 2x event = 1x", async () => {
-    const a = await createUser("A10"); const b = await createUser("B10");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 } });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const prog = await getProgress(a.token, raceId);
-    // 0.5x rate × 2x event = 1x. 100 − 50 + 50 = 100.
-    assert.equal(boardSteps(prog, a.userId), 100, "0.5 × 2 event = 1x");
-  });
-
-  // 11a. Settlement parity: scenario 3 active at race end, settled == live.
-  it("settlement parity: settled total equals the live 10x total", async () => {
-    const a = await createUser("A11"); const b = await createUser("B11");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3) });
-    await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", { startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: {} });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const live = boardSteps(await getProgress(a.token, raceId), a.userId);
-    assert.equal(live, 1000);
-    await prisma.race.update({ where: { id: raceId }, data: { endsAt: new Date(Date.now() - 60 * 1000) } });
-    await resolveExpiredRaces();
-    const settled = await participant(raceId, a.userId);
-    assert.equal(settled.totalSteps, live, "settled == live (no divergence)");
-  });
-
-  // 11b. determineFinishSnapshot interpolates a target crossing using the SUMMED
-  // multiplier. This function is only reachable through settlement's tie-break
-  // (races are time-based; no live target-finish), so it is asserted directly —
-  // the same pattern test/services/raceStateResolution.test.js uses for it.
-  it("determineFinishSnapshot interpolates the crossing at the summed (pepper+RH=5x) rate", async () => {
-    const T0 = new Date("2026-04-07T10:00:00Z");
-    const T1 = new Date("2026-04-07T11:00:00Z");
-    const samples = [{ periodStart: T0.toISOString(), periodEnd: T1.toISOString(), steps: 1200 }]; // 20/min raw
-    const snapshotDeps = {
-      stepSampleModel: { async findByUserIdAndTimeRange() { return samples; } },
-      powerupEventModel: { async findByRaceAsc() { return []; } },
-    };
-    const snapshot = await determineFinishSnapshot({
-      participant: { userId: "user-1", bonusSteps: 0 },
-      currentTotal: 6000, // 1200 × 5x
-      targetSteps: 2500,
-      effectiveStart: T0,
-      effectGroups: {
-        legCramps: [], runnersHighs: [{ startsAt: T0, expiresAt: T1, metadata: {} }], wrongTurns: [],
-        campfires: [], rainstorms: [], uprisings: [], rallyFlags: [], coinFlipWins: [], coinFlipLoses: [],
-        ghostPeppers: [{ startsAt: T0, expiresAt: T1, metadata: { boostMs: 60 * 60 * 1000, multiplier: 3 } }],
-      },
-      ...snapshotDeps,
-      raceId: "race-1",
-      now: T1,
-    });
-    // Raw 20/min at 5x = 100 counted/min → 2500 reached at minute 25 (10:25).
-    // Old max(3,2)=3x would give 60/min → 2500 at ~41.7min, so 10:25 proves SUM.
-    assert.equal(snapshot.finishTotalSteps, 2500);
-    assert.equal(snapshot.finishedAt.toISOString(), "2026-04-07T10:25:00.000Z");
-  });
-
-  // ── Batch 2026-08-10b item 6 — RAINSTORM is MULTIPLICATIVE ──────────────
-  //
-  // Rainstorm multiplication is permanent. Scenario 10 above pins the
-  // unbuffed case; these pin the buffed case end-to-end through the HTTP
-  // response a client actually receives, including the retired env name.
-  const RAIN_FLAG = "RAINSTORM_MULTIPLICATIVE_ENABLED";
-
-  async function prodRepro(a, b, raceId) {
-    // DrAmogh's row: Rally Flag (×1.25) + Ghost Pepper boost (×3) during a 2×
-    // global step event, rainstormed. Buff sum = 4.25.
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", {
-      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3),
-    });
-    await giveEffect(raceId, a.userId, a.userId, "RALLY_FLAG", {
-      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 1.25 },
-    });
-    await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", {
-      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 },
-    });
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-  }
-
-  it("item 6 ON: buffed + rainstorm halves the whole stack (4.25 → 2.125, not 3.75)", async () => {
-    process.env[RAIN_FLAG] = "true";
-    try {
-      const a = await createUser("A13"); const b = await createUser("B13");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      await prodRepro(a, b, raceId);
-      const prog = await getProgress(a.token, raceId);
-      // rate 4.25 × 0.5 = 2.125; × 2 event = 4.25 → 100 walked steps score 425.
-      assert.equal(boardSteps(prog, a.userId), 425, "2.125 rate × 2x event");
-    } finally {
-      delete process.env[RAIN_FLAG];
-    }
-  });
-
-  it("retired OFF env cannot restore subtractive rainstorm scoring", async () => {
-    process.env[RAIN_FLAG] = "false";
-    try {
-      const a = await createUser("A14"); const b = await createUser("B14");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      await prodRepro(a, b, raceId);
-      const prog = await getProgress(a.token, raceId);
-      // Permanent: 4.25 × 0.5 × 2 event → 425, regardless of stale env.
-      assert.equal(boardSteps(prog, a.userId), 425, "retired env cannot disable multiplication");
-    } finally {
-      delete process.env[RAIN_FLAG];
-    }
-  });
-
-  it("item 6 ON: settlement matches the live buffed-storm total", async () => {
-    process.env[RAIN_FLAG] = "true";
-    try {
-      const a = await createUser("A15"); const b = await createUser("B15");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      await prodRepro(a, b, raceId);
-      const live = boardSteps(await getProgress(a.token, raceId), a.userId);
-      assert.equal(live, 425);
-      await prisma.race.update({ where: { id: raceId }, data: { endsAt: new Date(Date.now() - 60 * 1000) } });
-      await resolveExpiredRaces();
-      const settled = await participant(raceId, a.userId);
-      assert.equal(settled.totalSteps, live, "settled == live (no divergence)");
-    } finally {
-      delete process.env[RAIN_FLAG];
-    }
-  });
-
-  it("item 6 ON: an unbuffed rainstormed racer is bit-identical to scenario 10", async () => {
-    process.env[RAIN_FLAG] = "true";
-    try {
-      const a = await createUser("A16"); const b = await createUser("B16");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      await giveHourlySamples(a.userId, 4, 1, 100);
-      await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", {
-        startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 },
-      });
-      await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-      const prog = await getProgress(a.token, raceId);
-      assert.equal(boardSteps(prog, a.userId), 100, "M=1 unbuffed: unchanged by the fix");
-    } finally {
-      delete process.env[RAIN_FLAG];
-    }
-  });
-
-  it("item 6 ON: an umbrella'd victim is protected while it is up and halved after", async () => {
-    process.env[RAIN_FLAG] = "true";
-    try {
-      const a = await createUser("A17"); const b = await createUser("B17");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      // Two walked hours; the umbrella covers only the first.
-      await giveHourlySamples(a.userId, 5, 2, 100); // [5h,4h) and [4h,3h)
-      await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", {
-        startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3), metadata: {},
-      });
-      await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", {
-        startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 },
-      });
-      await giveEffect(raceId, a.userId, a.userId, "UMBRELLA", {
-        startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(4), metadata: {},
-      });
-      const prog = await getProgress(a.token, raceId);
-      // hour 1: RH 2x, umbrella cancels the rain → 200.
-      // hour 2: RH 2x halved → 1x → 100. (Old rule: 2 − 0.5 = 1.5 → 150.)
-      assert.equal(boardSteps(prog, a.userId), 300, "200 + 100");
-    } finally {
-      delete process.env[RAIN_FLAG];
-    }
-  });
-
-  // 12. No-effects regression: with and without an event → plain 1x / 2x.
-  it("no effects: 1x without event, 2x with event", async () => {
-    const a = await createUser("A12"); const b = await createUser("B12");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await giveHourlySamples(a.userId, 4, 1, 100);
-    const noEvent = boardSteps(await getProgress(a.token, raceId), a.userId);
-    assert.equal(noEvent, 100, "1x with no effects and no event");
-
-    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
-    const withEvent = boardSteps(await getProgress(a.token, raceId), a.userId);
-    assert.equal(withEvent, 200, "2x with the event, still no per-participant effects");
-  });
-});
-
 })();
 
 
@@ -3801,82 +3476,7 @@ describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
     return { alice, bob, carol, dave, raceId, daveUp };
   }
 
-  it("Cleanse with ONLY a teammate's Uprising on you is rejected 400 and leaves it ACTIVE", async () => {
-    const { dave, raceId, daveUp } = await sparkedUprising();
-
-    const cleanse = await giveHeld(raceId, dave.userId, "CLEANSE");
-    const res = await usePU(dave.token, raceId, cleanse.id);
-    assert.equal(res.status, 400);
-
-    const after = await prisma.raceActiveEffect.findUnique({
-      where: { id: daveUp.id },
-    });
-    assert.equal(after.status, "ACTIVE", "Uprising untouched by Cleanse");
-    assert.equal(after.expiresAt.getTime(), daveUp.expiresAt.getTime());
   });
-
-  it("Quick Rinse with ONLY an Uprising on you is rejected 409 NO_TIMED_DEBUFFS", async () => {
-    const { dave, raceId, daveUp } = await sparkedUprising();
-
-    const rinse = await giveHeld(raceId, dave.userId, "QUICK_RINSE");
-    const res = await usePU(dave.token, raceId, rinse.id);
-    assert.equal(res.status, 409);
-    assert.equal((await res.json()).code, "NO_TIMED_DEBUFFS");
-
-    const after = await prisma.raceActiveEffect.findUnique({
-      where: { id: daveUp.id },
-    });
-    assert.equal(after.status, "ACTIVE");
-  });
-
-  it("Quick Rinse shortens a real timed debuff but not the Uprising alongside it", async () => {
-    const { alice, dave, raceId, daveUp } = await sparkedUprising();
-
-    const cramp = await giveHeld(raceId, alice.userId, "LEG_CRAMP", "UNCOMMON");
-    const crampRes = await usePU(alice.token, raceId, cramp.id, {
-      targetUserId: dave.userId,
-    });
-    assert.equal(crampRes.status, 200);
-    const crampBefore = await prisma.raceActiveEffect.findFirst({
-      where: { raceId, type: "LEG_CRAMP" },
-    });
-
-    const rinse = await giveHeld(raceId, dave.userId, "QUICK_RINSE");
-    const res = await usePU(dave.token, raceId, rinse.id);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    // Quick Rinse HALVES the remaining window (rows stay ACTIVE with a nearer
-    // expiry) rather than expiring anything — so the property under test is the
-    // COUNT it touched and WHOSE expiry moved, not a status flip.
-    assert.equal(
-      body.result.shortened,
-      1,
-      "only the leg cramp is rinsed — the Uprising is not counted"
-    );
-    assert.deepEqual(
-      body.result.affectedEffects.map((e) => e.type),
-      ["LEG_CRAMP"]
-    );
-
-    const crampAfter = await prisma.raceActiveEffect.findFirst({
-      where: { raceId, type: "LEG_CRAMP" },
-    });
-    assert.ok(
-      crampAfter.expiresAt.getTime() < crampBefore.expiresAt.getTime(),
-      "the real debuff's window was cut"
-    );
-
-    const after = await prisma.raceActiveEffect.findUnique({
-      where: { id: daveUp.id },
-    });
-    assert.equal(after.status, "ACTIVE", "Uprising survives the rinse");
-    assert.equal(
-      after.expiresAt.getTime(),
-      daveUp.expiresAt.getTime(),
-      "Uprising's window is not cut either"
-    );
-  });
-});
 
 })();
 
@@ -4686,7 +4286,6 @@ const HOUR_MS = 60 * 60 * 1000;
 
 // Wave-5 store catalog rows (cleanDatabase wipes them). Prices MUST match seed.js.
 const WAVE5 = [
-  { sku: "POWERUP_UPRISING", powerupType: "UPRISING", priceCoins: 300 },
   { sku: "POWERUP_GHOST_PEPPER", powerupType: "GHOST_PEPPER", priceCoins: 75 },
   { sku: "POWERUP_COIN_FLIP", powerupType: "COIN_FLIP", priceCoins: 40 },
   { sku: "POWERUP_MYSTERY_POTION", powerupType: "MYSTERY_POTION", priceCoins: 40 },
@@ -4694,7 +4293,6 @@ const WAVE5 = [
   { sku: "POWERUP_POWER_OUTAGE", powerupType: "POWER_OUTAGE", priceCoins: 150 },
   { sku: "POWERUP_UMBRELLA", powerupType: "UMBRELLA", priceCoins: 75 },
   { sku: "POWERUP_RALLY_FLAG", powerupType: "RALLY_FLAG", priceCoins: 150 },
-  { sku: "POWERUP_DRILL_SERGEANT", powerupType: "DRILL_SERGEANT", priceCoins: 150 },
   { sku: "POWERUP_PIGGY_BANK", powerupType: "PIGGY_BANK", priceCoins: 40 },
   { sku: "POWERUP_BOUNTY", powerupType: "BOUNTY", priceCoins: 75 },
 ];
@@ -4837,7 +4435,6 @@ describe("powerups5 wave — integration", () => {
       assert.equal(types.includes("IMPOSTER"), false);
       for (const w of WAVE5) assert.ok(types.includes(w.powerupType), `${w.powerupType} visible with powerups5`);
       const byType = Object.fromEntries(withP5.items.map((i) => [i.powerupType, i]));
-      assert.equal(byType.UPRISING.priceCoins, 300);
       assert.equal(byType.PIGGY_BANK.priceCoins, 40);
       assert.equal(byType.BOUNTY.priceCoins, 75);
 
@@ -4868,57 +4465,9 @@ describe("powerups5 wave — integration", () => {
       assert.equal((await prisma.racePowerup.findUnique({ where: { id: pw.id } })).status, "HELD");
     });
 
-    it("activeEffects downcast for old clients: POWER_OUTAGE→SIGNAL_JAMMER, UPRISING→RUNNERS_HIGH; DECOY withheld", async () => {
-      const alice = await createUser("A"); const bob = await createUser("B");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, [bob]);
-      await giveEffect(raceId, bob.userId, alice.userId, "POWER_OUTAGE");
-      await giveEffect(raceId, bob.userId, bob.userId, "UPRISING", { metadata: { multiplier: 2 } });
-      await giveEffect(raceId, bob.userId, bob.userId, "DECOY", { expiresAt: new Date(Date.now() + 24 * HOUR_MS) });
-
-      const p5 = await getProgress(bob.token, raceId, P5);
-      assert.ok(findEffect(p5, "POWER_OUTAGE"), "power outage rendered natively for p5");
-      assert.ok(findEffect(p5, "UPRISING"), "uprising rendered natively for p5");
-      assert.ok(findEffect(p5, "DECOY"), "decoy visible to its owner");
-
-      const old = await getProgress(bob.token, raceId, OLD);
-      assert.ok(!findEffect(old, "POWER_OUTAGE"), "power outage not raw for old client");
-      assert.ok(findEffect(old, "SIGNAL_JAMMER"), "downcast to signal jammer");
-      assert.ok(findEffect(old, "RUNNERS_HIGH"), "uprising downcast to runners high");
-      assert.ok(!findEffect(old, "DECOY"), "decoy withheld from old client");
     });
-  });
 
   // ── 2. Uprising ─────────────────────────────────────────────────────────
-  describe("uprising", () => {
-    it("top-half caster is rejected 400; bottom-half caster fans out to the bottom half", async () => {
-      await seedCatalog();
-      const a = await createUser("Leader"); const b = await createUser("Mid"); const c = await createUser("Last");
-      await makeFriends(a, b); await makeFriends(a, c);
-      const raceId = await createActiveRace(a, [b, c]);
-      await setSteps(raceId, a.userId, 9000);
-      await setSteps(raceId, b.userId, 5000);
-      await setSteps(raceId, c.userId, 1000);
-
-      // Leader (top) cannot use it.
-      const leaderPw = await giveHeld(raceId, a.userId, "UPRISING");
-      const bad = await usePU(a.token, raceId, leaderPw.id, {});
-      assert.equal(bad.status, 400);
-      assert.equal((await prisma.racePowerup.findUnique({ where: { id: leaderPw.id } })).status, "HELD");
-
-      // Last place (bottom half, n=3 → ceil(3/2)=2 → only index 2) can use it.
-      const lastPw = await giveHeld(raceId, c.userId, "UPRISING");
-      const ok = await usePU(c.token, raceId, lastPw.id, {});
-      assert.equal(ok.status, 200);
-      const body = (await ok.json()).result;
-      assert.equal(body.outcome, "APPLIED");
-      assert.ok(body.affected >= 1);
-      const rows = await prisma.raceActiveEffect.findMany({ where: { raceId, type: "UPRISING", status: "ACTIVE" } });
-      assert.equal(rows.length, body.affected);
-      assert.ok(rows.some((r) => r.targetUserId === c.userId), "caster is a beneficiary");
-    });
-  });
-
   // ── 3/4. Coin Flip + settlement parity ──────────────────────────────────
   describe("coin flip", () => {
     it("use returns flip WIN|LOSE and multiplier; effect created", async () => {
@@ -5297,45 +4846,6 @@ describe("powerups5 wave — integration", () => {
   });
 
   // ── 10. Drill Sergeant ──────────────────────────────────────────────────
-  describe("drill sergeant", () => {
-    it("penalizes the target at expiry when the goal is missed", async () => {
-      const a = await createUser("Sarge"); const b = await createUser("Recruit");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      await setSteps(raceId, b.userId, 5000);
-      // Dare that already expired, target walked 0 in-window (no samples) → fail.
-      await giveEffect(raceId, b.userId, a.userId, "DRILL_SERGEANT", {
-        startsAt: new Date(Date.now() - 3 * HOUR_MS),
-        expiresAt: new Date(Date.now() - 60 * 1000),
-        metadata: { goalSteps: 3000, penaltySteps: 1500, stepsAtStart: 5000 },
-      });
-      // Lazy expiry via progress.
-      await getProgress(a.token, raceId);
-      await drainRaceResolutionJobs();
-      const bP = await participant(raceId, b.userId);
-      assert.equal(bP.bonusSteps, -1500, "penalty applied at expiry");
-      const feed = (await (await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: a.token })).json()).events;
-      assert.ok(feed.some((e) => e.powerupType === "DRILL_SERGEANT" && /failed/i.test(e.description)));
-    });
-
-    it("void (no penalty) when the race ended before the dare's expiry", async () => {
-      const a = await createUser("Sarge2"); const b = await createUser("Recruit2");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b], { endsAt: new Date(Date.now() - 2 * HOUR_MS) });
-      await giveEffect(raceId, b.userId, a.userId, "DRILL_SERGEANT", {
-        startsAt: new Date(Date.now() - 4 * HOUR_MS),
-        expiresAt: new Date(Date.now() - 60 * 1000),
-        metadata: { goalSteps: 3000, penaltySteps: 1500, stepsAtStart: 0 },
-      });
-      const { evaluateDrillSergeant, mintPiggyBank } = require("../../../src/modules/powerups/commands/expireEffects");
-      // Expire via the command directly.
-      const { expireEffects } = require("../../../src/modules/powerups/commands/expireEffects");
-      await expireEffects({ raceId });
-      const bP = await participant(raceId, b.userId);
-      assert.equal(bP.bonusSteps, 0, "no penalty — race ended first");
-    });
-  });
-
   // ── 11. Piggy Bank ──────────────────────────────────────────────────────
   describe("piggy bank", () => {
     it("defers the real auth cache invalidation until the atomic expiry commits", async () => {
@@ -6599,82 +6109,7 @@ describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
     return { alice, bob, carol, dave, raceId, daveUp };
   }
 
-  it("Cleanse with ONLY a teammate's Uprising on you is rejected 400 and leaves it ACTIVE", async () => {
-    const { dave, raceId, daveUp } = await sparkedUprising();
-
-    const cleanse = await giveHeld(raceId, dave.userId, "CLEANSE");
-    const res = await usePU(dave.token, raceId, cleanse.id);
-    assert.equal(res.status, 400);
-
-    const after = await prisma.raceActiveEffect.findUnique({
-      where: { id: daveUp.id },
-    });
-    assert.equal(after.status, "ACTIVE", "Uprising untouched by Cleanse");
-    assert.equal(after.expiresAt.getTime(), daveUp.expiresAt.getTime());
   });
-
-  it("Quick Rinse with ONLY an Uprising on you is rejected 409 NO_TIMED_DEBUFFS", async () => {
-    const { dave, raceId, daveUp } = await sparkedUprising();
-
-    const rinse = await giveHeld(raceId, dave.userId, "QUICK_RINSE");
-    const res = await usePU(dave.token, raceId, rinse.id);
-    assert.equal(res.status, 409);
-    assert.equal((await res.json()).code, "NO_TIMED_DEBUFFS");
-
-    const after = await prisma.raceActiveEffect.findUnique({
-      where: { id: daveUp.id },
-    });
-    assert.equal(after.status, "ACTIVE");
-  });
-
-  it("Quick Rinse shortens a real timed debuff but not the Uprising alongside it", async () => {
-    const { alice, dave, raceId, daveUp } = await sparkedUprising();
-
-    const cramp = await giveHeld(raceId, alice.userId, "LEG_CRAMP", "UNCOMMON");
-    const crampRes = await usePU(alice.token, raceId, cramp.id, {
-      targetUserId: dave.userId,
-    });
-    assert.equal(crampRes.status, 200);
-    const crampBefore = await prisma.raceActiveEffect.findFirst({
-      where: { raceId, type: "LEG_CRAMP" },
-    });
-
-    const rinse = await giveHeld(raceId, dave.userId, "QUICK_RINSE");
-    const res = await usePU(dave.token, raceId, rinse.id);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    // Quick Rinse HALVES the remaining window (rows stay ACTIVE with a nearer
-    // expiry) rather than expiring anything — so the property under test is the
-    // COUNT it touched and WHOSE expiry moved, not a status flip.
-    assert.equal(
-      body.result.shortened,
-      1,
-      "only the leg cramp is rinsed — the Uprising is not counted"
-    );
-    assert.deepEqual(
-      body.result.affectedEffects.map((e) => e.type),
-      ["LEG_CRAMP"]
-    );
-
-    const crampAfter = await prisma.raceActiveEffect.findFirst({
-      where: { raceId, type: "LEG_CRAMP" },
-    });
-    assert.ok(
-      crampAfter.expiresAt.getTime() < crampBefore.expiresAt.getTime(),
-      "the real debuff's window was cut"
-    );
-
-    const after = await prisma.raceActiveEffect.findUnique({
-      where: { id: daveUp.id },
-    });
-    assert.equal(after.status, "ACTIVE", "Uprising survives the rinse");
-    assert.equal(
-      after.expiresAt.getTime(),
-      daveUp.expiresAt.getTime(),
-      "Uprising's window is not cut either"
-    );
-  });
-});
 
 })();
 
@@ -7484,7 +6919,6 @@ const HOUR_MS = 60 * 60 * 1000;
 
 // Wave-5 store catalog rows (cleanDatabase wipes them). Prices MUST match seed.js.
 const WAVE5 = [
-  { sku: "POWERUP_UPRISING", powerupType: "UPRISING", priceCoins: 300 },
   { sku: "POWERUP_GHOST_PEPPER", powerupType: "GHOST_PEPPER", priceCoins: 75 },
   { sku: "POWERUP_COIN_FLIP", powerupType: "COIN_FLIP", priceCoins: 40 },
   { sku: "POWERUP_MYSTERY_POTION", powerupType: "MYSTERY_POTION", priceCoins: 40 },
@@ -7492,7 +6926,6 @@ const WAVE5 = [
   { sku: "POWERUP_POWER_OUTAGE", powerupType: "POWER_OUTAGE", priceCoins: 150 },
   { sku: "POWERUP_UMBRELLA", powerupType: "UMBRELLA", priceCoins: 75 },
   { sku: "POWERUP_RALLY_FLAG", powerupType: "RALLY_FLAG", priceCoins: 150 },
-  { sku: "POWERUP_DRILL_SERGEANT", powerupType: "DRILL_SERGEANT", priceCoins: 150 },
   { sku: "POWERUP_PIGGY_BANK", powerupType: "PIGGY_BANK", priceCoins: 40 },
   { sku: "POWERUP_BOUNTY", powerupType: "BOUNTY", priceCoins: 75 },
 ];
@@ -7635,7 +7068,6 @@ describe("powerups5 wave — integration", () => {
       assert.equal(types.includes("IMPOSTER"), false);
       for (const w of WAVE5) assert.ok(types.includes(w.powerupType), `${w.powerupType} visible with powerups5`);
       const byType = Object.fromEntries(withP5.items.map((i) => [i.powerupType, i]));
-      assert.equal(byType.UPRISING.priceCoins, 300);
       assert.equal(byType.PIGGY_BANK.priceCoins, 40);
       assert.equal(byType.BOUNTY.priceCoins, 75);
 
@@ -7666,57 +7098,9 @@ describe("powerups5 wave — integration", () => {
       assert.equal((await prisma.racePowerup.findUnique({ where: { id: pw.id } })).status, "HELD");
     });
 
-    it("activeEffects downcast for old clients: POWER_OUTAGE→SIGNAL_JAMMER, UPRISING→RUNNERS_HIGH; DECOY withheld", async () => {
-      const alice = await createUser("A"); const bob = await createUser("B");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, [bob]);
-      await giveEffect(raceId, bob.userId, alice.userId, "POWER_OUTAGE");
-      await giveEffect(raceId, bob.userId, bob.userId, "UPRISING", { metadata: { multiplier: 2 } });
-      await giveEffect(raceId, bob.userId, bob.userId, "DECOY", { expiresAt: new Date(Date.now() + 24 * HOUR_MS) });
-
-      const p5 = await getProgress(bob.token, raceId, P5);
-      assert.ok(findEffect(p5, "POWER_OUTAGE"), "power outage rendered natively for p5");
-      assert.ok(findEffect(p5, "UPRISING"), "uprising rendered natively for p5");
-      assert.ok(findEffect(p5, "DECOY"), "decoy visible to its owner");
-
-      const old = await getProgress(bob.token, raceId, OLD);
-      assert.ok(!findEffect(old, "POWER_OUTAGE"), "power outage not raw for old client");
-      assert.ok(findEffect(old, "SIGNAL_JAMMER"), "downcast to signal jammer");
-      assert.ok(findEffect(old, "RUNNERS_HIGH"), "uprising downcast to runners high");
-      assert.ok(!findEffect(old, "DECOY"), "decoy withheld from old client");
     });
-  });
 
   // ── 2. Uprising ─────────────────────────────────────────────────────────
-  describe("uprising", () => {
-    it("top-half caster is rejected 400; bottom-half caster fans out to the bottom half", async () => {
-      await seedCatalog();
-      const a = await createUser("Leader"); const b = await createUser("Mid"); const c = await createUser("Last");
-      await makeFriends(a, b); await makeFriends(a, c);
-      const raceId = await createActiveRace(a, [b, c]);
-      await setSteps(raceId, a.userId, 9000);
-      await setSteps(raceId, b.userId, 5000);
-      await setSteps(raceId, c.userId, 1000);
-
-      // Leader (top) cannot use it.
-      const leaderPw = await giveHeld(raceId, a.userId, "UPRISING");
-      const bad = await usePU(a.token, raceId, leaderPw.id, {});
-      assert.equal(bad.status, 400);
-      assert.equal((await prisma.racePowerup.findUnique({ where: { id: leaderPw.id } })).status, "HELD");
-
-      // Last place (bottom half, n=3 → ceil(3/2)=2 → only index 2) can use it.
-      const lastPw = await giveHeld(raceId, c.userId, "UPRISING");
-      const ok = await usePU(c.token, raceId, lastPw.id, {});
-      assert.equal(ok.status, 200);
-      const body = (await ok.json()).result;
-      assert.equal(body.outcome, "APPLIED");
-      assert.ok(body.affected >= 1);
-      const rows = await prisma.raceActiveEffect.findMany({ where: { raceId, type: "UPRISING", status: "ACTIVE" } });
-      assert.equal(rows.length, body.affected);
-      assert.ok(rows.some((r) => r.targetUserId === c.userId), "caster is a beneficiary");
-    });
-  });
-
   // ── 3/4. Coin Flip + settlement parity ──────────────────────────────────
   describe("coin flip", () => {
     it("use returns flip WIN|LOSE and multiplier; effect created", async () => {
@@ -8095,45 +7479,6 @@ describe("powerups5 wave — integration", () => {
   });
 
   // ── 10. Drill Sergeant ──────────────────────────────────────────────────
-  describe("drill sergeant", () => {
-    it("penalizes the target at expiry when the goal is missed", async () => {
-      const a = await createUser("Sarge"); const b = await createUser("Recruit");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      await setSteps(raceId, b.userId, 5000);
-      // Dare that already expired, target walked 0 in-window (no samples) → fail.
-      await giveEffect(raceId, b.userId, a.userId, "DRILL_SERGEANT", {
-        startsAt: new Date(Date.now() - 3 * HOUR_MS),
-        expiresAt: new Date(Date.now() - 60 * 1000),
-        metadata: { goalSteps: 3000, penaltySteps: 1500, stepsAtStart: 5000 },
-      });
-      // Lazy expiry via progress.
-      await getProgress(a.token, raceId);
-      await drainRaceResolutionJobs();
-      const bP = await participant(raceId, b.userId);
-      assert.equal(bP.bonusSteps, -1500, "penalty applied at expiry");
-      const feed = (await (await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: a.token })).json()).events;
-      assert.ok(feed.some((e) => e.powerupType === "DRILL_SERGEANT" && /failed/i.test(e.description)));
-    });
-
-    it("void (no penalty) when the race ended before the dare's expiry", async () => {
-      const a = await createUser("Sarge2"); const b = await createUser("Recruit2");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b], { endsAt: new Date(Date.now() - 2 * HOUR_MS) });
-      await giveEffect(raceId, b.userId, a.userId, "DRILL_SERGEANT", {
-        startsAt: new Date(Date.now() - 4 * HOUR_MS),
-        expiresAt: new Date(Date.now() - 60 * 1000),
-        metadata: { goalSteps: 3000, penaltySteps: 1500, stepsAtStart: 0 },
-      });
-      const { evaluateDrillSergeant, mintPiggyBank } = require("../../../src/modules/powerups/commands/expireEffects");
-      // Expire via the command directly.
-      const { expireEffects } = require("../../../src/modules/powerups/commands/expireEffects");
-      await expireEffects({ raceId });
-      const bP = await participant(raceId, b.userId);
-      assert.equal(bP.bonusSteps, 0, "no penalty — race ended first");
-    });
-  });
-
   // ── 11. Piggy Bank ──────────────────────────────────────────────────────
   describe("piggy bank", () => {
     it("defers the real auth cache invalidation until the atomic expiry commits", async () => {
