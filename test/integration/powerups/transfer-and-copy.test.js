@@ -1456,14 +1456,14 @@ describe("hitchhike live-vs-settlement parity — integration", () => {
     assert.equal(live.status, "ACTIVE");
     assert.equal(
       live.totals[alice.userId],
-      1000,
-      "2,000 walked + 4,000 copied = 6,000 pre-leech, then Carol drains 5,000"
+      0,
+      "2,000 walked + 2,000 copied = 4,000 pre-leech, then Carol drains 4,000 to the floor"
     );
     assert.equal(live.totals[bob.userId], 4000, "the target loses nothing");
     assert.equal(
       live.totals[carol.userId],
-      15000,
-      "10,000 walked + 5,000 drained from Alice"
+      14000,
+      "10,000 walked + 4,000 drained from Alice after her Hitchhike copy"
     );
 
     // ── SETTLE through the real settlement path ───────────────────────────
@@ -1487,8 +1487,8 @@ describe("hitchhike live-vs-settlement parity — integration", () => {
     // a specific number rather than only as a parity mismatch.
     assert.equal(
       settled.totals[alice.userId],
-      1000,
-      "hitchhike copy is folded into preLeechTotal BEFORE the leech resolves (0 would mean the copy was dropped; 4,000 would mean it landed after the drain)"
+      0,
+      "Alice settles at the same floor as live scoring; Carol's 14,000 total above proves the 2,000 Hitchhike copy entered preLeechTotal before the drain resolved"
     );
 
     // And the persisted row agrees with what the API reports.
@@ -1564,8 +1564,8 @@ describe("hitchhike live-vs-settlement parity — integration", () => {
     const live = await totalsViaApi(raceId, alice);
     assert.equal(
       live.totals[alice.userId],
-      4000,
-      "1,000 walked + 3,000 copied"
+      2500,
+      "1,000 walked + 1,500 copied"
     );
 
     // Alice forfeits — her total is frozen at this instant, through the real
@@ -1585,8 +1585,8 @@ describe("hitchhike live-vs-settlement parity — integration", () => {
     assert.ok(frozen.forfeitedAt, "she really forfeited");
     assert.equal(
       frozen.totalSteps,
-      4000,
-      "the frozen total RETAINS the accrued copy — dropping it would silently delete steps she had already been shown"
+      2500,
+      "the frozen total RETAINS the accrued 50% copy — dropping it would silently delete steps she had already been shown"
     );
   });
 });
