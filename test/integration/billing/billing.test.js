@@ -253,6 +253,20 @@ it('rejects an original transaction restored into another account even after del
  const a=await createTestUser();await bootstrap(a.token);history.purchases=[purchase()];await sync(a.token);await request(server.baseUrl,'DELETE','/auth/account',{token:a.token});
  const b=await createTestUser();await bootstrap(b.token);const result=await sync(b.token,'store-paid-1');assert.equal(result.status,409);assert.equal(result.body.code,'PURCHASE_ACCOUNT_MISMATCH');assert.equal((await bootstrap(b.token)).coins,0);
 });
+it('skips already-fulfilled sandbox transfer history and fulfills a newly seen direct character without restoring Gold',async()=>{
+ const former=await createTestUser({billingRealm:'sandbox',coins:600});const formerState=await bootstrap(former.token);
+ const current=await createTestUser({billingRealm:'sandbox',coins:100});const currentState=await bootstrap(current.token);
+ const historical=purchase({transactionId:'transferred-coins',environment:'sandbox'}),subscriptionId='transferred-subscription';
+ await prisma.billingPurchase.create({data:{identityId:formerState.identity.appUserId,canonicalKey:JSON.stringify([config.projectId,historical.appId,historical.store,historical.environment,historical.transactionId]),projectId:config.projectId,appId:historical.appId,store:historical.store,environment:'sandbox',transactionId:historical.transactionId,providerId:historical.providerId,productId:'coins_500',purchasedAt:new Date(historical.purchasedAt),quantity:1,grantedCoins:500,fulfillmentStatus:'fulfilled',benefitKind:'paid'}});
+ await prisma.billingSubscription.create({data:{id:JSON.stringify([config.projectId,'app_ios','app_store','sandbox',subscriptionId]),identityId:formerState.identity.appUserId,productId:'plus_monthly',startsAt:new Date(Date.now()-86400000),accessUntil:new Date(Date.now()+86400000),givesAccess:true,observedAt:new Date()}});
+ const mouse=await prisma.shopItem.create({data:{sku:'mouse',name:'Mouse',slot:'CHARACTER',assetKey:'mouse',priceCoins:0}});
+ const direct=purchase({transactionId:'transferred-mouse',providerId:'transferred-mouse-provider',productId:'character_mouse',environment:'sandbox',purchaseStatus:'owned'});
+ history={purchases:[historical,direct],subscriptions:[subscription({providerId:subscriptionId,environment:'sandbox',startsAt:new Date(Date.now()-86400000).toISOString(),accessUntil:new Date(Date.now()+86400000).toISOString(),givesAccess:true})],observedAt:new Date().toISOString()};
+ const result=await sync(current.token,'transferred-mouse');
+ assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.coins,100);assert.equal(result.body.membership.status,'free');
+ assert.equal(await prisma.billingPurchase.count({where:{identityId:currentState.identity.appUserId,transactionId:'transferred-coins'}}),0);
+ assert.equal(await prisma.userShopItem.count({where:{userId:current.user.id,shopItemId:mouse.id}}),1);
+});
 it('rechecks realm after provider I/O and refuses stale production verification following sandbox provisioning',async()=>{
  const {user,token}=await createTestUser();await bootstrap(token);history.purchases=[purchase()];let release,entered;const held=new Promise(r=>{release=r;}),started=new Promise(r=>{entered=r;});const alternate=await startServer({billingConfig:config,billingProvider:{async getCustomerHistory(){entered();await held;return history;}}});
  try{const pending=request(alternate.baseUrl,'POST','/billing/sync',{token,body:{transactionId:'store-paid-1'}});await started;await cli('billing-provision-sandbox.js',[`--user-id=${user.id}`,'--apply']);release();const res=await pending;assert.equal(res.status,409);assert.equal((await res.json()).code,'BILLING_REALM_MISMATCH');assert.equal((await bootstrap(token)).coins,0);}finally{release();await alternate.close();}

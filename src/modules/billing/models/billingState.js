@@ -116,11 +116,13 @@ async function applyHistory({db,config,identity,token,history}){
    const product=validatePurchase(config,identity,p),canonicalKey=keyFor(config,p),gold=isGoldPurchase(product,p),direct=isDirectCharacterProduct(product);
    let receipt=await tx.billingPurchase.findUnique({where:{canonicalKey}});
    if(receipt&&receipt.identityId!==identity.id){
-    // This should only happen when the same store transaction is already
-    // bound to a different Bara identity. Keep the client response opaque,
-    // but retain enough server-side evidence to distinguish a provider
-    // transfer from a genuine receipt replay.
-    console.error(JSON.stringify({event:'billing_purchase_identity_conflict',canonicalKey,receiptIdentityId:receipt.identityId,currentIdentityId:identity.id,transactionId:p.transactionId,environment:p.environment,productId:product.id}));
+    // A RevenueCat sandbox transfer can bring a complete StoreKit history to
+    // a new Bara identity. Existing coin, subscription, and entitlement
+    // records remain with their original account: replaying them would mint
+    // value twice. Leave those rows untouched and continue so a newly seen
+    // direct character purchase later in the same verified history can be
+    // fulfilled for the current sandbox identity.
+    if(identity.environment==='sandbox'&&receipt.environment==='sandbox')continue;
     throw error('Purchase belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
    }
    const subscription=history.subscriptions.find(s=>s.providerId===p.subscriptionId);
@@ -162,7 +164,10 @@ async function applyHistory({db,config,identity,token,history}){
    validatePurchase(config,identity,{...s,transactionId:s.providerId,quantity:1,purchasedAt:s.startsAt});
    const id=JSON.stringify([config.projectId,s.appId,s.store,s.environment,s.providerId]);
    const existing=await tx.billingSubscription.findUnique({where:{id}});
-   if(existing&&existing.identityId!==identity.id)throw error('Subscription belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
+   // Sandbox receipt transfers retain historical subscription provenance. Do
+   // not reassign it (or revive Gold); only newly observed records belong to
+   // the receiving identity.
+   if(existing&&existing.identityId!==identity.id){if(identity.environment==='sandbox')continue;throw error('Subscription belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);}
    const period=s.periodStartsAt?instant(s.periodStartsAt):null;
    if(existing&&(existing.observedAt>observedAt||period&&existing.periodStartsAt&&period<existing.periodStartsAt))continue;
    const data={identityId:identity.id,productId:s.productId,startsAt:instant(s.startsAt),periodStartsAt:period,accessUntil:s.accessUntil?instant(s.accessUntil):null,givesAccess:s.givesAccess===true,providerStatus:s.status||(s.trial?'trialing':'active'),trial:s.trial===true,renews:s.renews===true,observedAt,managementUrl:s.managementUrl||null,benefitContract:s.benefitContract||(s.productId==='plus_weekly'?GOLD_BENEFIT_VERSION:null)};
