@@ -68,6 +68,7 @@ const {
 const {
   scheduleRaceResolutionWorkerV2,
   scheduleRaceDirtyStreamWorker,
+  scheduleRaceResolutionRecoverySweep,
   scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTaskRunner,
   scheduleRaceSeriesRenewal,
@@ -169,6 +170,8 @@ function startServer({
   schedulePowerupRecalcStreamWorker:
     schedulePowerupStream = schedulePowerupRecalcStreamWorker,
   scheduleRaceDirtyStreamWorker: scheduleRaceDirtyStream = scheduleRaceDirtyStreamWorker,
+  scheduleRaceResolutionRecoverySweep:
+    scheduleRaceRecovery = scheduleRaceResolutionRecoverySweep,
   scheduleRacePlacementTransitions:
     schedulePlacementTransitions = scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTasks:
@@ -256,7 +259,8 @@ function startServer({
       const scheduleQueueFirstRacePipeline = () => {
         retainStopHandle(scheduleStepStream());
         retainStopHandle(schedulePowerupStream());
-        return retainStopHandle(scheduleRaceDirtyStream());
+        retainStopHandle(scheduleRaceDirtyStream());
+        return retainStopHandle(scheduleRaceRecovery());
       };
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup
@@ -264,9 +268,6 @@ function startServer({
       if (processRole === "http") return;
       if (processRole === "resolution") {
         scheduleQueueFirstRacePipeline();
-        // Postgres is no longer the primary transport. Keep only a slow
-        // recovery sweep for an after-commit Redis publish failure.
-        scheduleTrackedResolutionWorker({ pollIntervalMs: 60_000 });
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
@@ -420,7 +421,6 @@ function startServer({
       // injected startup logger.
       if (processRole !== "cron") {
         scheduleQueueFirstRacePipeline();
-        scheduleTrackedResolutionWorker({ pollIntervalMs: 60_000 });
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
