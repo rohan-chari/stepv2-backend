@@ -40,6 +40,17 @@ async function queueStepSync({
     syncId,
     acceptedAt: acceptedAt.toISOString(),
     sampleCount: canonical.samples.length,
+    uploaderReconciliation: {
+      state: "DEFERRED",
+      resolvedRaceCount: 0,
+      boxStateCurrent: false,
+    },
+    raceResolution: {
+      jobId: null,
+      generation: null,
+      state: "QUEUED",
+      requestedAt: acceptedAt.toISOString(),
+    },
     stepIntakeSemantics: "QUEUE_FIRST_V1",
   };
 }
