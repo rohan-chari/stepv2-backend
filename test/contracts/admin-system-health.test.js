@@ -155,14 +155,17 @@ function poolSnapshot(role, instance, nowMs) {
 describe("admin system health", () => {
   let server;
   let originalRedisUrl;
+  let originalQueueRedisUrl;
   let originalCachePrefix;
 
   before(async () => {
     const databaseName = decodeURIComponent(new URL(process.env.DATABASE_URL).pathname.slice(1));
     assert.match(databaseName, /_test$/, "admin system-health integration requires a dedicated *_test database");
     originalRedisUrl = process.env.REDIS_URL;
+    originalQueueRedisUrl = process.env.QUEUE_REDIS_URL;
     originalCachePrefix = process.env.CACHE_ENV_PREFIX;
     delete process.env.REDIS_URL;
+    delete process.env.QUEUE_REDIS_URL;
     delete process.env.CACHE_ENV_PREFIX;
     await redisCache.close();
     server = await startServer();
@@ -173,6 +176,8 @@ describe("admin system health", () => {
     await redisCache.close();
     if (originalRedisUrl == null) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = originalRedisUrl;
+    if (originalQueueRedisUrl == null) delete process.env.QUEUE_REDIS_URL;
+    else process.env.QUEUE_REDIS_URL = originalQueueRedisUrl;
     if (originalCachePrefix == null) delete process.env.CACHE_ENV_PREFIX;
     else process.env.CACHE_ENV_PREFIX = originalCachePrefix;
   });
