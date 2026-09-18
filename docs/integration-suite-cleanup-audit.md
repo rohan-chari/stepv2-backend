@@ -553,3 +553,42 @@ Powerup, scoring, settlement/lifecycle, funded-prize, and race-lock canonical su
 
 
 Final default integration target reached: 17 test files. Final hygiene pass: moved-suite flattening, support shims, and npm script separation.
+
+
+# Final cleanup result
+
+Cleanup completed on `performance/scalability`.
+
+A recursive count revealed that the original default suite was actually **409 test files**: the 401 root-level files audited initially plus 8 pre-existing files under `test/integration/billing/`.
+
+The default integration suite is now **17 test files** with **zero root-level `.test.js` files**.
+
+Final default integration ownership:
+
+- 6 powerup gameplay files
+- 4 scoring files
+- 2 race lifecycle/settlement files
+- 2 economy/payout files
+- 1 race single-writer/fencing file
+- 2 current billing/IAP entitlement files
+
+Separated non-default suites:
+
+- Performance: 52 files
+- Reliability: 70 files
+- Contracts: 30 files
+- HTTP/service: 128 files
+- Maintenance: 3 files
+
+The retired permanent-plan billing suite was deleted. Buy-in tests, retired Fanny Pack coverage, obsolete onboarding/cutover/old queue rollout coverage, and other confirmed retired behavior were deleted rather than relocated.
+
+NPM commands now separate the suites:
+
+- `npm run test:integration`
+- `npm run test:performance`
+- `npm run test:reliability`
+- `npm run test:contracts`
+- `npm run test:http-service`
+- `npm run test:maintenance`
+
+No behavioral test suite has been executed as part of this cleanup yet. The 17 lean integration files passed a JavaScript syntax/static parse check.
