@@ -12,7 +12,8 @@ const GROUPS = Object.freeze({
   RACE_DIRTY: "race-workers-v1",
 });
 
-let client = null;
+let commandState = null;
+const readerStates = new Map();
 
 function prefix() {
   return process.env.CACHE_ENV_PREFIX || "";
@@ -31,8 +32,7 @@ function consumerName(role = "worker") {
   return `${os.hostname()}:${instance}:${process.pid}:${role}`;
 }
 
-function getClient() {
-  if (client) return client;
+function createClient(role) {
   const url = String(process.env.REDIS_URL || "").trim();
   if (!url) {
     const error = new Error("REDIS_URL is required for queue-first work");
@@ -40,17 +40,39 @@ function getClient() {
     throw error;
   }
   const IORedis = require("ioredis");
-  client = new IORedis(url, {
+  const redis = new IORedis(url, {
     enableOfflineQueue: false,
     maxRetriesPerRequest: 1,
     connectTimeout: 1500,
     retryStrategy: (attempt) => Math.min(attempt * 200, 5000),
     lazyConnect: false,
   });
-  client.on("error", (error) => {
-    console.error("[redisStreams] connection error:", error?.message || error);
+  redis.on("error", (error) => {
+    console.error(`[redisStreams] ${role} connection error:`, error?.message || error);
   });
-  return client;
+  let settle;
+  const ready = new Promise((resolve) => { settle = resolve; });
+  const done = () => settle(true);
+  redis.once("ready", done);
+  redis.once("error", done);
+  redis.once("end", done);
+  setTimeout(done, 2000).unref?.();
+  return { redis, ready };
+}
+
+async function commandClient() {
+  commandState ||= createClient("command");
+  await commandState.ready;
+  return commandState.redis;
+}
+
+async function readerClient(consumer) {
+  if (!readerStates.has(consumer)) {
+    readerStates.set(consumer, createClient(`reader:${consumer}`));
+  }
+  const state = readerStates.get(consumer);
+  await state.ready;
+  return state.redis;
 }
 
 function encodeFields(fields) {
@@ -73,7 +95,7 @@ function decodeEntry(entry) {
 
 async function publish(stream, fields) {
   try {
-    const redis = getClient();
+    const redis = await commandClient();
     return await redis.xadd(streamName(stream), "*", ...encodeFields(fields));
   } catch (error) {
     if (!error.code) error.code = "QUEUE_REDIS_UNAVAILABLE";
@@ -83,7 +105,7 @@ async function publish(stream, fields) {
 
 async function ensureGroup(stream, group) {
   try {
-    const redis = getClient();
+    const redis = await commandClient();
     await redis.xgroup("CREATE", streamName(stream), group, "0", "MKSTREAM");
     return true;
   } catch (error) {
@@ -94,7 +116,7 @@ async function ensureGroup(stream, group) {
 }
 
 async function readGroup({ stream, group, consumer, count = 10, blockMs = 5000 }) {
-  const redis = getClient();
+  const redis = await readerClient(consumer);
   const result = await redis.xreadgroup(
     "GROUP", group, consumer,
     "COUNT", Math.max(1, Number(count) || 1),
@@ -106,7 +128,7 @@ async function readGroup({ stream, group, consumer, count = 10, blockMs = 5000 }
 }
 
 async function ack(stream, group, messageId) {
-  const redis = getClient();
+  const redis = await commandClient();
   return Number(await redis.xack(streamName(stream), group, messageId)) > 0;
 }
 
@@ -117,7 +139,7 @@ async function reclaimIdle({
   minIdleMs = 30000,
   count = 25,
 }) {
-  const redis = getClient();
+  const redis = await commandClient();
   const result = await redis.xautoclaim(
     streamName(stream),
     group,
@@ -132,7 +154,7 @@ async function reclaimIdle({
 }
 
 async function pendingSummary(stream, group) {
-  const redis = getClient();
+  const redis = await commandClient();
   const result = await redis.xpending(streamName(stream), group);
   return {
     count: Number(result?.[0] || 0),
@@ -142,10 +164,15 @@ async function pendingSummary(stream, group) {
 }
 
 async function close() {
-  if (!client) return;
-  const current = client;
-  client = null;
-  await current.quit().catch(() => current.disconnect());
+  const states = [
+    ...(commandState ? [commandState] : []),
+    ...readerStates.values(),
+  ];
+  commandState = null;
+  readerStates.clear();
+  await Promise.all(states.map(async ({ redis }) => {
+    await redis.quit().catch(() => redis.disconnect());
+  }));
 }
 
 module.exports = {
