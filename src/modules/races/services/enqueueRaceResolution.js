@@ -194,9 +194,10 @@ async function enqueueRaceResolution(
       );
       if (covered) {
         if (!tx) {
-          await redisCache.publishDurableQueueWakeup("resolution", {
-            workKind: "ordinary",
-          });
+          await publishRaceDirty(
+            { raceId, generation: covered.generation || null },
+            { userId, reason: "DISPLAY_REFRESH", requestedAt: now },
+          );
         }
         return covered;
       }
