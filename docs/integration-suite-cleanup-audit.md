@@ -482,3 +482,66 @@ A few small focused existing files may remain as-is if they stay clearer than me
 Integration tests should prove behavior that unit/service tests cannot reliably prove: real Postgres state transitions, scoring/effect correctness, transactional money state, idempotency, single-writer fencing, crash/retry convergence, and a very small number of lifecycle settlement paths.
 
 Everything else should be cheaper and more targeted.
+
+
+# Second pass: DELETE OUTRIGHT candidates
+
+This is stricter than the KEEP/MERGE/MOVE audit above. These files validate behavior we no longer intend to support as a product path, one-time operational migrations, retired rollout experiments, or historical batch ownership. They should be removed rather than relocated once any still-relevant invariant has been extracted.
+
+## Obsolete buy-in product behavior
+
+- `race-buyins.test.js`
+- `buy-in-hold-concurrency.test.js`
+
+## Retired onboarding / invite-code behavior
+
+- `activation-onboarding-v2.test.js`
+- `invite-code-onboarding.test.js`
+
+## One-time retirement / migration / cutover verification
+
+- `backpack-retirement.test.js`
+- `decoy-shop-migration.test.js`
+- `duplicate-leech-repair.test.js`
+- `recap-cutover-operator-database.test.js`
+- `fixed-team-payout-deployment-a.test.js`
+- `event-recap-retained-schema-account-deletion.test.js`
+- `feature-control-remediation.test.js`
+
+## Retired rollout / compatibility scaffolding
+
+- `feature-control-cleanup-contract.test.js`
+- `notification-snapshot-retirement.test.js`
+- `race-queue-v2-closure-shadow.test.js`
+- `race-resolution-unused-history.test.js`
+- `race-resolution-planning-input-reuse.test.js`
+- `race-resolution-memory-profile.test.js`
+- `race-resolution-memory-reuse.test.js`
+- `race-resolution-configured-concurrency.test.js`
+- `race-resolution-five-concurrency.test.js`
+- `race-resolution-spawned-worker-scale.test.js`
+
+## Historical batch ownership with no permanent domain purpose
+
+- `batch-0808-admin-version-stats.test.js`
+- `feature-batch-2026-07-24-discovery.test.js`
+- `feature-batch-2026-07-25-ad-unlock.test.js`
+- `feature-batch-2026-07-25-spectate-chat.test.js`
+- `feature-batch-2026-07-26.test.js`
+- `feature-batch-2026-08-09.test.js`
+- `feature-batch-2026-08-17-contracts.test.js`
+- `feature-batch-2026-08-28b.test.js`
+- `feature-batch-2026-09-06-backend.test.js`
+- `feature-batch-backend-contract.test.js`
+
+## Schema/index existence tests that should be owned by migrations, not permanent integration
+
+- `local-global-step-event-schema.test.js`
+- `race-effect-expiry-indexes.test.js`
+- `snapshot-success-indexes.test.js`
+
+**Current outright-delete candidate count: 34 files.**
+
+Important: funded prize-pool tests are **not** in this delete set. The product has moved from participant buy-ins to app-funded prizes, so prize settlement remains current while participant buy-in behavior is obsolete.
+
+For the queue refactor, old scheduler/polling/rollout tests should not be mechanically rewritten. Only these enduring guarantees should survive into the new lean queue suite: duplicate delivery safety, single-writer fencing, stale generation rejection, crash/reclaim recovery, and final scoring parity.
