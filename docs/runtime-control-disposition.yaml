@@ -1940,19 +1940,6 @@
       "rollbackValue": null
     },
     {
-      "id": "env:QUEUE_REDIS_URL",
-      "name": "QUEUE_REDIS_URL",
-      "kind": "string_environment",
-      "evidenceTimestamp": "2026-08-20T04:23:00Z",
-      "compatibilityConsumers": [],
-      "adminExposed": false,
-      "disposition": "deployment_config",
-      "permanentValue": null,
-      "polarityDefault": "runtime value; see source consumers",
-      "deployFamily": "runtime_configuration",
-      "rollbackValue": null
-    },
-    {
       "id": "env:RACE_ENDING_REMINDER_DISABLED",
       "name": "RACE_ENDING_REMINDER_DISABLED",
       "kind": "boolean_environment",
@@ -1964,6 +1951,19 @@
       "polarityDefault": "fan-out runs behind OPS_USER_FANOUTS_DISABLED",
       "deployFamily": "environment_cleanup",
       "rollbackValue": false
+    },
+    {
+      "id": "env:QUEUE_REDIS_URL",
+      "name": "QUEUE_REDIS_URL",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "runtime value; see source consumers",
+      "deployFamily": "runtime_configuration",
+      "rollbackValue": null
     },
     {
       "id": "env:RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS",
