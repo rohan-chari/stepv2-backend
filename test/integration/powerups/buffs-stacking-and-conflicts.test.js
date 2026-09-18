@@ -3131,7 +3131,6 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("../setup");
 const { appSettings } = require("../../../src/shared/config/appSettings");
 
 // ---------------------------------------------------------------------------
-// Batch 2026-08-09 item 7 — Rally Flag and Uprising are BUFFS, not debuffs.
 // Cleanse and Quick Rinse must never clear them.
 //
 // Root cause this pins: both powerups write ONE EFFECT ROW PER BENEFICIARY via
@@ -3149,7 +3148,6 @@ const { appSettings } = require("../../../src/shared/config/appSettings");
 //
 // Follows the powerups-bounty-not-cleansable.test.js precedent: real HTTP, real
 // DB, real handler chain, real casts. The buff rows under test are produced by
-// genuinely casting Uprising / Rally Flag, not hand-inserted, because the
 // per-beneficiary fan-out IS the thing that creates the bug.
 // ---------------------------------------------------------------------------
 
@@ -3200,7 +3198,6 @@ async function backdate(raceId) {
   });
 }
 
-// Ordinary (non-team) race — Uprising's solo bottom-half branch.
 async function createSoloRace(creator, opponents) {
   const createRes = await request(server.baseUrl, "POST", "/races", {
     body: {
@@ -3321,7 +3318,7 @@ async function buffRowFor(raceId, type, userId) {
   });
 }
 
-describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
+describe("Rally Flag survives Cleanse and Quick Rinse", () => {
   before(async () => {
     server = await getSharedServer();
   });
@@ -3444,38 +3441,8 @@ describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
     assert.equal(after.status, "ACTIVE");
   });
 
-  // ── Uprising (solo race, bottom-half branch) ──────────────────────────────
 
-  // Four runners; Carol (3rd) sparks the Uprising, so beneficiaries are Carol
   // and Dave. DAVE's copy is the caster-sourced one under test.
-  async function sparkedUprising() {
-    const alice = await createUser("AliceUp");
-    const bob = await createUser("BobUp");
-    const carol = await createUser("CarolUp");
-    const dave = await createUser("DaveUp");
-    for (const other of [bob, carol, dave]) await makeFriends(alice, other);
-    const raceId = await createSoloRace(alice, [bob, carol, dave]);
-
-    // Standings: alice 8000 > bob 6000 > carol 2000 > dave 1000. Bottom half of
-    // four is index 2..3 = carol, dave.
-    await setSteps(raceId, alice.userId, 8000);
-    await setSteps(raceId, bob.userId, 6000);
-    await setSteps(raceId, carol.userId, 2000);
-    await setSteps(raceId, dave.userId, 1000);
-
-    const up = await giveHeld(raceId, carol.userId, "UPRISING");
-    const res = await usePU(carol.token, raceId, up.id);
-    assert.equal(res.status, 200, "Carol is in the bottom half");
-    assert.equal((await res.json()).result.affected, 2);
-
-    const daveUp = await buffRowFor(raceId, "UPRISING", dave.userId);
-    assert.ok(daveUp, "Dave got an Uprising row");
-    assert.equal(daveUp.sourceUserId, carol.userId);
-    assert.equal(daveUp.targetUserId, dave.userId);
-
-    return { alice, bob, carol, dave, raceId, daveUp };
-  }
-
   });
 
 })();
@@ -4467,7 +4434,6 @@ describe("powerups5 wave — integration", () => {
 
     });
 
-  // ── 2. Uprising ─────────────────────────────────────────────────────────
   // ── 3/4. Coin Flip + settlement parity ──────────────────────────────────
   describe("coin flip", () => {
     it("use returns flip WIN|LOSE and multiplier; effect created", async () => {
@@ -4700,138 +4666,6 @@ describe("powerups5 wave — integration", () => {
   });
 
   // ── 8. Rally Flag ───────────────────────────────────────────────────────
-  describe("restart-atomic effect expiry", () => {
-    it("serializes Fanny expiry before a real Pocket Watch command without an ABBA deadlock", async () => {
-      const a = await createUser("Lock Order Packer");
-      const b = await createUser("Lock Order Observer");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      const target = await participant(raceId, a.userId);
-      await prisma.raceParticipant.update({
-        where: { id: target.id },
-        data: { powerupSlots: 4 },
-      });
-      const originalExpiry = new Date(Date.now() + HOUR_MS);
-      const effect = await giveEffect(raceId, a.userId, a.userId, "FANNY_PACK", {
-        expiresAt: originalExpiry,
-      });
-      const watch = await giveHeld(raceId, a.userId, "POCKET_WATCH");
-
-      let announceParticipantLock;
-      const participantLocked = new Promise((resolve) => {
-        announceParticipantLock = resolve;
-      });
-      let releaseParticipantLock;
-      const holdParticipantLock = new Promise((resolve) => {
-        releaseParticipantLock = resolve;
-      });
-      const expireAtBoundary = buildExpireEffects({
-        prisma,
-        now: () => new Date(originalExpiry.getTime() + 1),
-        eventBus: { emit() {} },
-        afterFannyParticipantLock: async () => {
-          announceParticipantLock();
-          await holdParticipantLock;
-        },
-      });
-
-      const expiryPromise = expireAtBoundary({ raceId });
-      await Promise.race([
-        participantLocked,
-        new Promise((_, reject) => setTimeout(
-          () => reject(new Error("Fanny expiry never acquired the participant-first lock")),
-          2_000,
-        )),
-      ]);
-      const watchPromise = usePU(a.token, raceId, watch.id);
-      releaseParticipantLock();
-
-      await expiryPromise;
-      const watchResponse = await watchPromise;
-      assert.equal(watchResponse.status, 400);
-      assert.match((await watchResponse.json()).error, /active timed buff/i);
-      assert.equal((await participant(raceId, a.userId)).powerupSlots, 3);
-      assert.equal(
-        (await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status,
-        "EXPIRED",
-      );
-      assert.equal(
-        (await prisma.racePowerup.findUnique({ where: { id: watch.id } })).status,
-        "HELD",
-      );
-    });
-
-    it("rolls back a killed Fanny Pack expiry and decrements/feed-writes once on retry", async () => {
-      const a = await createUser("Atomic Packer");
-      const b = await createUser("Atomic Observer");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      const target = await participant(raceId, a.userId);
-      await prisma.raceParticipant.update({
-        where: { id: target.id },
-        data: { powerupSlots: 4 },
-      });
-      const effect = await giveEffect(raceId, a.userId, a.userId, "FANNY_PACK", {
-        expiresAt: new Date(Date.now() - 60_000),
-      });
-      const task = await prisma.raceResolutionPostTask.create({
-        data: {
-          raceId,
-          sourceGeneration: 999,
-          dedupeKey: `atomic-expiry:${raceId}`,
-          state: "running",
-          requestedAt: new Date(),
-          notBeforeAt: new Date(),
-          snapshotCommand: { raceId, timeZone: "UTC" },
-          payloadBytes: 32,
-          intentCount: 0,
-          leaseToken: "stale-expiry-lease",
-          leaseExpiresAt: new Date(Date.now() + 60_000),
-        },
-      });
-      const killed = buildExpireEffects({
-        prisma,
-        eventBus: { emit() {} },
-        afterEffectConsequenceWrite: async () => {
-          throw Object.assign(new Error("simulated process death"), { code: "KILL_POINT" });
-        },
-      });
-
-      await assert.rejects(() => killed({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "stale-expiry-lease" },
-      }), { code: "KILL_POINT" });
-      assert.equal((await participant(raceId, a.userId)).powerupSlots, 4);
-      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "ACTIVE");
-      assert.equal(await prisma.racePowerupEvent.count({
-        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "FANNY_PACK" },
-      }), 0);
-
-      await prisma.raceResolutionPostTask.update({
-        where: { id: task.id },
-        data: { leaseToken: "fresh-expiry-lease", leaseExpiresAt: new Date(Date.now() + 60_000) },
-      });
-      const retry = buildExpireEffects({ prisma, eventBus: { emit() {} } });
-      await assert.rejects(() => retry({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "stale-expiry-lease" },
-      }), { code: "POST_TASK_FENCE_LOST" });
-      await retry({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "fresh-expiry-lease" },
-      });
-      await retry({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "fresh-expiry-lease" },
-      });
-      assert.equal((await participant(raceId, a.userId)).powerupSlots, 3);
-      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "EXPIRED");
-      assert.equal(await prisma.racePowerupEvent.count({
-        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "FANNY_PACK" },
-      }), 1);
-    });
-  });
-
   describe("rally flag", () => {
     it("rejected 400 outside a team race", async () => {
       await seedCatalog();
@@ -4845,7 +4679,6 @@ describe("powerups5 wave — integration", () => {
     });
   });
 
-  // ── 10. Drill Sergeant ──────────────────────────────────────────────────
   // ── 11. Piggy Bank ──────────────────────────────────────────────────────
   describe("piggy bank", () => {
     it("defers the real auth cache invalidation until the atomic expiry commits", async () => {
@@ -5764,7 +5597,6 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("../setup");
 const { appSettings } = require("../../../src/shared/config/appSettings");
 
 // ---------------------------------------------------------------------------
-// Batch 2026-08-09 item 7 — Rally Flag and Uprising are BUFFS, not debuffs.
 // Cleanse and Quick Rinse must never clear them.
 //
 // Root cause this pins: both powerups write ONE EFFECT ROW PER BENEFICIARY via
@@ -5782,7 +5614,6 @@ const { appSettings } = require("../../../src/shared/config/appSettings");
 //
 // Follows the powerups-bounty-not-cleansable.test.js precedent: real HTTP, real
 // DB, real handler chain, real casts. The buff rows under test are produced by
-// genuinely casting Uprising / Rally Flag, not hand-inserted, because the
 // per-beneficiary fan-out IS the thing that creates the bug.
 // ---------------------------------------------------------------------------
 
@@ -5833,7 +5664,6 @@ async function backdate(raceId) {
   });
 }
 
-// Ordinary (non-team) race — Uprising's solo bottom-half branch.
 async function createSoloRace(creator, opponents) {
   const createRes = await request(server.baseUrl, "POST", "/races", {
     body: {
@@ -5954,7 +5784,7 @@ async function buffRowFor(raceId, type, userId) {
   });
 }
 
-describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
+describe("Rally Flag survives Cleanse and Quick Rinse", () => {
   before(async () => {
     server = await getSharedServer();
   });
@@ -6077,38 +5907,8 @@ describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
     assert.equal(after.status, "ACTIVE");
   });
 
-  // ── Uprising (solo race, bottom-half branch) ──────────────────────────────
 
-  // Four runners; Carol (3rd) sparks the Uprising, so beneficiaries are Carol
   // and Dave. DAVE's copy is the caster-sourced one under test.
-  async function sparkedUprising() {
-    const alice = await createUser("AliceUp");
-    const bob = await createUser("BobUp");
-    const carol = await createUser("CarolUp");
-    const dave = await createUser("DaveUp");
-    for (const other of [bob, carol, dave]) await makeFriends(alice, other);
-    const raceId = await createSoloRace(alice, [bob, carol, dave]);
-
-    // Standings: alice 8000 > bob 6000 > carol 2000 > dave 1000. Bottom half of
-    // four is index 2..3 = carol, dave.
-    await setSteps(raceId, alice.userId, 8000);
-    await setSteps(raceId, bob.userId, 6000);
-    await setSteps(raceId, carol.userId, 2000);
-    await setSteps(raceId, dave.userId, 1000);
-
-    const up = await giveHeld(raceId, carol.userId, "UPRISING");
-    const res = await usePU(carol.token, raceId, up.id);
-    assert.equal(res.status, 200, "Carol is in the bottom half");
-    assert.equal((await res.json()).result.affected, 2);
-
-    const daveUp = await buffRowFor(raceId, "UPRISING", dave.userId);
-    assert.ok(daveUp, "Dave got an Uprising row");
-    assert.equal(daveUp.sourceUserId, carol.userId);
-    assert.equal(daveUp.targetUserId, dave.userId);
-
-    return { alice, bob, carol, dave, raceId, daveUp };
-  }
-
   });
 
 })();
@@ -7100,7 +6900,6 @@ describe("powerups5 wave — integration", () => {
 
     });
 
-  // ── 2. Uprising ─────────────────────────────────────────────────────────
   // ── 3/4. Coin Flip + settlement parity ──────────────────────────────────
   describe("coin flip", () => {
     it("use returns flip WIN|LOSE and multiplier; effect created", async () => {
@@ -7333,138 +7132,6 @@ describe("powerups5 wave — integration", () => {
   });
 
   // ── 8. Rally Flag ───────────────────────────────────────────────────────
-  describe("restart-atomic effect expiry", () => {
-    it("serializes Fanny expiry before a real Pocket Watch command without an ABBA deadlock", async () => {
-      const a = await createUser("Lock Order Packer");
-      const b = await createUser("Lock Order Observer");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      const target = await participant(raceId, a.userId);
-      await prisma.raceParticipant.update({
-        where: { id: target.id },
-        data: { powerupSlots: 4 },
-      });
-      const originalExpiry = new Date(Date.now() + HOUR_MS);
-      const effect = await giveEffect(raceId, a.userId, a.userId, "FANNY_PACK", {
-        expiresAt: originalExpiry,
-      });
-      const watch = await giveHeld(raceId, a.userId, "POCKET_WATCH");
-
-      let announceParticipantLock;
-      const participantLocked = new Promise((resolve) => {
-        announceParticipantLock = resolve;
-      });
-      let releaseParticipantLock;
-      const holdParticipantLock = new Promise((resolve) => {
-        releaseParticipantLock = resolve;
-      });
-      const expireAtBoundary = buildExpireEffects({
-        prisma,
-        now: () => new Date(originalExpiry.getTime() + 1),
-        eventBus: { emit() {} },
-        afterFannyParticipantLock: async () => {
-          announceParticipantLock();
-          await holdParticipantLock;
-        },
-      });
-
-      const expiryPromise = expireAtBoundary({ raceId });
-      await Promise.race([
-        participantLocked,
-        new Promise((_, reject) => setTimeout(
-          () => reject(new Error("Fanny expiry never acquired the participant-first lock")),
-          2_000,
-        )),
-      ]);
-      const watchPromise = usePU(a.token, raceId, watch.id);
-      releaseParticipantLock();
-
-      await expiryPromise;
-      const watchResponse = await watchPromise;
-      assert.equal(watchResponse.status, 400);
-      assert.match((await watchResponse.json()).error, /active timed buff/i);
-      assert.equal((await participant(raceId, a.userId)).powerupSlots, 3);
-      assert.equal(
-        (await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status,
-        "EXPIRED",
-      );
-      assert.equal(
-        (await prisma.racePowerup.findUnique({ where: { id: watch.id } })).status,
-        "HELD",
-      );
-    });
-
-    it("rolls back a killed Fanny Pack expiry and decrements/feed-writes once on retry", async () => {
-      const a = await createUser("Atomic Packer");
-      const b = await createUser("Atomic Observer");
-      await makeFriends(a, b);
-      const raceId = await createActiveRace(a, [b]);
-      const target = await participant(raceId, a.userId);
-      await prisma.raceParticipant.update({
-        where: { id: target.id },
-        data: { powerupSlots: 4 },
-      });
-      const effect = await giveEffect(raceId, a.userId, a.userId, "FANNY_PACK", {
-        expiresAt: new Date(Date.now() - 60_000),
-      });
-      const task = await prisma.raceResolutionPostTask.create({
-        data: {
-          raceId,
-          sourceGeneration: 999,
-          dedupeKey: `atomic-expiry:${raceId}`,
-          state: "running",
-          requestedAt: new Date(),
-          notBeforeAt: new Date(),
-          snapshotCommand: { raceId, timeZone: "UTC" },
-          payloadBytes: 32,
-          intentCount: 0,
-          leaseToken: "stale-expiry-lease",
-          leaseExpiresAt: new Date(Date.now() + 60_000),
-        },
-      });
-      const killed = buildExpireEffects({
-        prisma,
-        eventBus: { emit() {} },
-        afterEffectConsequenceWrite: async () => {
-          throw Object.assign(new Error("simulated process death"), { code: "KILL_POINT" });
-        },
-      });
-
-      await assert.rejects(() => killed({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "stale-expiry-lease" },
-      }), { code: "KILL_POINT" });
-      assert.equal((await participant(raceId, a.userId)).powerupSlots, 4);
-      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "ACTIVE");
-      assert.equal(await prisma.racePowerupEvent.count({
-        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "FANNY_PACK" },
-      }), 0);
-
-      await prisma.raceResolutionPostTask.update({
-        where: { id: task.id },
-        data: { leaseToken: "fresh-expiry-lease", leaseExpiresAt: new Date(Date.now() + 60_000) },
-      });
-      const retry = buildExpireEffects({ prisma, eventBus: { emit() {} } });
-      await assert.rejects(() => retry({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "stale-expiry-lease" },
-      }), { code: "POST_TASK_FENCE_LOST" });
-      await retry({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "fresh-expiry-lease" },
-      });
-      await retry({
-        raceId,
-        taskFence: { taskId: task.id, leaseToken: "fresh-expiry-lease" },
-      });
-      assert.equal((await participant(raceId, a.userId)).powerupSlots, 3);
-      assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: effect.id } })).status, "EXPIRED");
-      assert.equal(await prisma.racePowerupEvent.count({
-        where: { raceId, eventType: "EFFECT_EXPIRED", powerupType: "FANNY_PACK" },
-      }), 1);
-    });
-  });
-
   describe("rally flag", () => {
     it("rejected 400 outside a team race", async () => {
       await seedCatalog();
@@ -7478,7 +7145,6 @@ describe("powerups5 wave — integration", () => {
     });
   });
 
-  // ── 10. Drill Sergeant ──────────────────────────────────────────────────
   // ── 11. Piggy Bank ──────────────────────────────────────────────────────
   describe("piggy bank", () => {
     it("defers the real auth cache invalidation until the atomic expiry commits", async () => {
