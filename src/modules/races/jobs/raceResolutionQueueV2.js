@@ -94,6 +94,11 @@ const {
 const { createPostgresWakeCoordinator } = require("../../../shared/queues/postgresWakeCoordinator");
 const redisCache = require("../../../shared/cache/redisCache");
 const {
+  publish: publishStream,
+  STREAMS,
+} = require("../../../shared/queues/redisStreams");
+const { RACE_DIRTY_VERSION } = require("../../../shared/queues/workMessages");
+const {
   coordinatedOptimizationMetrics,
 } = require("../../../shared/observability/coordinatedOptimizationMetrics");
 
@@ -1714,6 +1719,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       let committedBoxSyncResults = [];
       let committedPowerupEvents = [];
       let committedPostTaskId = null;
+      let continuationRaceDirty = null;
 
       for (;;) {
         // A forced FULL retry reloads inputs; never refresh tokens merely to
@@ -2712,7 +2718,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           placementHandoffOutcome = "superseded_skip";
         }
         if (impactContinuationNeeded) {
-          await jobModel.enqueue({
+          const continuationJob = await jobModel.enqueue({
             raceId: job.raceId,
             now: now(),
             dirtyEnvelope: {
@@ -2723,6 +2729,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               priority: "IMMEDIATE",
             },
           }, tx);
+          if (continuationJob) {
+            continuationRaceDirty = {
+              raceId: job.raceId,
+              generation: continuationJob.generation,
+              requestedAt: now(),
+            };
+          }
         }
         if (atomicPostTaskHandoff && preparedSnapshotCommand) {
           const resolveIntents = async (client) => {
@@ -2804,6 +2817,27 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
           if (committedPostTaskId) {
             await publishDurableQueueWakeup("post-task");
+          }
+          if (continuationRaceDirty) {
+            try {
+              await publishStream(STREAMS.RACE_DIRTY, {
+                schemaVersion: RACE_DIRTY_VERSION,
+                raceId: continuationRaceDirty.raceId,
+                userId: "",
+                timeZone: job.processingTimeZone || "",
+                sourceGeneration: String(continuationRaceDirty.generation),
+                jobGeneration: String(continuationRaceDirty.generation),
+                reason: "EFFECT_BOUNDARY",
+                requestedAt: continuationRaceDirty.requestedAt.toISOString(),
+              });
+            } catch (error) {
+              // The durable race row is already committed. The slow Postgres
+              // recovery sweep remains the safety net for a Redis publish blip.
+              logger.error("[RACE_RESOLUTION_V2] continuation stream publish failed", {
+                raceId: continuationRaceDirty.raceId,
+                errorCode: error?.code || error?.name || "QUEUE_PUBLISH_FAILED",
+              });
+            }
           }
           if (typeof dependencies.afterAuthoritativeCommit === "function") {
             await dependencies.afterAuthoritativeCommit({ job, result });
