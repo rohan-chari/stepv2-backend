@@ -235,7 +235,7 @@ test("Cleanse (POWERUP_CLEANSE, 150 coins) purchases like any other shop powerup
   assert.equal(result.item.priceCoins, 150);
 });
 
-test("non-Gold users cannot purchase a premium powerup or lose coins", async () => {
+test("non-Gold users can purchase Leech after the Gold acquisition requirement was retired", async () => {
   const deps = makeDeps({
     coins: 1000,
     sku: "POWERUP_LEECH",
@@ -248,17 +248,17 @@ test("non-Gold users cannot purchase a premium powerup or lose coins", async () 
     goldMembershipForUser: async () => ({ isMember: false }),
   });
 
-  await assert.rejects(
-    () => purchase({ userId: "user-1", sku: "POWERUP_LEECH", idempotencyKey: "free-premium" }),
-    (err) => {
-      assert.equal(err.code, "GOLD_REQUIRED");
-      assert.equal(err.statusCode, 403);
-      return true;
-    }
-  );
-  assert.equal(deps.state.user.coins, 1000);
-  assert.equal(deps.state.inventoryQty, 0);
-  assert.equal(deps.state.requests.size, 0);
+  const result = await purchase({
+    userId: "user-1",
+    sku: "POWERUP_LEECH",
+    idempotencyKey: "free-leech",
+  });
+
+  assert.equal(deps.state.user.coins, 700);
+  assert.equal(deps.state.inventoryQty, 1);
+  assert.equal(deps.state.requests.size, 1);
+  assert.equal(result.inventory.powerupType, "LEECH");
+  assert.equal(result.inventory.quantity, 1);
 });
 
 test("missing idempotency key is rejected", async () => {
