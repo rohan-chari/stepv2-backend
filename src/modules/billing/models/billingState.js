@@ -115,7 +115,14 @@ async function applyHistory({db,config,identity,token,history}){
   for(const p of history.purchases){
    const product=validatePurchase(config,identity,p),canonicalKey=keyFor(config,p),gold=isGoldPurchase(product,p),direct=isDirectCharacterProduct(product);
    let receipt=await tx.billingPurchase.findUnique({where:{canonicalKey}});
-   if(receipt&&receipt.identityId!==identity.id)throw error('Purchase belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
+   if(receipt&&receipt.identityId!==identity.id){
+    // This should only happen when the same store transaction is already
+    // bound to a different Bara identity. Keep the client response opaque,
+    // but retain enough server-side evidence to distinguish a provider
+    // transfer from a genuine receipt replay.
+    console.error(JSON.stringify({event:'billing_purchase_identity_conflict',canonicalKey,receiptIdentityId:receipt.identityId,currentIdentityId:identity.id,transactionId:p.transactionId,environment:p.environment,productId:product.id}));
+    throw error('Purchase belongs to its original Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
+   }
    const subscription=history.subscriptions.find(s=>s.providerId===p.subscriptionId);
    const isTrial=!p.paid&&subscription?.trial===true&&instant(p.purchasedAt).getTime()===instant(subscription.startsAt).getTime();
    const signal=latestSignals.get(canonicalKey);
