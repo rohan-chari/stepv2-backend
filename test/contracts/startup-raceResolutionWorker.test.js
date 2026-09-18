@@ -2,27 +2,6 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { startServer } = require("../../src/index");
 
-const noopSchedulers = {
-  scheduleRaceExpiryCheck() {},
-  scheduleSeededRaceRenewal() {},
-  scheduleTournamentSeedRenewal() {},
-  scheduleComputeRanks() {},
-  scheduleComputeRankedWeeks() {},
-  scheduleGlobalStepEvents() {},
-  scheduleGlobalEventSummaryTick() {},
-  scheduleAutoStartScheduledRaces() {},
-  scheduleRecomputePlacements() {},
-  scheduleNotificationCleanup() {},
-  scheduleInboxExpiry() {},
-  scheduleInboxDelivery() {},
-  scheduleDomainEventProjection() {},
-  scheduleDomainEventRetention() {},
-  scheduleActivationEventCleanup() {},
-  scheduleDailyMover() {},
-  scheduleRaceResolutionPostTasks() {},
-  scheduleRacePlacementTransitions() {},
-};
-
 function fakeApp() {
   return {
     listen(...args) {
@@ -32,65 +11,112 @@ function fakeApp() {
   };
 }
 
-test("startServer registers the race-resolution worker after the cron delay", async () => {
-  let workerCalls = 0;
-  startServer({
-    app: fakeApp(),
-    port: 3000,
-    cronStartDelayMs: 20,
-    registerEventHandlers() {},
-    registerNotificationHandlers() {},
-    ...noopSchedulers,
-    scheduleRaceResolutionWorker() {
-      workerCalls += 1;
-    },
-    logger: { log() {} },
-  });
-
-  // Deferred past the reload-overlap window like the other jobs.
-  assert.equal(workerCalls, 0);
-  await new Promise((r) => setTimeout(r, 60));
-  assert.equal(workerCalls, 1);
-});
-
-test("worker is registered immediately when cronStartDelayMs is 0", () => {
-  let workerCalls = 0;
-  startServer({
+function baseDeps(overrides = {}) {
+  const noop = () => {};
+  return {
     app: fakeApp(),
     port: 3000,
     cronStartDelayMs: 0,
-    registerEventHandlers() {},
-    registerNotificationHandlers() {},
-    ...noopSchedulers,
-    scheduleRaceResolutionWorker() {
-      workerCalls += 1;
-    },
+    registerEventHandlers: noop,
+    registerNotificationHandlers: noop,
+    registerRaceListCacheInvalidation: noop,
+    scheduleBillingReconciliation: noop,
+    scheduleRaceExpiryCheck: noop,
+    scheduleSeededRaceRenewal: noop,
+    scheduleTournamentSeedRenewal: noop,
+    scheduleComputeRanks: noop,
+    scheduleComputeRankedWeeks: noop,
+    scheduleGlobalStepEvents: noop,
+    scheduleGenerationHeartbeat: noop,
+    scheduleGlobalEventBoundaryDrain: noop,
+    scheduleGlobalEventEntitlementEventReconciler: noop,
+    scheduleGlobalEventBoundaryStreamScheduler: noop,
+    scheduleGlobalEventBoundaryStreamWorker: noop,
+    scheduleGlobalEventRedisScheduleHydrator: noop,
+    scheduleStepSampleRetention: noop,
+    scheduleAutoStartScheduledRaces: noop,
+    scheduleRecomputePlacements: noop,
+    scheduleNotificationCleanup: noop,
+    scheduleInboxExpiry: noop,
+    scheduleInboxDelivery: noop,
+    scheduleDomainEventProjection: noop,
+    scheduleDomainEventRetention: noop,
+    scheduleDomainEventReceiptRecovery: noop,
+    scheduleNotificationScheduleRelease: noop,
+    scheduleNotificationCompletenessReconciler: noop,
+    scheduleDeviceTokenCleanup: noop,
+    scheduleNotificationDeliveryStreamWorker: noop,
+    scheduleActivationEventCleanup: noop,
+    scheduleAdminMetricsActivityCleanup: noop,
+    schedulePushDeliveryCleanup: noop,
+    scheduleReferralLinkOpenCleanup: noop,
+    scheduleGiveawayRetention: noop,
+    scheduleFeedbackEmailAttemptExpiry: noop,
+    scheduleDailyMover: noop,
+    scheduleDailyRewardReminder: noop,
+    scheduleStepMilestoneReminder: noop,
+    scheduleRaceResolutionWorker: noop,
+    scheduleStepSyncStreamWorker: noop,
+    schedulePowerupRecalcStreamWorker: noop,
+    scheduleRaceDirtyStreamWorker: noop,
+    scheduleRaceResolutionRecoverySweep: noop,
+    scheduleRacePlacementTransitions: noop,
+    scheduleRaceResolutionPostTasks: noop,
+    scheduleRaceSeriesRenewal: noop,
+    scheduleEffectDeadlines: noop,
+    scheduleResolvedImpactBoundaries: noop,
+    scheduleRaceAdminCommands: noop,
+    scheduleRacePayoutDoubleReconcile: noop,
+    scheduleFixedTeamPayoutMonitoring: noop,
+    scheduleRedisStreamTrimmer: noop,
+    databasePoolTelemetry: { start() {} },
+    eventSurgeTelemetry: { start() {} },
     logger: { log() {} },
-  });
-  assert.equal(workerCalls, 1);
-});
+    ...overrides,
+  };
+}
 
-test("capacity HTTP+resolution mode schedules only resolution workers", () => {
+function trackedQueuePipeline(calls) {
+  return {
+    scheduleStepSyncStreamWorker() { calls.push("step"); },
+    schedulePowerupRecalcStreamWorker() { calls.push("powerup"); },
+    scheduleRaceDirtyStreamWorker() { calls.push("dirty"); },
+    scheduleRaceResolutionRecoverySweep() { calls.push("recovery"); },
+  };
+}
+
+test("queue-first race pipeline starts after the cron delay", async () => {
   const calls = [];
-  const trackedSchedulers = Object.fromEntries(
-    Object.keys(noopSchedulers).map((name) => [name, () => calls.push(name)]),
-  );
-  startServer({
-    app: fakeApp(),
-    port: 3000,
-    cronStartDelayMs: 0,
+  startServer(baseDeps({
+    cronStartDelayMs: 20,
+    ...trackedQueuePipeline(calls),
+  }));
+
+  assert.deepEqual(calls, []);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(calls, ["step", "powerup", "dirty", "recovery"]);
+});
+
+test("queue-first race pipeline starts immediately when cronStartDelayMs is 0", () => {
+  const calls = [];
+  startServer(baseDeps(trackedQueuePipeline(calls)));
+  assert.deepEqual(calls, ["step", "powerup", "dirty", "recovery"]);
+});
+
+test("capacity HTTP+resolution mode schedules only the direct measured resolution workers", () => {
+  const calls = [];
+  startServer(baseDeps({
     capacityHttpResolutionOnly: true,
-    registerEventHandlers() {},
-    registerNotificationHandlers() {},
-    ...trackedSchedulers,
     scheduleRaceResolutionWorker() {
       calls.push("scheduleRaceResolutionWorker");
     },
     scheduleRacePlacementTransitions() {
       calls.push("scheduleRacePlacementTransitions");
     },
-    logger: { log() {} },
-  });
+    scheduleRaceResolutionPostTasks() {
+      calls.push("scheduleRaceResolutionPostTasks");
+    },
+  }));
 
   assert.deepEqual(calls, [
     "scheduleRaceResolutionWorker",
@@ -99,55 +125,36 @@ test("capacity HTTP+resolution mode schedules only resolution workers", () => {
   ]);
 });
 
-test("capacity resolution startup reports the exact scheduled worker readiness handle", () => {
+test("capacity resolution startup reports the exact measured worker readiness handle", () => {
   const worker = { startupReadiness() { return { ready: false }; } };
   let reported = null;
-  startServer({
-    app: fakeApp(),
-    port: 3010,
-    cronStartDelayMs: 0,
-    processRole: "resolution",
-    registerEventHandlers() {},
-    registerNotificationHandlers() {},
-    scheduleGenerationHeartbeat() {},
-    ...noopSchedulers,
+  startServer(baseDeps({
+    capacityHttpResolutionOnly: true,
     scheduleRaceResolutionWorker() { return { worker }; },
-    scheduleRaceAdminCommands() {},
-    scheduleResolvedImpactBoundaries() {},
     reportCapacityResolutionWorker(value) { reported = value; },
-    databasePoolTelemetry: { start() {} },
-    eventSurgeTelemetry: { start() {} },
-    logger: { log() {} },
-  });
+  }));
   assert.equal(reported, worker);
 });
 
-test("normal startup ignores the capacity-only environment variable", () => {
+test("normal startup ignores CAPACITY_HTTP_RESOLUTION_ONLY and keeps queue-first ownership", () => {
   const previous = process.env.CAPACITY_HTTP_RESOLUTION_ONLY;
   process.env.CAPACITY_HTTP_RESOLUTION_ONLY = "true";
   const calls = [];
-  const trackedSchedulers = Object.fromEntries(
-    Object.keys(noopSchedulers).map((name) => [name, () => calls.push(name)]),
-  );
-
   try {
-    startServer({
-      app: fakeApp(),
-      port: 3000,
-      cronStartDelayMs: 0,
-      registerEventHandlers() {},
-      registerNotificationHandlers() {},
-      ...trackedSchedulers,
-      scheduleRaceResolutionWorker() {
-        calls.push("scheduleRaceResolutionWorker");
-      },
-      logger: { log() {} },
-    });
+    startServer(baseDeps({
+      scheduleRaceExpiryCheck() { calls.push("expiry"); },
+      scheduleRaceResolutionWorker() { calls.push("legacy-resolution"); },
+      ...trackedQueuePipeline(calls),
+    }));
   } finally {
     if (previous === undefined) delete process.env.CAPACITY_HTTP_RESOLUTION_ONLY;
     else process.env.CAPACITY_HTTP_RESOLUTION_ONLY = previous;
   }
 
-  assert.ok(calls.includes("scheduleRaceExpiryCheck"));
-  assert.ok(calls.includes("scheduleRaceResolutionWorker"));
+  assert.ok(calls.includes("expiry"));
+  assert.ok(calls.includes("step"));
+  assert.ok(calls.includes("powerup"));
+  assert.ok(calls.includes("dirty"));
+  assert.ok(calls.includes("recovery"));
+  assert.equal(calls.includes("legacy-resolution"), false);
 });
