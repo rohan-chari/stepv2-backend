@@ -164,7 +164,118 @@ function scheduleRaceDirtyStreamWorker(dependencies = {}) {
   };
 }
 
+
+function scheduleRaceResolutionRecoverySweep(dependencies = {}) {
+  const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
+  const logger = dependencies.logger || console;
+  const now = dependencies.now || (() => new Date());
+  const intervalMs = Math.max(10_000, Number(dependencies.intervalMs) || 60_000);
+  const cleanupIntervalMs = Math.max(
+    60_000,
+    Number(dependencies.cleanupIntervalMs) || 5 * 60_000,
+  );
+  const terminalRetentionMs = Math.max(
+    24 * 60 * 60 * 1000,
+    Number(dependencies.terminalRetentionMs) || 14 * 24 * 60 * 60 * 1000,
+  );
+  const cleanupBatchSize = Math.min(
+    5000,
+    Math.max(1, Number(dependencies.cleanupBatchSize) || 1000),
+  );
+  const resolver = dependencies.resolver || buildRaceResolutionWorkerV2({
+    ...dependencies,
+    RaceResolutionJobV2: jobModel,
+    processRole: "resolution",
+  });
+
+  let stopped = false;
+  let recoveryRunning = false;
+  let cleanupRunning = false;
+
+  async function recoveryTick() {
+    if (stopped || recoveryRunning) return 0;
+    recoveryRunning = true;
+    try {
+      const candidates = await jobModel.listRecoveryCandidates({
+        now: now(),
+        queuedLimit: 50,
+        runningLimit: 50,
+      });
+      let processed = 0;
+      for (const job of candidates) {
+        if (stopped) break;
+        try {
+          const result = await resolver.processRace({
+            raceId: job.raceId,
+            generation: Number(job.generation),
+          });
+          if (result) processed += 1;
+        } catch (error) {
+          logger.error("[RACE_RECOVERY] candidate failed", {
+            raceId: job.raceId,
+            code: error?.code || error?.name || "RACE_RECOVERY_ERROR",
+          });
+        }
+      }
+      return processed;
+    } finally {
+      recoveryRunning = false;
+    }
+  }
+
+  async function cleanupTick() {
+    if (stopped || cleanupRunning) return 0;
+    cleanupRunning = true;
+    try {
+      return await jobModel.cleanupTerminalJobs({
+        before: new Date(now().getTime() - terminalRetentionMs),
+        limit: cleanupBatchSize,
+      });
+    } catch (error) {
+      logger.error("[RACE_RECOVERY] terminal cleanup failed", {
+        code: error?.code || error?.name || "RACE_RECOVERY_CLEANUP_ERROR",
+      });
+      return 0;
+    } finally {
+      cleanupRunning = false;
+    }
+  }
+
+  const recoveryTimer = setInterval(() => {
+    recoveryTick().catch((error) =>
+      logger.error("[RACE_RECOVERY] sweep failed", error));
+  }, intervalMs);
+  recoveryTimer.unref?.();
+
+  const cleanupTimer = setInterval(() => {
+    cleanupTick().catch((error) =>
+      logger.error("[RACE_RECOVERY] cleanup sweep failed", error));
+  }, cleanupIntervalMs);
+  cleanupTimer.unref?.();
+
+  // Do one bounded pass after startup, then rely on the fixed cadence.
+  recoveryTick().catch((error) =>
+    logger.error("[RACE_RECOVERY] startup sweep failed", error));
+  cleanupTick().catch((error) =>
+    logger.error("[RACE_RECOVERY] startup cleanup failed", error));
+
+  return {
+    recoveryTick,
+    cleanupTick,
+    async stop() {
+      stopped = true;
+      clearInterval(recoveryTimer);
+      clearInterval(cleanupTimer);
+      const deadline = Date.now() + 6000;
+      while ((recoveryRunning || cleanupRunning) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    },
+  };
+}
+
 module.exports = {
   buildRaceDirtyStreamWorker,
   scheduleRaceDirtyStreamWorker,
+  scheduleRaceResolutionRecoverySweep,
 };
