@@ -37,9 +37,9 @@ function consumerName(role = "worker") {
 }
 
 function createClient(role) {
-  const url = String(process.env.REDIS_URL || "").trim();
+  const url = String(process.env.QUEUE_REDIS_URL || "").trim();
   if (!url) {
-    const error = new Error("REDIS_URL is required for queue-first work");
+    const error = new Error("QUEUE_REDIS_URL is required for queue-first work");
     error.code = "QUEUE_REDIS_UNAVAILABLE";
     throw error;
   }
