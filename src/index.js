@@ -198,6 +198,8 @@ function startServer({
     scheduleImpactBoundaries = scheduleResolvedImpactBoundaryScheduler,
   scheduleRaceAdminCommands:
     scheduleAdminCommands = scheduleRaceAdminCommandRunner,
+  scheduleHistoricalRaceReconciliation:
+    scheduleHistoricalReconciliation = scheduleHistoricalRaceReconciliationWorker,
   scheduleRacePayoutDoubleReconcile:
     schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
   scheduleFixedTeamPayoutMonitoring:
@@ -321,7 +323,7 @@ function startServer({
       }
       if (processRole === "resolution") {
         scheduleResolutionDomain();
-        retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
+        retainStopHandle(scheduleHistoricalReconciliation());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
@@ -469,7 +471,7 @@ function startServer({
       if (processRole !== "cron") {
         scheduleQueueFirstRacePipeline();
         retainStopHandle(scheduleGlobalEventBoundaryStreamWorkerJob());
-        retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
+        retainStopHandle(scheduleHistoricalReconciliation());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
         scheduleImpactBoundaries();
