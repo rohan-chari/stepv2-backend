@@ -4,6 +4,11 @@ const {
 } = require("../models/raceEffectDeadline");
 const redisCache = require("../../../shared/cache/redisCache");
 const {
+  publish: publishStream,
+  STREAMS,
+} = require("../../../shared/queues/redisStreams");
+const { RACE_DIRTY_VERSION } = require("../../../shared/queues/workMessages");
+const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
 const { coordinatedOptimizationMetrics: metrics } = require("../../../shared/observability/coordinatedOptimizationMetrics");
@@ -13,12 +18,20 @@ const metricLabels = { queue: "effect-deadline" };
 function buildRaceEffectDeadlineScheduler(dependencies = {}) {
   const now = dependencies.now || Date.now;
   const model = dependencies.RaceEffectDeadline || RaceEffectDeadline;
-  const wake =
-    dependencies.publishResolutionWake ||
-    (() =>
-      redisCache.publishDurableQueueWakeup("resolution", {
-        workKind: "ordinary",
-      }));
+  const publishRaceDirty =
+    dependencies.publishRaceDirty ||
+    (async (job) => {
+      if (!job?.raceId) return null;
+      return publishStream(STREAMS.RACE_DIRTY, {
+        schemaVersion: RACE_DIRTY_VERSION,
+        raceId: job.raceId,
+        userId: "",
+        sourceGeneration: job.generation ? String(job.generation) : "",
+        jobGeneration: job.generation ? String(job.generation) : "",
+        reason: "EFFECT_BOUNDARY",
+        requestedAt: new Date(now()).toISOString(),
+      });
+    });
   const busyUntil = new Map();
   let lastHealthAt = 0;
   let saturated = false;
@@ -82,7 +95,7 @@ function buildRaceEffectDeadlineScheduler(dependencies = {}) {
                   effects: result.effects,
                 },
               );
-              await wake();
+              await publishRaceDirty(result.job);
             } else {
               // Cancelled/ended/racing source rows must not occupy the due
               // head until the slower cleanup sweep removes them.
