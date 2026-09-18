@@ -7,7 +7,7 @@ const {
   isRetiredPowerupRequest,
   markRetiredPowerupError,
 } = require("../powerupRetirement");
-const { goldMembershipForUser } = require("../../billing/queries/goldPolicy");
+const { goldMembershipForUser: defaultGoldMembershipForUser } = require("../../billing/queries/goldPolicy");
 const { powerupRequiresGold } = require("../constants/premiumPowerups");
 
 class PowerupPurchaseError extends Error {
@@ -60,6 +60,7 @@ function buildPurchasePowerupItem(dependencies = {}) {
   const runTransaction =
     dependencies.runTransaction ||
     ((fn) => prisma.$transaction((tx) => fn(tx)));
+  const goldMembershipForUser = dependencies.goldMembershipForUser || defaultGoldMembershipForUser;
   const findExistingRequest =
     dependencies.findExistingRequest ||
     (async (tx, { userId, idempotencyKey }) =>
