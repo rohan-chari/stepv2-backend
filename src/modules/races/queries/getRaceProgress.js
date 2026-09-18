@@ -29,7 +29,7 @@ const {
   buildRollContext,
   RARITY_ORDER,
 } = require("../../powerups/powerupOdds");
-const { leaderboardPositionFor, nextRawSteps } = require("../../powerups/rawPosition");
+const { rawPositionFor, nextRawSteps } = require("../../powerups/rawPosition");
 const { calculateSubsequentSteps } = require("../raceSteps");
 const {
   calculateBaseAdjusted,
@@ -215,10 +215,10 @@ function buildDropOdds({
 }) {
   const { version, config } = snapshot;
 
-  // The odds POSITION comes from the EFFECTIVE persisted leaderboard totals,
-  // matching the boosted/effect-sensitive position the player sees. The same
-  // helper/source is used by box open and reroll so disclosure cannot drift.
-  const { position, totalParticipants, myTeamValid } = persistedPreviewContext || leaderboardPositionFor({
+  // The odds POSITION comes from persisted raw walked steps, with the shared
+  // race-wide all-or-nothing fallback when any accepted row lacks rawSteps.
+  // The page projection supplies the same rule through its persisted summary.
+  const { position, totalParticipants, myTeamValid } = persistedPreviewContext || rawPositionFor({
     participants: persistedParticipants,
     race,
     userId,
