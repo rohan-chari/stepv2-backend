@@ -299,6 +299,10 @@ test("dedicated worker roles own only their core queue workers", () => {
       scheduleGlobalEventBoundaryStreamWorker: track("event"),
       scheduleGlobalEventRedisScheduleHydrator: track("eventHydrator"),
       scheduleGlobalEventBoundaryStreamScheduler: track("eventScheduler"),
+      scheduleDomainEventProjection: track("notificationProjection"),
+      scheduleNotificationScheduleRelease: track("notificationRelease"),
+      scheduleNotificationCompletenessReconciler: track("notificationCompleteness"),
+      scheduleInboxDelivery: track("notificationInboxDelivery"),
       scheduleNotificationDeliveryStreamWorker: track("notification"),
       logger: { log() {} },
     });
@@ -309,7 +313,13 @@ test("dedicated worker roles own only their core queue workers", () => {
   assert.deepEqual(run("step"), ["step"]);
   assert.deepEqual(run("race"), ["powerup", "race", "raceRecovery"]);
   assert.deepEqual(run("event"), ["eventHydrator", "eventScheduler", "event"]);
-  assert.deepEqual(run("notification"), ["notification"]);
+  assert.deepEqual(run("notification"), [
+    "notificationProjection",
+    "notificationRelease",
+    "notificationCompleteness",
+    "notificationInboxDelivery",
+    "notification",
+  ]);
 });
 
 test("home-open capacity keeps the cron process idle", () => {
@@ -364,7 +374,19 @@ test("home-open capacity keeps the cron process idle", () => {
   const ordinary = run(false);
   const isolated = run(true);
   assert.ok(ordinary.includes("raceExpiry"), "default false must preserve ordinary cron behavior");
-  assert.ok(ordinary.includes("domainProjection"), "default false must preserve delivery cron behavior");
+  for (const deliveryJob of [
+    "domainProjection",
+    "notificationRelease",
+    "notificationCompleteness",
+    "inboxDelivery",
+    "notificationStream",
+  ]) {
+    assert.equal(
+      ordinary.includes(deliveryJob),
+      false,
+      `cron must not own normal notification delivery job: ${deliveryJob}`,
+    );
+  }
   assert.deepEqual(isolated, ["heartbeat"],
     "home isolation must retain process telemetry without unrelated database writers");
 });
