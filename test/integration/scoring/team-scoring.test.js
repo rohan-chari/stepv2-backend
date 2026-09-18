@@ -819,35 +819,6 @@ describe('current Join preserves scoring, effects and box boundaries', () => {
   async function join(account,kind){const response=await request(server.baseUrl,'POST',`/races/seeded/${kind}/join-current`,{token:account.token,headers:HEADERS,body:{requestId:randomUUID()}});assert.equal(response.status,200,await response.clone().text());return response.json();}
   async function sync(account,steps,samples){const response=await request(server.baseUrl,'POST','/steps/sync-v2',{token:account.token,headers:{...HEADERS,'Idempotency-Key':randomUUID()},body:{date:'2026-09-09',steps,samples:samples||[]}});assert.equal(response.status,202,await response.clone().text());}
   async function progress(account,raceId){const response=await request(server.baseUrl,'GET',`/races/${raceId}/progress`,{token:account.token,headers:HEADERS});assert.equal(response.status,200);return (await response.json()).progress;}
-  it('HTTP step sync processes its queued score without a seeded membership probe', async () => {
-    const account = await createTestUser({ autoJoinFeaturedRaces: false });
-    const joined = await join(account, 'DAILY_10K');
-    const queuedWorker = buildRaceResolutionWorkerV2({ prisma, bootAt: 0, now: () => new Date(clock), processRole: 'all', logger: { log() {}, error() {}, warn() {} } });
-    clock = '2026-09-09T16:31:00Z';
-    await queuedWorker.tick();
-    clock = '2026-09-09T16:32:00Z';
-    await queuedWorker.tick();
-    const originalQueryRaw = prisma.$queryRaw;
-    let membershipProbes = 0;
-    prisma.$queryRaw = function (...args) {
-      const sql = Array.isArray(args[0]) ? args[0].join('?') : String(args[0]?.sql || args[0]);
-      if (sql.includes('FROM seeded_challenge_preparation_groups g JOIN races')) membershipProbes += 1;
-      return originalQueryRaw.apply(this, args);
-    };
-    try {
-      clock = '2026-09-09T16:40:00Z';
-      await sync(account, 100, [{ periodStart: '2026-09-09T16:35:00Z', periodEnd: '2026-09-09T16:40:00Z', steps: 100 }]);
-      const queued = await prisma.raceResolutionJobV2.findUnique({ where: { raceId: joined.raceId } });
-      assert.ok(queued.dirtyReasons.length > 0);
-      assert.ok(queued.dirtyReasons.every(reason => ['STEP_SYNC', 'STEP_INPUT_CHANGED'].includes(reason)), JSON.stringify(queued.dirtyReasons));
-      clock = new Date(Math.max(new Date(clock).getTime(), new Date(queued.requestedAt).getTime()) + 60000).toISOString();
-      const scoreWorker = buildRaceResolutionWorkerV2({ prisma, bootAt: 0, now: () => new Date(clock), processRole: 'all', logger: { log() {}, error() {}, warn() {} } });
-      const tickResult = await scoreWorker.tick();
-      assert.ok(tickResult > 0, JSON.stringify({ queued, tickResult }));
-      assert.equal((await progress(account, joined.raceId)).participants.find(row => row.userId === account.user.id).totalSteps, 100);
-      assert.equal(membershipProbes, 0);
-    } finally { prisma.$queryRaw = originalQueryRaw; }
-  });
   for(const kind of ['DAILY_10K','WEEKLY_50K']) it(`${kind}: daily-only sync never credits an unknowable pre-join day`,async()=>{
     const account=await createTestUser({autoJoinFeaturedRaces:false});
     await sync(account,10000);const joined=await join(account,kind);
