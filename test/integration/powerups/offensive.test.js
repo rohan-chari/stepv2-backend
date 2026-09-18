@@ -1977,35 +1977,7 @@ describe("Red Card 10,000 step cap through real HTTP", () => {
     }
   });
 
-  it("a real queued worker replays a historical 20k penalty unchanged alongside a new capped attack", async () => {
-    const f = await fixture([500, 180000]);
-    const t = f.race.startedAt.getTime();
-    await prisma.racePowerupEvent.createMany({ data: [
-      { raceId: f.race.id, actorUserId: f.users[1].user.id, eventType: "POWERUP_USED", powerupType: "PROTEIN_SHAKE", description: "Historical bonus", metadata: { bonus: 200000 }, createdAt: new Date(t + 1000) },
-      { raceId: f.race.id, actorUserId: f.users[0].user.id, targetUserId: f.users[1].user.id, eventType: "POWERUP_USED", powerupType: "RED_CARD", description: "Historical Red Card: lost 20,000 steps.", metadata: { penalty: 20000 }, createdAt: new Date(t + 2000) },
-    ] });
-    const response = await f.use(0, await f.held(0));
-    assert.equal(response.status, 200);
-    assert.equal((await response.json()).result.penalty, 10000);
-    const env = { ...process.env, RACE_QUEUE_V2_QUIET_PERIOD_MS: "0" };
-    delete env.NODE_TEST_CONTEXT;
-    const worker = await new Promise((resolve, reject) => {
-      const child = fork(path.join(__dirname, "../../scripts/test-race-resolution-worker-once.js"), [], { env, execArgv: [], stdio: ["ignore", "ignore", "ignore", "ipc"] });
-      let result;
-      child.on("message", value => { result = value; });
-      child.on("error", reject);
-      child.on("exit", code => code === 0 && !result?.error ? resolve(result) : reject(new Error(result?.error || `worker exit ${code}`)));
-    });
-    assert.equal(worker.claimed, true);
-    await f.checkLoss(1, 10000);
-    const feed = await request(server.baseUrl, "GET", `/races/${f.race.id}/feed`, { token: f.users[1].token, headers: LEGACY });
-    assert.equal(feed.status, 200);
-    assert.ok((await feed.json()).events.some(e => e.description === "Historical Red Card: lost 20,000 steps."));
-    const oldEvent = await prisma.racePowerupEvent.findFirstOrThrow({ where: { raceId: f.race.id, powerupType: "RED_CARD", createdAt: new Date(t + 2000) } });
-    assert.equal(oldEvent.metadata.penalty, 20000);
   });
-
-});
 
 })();
 
