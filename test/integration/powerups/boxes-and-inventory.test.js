@@ -938,8 +938,9 @@ async function skewedRace() {
     data: { bonusSteps: 20000, maxBonusSteps: 20000 },
   });
 
-  // One replay through the real endpoint persists totals AND raw steps.
-  await progress(alice, raceId);
+  // Run the canonical resolution worker so persisted leaderboard totals and
+  // raw-step snapshots reflect the fixture before mystery-box odds are read.
+  await processQueuedRace(raceId);
 
   const state = await rows(raceId);
   assert.ok(
@@ -1115,7 +1116,7 @@ describe("mystery-box odds position follows the boosted leaderboard", () => {
       data: { bonusSteps: 30000, maxBonusSteps: 30000 },
     });
 
-    await progress(alice, raceId);
+    await processQueuedRace(raceId);
     const state = await rows(raceId);
     assert.ok(
       state[alice.userId].totalSteps + state[bob.userId].totalSteps >
