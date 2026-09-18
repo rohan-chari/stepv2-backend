@@ -346,13 +346,12 @@ in-the-wild app version do when it hits this?"*
   so the new app's endpoints exist — but the old app is still hitting the same
   prod backend the whole time, so the backend must satisfy both.
 
-See `DEPLOYMENT.md` and `DEPLOY_RUNBOOK.md` for the deploy procedure and
-incident playbook.
+See `OPERATIONS.md` for the deploy, incident, backup, and rollback procedure.
 
 ## Connecting to the droplet (SSH)
 
 The droplet host, user, and credentials are deliberately **not** in this repo
-(see `DEPLOY_RUNBOOK.md`). But everything needed to connect already lives on
+(see `OPERATIONS.md`). But everything needed to connect already lives on
 the developer's machine, so don't ask for it — recover it locally:
 
 1. **Key:** the SSH private key is in the standard `~/.ssh/` location (an
@@ -377,7 +376,7 @@ them inline each session and keep them out of the repo.
 ## Manual PROD database backup
 
 When asked to **"make a dated prod backup"** / **"back up prod"** / **"take a
-prod DB snapshot"**, follow `BACKUP.md` end-to-end. Key gotcha: prod is the
+prod DB snapshot"**, follow `OPERATIONS.md` → "Production database backup" end-to-end. Key gotcha: prod is the
 managed DigitalOcean Postgres (PG 18), and the droplet's bundled `pg_dump` is
 pg16, which **refuses** to dump an 18 server — so dump from the laptop's pg18
 client (`/opt/homebrew/opt/postgresql@18/bin/pg_dump`) using `PROD_DATABASE_URL`
