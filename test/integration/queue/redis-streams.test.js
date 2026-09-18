@@ -22,7 +22,7 @@ const {
 let ownedRedis = null;
 let redisUrl;
 let inspector;
-let originalRedisUrl;
+let originalQueueRedisUrl;
 let originalPrefix;
 let testPrefix;
 
@@ -38,11 +38,11 @@ async function deletePrefix(prefix) {
 
 describe("queue-first Redis Streams transport", () => {
   before(async (t) => {
-    originalRedisUrl = process.env.REDIS_URL;
+    originalQueueRedisUrl = process.env.QUEUE_REDIS_URL;
     originalPrefix = process.env.CACHE_ENV_PREFIX;
 
-    if (String(process.env.REDIS_URL || "").trim()) {
-      redisUrl = process.env.REDIS_URL;
+    if (String(process.env.QUEUE_REDIS_URL || "").trim()) {
+      redisUrl = process.env.QUEUE_REDIS_URL;
     } else {
       ownedRedis = await startTestRedis();
       if (!ownedRedis) {
@@ -63,7 +63,7 @@ describe("queue-first Redis Streams transport", () => {
     if (!redisUrl) return;
     await closeQueueRedis();
     testPrefix = `${originalPrefix || "integration:"}redis-streams:${crypto.randomUUID()}:`;
-    process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
     process.env.CACHE_ENV_PREFIX = testPrefix;
   });
 
@@ -71,7 +71,7 @@ describe("queue-first Redis Streams transport", () => {
     if (!redisUrl) return;
     await closeQueueRedis();
     await deletePrefix(testPrefix);
-    process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
     process.env.CACHE_ENV_PREFIX = originalPrefix || "";
   });
 
@@ -79,8 +79,8 @@ describe("queue-first Redis Streams transport", () => {
     await closeQueueRedis();
     if (inspector) await inspector.quit().catch(() => inspector.disconnect());
     if (ownedRedis) await ownedRedis.close();
-    if (originalRedisUrl === undefined) delete process.env.REDIS_URL;
-    else process.env.REDIS_URL = originalRedisUrl;
+    if (originalQueueRedisUrl === undefined) delete process.env.QUEUE_REDIS_URL;
+    else process.env.QUEUE_REDIS_URL = originalQueueRedisUrl;
     if (originalPrefix === undefined) delete process.env.CACHE_ENV_PREFIX;
     else process.env.CACHE_ENV_PREFIX = originalPrefix;
   });
@@ -209,14 +209,14 @@ describe("queue-first Redis Streams transport", () => {
   it("fails a required publish loudly when Redis is unavailable", async () => {
     const port = await closedPort();
     await closeQueueRedis();
-    process.env.REDIS_URL = `redis://127.0.0.1:${port}/15`;
+    process.env.QUEUE_REDIS_URL = `redis://127.0.0.1:${port}/15`;
 
     await assert.rejects(
       publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "must-fail" }),
     );
 
     await closeQueueRedis();
-    process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
   });
 
   it("keeps queue types isolated from each other", async () => {
