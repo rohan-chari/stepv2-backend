@@ -68,7 +68,6 @@ function buildPowerupRecalcStreamWorker(dependencies = {}) {
       syncResult = await syncRacePowerupState({
         raceId: message.raceId,
         userId: message.userId,
-        race: computed.result.race,
         boxEffectiveSteps: Number(boxEffectiveSteps),
         tx,
       });
