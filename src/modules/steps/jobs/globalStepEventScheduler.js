@@ -354,6 +354,9 @@ function scheduleGlobalStepEvents(dependencies = {}) {
     if (pending.end > clock() || stopped) return;
     const dueAt = pending.end;
     pending.end = clock() + interval;
+    if (dependencies.queueFirstBoundaryTransport === true) {
+      return;
+    }
     try {
       const result = await endDrain.run({ isStopped: () => stopped });
       if (result?.more) pending.end = Math.min(pending.end, clock() + Math.max(1, result.retryAfterMs || dependencies.endContinuationMs || 250));
