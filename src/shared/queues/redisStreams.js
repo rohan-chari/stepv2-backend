@@ -153,6 +153,30 @@ async function reclaimIdle({
   return (entries || []).map(decodeEntry).filter(Boolean);
 }
 
+
+async function claimIdempotentWindow(key, token, ttlMs) {
+  const redis = await commandClient();
+  const physicalKey = `${prefix()}${key}`;
+  const lifetime = Math.max(1, Math.ceil(Number(ttlMs) || 1));
+  const script = `
+local existing = redis.call("GET", KEYS[1])
+if not existing then
+  redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+  return {1, ARGV[2]}
+end
+if existing == ARGV[1] then
+  local ttl = redis.call("PTTL", KEYS[1])
+  return {1, ttl}
+end
+return {0, redis.call("PTTL", KEYS[1])}
+`;
+  const result = await redis.eval(script, 1, physicalKey, String(token), String(lifetime));
+  return {
+    acquired: Number(result?.[0]) === 1,
+    retryAfterMs: Math.max(0, Number(result?.[1]) || 0),
+  };
+}
+
 async function pendingSummary(stream, group) {
   const redis = await commandClient();
   const result = await redis.xpending(streamName(stream), group);
@@ -185,6 +209,7 @@ module.exports = {
   readGroup,
   ack,
   reclaimIdle,
+  claimIdempotentWindow,
   pendingSummary,
   close,
 };
