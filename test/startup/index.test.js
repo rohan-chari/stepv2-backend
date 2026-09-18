@@ -73,6 +73,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
     registerRaceListCacheInvalidation() {},
     databasePoolTelemetry: { start() {} },
     eventSurgeTelemetry: { start() {} },
+    scheduleStepSyncStreamWorker: track("stepStream"),
     scheduleRaceExpiryCheck: track("raceExpiry"),
     scheduleSeededRaceRenewal: track("seededRenewal"),
     scheduleTournamentSeedRenewal: () => {},
@@ -151,7 +152,7 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     app,
     port: 3000,
     cronStartDelayMs: 25,
-    processRole: "cron",
+    processRole: "step",
     registerEventHandlers() {},
     registerNotificationHandlers() {},
     registerRaceListCacheInvalidation() {},
@@ -211,9 +212,9 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
   assert.ok(logs.some((l) => l.includes("Job scheduling starts in")));
 
   await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.equal(scheduleCalls.seededRenewal, 1);
-  assert.equal(scheduleCalls.raceExpiry, 1);
-  assert.equal(scheduleCalls.dailyMover, 1);
+  assert.equal(scheduleCalls.stepStream, 1);
+  assert.equal(scheduleCalls.raceExpiry, undefined);
+  assert.equal(scheduleCalls.dailyMover, undefined);
 });
 
 test("http and resolution process roles do not start the wrong schedulers", () => {
