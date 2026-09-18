@@ -900,7 +900,39 @@ async function processDueEntitlementBoundaries({
     }
   };
 
-  if (processStarts) await drain("start", processOneStart);
+  if (processStarts) {
+    if (!enqueueRaceResolution && typeof prisma.$queryRawUnsafe === "function") {
+      try {
+        const dueStarts = await discoverDueStartIds({
+          prisma,
+          now: current,
+          batchSize: limit,
+        });
+        if (dueStarts.length) {
+          const startedBatch = await processDueStartMicroBatch({
+            prisma,
+            ids: dueStarts.map((row) => row.id),
+            now: current,
+          });
+          result.starts += startedBatch.starts;
+          result.stale += startedBatch.stale;
+          for (const userId of startedBatch.transitionedUserIds || []) {
+            transitionedUserIds.add(userId);
+          }
+        }
+      } catch (error) {
+        // Preserve the established per-entitlement recovery path if a set-based
+        // start batch cannot safely close its race-lock set or otherwise rolls
+        // back. Healthy siblings can still make progress on the same tick.
+        logger.error("[GLOBAL_EVENT_BOUNDARY] start batch rolled back; retrying individually", {
+          errorCode: error?.code || "START_BATCH_FAILED",
+        });
+        await drain("start", processOneStart, Date.now());
+      }
+    } else {
+      await drain("start", processOneStart);
+    }
+  }
   if (Date.now() - started < tickBudgetMs) {
     if (!enqueueRaceResolution && typeof prisma.$queryRawUnsafe === 'function') {
       try {
