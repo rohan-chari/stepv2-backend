@@ -4,12 +4,16 @@ const STREAMS = Object.freeze({
   STEP_SYNC: "queue:step-sync:v1",
   POWERUP_RECALC: "queue:powerup-recalc:v1",
   RACE_DIRTY: "queue:race-dirty:v1",
+  GLOBAL_EVENT_BOUNDARY: "queue:global-event-boundary:v1",
+  NOTIFICATION_DELIVERY: "queue:notification-delivery:v1",
 });
 
 const GROUPS = Object.freeze({
   STEP_SYNC: "step-workers-v1",
   POWERUP_RECALC: "powerup-workers-v1",
   RACE_DIRTY: "race-workers-v1",
+  GLOBAL_EVENT_BOUNDARY: "global-event-boundary-workers-v1",
+  NOTIFICATION_DELIVERY: "notification-workers-v1",
 });
 
 let commandState = null;
@@ -91,6 +95,12 @@ function decodeEntry(entry) {
   const fields = {};
   for (let i = 0; i < raw.length; i += 2) fields[raw[i]] = raw[i + 1];
   return { id, fields };
+}
+
+async function withCommandClient(work) {
+  if (typeof work !== "function") throw new TypeError("work callback is required");
+  const redis = await commandClient();
+  return work(redis);
 }
 
 async function publish(stream, fields) {
@@ -205,6 +215,7 @@ module.exports = {
   streamName,
   consumerName,
   publish,
+  withCommandClient,
   ensureGroup,
   readGroup,
   ack,
