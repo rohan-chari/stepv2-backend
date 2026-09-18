@@ -30,7 +30,15 @@ const PHASES = new Set([
   "idempotency_finalization",
   "post_commit",
 ]);
-const SUPPORTED_IDENTITIES = new Set(["http:0", "http:1", "resolution:0", "cron:0"]);
+const SUPPORTED_IDENTITIES = new Set([
+  "http:0",
+  "http:1",
+  "step:0",
+  "resolution:0",
+  "event:0",
+  "notification:0",
+  "cron:0",
+]);
 const SNAPSHOT_SCHEMA = "database-pool-telemetry-snapshot-v1";
 const LOG_SCHEMA = "database-pool-telemetry-v1";
 const SNAPSHOT_TTL_SECONDS = 150;
