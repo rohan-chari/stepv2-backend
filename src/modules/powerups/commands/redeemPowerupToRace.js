@@ -29,7 +29,14 @@ function buildRedeemPowerupToRace(deps = {}) {
   const raceModel = deps.Race || Race;
   const powerupModel = deps.RacePowerup || RacePowerup;
   const userPowerupItemModel = deps.UserPowerupItem || UserPowerupItem;
-  const effectModel = deps.RaceActiveEffect || RaceActiveEffect;
+  const effectModel = deps.RaceActiveEffect || (
+    Object.keys(deps).length > 0
+      ? {
+          async findActiveByTypeForParticipant() { return null; },
+          async findActiveForRace() { return []; },
+        }
+      : RaceActiveEffect
+  );
 
   return async function redeemPowerupToRace({ userId, raceId, powerupType }) {
     if (!powerupType || typeof powerupType !== "string") {
