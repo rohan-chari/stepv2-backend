@@ -92,6 +92,7 @@ Object.assign(module.exports, require("./jobs/raceResolutionQueue"));
 // C0: the race-keyed worker. The v1 worker above stays exported (and its code
 // present) for the reverse-handoff rollback, but src/index.js schedules ONLY v2.
 Object.assign(module.exports, require("./jobs/raceResolutionQueueV2"));
+Object.assign(module.exports, require("./jobs/raceDirtyStreamWorker"));
 Object.assign(module.exports, require("./jobs/racePlacementTransitionWorker"));
 Object.assign(module.exports, require("./jobs/raceResolutionPostTaskRunner"));
 Object.assign(module.exports, require("./jobs/raceSeriesRenewal"));
