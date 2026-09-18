@@ -194,6 +194,7 @@ describe("admin system health", () => {
     assert.deepEqual(body.processes, []);
     assert.equal(body.stepIngestion, null);
     assert.equal(body.failureWindows, null);
+    assert.deepEqual(body.queueHealth, { status: "unavailable", queues: [] });
     assert.deepEqual(body.missingProcesses, [
       { role: "http", instance: "0", reason: "unavailable" },
       { role: "http", instance: "1", reason: "unavailable" },
