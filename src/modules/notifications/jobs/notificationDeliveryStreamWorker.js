@@ -68,7 +68,7 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
     return {
       entitlement,
       title: `${multiplier}x STEPS EVENT`,
-      body: `Your ${multiplier}x steps event is live now.`,
+      body: `Double steps are LIVE for 30 minutes. Every step counts ${multiplier}x in your races! Go!`,
       destination: { route: "home" },
       payload: {
         type: "GLOBAL_EVENT_STARTED",
@@ -76,8 +76,6 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
         eventId: entitlement.eventId,
         entitlementId: entitlement.id,
         multiplier,
-        endsAt: new Date(entitlement.endsAt).toISOString(),
-        collapseId: `global_event_${String(entitlement.eventId).slice(0, 12)}`,
       },
     };
   }
@@ -166,7 +164,6 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
         body: intent.body,
         payload: intent.payload,
         expiresAt: new Date(message.expiresAt),
-        collapseId: intent.payload.collapseId,
       });
       if (result?.success) {
         accepted.push(token.token);
