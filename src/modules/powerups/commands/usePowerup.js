@@ -1104,6 +1104,14 @@ function buildUsePowerup(dependencies = {}) {
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
+  const usageStateModel = dependencies.PowerupUsageState || (
+    hasInjectedDeps
+      ? {
+          async findAvailable() { return null; },
+          async upsertUsed() { return null; },
+        }
+      : PowerupUsageState
+  );
   const eventModelDependency = dependencies.RacePowerupEvent || RacePowerupEvent;
   const activeRaceImpact = dependencies.ActiveRaceImpact || defaultRaceImpactEvent;
   const raceModel = dependencies.Race || Race;
@@ -1329,7 +1337,7 @@ function buildUsePowerup(dependencies = {}) {
         select: { id: true },
       });
       if (!shopItem) return;
-      const usage = await PowerupUsageState.findAvailable(transactionDb, raceId, userId, powerup.type, usedAt);
+      const usage = await usageStateModel.findAvailable(transactionDb, raceId, userId, powerup.type, usedAt);
       if (usage) {
         throw new PowerupUseError(
           "This powerup is on cooldown",
@@ -1339,7 +1347,7 @@ function buildUsePowerup(dependencies = {}) {
         );
       }
       const cooldownStart = activeUntil || usedAt;
-      await PowerupUsageState.upsertUsed({
+      await usageStateModel.upsertUsed({
         db: transactionDb,
         userId,
         raceId,
@@ -4342,7 +4350,9 @@ function buildUsePowerup(dependencies = {}) {
         if (shouldSkipRedirectedDuplicate({
           type,
           wasRedirected: reflected || Boolean(decoyRedirectedToUserId),
-          activeEffects: await effectModel.findActiveForParticipant(targetParticipant.id),
+          activeEffects: typeof effectModel.findActiveForParticipant === "function"
+            ? await effectModel.findActiveForParticipant(targetParticipant.id)
+            : [],
         })) {
           result.outcome = reflected ? "REFLECTED_DUPLICATE" : "REDIRECTED_DUPLICATE";
           result.affected = 0;
