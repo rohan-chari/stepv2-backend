@@ -14,7 +14,7 @@ const {
   pickTypeForRarity,
   canonicalRarityFor,
 } = require("../powerupOdds");
-const { leaderboardPositionFor } = require("../rawPosition");
+const { rawPositionFor } = require("../rawPosition");
 const {
   balanceConfig: defaultBalanceConfig,
 } = require("../../economy/balanceConfig");
@@ -303,8 +303,8 @@ function buildRerollMysteryBox(dependencies = {}) {
     // as openMysteryBox, at the player's CURRENT position (a reroll late in a
     // race rolls on late-race odds, not the odds the box was opened under).
     const allParticipants = await participantModel.findAcceptedByRace(raceId);
-    // The same boosted leaderboard position an open uses.
-    const { position, totalParticipants } = leaderboardPositionFor({
+    // Same persisted raw-step odds position as the initial box open.
+    const { position, totalParticipants } = rawPositionFor({
       participants: allParticipants,
       race,
       userId,
