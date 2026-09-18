@@ -59,7 +59,9 @@
     "test:contracts": "node scripts/run-local-integration-tests.cjs 'test/contracts/**/*.test.js'",
     "test:http-service": "node scripts/run-local-integration-tests.cjs 'test/http-and-service/**/*.test.js'",
     "test:maintenance": "node scripts/run-local-integration-tests.cjs 'test/maintenance/**/*.test.js'",
-    "test:integration:serial": "node scripts/run-local-integration-tests.cjs"
+    "test:integration:serial": "node scripts/run-local-integration-tests.cjs",
+    "queues:preflight": "node scripts/queue-preflight.js",
+    "queues:health": "node scripts/queue-health.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
