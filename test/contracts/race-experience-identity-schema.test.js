@@ -153,11 +153,12 @@ describe("race experience + discoverable identity — additive data contract", (
     assert.match(runbook, /EXPLAIN\s*\(ANALYZE,\s*BUFFERS\)/i);
     assert.match(runbook, /recover/i);
     assert.match(runbook, /DROP\s+INDEX\s+CONCURRENTLY\s+IF\s+EXISTS/i);
-    const packageJson = JSON.parse(
-      fs.readFileSync(path.join(__dirname, "../../package.json"), "utf8")
+    const localRunner = fs.readFileSync(
+      path.join(__dirname, "../../scripts/run-local-integration-tests.cjs"),
+      "utf8"
     );
     assert.match(
-      packageJson.scripts["test:integration"] || "",
+      localRunner,
       /identity-search-indexes:apply/
     );
   });
