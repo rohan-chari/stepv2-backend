@@ -43,10 +43,13 @@ Current reviewed production topology:
 | PM2 app | Count | Role | DB pool max |
 | --- | ---: | --- | ---: |
 | `steps-tracker` | 2 | `http` | 10 each |
-| `steps-tracker-resolution` | 1 | `resolution` | 8 |
-| `steps-tracker-cron` | 1 | `cron` | 4 |
+| `steps-tracker-step` | 1 | `step` | 3 |
+| `steps-tracker-resolution` | 1 | `resolution` | 6 |
+| `steps-tracker-event` | 1 | `event` | 3 |
+| `steps-tracker-notification` | 1 | `notification` | 4 |
+| `steps-tracker-cron` | 1 | `cron` | 3 |
 
-Reviewed aggregate database pool budget: **32**.
+Reviewed aggregate database pool budget: **39**.
 
 Staging is one stopped `steps-tracker-staging` process using
 `STEPS_PROCESS_ROLE=staging_all` and `DATABASE_POOL_MAX_ALL=10`.
@@ -57,7 +60,9 @@ Do not repair topology with ad-hoc `pm2 scale`, `pm2 restart <id>`, or
 ## Queue-first deployment requirements
 
 The queue-first architecture uses a dedicated queue Redis connection through
-`QUEUE_REDIS_URL`. This is separate from ordinary HTTP/cache Redis by design.
+`QUEUE_REDIS_URL`. For the current single-droplet architecture this is a
+second Redis server process on the production droplet, separate from ordinary
+HTTP/cache Redis. Horizontal Redis failover is a future scaling goal.
 
 Before any queue-first production deploy:
 
@@ -69,21 +74,26 @@ Before any queue-first production deploy:
    explicit production owner.
 6. Verify **notification delivery has an explicit production owner**.
 
-### Current notification topology warning
+### Split worker ownership
 
-`src/index.js` supports a dedicated `notification` role, but the current
-reviewed `ecosystem.config.js` does not declare a
-`steps-tracker-notification` process.
+Production ownership is explicit:
 
-Do **not** deploy a revision that depends on the dedicated notification role
-until one of these is explicitly true and tested:
+- `step` owns STEP_SYNC intake.
+- `resolution` owns POWERUP_RECALC, RACE_DIRTY and resolution-coupled work.
+- `event` owns global-event Redis scheduling/boundary consumption.
+- `notification` owns notification projection/release/inbox/stream delivery.
+- `cron` owns true periodic maintenance and stream trimming.
 
-- a dedicated notification process is added to `ecosystem.config.js`, with its
-  database-pool budget reviewed; or
-- notification stream/projection/delivery ownership is deliberately assigned to
-  an existing reviewed process and tested.
+The race-dirty worker remains with resolution because it directly invokes the
+resolver and core/post-task work shares one in-process work budget.
 
-This is a deployment blocker, not something to infer at deploy time.
+## Deploy checklists
+
+- Pre-deploy provisioning and GO/NO-GO: `PRE_DEPLOY_README.md`
+- Post-deploy verification and observation: `POST_DEPLOY_README.md`
+
+Agents with SSH access should follow those files in order rather than
+reconstructing commands from historical notes.
 
 ## Merge gate for major backend branches
 
@@ -99,8 +109,8 @@ Before recommending merge to `main`:
    - `test:maintenance`
 4. Review migrations and production environment additions.
 5. Verify this operations file matches any topology or deployment changes.
-6. For queue-first/scalability work, resolve the notification-owner and
-   `QUEUE_REDIS_URL` requirements above.
+6. For queue-first/scalability work, verify the split topology, queue Redis
+   requirements, and deploy checklists are represented in code/docs.
 7. Review the final branch diff against `main`.
 
 A green unit/integration suite does not waive an unresolved production topology
