@@ -83,13 +83,12 @@ module.exports = {
       // therefore use an unreachable sentinel that the watchdog verifies.
       maxMemoryRestart: "100G",
     }),
-    // The queue owns participant projection writes and is intentionally kept
-    // out of the HTTP workers. It is one fork: the queue itself provides
-    // cross-process serialization with Postgres leases.
-    app("steps-tracker-resolution", PROD_DIR, 1, {
-      STEPS_PROCESS_ROLE: "resolution",
-      DATABASE_POOL_MAX_RESOLUTION: "8",
-      DATABASE_POOL_TOTAL_BUDGET: "32",
+    // Queue intake is isolated from race resolution so a sync burst cannot
+    // consume the resolution process's event loop or DB pool.
+    app("steps-tracker-step", PROD_DIR, 1, {
+      STEPS_PROCESS_ROLE: "step",
+      DATABASE_POOL_MAX_STEP: "3",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
       PORT: 3010,
       HOST: "127.0.0.1",
     }, {
@@ -97,13 +96,52 @@ module.exports = {
       node_args: BACKGROUND_NODE_ARGS,
       exp_backoff_restart_delay: 1000,
     }),
-    // Expiry/cron is a single owner. It shares the database fence with the
-    // resolution process, so settlement and live work cannot interleave.
+    // Race/powerup resolution stays together because RACE_DIRTY invokes the
+    // resolver directly and core/post-task work shares one in-process budget.
+    app("steps-tracker-resolution", PROD_DIR, 1, {
+      STEPS_PROCESS_ROLE: "resolution",
+      DATABASE_POOL_MAX_RESOLUTION: "6",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
+      PORT: 3011,
+      HOST: "127.0.0.1",
+    }, {
+      exec_mode: "fork",
+      node_args: BACKGROUND_NODE_ARGS,
+      exp_backoff_restart_delay: 1000,
+    }),
+    // Global-event Redis scheduling/boundary processing is isolated from both
+    // ordinary race resolution and time-driven cron maintenance.
+    app("steps-tracker-event", PROD_DIR, 1, {
+      STEPS_PROCESS_ROLE: "event",
+      DATABASE_POOL_MAX_EVENT: "3",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
+      PORT: 3012,
+      HOST: "127.0.0.1",
+    }, {
+      exec_mode: "fork",
+      node_args: BACKGROUND_NODE_ARGS,
+      exp_backoff_restart_delay: 1000,
+    }),
+    // Durable domain-event projection, notification scheduling, inbox delivery
+    // and the notification Redis stream have one explicit production owner.
+    app("steps-tracker-notification", PROD_DIR, 1, {
+      STEPS_PROCESS_ROLE: "notification",
+      DATABASE_POOL_MAX_NOTIFICATION: "4",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
+      PORT: 3013,
+      HOST: "127.0.0.1",
+    }, {
+      exec_mode: "fork",
+      node_args: BACKGROUND_NODE_ARGS,
+      exp_backoff_restart_delay: 1000,
+    }),
+    // True periodic maintenance stays a single owner. Redis stream trimming is
+    // intentionally here so consumer processes only process work.
     app("steps-tracker-cron", PROD_DIR, 1, {
       STEPS_PROCESS_ROLE: "cron",
-      DATABASE_POOL_MAX_CRON: "4",
-      DATABASE_POOL_TOTAL_BUDGET: "32",
-      PORT: 3011,
+      DATABASE_POOL_MAX_CRON: "3",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
+      PORT: 3014,
       HOST: "127.0.0.1",
     }, { exec_mode: "fork", node_args: CRON_NODE_ARGS }),
     // Staging stays at ONE because it serves essentially no traffic. This was
