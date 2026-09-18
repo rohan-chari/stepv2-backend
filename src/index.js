@@ -100,6 +100,9 @@ const {
   scheduleDomainEventRetention,
   scheduleDomainEventReceiptRecovery,
 } = require("./modules/domainEvents");
+const {
+  scheduleRedisStreamTrimmer,
+} = require("./shared/queues/redisStreamTrimmer");
 
 function configureHttpServer(server) {
   server.keepAliveTimeout = 65_000;
@@ -199,6 +202,8 @@ function startServer({
     schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
   scheduleFixedTeamPayoutMonitoring:
     scheduleFixedTeamPayoutMonitor = scheduleFixedTeamPayoutMonitoring,
+  scheduleRedisStreamTrimmer:
+    scheduleQueueTrim = scheduleRedisStreamTrimmer,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
@@ -325,6 +330,7 @@ function startServer({
       }
       if (processRole === "cron") {
         retainStopHandle(scheduleBilling());
+        retainStopHandle(scheduleQueueTrim());
       }
       if (capacityHttpResolutionOnly) {
         scheduleTrackedResolutionWorker();
