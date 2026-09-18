@@ -29,7 +29,7 @@ const {
   buildRollContext,
   RARITY_ORDER,
 } = require("../../powerups/powerupOdds");
-const { rawPositionFor, nextRawSteps } = require("../../powerups/rawPosition");
+const { leaderboardPositionFor, nextRawSteps } = require("../../powerups/rawPosition");
 const { calculateSubsequentSteps } = require("../raceSteps");
 const {
   calculateBaseAdjusted,
@@ -215,16 +215,10 @@ function buildDropOdds({
 }) {
   const { version, config } = snapshot;
 
-  // The odds POSITION comes from RAW WALKED steps on the PERSISTED participant
-  // rows (2026-08-09, docs/box-raw-steps-position-and-option-h-requirements.md)
-  // — the same helper and the same source openMysteryBox / rerollMysteryBox
-  // rank on, so the quoted odds and the actual roll cannot disagree.
-  //
-  // Deliberately NOT the live replay's or the snapshot's `baseAdjusted`: those
-  // can lead the persisted column by a replay cycle, which would make the
-  // quoted odds disagree with the real roll in exactly the manipulated case
-  // this feature exists to fix (the invariant at powerupOdds.js:161-163).
-  const { position, totalParticipants, myTeamValid } = persistedPreviewContext || rawPositionFor({
+  // The odds POSITION comes from the EFFECTIVE persisted leaderboard totals,
+  // matching the boosted/effect-sensitive position the player sees. The same
+  // helper/source is used by box open and reroll so disclosure cannot drift.
+  const { position, totalParticipants, myTeamValid } = persistedPreviewContext || leaderboardPositionFor({
     participants: persistedParticipants,
     race,
     userId,
@@ -1708,7 +1702,7 @@ function buildGetRaceProgress(deps = {}) {
             participant: { userId: e.userId, team: e.team ?? null },
             totalSteps: Math.max(0, Number(e.totalSteps) || 0),
           })),
-          // Position input: the PERSISTED rows, which is what the roll ranks on.
+          // Position input: persisted effective leaderboard totals, matching the roll.
           persistedParticipants: (race._projectionParticipants || race.participants).filter(
             (p) => p.status === "ACCEPTED"
           ),
