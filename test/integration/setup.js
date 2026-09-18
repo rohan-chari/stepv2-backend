@@ -2,6 +2,17 @@ const http = require("node:http");
 const { prisma } = require("../../src/db");
 const { createApp } = require("../../src/app");
 const { signSessionToken } = require("../../src/modules/users/services/sessionToken");
+const IORedis = require("ioredis");
+const {
+  STREAMS,
+  GROUPS,
+  ensureGroup,
+  readGroup,
+  reclaimIdle,
+} = require("../../src/shared/queues/redisStreams");
+const { buildStepSyncStreamWorker } = require("../../src/modules/steps/jobs/stepSyncStreamWorker");
+const { buildPowerupRecalcStreamWorker } = require("../../src/modules/powerups/jobs/powerupRecalcStreamWorker");
+const { buildRaceDirtyStreamWorker } = require("../../src/modules/races/jobs/raceDirtyStreamWorker");
 
 // Tables in deletion order (respects foreign key constraints)
 const TABLES_IN_ORDER = [
@@ -160,6 +171,73 @@ const TABLES_IN_ORDER = [
 //
 // Deliberately checks the DB NAME rather than the host: a prod URL copied into
 // the environment fails here even if it happens to be reachable locally.
+
+async function resetIntegrationRedis() {
+  const url = String(process.env.REDIS_URL || "").trim();
+  if (!url) return;
+  const redis = new IORedis(url, { lazyConnect: true, maxRetriesPerRequest: 1 });
+  try {
+    await redis.connect();
+    const prefix = process.env.CACHE_ENV_PREFIX || "integration:";
+    const keys = await redis.keys(`${prefix}*`);
+    if (keys.length) await redis.del(...keys);
+  } finally {
+    await redis.quit().catch(() => redis.disconnect());
+  }
+}
+
+async function drainQueueFirstWork({ maxRounds = 100 } = {}) {
+  const stepWorker = buildStepSyncStreamWorker({
+    logger: { log() {}, warn() {}, error(error) { throw error; } },
+  });
+  const powerupWorker = buildPowerupRecalcStreamWorker({
+    logger: { log() {}, warn() {}, error(error) { throw error; } },
+  });
+  const raceWorker = buildRaceDirtyStreamWorker({
+    bootAt: 0,
+    logger: { log() {}, warn() {}, error(error) { throw error; } },
+  });
+
+  const specs = [
+    { stream: STREAMS.STEP_SYNC, group: GROUPS.STEP_SYNC, consumer: "itest-step", worker: stepWorker },
+    { stream: STREAMS.POWERUP_RECALC, group: GROUPS.POWERUP_RECALC, consumer: "itest-powerup", worker: powerupWorker },
+    { stream: STREAMS.RACE_DIRTY, group: GROUPS.RACE_DIRTY, consumer: "itest-race", worker: raceWorker },
+  ];
+  for (const spec of specs) await ensureGroup(spec.stream, spec.group);
+
+  let idleRounds = 0;
+  for (let round = 0; round < maxRounds; round++) {
+    let processed = 0;
+    for (const spec of specs) {
+      const reclaimed = await reclaimIdle({
+        stream: spec.stream,
+        group: spec.group,
+        consumer: spec.consumer,
+        minIdleMs: 1,
+        count: 100,
+      });
+      const fresh = await readGroup({
+        stream: spec.stream,
+        group: spec.group,
+        consumer: spec.consumer,
+        count: 100,
+        blockMs: 1,
+      });
+      for (const entry of [...reclaimed, ...fresh]) {
+        await spec.worker.processEntry(entry);
+        processed += 1;
+      }
+    }
+    if (processed === 0) {
+      idleRounds += 1;
+      if (idleRounds >= 2) return;
+    } else {
+      idleRounds = 0;
+    }
+  }
+  throw new Error("queue-first integration drain exceeded maxRounds");
+}
+
 function assertDisposableDatabase() {
   const url = process.env.DATABASE_URL || "";
   let name = "";
@@ -181,6 +259,7 @@ function assertDisposableDatabase() {
 
 async function cleanDatabase() {
   assertDisposableDatabase();
+  await resetIntegrationRedis();
   // The shared integration server intentionally survives across cases; clear
   // process-local read caches when the database fixture is reset so a row from
   // the preceding case cannot masquerade as current state.
@@ -295,8 +374,8 @@ async function createLegacyFeedbackThread({
   });
 }
 
-function request(baseUrl, method, path, { body, token, headers } = {}) {
-  return fetch(`${baseUrl}${path}`, {
+async function request(baseUrl, method, path, { body, token, headers, drainQueue = true } = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -305,6 +384,10 @@ function request(baseUrl, method, path, { body, token, headers } = {}) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (drainQueue && path === "/steps/sync-v2" && response.status === 202) {
+    await drainQueueFirstWork();
+  }
+  return response;
 }
 
 async function disconnectDatabase() {
@@ -349,4 +432,6 @@ module.exports = {
   request,
   getBaseUrl,
   getSharedServer,
+  drainQueueFirstWork,
+  resetIntegrationRedis,
 };
