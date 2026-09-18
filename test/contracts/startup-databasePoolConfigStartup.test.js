@@ -48,6 +48,36 @@ test("production role-specific max reaches the constructed pg pool", () => {
   });
 });
 
+test("every split production role requires and uses its own pool variable", () => {
+  const cases = [
+    ["step", "DATABASE_POOL_MAX_STEP", "3"],
+    ["resolution", "DATABASE_POOL_MAX_RESOLUTION", "6"],
+    ["event", "DATABASE_POOL_MAX_EVENT", "3"],
+    ["notification", "DATABASE_POOL_MAX_NOTIFICATION", "4"],
+    ["cron", "DATABASE_POOL_MAX_CRON", "3"],
+  ];
+
+  for (const [role, variable, value] of cases) {
+    const result = loadDb({
+      STEPS_PROCESS_ROLE: role,
+      DATABASE_POOL_MAX_HTTP: null,
+      [variable]: value,
+    });
+    assert.equal(result.status, 0, `${role}: ${result.stdout}\n${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      role,
+      max: Number(value),
+      source: variable,
+    });
+
+    assertStartupRejected({
+      STEPS_PROCESS_ROLE: role,
+      DATABASE_POOL_MAX_HTTP: null,
+      [variable]: null,
+    }, variable);
+  }
+});
+
 test("audited unprefixed production deploy commands use a bounded maintenance pool", () => {
   for (const [command, entry] of [
     ["powerups:copy:sync", "scripts/powerup-copy-sync.js"],
@@ -102,7 +132,7 @@ test("production missing and unknown roles fail before a connection attempt", ()
   assertStartupRejected({ STEPS_PROCESS_ROLE: "unknown" }, "STEPS_PROCESS_ROLE");
 });
 
-test("deployment B production missing and malformed role values fail before a connection attempt", () => {
+test("production missing and malformed role values fail before a connection attempt", () => {
   assertStartupRejected({ DATABASE_POOL_MAX_HTTP: null }, "DATABASE_POOL_MAX_HTTP");
   assertStartupRejected({ DATABASE_POOL_MAX_HTTP: "" }, "DATABASE_POOL_MAX_HTTP");
   assertStartupRejected({ DATABASE_POOL_MAX_HTTP: "20.0" }, "DATABASE_POOL_MAX_HTTP");
