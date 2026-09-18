@@ -1055,3 +1055,1007 @@ describe("stealth mode + red card", () => {
 });
 
 })();
+
+// ---- consolidated from decoy-redirection-concurrency.test.js ----
+(function decoy_redirection_concurrency_test_js(){
+const assert = require("node:assert/strict");
+const { describe, it, before, beforeEach } = require("node:test");
+const { cleanDatabase, prisma, request, getSharedServer } = require("../setup");
+
+let server;
+let nextAppleId = 0;
+
+const POWERUPS5 = {
+  "X-Client-Features": "characters,powerups5",
+};
+const TEAM_POWERUPS5 = {
+  "X-Client-Features": "characters,team_races,powerups5",
+};
+
+async function createUser(displayName, headers = POWERUPS5) {
+  const res = await request(server.baseUrl, "POST", "/auth/apple", {
+    body: { identityToken: `apple-decoy-${++nextAppleId}` },
+  });
+  const body = await res.json();
+  await request(server.baseUrl, "PUT", "/auth/me/display-name", {
+    body: { displayName },
+    token: body.sessionToken,
+    headers,
+  });
+  return { userId: body.user.id, token: body.sessionToken };
+}
+
+async function makeFriends(a, b, headers = POWERUPS5) {
+  const sendRes = await request(server.baseUrl, "POST", "/friends/request", {
+    body: { addresseeId: b.userId },
+    token: a.token,
+    headers,
+  });
+  const friendshipId = (await sendRes.json()).friendship.id;
+  await request(server.baseUrl, "PUT", `/friends/request/${friendshipId}`, {
+    body: { accept: true },
+    token: b.token,
+    headers,
+  });
+}
+
+async function participant(raceId, userId) {
+  return prisma.raceParticipant.findFirst({ where: { raceId, userId } });
+}
+
+async function createSoloRace(users) {
+  const [creator, ...opponents] = users;
+  for (const opponent of opponents) await makeFriends(creator, opponent);
+  const createRes = await request(server.baseUrl, "POST", "/races", {
+    body: {
+      name: "Decoy Solo",
+      isPublic: true,
+      targetSteps: 200000,
+      maxDurationDays: 7,
+      powerupsEnabled: true,
+      powerupStepInterval: 5000,
+    },
+    token: creator.token,
+    headers: POWERUPS5,
+  });
+  const raceId = (await createRes.json()).race.id;
+  await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+    body: { inviteeIds: opponents.map((user) => user.userId) },
+    token: creator.token,
+    headers: POWERUPS5,
+  });
+  for (const opponent of opponents) {
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: opponent.token,
+      headers: POWERUPS5,
+    });
+  }
+  const startRes = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+    token: creator.token,
+    headers: POWERUPS5,
+  });
+  assert.equal(startRes.status, 200);
+  return raceId;
+}
+
+async function createTeamRace(users) {
+  const [creator, ...opponents] = users;
+  for (const opponent of opponents) await makeFriends(creator, opponent, TEAM_POWERUPS5);
+  const createRes = await request(server.baseUrl, "POST", "/races", {
+    body: {
+      name: "Decoy Teams",
+      maxDurationDays: 7,
+      isPublic: true,
+      isTeamRace: true,
+      teamSize: 2,
+      powerupsEnabled: true,
+      powerupStepInterval: 5000,
+    },
+    token: creator.token,
+    headers: TEAM_POWERUPS5,
+  });
+  const raceId = (await createRes.json()).race.id;
+  await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+    body: { inviteeIds: opponents.map((user) => user.userId) },
+    token: creator.token,
+    headers: TEAM_POWERUPS5,
+  });
+  const teams = ["TEAM_A", "TEAM_B", "TEAM_B"];
+  for (const [index, opponent] of opponents.entries()) {
+    const response = await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true, team: teams[index] },
+      token: opponent.token,
+      headers: TEAM_POWERUPS5,
+    });
+    assert.equal(response.status, 200);
+  }
+  const startRes = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+    token: creator.token,
+    headers: TEAM_POWERUPS5,
+  });
+  assert.equal(startRes.status, 200);
+  return raceId;
+}
+
+async function giveHeldPowerup(raceId, userId, type, earnedAtSteps) {
+  const p = await participant(raceId, userId);
+  return prisma.racePowerup.create({
+    data: {
+      raceId,
+      participantId: p.id,
+      userId,
+      type,
+      rarity: "RARE",
+      status: "HELD",
+      earnedAtSteps,
+    },
+  });
+}
+
+async function giveActiveEffect(raceId, userId, type, powerupId, expiresAt) {
+  const p = await participant(raceId, userId);
+  return prisma.raceActiveEffect.create({
+    data: {
+      raceId,
+      targetParticipantId: p.id,
+      targetUserId: userId,
+      sourceUserId: userId,
+      powerupId,
+      type,
+      status: "ACTIVE",
+      startsAt: new Date(),
+      expiresAt,
+    },
+  });
+}
+
+async function usePowerup(user, raceId, powerupId, body = {}, headers = POWERUPS5) {
+  return request(server.baseUrl, "POST", `/races/${raceId}/powerups/${powerupId}/use`, {
+    body,
+    token: user.token,
+    headers,
+  });
+}
+
+async function activeEffects(raceId, type) {
+  return prisma.raceActiveEffect.findMany({
+    where: { raceId, type, status: "ACTIVE" },
+    orderBy: [{ targetUserId: "asc" }, { id: "asc" }],
+  });
+}
+
+describe("Decoy redirection and concurrency — integration", () => {
+  before(async () => {
+    server = await getSharedServer();
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase();
+    nextAppleId = 0;
+  });
+
+  it("rejects a second active Decoy with DECOY_ACTIVE and retains the held item", async () => {
+    const alice = await createUser("DecoyOwner");
+    const bob = await createUser("DecoyOpponent");
+    const raceId = await createSoloRace([alice, bob]);
+    const first = await giveHeldPowerup(raceId, alice.userId, "DECOY", 1000);
+    const second = await giveHeldPowerup(raceId, alice.userId, "DECOY", 2000);
+
+    assert.equal((await usePowerup(alice, raceId, first.id)).status, 200);
+    const rejected = await usePowerup(alice, raceId, second.id);
+    assert.equal(rejected.status, 409);
+    assert.deepEqual(await rejected.json(), {
+      error: "You already have an active Decoy in this race",
+      code: "DECOY_ACTIVE",
+    });
+
+    const held = await prisma.racePowerup.findUnique({ where: { id: second.id } });
+    assert.equal(held.status, "HELD");
+    assert.equal(
+      (await prisma.raceActiveEffect.count({
+        where: { raceId, targetUserId: alice.userId, type: "DECOY", status: "ACTIVE" },
+      })),
+      1,
+    );
+  });
+
+  it("treats an expired ACTIVE Decoy as inactive and permits re-arming", async () => {
+    const alice = await createUser("ExpiredDecoyOwner");
+    const bob = await createUser("ExpiredDecoyOpponent");
+    const raceId = await createSoloRace([alice, bob]);
+    const expiredPowerup = await giveHeldPowerup(raceId, alice.userId, "DECOY", 1000);
+    await giveActiveEffect(
+      raceId,
+      alice.userId,
+      "DECOY",
+      expiredPowerup.id,
+      new Date(Date.now() - 1000),
+    );
+    const fresh = await giveHeldPowerup(raceId, alice.userId, "DECOY", 2000);
+
+    const response = await usePowerup(alice, raceId, fresh.id);
+    assert.equal(response.status, 200);
+    const live = await prisma.raceActiveEffect.findMany({
+      where: { raceId, targetUserId: alice.userId, type: "DECOY", status: "ACTIVE" },
+    });
+    assert.equal(live.length, 2, "historical expired row is preserved and fresh row is active");
+    assert.equal(live.filter((row) => row.expiresAt > new Date()).length, 1);
+  });
+
+  it("serializes concurrent Decoy activation so exactly one row is active", async () => {
+    const alice = await createUser("ConcurrentDecoyOwner");
+    const bob = await createUser("ConcurrentDecoyOpponent");
+    const raceId = await createSoloRace([alice, bob]);
+    const first = await giveHeldPowerup(raceId, alice.userId, "DECOY", 1000);
+    const second = await giveHeldPowerup(raceId, alice.userId, "DECOY", 2000);
+
+    const responses = await Promise.all([
+      usePowerup(alice, raceId, first.id),
+      usePowerup(alice, raceId, second.id),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+    const active = await prisma.raceActiveEffect.findMany({
+      where: { raceId, targetUserId: alice.userId, type: "DECOY", status: "ACTIVE" },
+    });
+    assert.equal(active.length, 1);
+    const held = await prisma.racePowerup.count({
+      where: { raceId, userId: alice.userId, type: "DECOY", status: "HELD" },
+    });
+    assert.equal(held, 1);
+  });
+
+  it("redirects Rainstorm per victim in a 3-runner solo race and applies once", async () => {
+    const alice = await createUser("RainSoloCaster");
+    const bob = await createUser("RainSoloDecoy");
+    const carol = await createUser("RainSoloDestination");
+    const raceId = await createSoloRace([alice, bob, carol]);
+    const decoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const storm = await giveHeldPowerup(raceId, alice.userId, "RAINSTORM", 2000);
+
+    const response = await usePowerup(alice, raceId, storm.id);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.result.redirected, true);
+    assert.deepEqual(body.result.redirectedToUserIds, [carol.userId]);
+    assert.equal(body.result.redirectedToUserId, carol.userId);
+    assert.equal(body.result.decoyBlockedCount, 0);
+    const effects = await activeEffects(raceId, "RAINSTORM");
+    assert.deepEqual(effects.map((effect) => effect.targetUserId), [carol.userId]);
+    assert.equal(effects.filter((effect) => effect.targetUserId === bob.userId).length, 0);
+  });
+
+  it("makes a redirected Rainstorm landing onto an existing effect a durable no-op", async () => {
+    const alice = await createUser("DuplicateTeamCaster");
+    const bob = await createUser("DuplicateTeamExisting");
+    const carol = await createUser("DuplicateTeamDecoy");
+    const dave = await createUser("DuplicateTeamVictim");
+    const raceId = await createTeamRace([alice, bob, carol, dave]);
+    const decoyPowerup = await giveHeldPowerup(raceId, carol.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, carol.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const existingPowerup = await giveHeldPowerup(raceId, bob.userId, "RAINSTORM", 1100);
+    const original = await giveActiveEffect(raceId, bob.userId, "RAINSTORM", existingPowerup.id, new Date(Date.now() + 3600000));
+    const snapshot = {
+      id: original.id, type: original.type, targetParticipantId: original.targetParticipantId,
+      targetUserId: original.targetUserId, sourceUserId: original.sourceUserId,
+      powerupId: original.powerupId, startsAt: original.startsAt, expiresAt: original.expiresAt,
+      status: original.status, metadata: original.metadata,
+    };
+    const storm = await giveHeldPowerup(raceId, alice.userId, "RAINSTORM", 2000);
+    const response = await usePowerup(alice, raceId, storm.id, {}, TEAM_POWERUPS5);
+    assert.equal(response.status, 200);
+    const effects = await activeEffects(raceId, "RAINSTORM");
+    assert.equal(effects.filter((effect) => effect.targetUserId === bob.userId).length, 1);
+    const after = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+    assert.deepEqual({
+      id: after.id, type: after.type, targetParticipantId: after.targetParticipantId,
+      targetUserId: after.targetUserId, sourceUserId: after.sourceUserId,
+      powerupId: after.powerupId, startsAt: after.startsAt, expiresAt: after.expiresAt,
+      status: after.status, metadata: after.metadata,
+    }, snapshot);
+    assert.ok(effects.some((effect) => effect.targetUserId === dave.userId));
+  });
+
+  it("combines redirected-duplicate no-op with race-scoped Rainstorm cooldown", async () => {
+    await prisma.powerupShopItem.upsert({
+      where: { sku: "POWERUP_RAINSTORM" },
+      update: { active: true },
+      create: { sku: "POWERUP_RAINSTORM", name: "Rainstorm", priceCoins: 75, powerupType: "RAINSTORM", active: true },
+    });
+    const alice = await createUser("CombinedCaster");
+    const bob = await createUser("CombinedExisting");
+    const carol = await createUser("CombinedDecoy");
+    const dave = await createUser("CombinedVictim");
+    const raceA = await createTeamRace([alice, bob, carol, dave]);
+    const decoy = await giveHeldPowerup(raceA, carol.userId, "DECOY", 1000);
+    await giveActiveEffect(raceA, carol.userId, "DECOY", decoy.id, new Date(Date.now() + 86400000));
+    const existingPowerup = await giveHeldPowerup(raceA, bob.userId, "RAINSTORM", 1100);
+    const original = await giveActiveEffect(raceA, bob.userId, "RAINSTORM", existingPowerup.id, new Date(Date.now() + 3600000));
+    const stormA = await giveHeldPowerup(raceA, alice.userId, "RAINSTORM", 1200);
+    const retryItem = await giveHeldPowerup(raceA, alice.userId, "RAINSTORM", 1300);
+    assert.equal((await usePowerup(alice, raceA, stormA.id, {}, TEAM_POWERUPS5)).status, 200);
+    assert.equal(await prisma.raceActiveEffect.count({ where: { raceId: raceA, targetUserId: bob.userId, type: "RAINSTORM", status: "ACTIVE" } }), 1);
+    assert.ok(await prisma.powerupUsageState.findUnique({ where: { raceId_userId_powerupType: { raceId: raceA, userId: alice.userId, powerupType: "RAINSTORM" } } }));
+    const retry = await usePowerup(alice, raceA, retryItem.id, {}, TEAM_POWERUPS5);
+    const retryBody = await retry.json();
+    assert.ok([400, 409].includes(retry.status), JSON.stringify(retryBody));
+    if (retry.status === 409) assert.equal(retryBody.code, "POWERUP_COOLDOWN");
+
+    const raceB = await createSoloRace([alice, await createUser("CombinedRaceBVictim")]);
+    const stormB = await giveHeldPowerup(raceB, alice.userId, "RAINSTORM", 1400);
+    assert.equal((await usePowerup(alice, raceB, stormB.id)).status, 200);
+    const unchanged = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+    assert.equal(unchanged.id, original.id);
+    assert.equal(unchanged.startsAt.getTime(), original.startsAt.getTime());
+    assert.equal(unchanged.expiresAt.getTime(), original.expiresAt.getTime());
+  });
+
+  it("redirects Power Outage per victim in a 3-runner solo race", async () => {
+    const alice = await createUser("OutageSoloCaster");
+    const bob = await createUser("OutageSoloDecoy");
+    const carol = await createUser("OutageSoloDestination");
+    const raceId = await createSoloRace([alice, bob, carol]);
+    const decoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const outage = await giveHeldPowerup(raceId, alice.userId, "POWER_OUTAGE", 2000);
+
+    const response = await usePowerup(alice, raceId, outage.id);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.result.redirectedToUserIds, [carol.userId]);
+    assert.equal(body.result.redirectedToUserId, carol.userId);
+    assert.equal(body.result.decoyBlockedCount, 0);
+    const effects = await activeEffects(raceId, "POWER_OUTAGE");
+    assert.deepEqual(effects.map((effect) => effect.targetUserId), [carol.userId]);
+  });
+
+  it("skips an already-outaged redirected recipient while preserving other AoE landings", async () => {
+    const alice = await createUser("DuplicateOutageCaster");
+    const bob = await createUser("DuplicateOutageDecoy");
+    const carol = await createUser("DuplicateOutageTarget");
+    const dave = await createUser("DuplicateOutageOther");
+    const raceId = await createSoloRace([alice, bob, carol, dave]);
+    const decoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const existingPowerup = await giveHeldPowerup(raceId, bob.userId, "POWER_OUTAGE", 1100);
+    const original = await giveActiveEffect(raceId, carol.userId, "POWER_OUTAGE", existingPowerup.id, new Date(Date.now() + 1800000), bob.userId);
+    const snapshot = { startsAt: original.startsAt, expiresAt: original.expiresAt, sourceUserId: original.sourceUserId, powerupId: original.powerupId, metadata: original.metadata };
+    const outage = await giveHeldPowerup(raceId, alice.userId, "POWER_OUTAGE", 2000);
+    assert.equal((await usePowerup(alice, raceId, outage.id)).status, 200);
+    const after = await prisma.raceActiveEffect.findUnique({ where: { id: original.id } });
+    assert.deepEqual({ startsAt: after.startsAt, expiresAt: after.expiresAt, sourceUserId: after.sourceUserId, powerupId: after.powerupId, metadata: after.metadata }, snapshot);
+    assert.equal((await activeEffects(raceId, "POWER_OUTAGE")).filter((effect) => effect.targetUserId === carol.userId).length, 1);
+    assert.ok((await activeEffects(raceId, "POWER_OUTAGE")).some((effect) => effect.targetUserId === dave.userId));
+  });
+
+  it("consumes a Decoy as a block for Rainstorm and Power Outage when head-to-head has no destination", async () => {
+    const alice = await createUser("TwoWayCaster");
+    const bob = await createUser("TwoWayDecoy");
+    const raceId = await createSoloRace([alice, bob]);
+    const decoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const storm = await giveHeldPowerup(raceId, alice.userId, "RAINSTORM", 2000);
+
+    const response = await usePowerup(alice, raceId, storm.id);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.result.affected, 0);
+    assert.equal(body.result.decoyBlockedCount, 1);
+    assert.equal(body.result.redirected, undefined);
+    assert.equal((await activeEffects(raceId, "RAINSTORM")).length, 0);
+    const decoy = await prisma.raceActiveEffect.findFirst({
+      where: { raceId, targetUserId: bob.userId, type: "DECOY" },
+    });
+    assert.equal(decoy.status, "EXPIRED");
+
+    const secondDecoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 3000);
+    await giveActiveEffect(
+      raceId,
+      bob.userId,
+      "DECOY",
+      secondDecoyPowerup.id,
+      new Date(Date.now() + 86400000),
+    );
+    const outage = await giveHeldPowerup(raceId, alice.userId, "POWER_OUTAGE", 4000);
+    const outageResponse = await usePowerup(alice, raceId, outage.id);
+    assert.equal(outageResponse.status, 200);
+    const outageBody = await outageResponse.json();
+    assert.equal(outageBody.result.affected, 0);
+    assert.equal(outageBody.result.decoyBlockedCount, 1);
+    assert.equal((await activeEffects(raceId, "POWER_OUTAGE")).length, 0);
+  });
+
+  it("uses existing team eligibility, supports duplicate destinations, and does not chain Decoys", async () => {
+    const alice = await createUser("TeamCaster", TEAM_POWERUPS5);
+    const erin = await createUser("TeamTeammate", TEAM_POWERUPS5);
+    const bob = await createUser("TeamDecoyOne", TEAM_POWERUPS5);
+    const carol = await createUser("TeamDecoyTwo", TEAM_POWERUPS5);
+    const raceId = await createTeamRace([alice, erin, bob, carol]);
+    const bobDecoy = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    const carolDecoy = await giveHeldPowerup(raceId, carol.userId, "DECOY", 2000);
+    const teammateDecoy = await giveHeldPowerup(raceId, erin.userId, "DECOY", 2500);
+    const bobDecoyEffect = await giveActiveEffect(raceId, bob.userId, "DECOY", bobDecoy.id, new Date(Date.now() + 86400000));
+    const carolDecoyEffect = await giveActiveEffect(raceId, carol.userId, "DECOY", carolDecoy.id, new Date(Date.now() + 86400000));
+    const teammateDecoyEffect = await giveActiveEffect(
+      raceId,
+      erin.userId,
+      "DECOY",
+      teammateDecoy.id,
+      new Date(Date.now() + 86400000),
+    );
+    const storm = await giveHeldPowerup(raceId, alice.userId, "RAINSTORM", 3000);
+
+    const response = await usePowerup(alice, raceId, storm.id, {}, TEAM_POWERUPS5);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.result.redirectedToUserIds, [erin.userId]);
+    assert.equal(body.result.redirectedToUserId, erin.userId);
+    assert.equal(body.result.decoyBlockedCount, 0);
+    assert.equal(body.result.affected, 1, "duplicate destination receives one effect");
+    const effects = await activeEffects(raceId, "RAINSTORM");
+    assert.deepEqual(effects.map((effect) => effect.targetUserId), [erin.userId]);
+    assert.equal(
+      (await prisma.raceActiveEffect.count({
+        where: { raceId, type: "RAINSTORM", targetUserId: alice.userId },
+      })),
+      0,
+      "caster teammate is not an AoE victim before redirection",
+    );
+    assert.equal(
+      (await prisma.raceActiveEffect.count({
+        where: { raceId, type: "DECOY", status: "ACTIVE" },
+      })),
+      1,
+      "victim Decoys are consumed exactly once and destination Decoy is not chained",
+    );
+    assert.equal(
+      (await prisma.raceActiveEffect.findUnique({ where: { id: teammateDecoyEffect.id } })).status,
+      "ACTIVE",
+    );
+    const stormConsumptionEvents = await prisma.domainEventOutbox.findMany({
+      where: {
+        eventKey: {
+          in: [
+            `DECOY_CONSUMED_V1:${bobDecoyEffect.id}`,
+            `DECOY_CONSUMED_V1:${carolDecoyEffect.id}`,
+          ],
+        },
+      },
+      orderBy: { eventKey: "asc" },
+    });
+    assert.equal(stormConsumptionEvents.length, 2);
+    assert.deepEqual(
+      stormConsumptionEvents.map((event) => event.payload.attackPowerupType),
+      ["RAINSTORM", "RAINSTORM"],
+    );
+
+    const bobOutageDecoy = await giveHeldPowerup(raceId, bob.userId, "DECOY", 4000);
+    const carolOutageDecoy = await giveHeldPowerup(raceId, carol.userId, "DECOY", 5000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", bobOutageDecoy.id, new Date(Date.now() + 86400000));
+    await giveActiveEffect(raceId, carol.userId, "DECOY", carolOutageDecoy.id, new Date(Date.now() + 86400000));
+    const outage = await giveHeldPowerup(raceId, alice.userId, "POWER_OUTAGE", 6000);
+    const outageResponse = await usePowerup(alice, raceId, outage.id, {}, TEAM_POWERUPS5);
+    assert.equal(outageResponse.status, 200);
+    const outageBody = await outageResponse.json();
+    assert.deepEqual(outageBody.result.redirectedToUserIds, [erin.userId]);
+    assert.equal(outageBody.result.affected, 1);
+    assert.deepEqual(
+      (await activeEffects(raceId, "POWER_OUTAGE")).map((effect) => effect.targetUserId),
+      [erin.userId],
+    );
+  });
+
+  it("runs destination Umbrella and Socks defenses after an AoE Decoy redirect", async () => {
+    const alice = await createUser("DefenseCaster");
+    const bob = await createUser("DefenseDecoy");
+    const carol = await createUser("DefenseDestination");
+    const raceId = await createSoloRace([alice, bob, carol]);
+    const decoyPowerup = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    const umbrellaPowerup = await giveHeldPowerup(raceId, carol.userId, "UMBRELLA", 2000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoyPowerup.id, new Date(Date.now() + 86400000));
+    const umbrella = await giveActiveEffect(
+      raceId,
+      carol.userId,
+      "UMBRELLA",
+      umbrellaPowerup.id,
+      new Date(Date.now() + 86400000),
+    );
+    const storm = await giveHeldPowerup(raceId, alice.userId, "RAINSTORM", 3000);
+
+    const response = await usePowerup(alice, raceId, storm.id);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.result.redirectedToUserIds, [carol.userId]);
+    assert.equal(body.result.affected, 0);
+    assert.equal(body.result.blockedCount, 0);
+    assert.equal((await activeEffects(raceId, "RAINSTORM")).length, 0);
+    assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: umbrella.id } })).status, "ACTIVE");
+
+    const alice2 = await createUser("SocksDefenseCaster");
+    const bob2 = await createUser("SocksDefenseDecoy");
+    const carol2 = await createUser("SocksDefenseDestination");
+    const raceId2 = await createSoloRace([alice2, bob2, carol2]);
+    const decoy2 = await giveHeldPowerup(raceId2, bob2.userId, "DECOY", 4000);
+    const socksPowerup = await giveHeldPowerup(raceId2, carol2.userId, "COMPRESSION_SOCKS", 5000);
+    await giveActiveEffect(raceId2, bob2.userId, "DECOY", decoy2.id, new Date(Date.now() + 86400000));
+    const socks = await giveActiveEffect(
+      raceId2,
+      carol2.userId,
+      "COMPRESSION_SOCKS",
+      socksPowerup.id,
+      new Date(Date.now() + 86400000),
+    );
+    const outage = await giveHeldPowerup(raceId2, alice2.userId, "POWER_OUTAGE", 6000);
+    const outageResponse = await usePowerup(alice2, raceId2, outage.id);
+    assert.equal(outageResponse.status, 200);
+    const outageBody = await outageResponse.json();
+    assert.deepEqual(outageBody.result.redirectedToUserIds, [carol2.userId]);
+    assert.equal(outageBody.result.affected, 0);
+    assert.equal(outageBody.result.blockedCount, 1);
+    assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: socks.id } })).status, "BLOCKED");
+    assert.equal((await activeEffects(raceId2, "POWER_OUTAGE")).length, 0);
+  });
+
+  it("does not let an expired destination Socks row block a redirected Power Outage", async () => {
+    const alice = await createUser("ExpiredSocksCaster");
+    const bob = await createUser("ExpiredSocksDecoy");
+    const carol = await createUser("ExpiredSocksDestination");
+    const raceId = await createSoloRace([alice, bob, carol]);
+    const decoy = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
+    const socksPowerup = await giveHeldPowerup(raceId, carol.userId, "COMPRESSION_SOCKS", 2000);
+    await giveActiveEffect(raceId, bob.userId, "DECOY", decoy.id, new Date(Date.now() + 86400000));
+    await giveActiveEffect(
+      raceId,
+      carol.userId,
+      "COMPRESSION_SOCKS",
+      socksPowerup.id,
+      new Date(Date.now() - 1000),
+    );
+    const outage = await giveHeldPowerup(raceId, alice.userId, "POWER_OUTAGE", 3000);
+
+    const response = await usePowerup(alice, raceId, outage.id);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.result.affected, 1);
+    assert.equal(body.result.blockedCount, 0);
+    assert.equal((await activeEffects(raceId, "POWER_OUTAGE")).length, 1);
+  });
+});
+
+})();
+
+// ---- consolidated from powerups-reflected-attack-socks.test.js ----
+(function powerups_reflected_attack_socks_test_js(){
+const assert = require("node:assert/strict");
+const { describe, it, before, after, beforeEach } = require("node:test");
+const {
+  cleanDatabase,
+  prisma,
+  request,
+  getSharedServer,
+  startServer,
+} = require("../setup");
+const {
+  buildUsePowerup,
+} = require("../../../src/modules/powerups/commands/usePowerup");
+const {
+  RaceImpactEvent,
+} = require("../../../src/modules/races/models/raceImpactEvent");
+
+// ---------------------------------------------------------------------------
+// REFLECTED ATTACK vs THE ATTACKER'S OWN COMPRESSION SOCKS
+//
+// Design rule under test: when an offensive powerup is reflected by the
+// target's Mirror, the reflected hit lands on the original attacker — and the
+// attacker's own active Compression Socks now BLOCK that bounce. Both shields
+// are consumed (Mirror EXPIRED on the defender, socks BLOCKED on the
+// attacker), the effect never applies to anyone, and the response carries the
+// combined discriminator: outcome "BLOCKED" + blockedBy "COMPRESSION_SOCKS"
+// + reflected true + reflectedBy "MIRROR". Covers the primary Mirror branch,
+// the Decoy-redirect-then-Mirror branch, and the Mystery Potion enemy-attack
+// path.
+// ---------------------------------------------------------------------------
+
+let server;
+let nextAppleId = 0;
+
+async function createUser(displayName) {
+  const appleId = `apple-refsocks-${++nextAppleId}`;
+  const res = await request(server.baseUrl, "POST", "/auth/apple", {
+    body: { identityToken: appleId },
+  });
+  const body = await res.json();
+  if (displayName) {
+    await request(server.baseUrl, "PUT", "/auth/me/display-name", {
+      body: { displayName },
+      token: body.sessionToken,
+    });
+  }
+  return { userId: body.user.id, token: body.sessionToken };
+}
+
+async function makeFriends(a, b) {
+  const sendRes = await request(server.baseUrl, "POST", "/friends/request", {
+    body: { addresseeId: b.userId },
+    token: a.token,
+  });
+  const fId = (await sendRes.json()).friendship.id;
+  await request(server.baseUrl, "PUT", `/friends/request/${fId}`, {
+    body: { accept: true },
+    token: b.token,
+  });
+}
+
+async function createActiveRace(creator, others) {
+  const createRes = await request(server.baseUrl, "POST", "/races", {
+    body: {
+      name: "Reflected Socks Test",
+      targetSteps: 200000,
+      maxDurationDays: 7,
+      powerupsEnabled: true,
+      powerupStepInterval: 5000,
+    },
+    token: creator.token,
+  });
+  const raceId = (await createRes.json()).race.id;
+  await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+    body: { inviteeIds: others.map((o) => o.userId) },
+    token: creator.token,
+  });
+  for (const o of others) {
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: o.token,
+    });
+  }
+  await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: creator.token });
+  const defaultStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  await prisma.race.update({ where: { id: raceId }, data: { startedAt: defaultStart } });
+  await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: defaultStart } });
+  return raceId;
+}
+
+async function getParticipant(raceId, userId) {
+  return prisma.raceParticipant.findFirst({ where: { raceId, userId } });
+}
+
+async function giveHeldPowerup(raceId, userId, type, earnedAtSteps) {
+  const participant = await getParticipant(raceId, userId);
+  const rareTypes = ["COMPRESSION_SOCKS", "MIRROR"];
+  return prisma.racePowerup.create({
+    data: {
+      raceId,
+      participantId: participant.id,
+      userId,
+      type,
+      rarity: rareTypes.includes(type) ? "RARE" : "COMMON",
+      status: "HELD",
+      earnedAtSteps,
+    },
+  });
+}
+
+async function giveBonusSteps(raceId, userId, amount) {
+  const participant = await getParticipant(raceId, userId);
+  await prisma.raceParticipant.update({
+    where: { id: participant.id },
+    data: { bonusSteps: { increment: amount }, totalSteps: amount },
+  });
+}
+
+// Wave-gated types (DECOY, MYSTERY_POTION) 400 without the client-features header.
+const FEATURES = { "X-Client-Features": "characters,powerups3,powerups4,powerups5" };
+
+async function usePowerup(token, raceId, powerupId, targetUserId) {
+  return request(server.baseUrl, "POST", `/races/${raceId}/powerups/${powerupId}/use`, {
+    body: targetUserId ? { targetUserId } : {},
+    token,
+    headers: FEATURES,
+  });
+}
+
+// Activate a held self-shield (socks/mirror/decoy) and assert it stuck.
+async function activateShield(raceId, user, type, earnedAtSteps) {
+  const held = await giveHeldPowerup(raceId, user.userId, type, earnedAtSteps);
+  const res = await usePowerup(user.token, raceId, held.id);
+  assert.equal(res.status, 200, `${type} should activate`);
+}
+
+async function shieldStatus(raceId, userId, type) {
+  const effect = await prisma.raceActiveEffect.findFirst({
+    where: { raceId, type, targetUserId: userId },
+    orderBy: { startsAt: "desc" },
+  });
+  return effect ? effect.status : "(none)";
+}
+
+async function activeEffectCount(raceId, type) {
+  return prisma.raceActiveEffect.count({ where: { raceId, type, status: "ACTIVE" } });
+}
+
+async function feedEventCount(raceId, eventType, powerupType) {
+  return prisma.racePowerupEvent.count({ where: { raceId, eventType, powerupType } });
+}
+
+describe("reflected attack blocked by the attacker's own compression socks", () => {
+  before(async () => {
+    server = await getSharedServer();
+  });
+
+  after(async () => {});
+
+  beforeEach(async () => {
+    await cleanDatabase();
+    nextAppleId = 0;
+  });
+
+  it("WRONG_TURN reflected by the target's Mirror is blocked by the attacker's socks", async () => {
+    const alice = await createUser("AliceAtk");
+    const bob = await createUser("BobMirror");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveBonusSteps(raceId, alice.userId, 5000);
+    await giveBonusSteps(raceId, bob.userId, 5000);
+
+    await activateShield(raceId, alice, "COMPRESSION_SOCKS", 99901);
+    await activateShield(raceId, bob, "MIRROR", 99902);
+
+    const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99903);
+    const res = await usePowerup(alice.token, raceId, wt.id, bob.userId);
+    assert.equal(res.status, 200);
+    const { result } = await res.json();
+
+    assert.equal(result.outcome, "BLOCKED");
+    assert.equal(result.blocked, true);
+    assert.equal(result.blockedBy, "COMPRESSION_SOCKS");
+    assert.equal(result.reflected, true);
+    assert.equal(result.reflectedBy, "MIRROR");
+
+    assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED", "mirror consumed");
+    assert.equal(await shieldStatus(raceId, alice.userId, "COMPRESSION_SOCKS"), "BLOCKED", "attacker socks consumed");
+    assert.equal(await activeEffectCount(raceId, "WRONG_TURN"), 0, "wrong turn never lands on anyone");
+
+    const powerup = await prisma.racePowerup.findUnique({ where: { id: wt.id } });
+    assert.equal(powerup.status, "USED", "the wrong turn item is consumed");
+
+    assert.equal(await feedEventCount(raceId, "POWERUP_REFLECTED", "WRONG_TURN"), 1);
+    assert.equal(await feedEventCount(raceId, "POWERUP_BLOCKED", "WRONG_TURN"), 1);
+  });
+
+  it("reflected WRONG_TURN still lands when the attacker has NO socks (regression)", async () => {
+    const alice = await createUser("AliceAtk");
+    const bob = await createUser("BobMirror");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveBonusSteps(raceId, alice.userId, 5000);
+    await giveBonusSteps(raceId, bob.userId, 5000);
+
+    await activateShield(raceId, bob, "MIRROR", 99902);
+
+    const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99903);
+    const res = await usePowerup(alice.token, raceId, wt.id, bob.userId);
+    assert.equal(res.status, 200);
+    const { result } = await res.json();
+
+    assert.equal(result.outcome, "REFLECTED");
+    assert.equal(result.reflectedBy, "MIRROR");
+    assert.notEqual(result.blocked, true);
+    assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED");
+    assert.equal(await shieldStatus(raceId, alice.userId, "WRONG_TURN"), "ACTIVE", "bounced wrong turn lands on the attacker");
+  });
+
+  it("socks-holding attacker who ALREADY has a Wrong Turn gets blocked, not a 400", async () => {
+    const alice = await createUser("AliceAtk");
+    const bob = await createUser("BobMirror");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveBonusSteps(raceId, alice.userId, 5000);
+    await giveBonusSteps(raceId, bob.userId, 5000);
+
+    await activateShield(raceId, alice, "COMPRESSION_SOCKS", 99901);
+    await activateShield(raceId, bob, "MIRROR", 99902);
+
+    // Seed an already-active Wrong Turn ON the attacker (sourced by Bob).
+    const aliceP = await getParticipant(raceId, alice.userId);
+    const seedItem = await giveHeldPowerup(raceId, bob.userId, "WRONG_TURN", 99904);
+    await prisma.racePowerup.update({ where: { id: seedItem.id }, data: { status: "USED", usedAt: new Date() } });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId,
+        targetParticipantId: aliceP.id,
+        targetUserId: alice.userId,
+        sourceUserId: bob.userId,
+        powerupId: seedItem.id,
+        type: "WRONG_TURN",
+        status: "ACTIVE",
+        startsAt: new Date(Date.now() - 10 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 50 * 60 * 1000),
+      },
+    });
+
+    const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99903);
+    const res = await usePowerup(alice.token, raceId, wt.id, bob.userId);
+    assert.equal(res.status, 200, "socks precedence: no stacking 400 when the bounce is blocked anyway");
+    const { result } = await res.json();
+    assert.equal(result.outcome, "BLOCKED");
+    assert.equal(result.blockedBy, "COMPRESSION_SOCKS");
+    assert.equal(result.reflected, true);
+    assert.equal(await shieldStatus(raceId, alice.userId, "COMPRESSION_SOCKS"), "BLOCKED");
+    assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED");
+    // Only the pre-seeded wrong turn remains active on Alice — no second stack.
+    assert.equal(await activeEffectCount(raceId, "WRONG_TURN"), 1);
+  });
+
+  it("Decoy redirect → new victim's Mirror reflect → attacker socks block", async () => {
+    const alice = await createUser("AliceAtk"); // attacker, socks
+    const bob = await createUser("BobDecoy"); // decoy holder
+    const carol = await createUser("CarolMirr"); // mirror holder (redirect victim)
+    await makeFriends(alice, bob);
+    await makeFriends(alice, carol);
+    await makeFriends(bob, carol);
+    const raceId = await createActiveRace(alice, [bob, carol]);
+    for (const u of [alice, bob, carol]) await giveBonusSteps(raceId, u.userId, 5000);
+
+    await activateShield(raceId, alice, "COMPRESSION_SOCKS", 99901);
+    await activateShield(raceId, carol, "MIRROR", 99902);
+    // Decoy is a shop powerup; grant it held and activate.
+    await activateShield(raceId, bob, "DECOY", 99905);
+
+    const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99903);
+    const res = await usePowerup(alice.token, raceId, wt.id, bob.userId);
+    assert.equal(res.status, 200);
+    const { result } = await res.json();
+
+    assert.equal(result.outcome, "BLOCKED");
+    assert.equal(result.blockedBy, "COMPRESSION_SOCKS");
+    assert.equal(result.reflected, true);
+    assert.equal(result.reflectedBy, "MIRROR");
+
+    assert.equal(await shieldStatus(raceId, bob.userId, "DECOY"), "EXPIRED", "decoy consumed");
+    assert.equal(await shieldStatus(raceId, carol.userId, "MIRROR"), "EXPIRED", "mirror consumed");
+    assert.equal(await shieldStatus(raceId, alice.userId, "COMPRESSION_SOCKS"), "BLOCKED", "attacker socks consumed");
+    assert.equal(await activeEffectCount(raceId, "WRONG_TURN"), 0);
+  });
+
+  it("Leg Cramp consumes Mirror before Decoy before Compression Socks when defenses coexist", async () => {
+    const alice = await createUser("AliceOrder");
+    const bob = await createUser("BobOrder");
+    const carol = await createUser("CarolOrder");
+    await makeFriends(alice, bob);
+    await makeFriends(alice, carol);
+    const raceId = await createActiveRace(alice, [bob, carol]);
+    for (const user of [alice, bob, carol]) {
+      await giveBonusSteps(raceId, user.userId, 5000);
+    }
+    await activateShield(raceId, bob, "COMPRESSION_SOCKS", 99801);
+    await activateShield(raceId, bob, "DECOY", 99802);
+    await activateShield(raceId, bob, "MIRROR", 99803);
+
+    const cramp = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99804);
+    const response = await usePowerup(alice.token, raceId, cramp.id, bob.userId);
+    assert.equal(response.status, 200);
+    const { result } = await response.json();
+    assert.equal(result.outcome, "REFLECTED");
+    assert.equal(result.reflectedBy, "MIRROR");
+    assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED");
+    assert.equal(await shieldStatus(raceId, bob.userId, "DECOY"), "ACTIVE");
+    assert.equal(await shieldStatus(raceId, bob.userId, "COMPRESSION_SOCKS"), "ACTIVE");
+    assert.equal(await shieldStatus(raceId, alice.userId, "LEG_CRAMP"), "ACTIVE");
+  });
+
+  it("Mystery Potion enemy attack reflected by the victim's Mirror is blocked by the caster's socks", async () => {
+    const alice = await createUser("AlicePot");
+    const bob = await createUser("BobMirror");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveBonusSteps(raceId, alice.userId, 5000);
+    await giveBonusSteps(raceId, bob.userId, 5000);
+
+    await activateShield(raceId, alice, "COMPRESSION_SOCKS", 99901);
+    await activateShield(raceId, bob, "MIRROR", 99902);
+
+    // The potion roll is random; enemy-attack outcomes (PINECONE_TOSS /
+    // SHORTCUT / LEG_CRAMP) have substantial weight, so casting repeatedly
+    // reaches one with overwhelming probability. Non-attack rolls only buff
+    // the caster and never touch either shield, so the first enemy roll is
+    // the one that exercises the Mirror.
+    const enemyOutcomes = new Set(["PINECONE_TOSS", "SHORTCUT", "LEG_CRAMP"]);
+    let attackResult = null;
+    for (let i = 0; i < 40 && !attackResult; i++) {
+      const potion = await giveHeldPowerup(raceId, alice.userId, "MYSTERY_POTION", 90000 + i);
+      const res = await usePowerup(alice.token, raceId, potion.id);
+      assert.equal(res.status, 200, `potion cast ${i} should succeed`);
+      const { result } = await res.json();
+      if (enemyOutcomes.has(result.rolled)) attackResult = result;
+    }
+    assert.ok(attackResult, "expected at least one enemy-attack potion roll in 40 casts");
+
+    assert.equal(attackResult.reflected, true, "mirror fires on the enemy roll");
+    assert.equal(attackResult.reflectedBy, "MIRROR");
+    assert.equal(attackResult.blocked, true, "caster's own socks block the bounce");
+    assert.equal(attackResult.blockedBy, "COMPRESSION_SOCKS");
+    assert.equal(attackResult.outcome, "BLOCKED");
+
+    assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED");
+    assert.equal(await shieldStatus(raceId, alice.userId, "COMPRESSION_SOCKS"), "BLOCKED");
+  });
+
+  it("a reflected Mystery Potion Shortcut conserves steps and credits the Mirror holder", async () => {
+    const alice = await createUser("AlicePotionShortcut");
+    const bob = await createUser("BobPotionMirror");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveBonusSteps(raceId, alice.userId, 400);
+    await giveBonusSteps(raceId, bob.userId, 5000);
+    await activateShield(raceId, bob, "MIRROR", 99701);
+
+    const potion = await giveHeldPowerup(
+      raceId,
+      alice.userId,
+      "MYSTERY_POTION",
+      99702,
+    );
+    // 0.72 deterministically selects SHORTCUT from the canonical potion pool.
+    // Use a real HTTP server/handler chain while injecting only the random seam.
+    const deterministicServer = await startServer({
+      usePowerup: buildUsePowerup({
+        random: () => 0.72,
+        ActiveRaceImpact: RaceImpactEvent,
+      }),
+    });
+    try {
+      const before = await prisma.raceParticipant.findMany({
+        where: { raceId, userId: { in: [alice.userId, bob.userId] } },
+        orderBy: { userId: "asc" },
+      });
+      const beforeSum = before.reduce((sum, participant) => sum + participant.totalSteps, 0);
+
+      const response = await request(
+        deterministicServer.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${potion.id}/use`,
+        { token: alice.token, headers: FEATURES, body: {} },
+      );
+      assert.equal(response.status, 200);
+      const { result } = await response.json();
+      assert.equal(result.rolled, "SHORTCUT");
+      assert.equal(result.reflected, true);
+      assert.equal(result.reflectedBy, "MIRROR");
+      assert.equal(result.stolen, 400, "the returned amount is the actual clamped debit");
+
+      const after = await prisma.raceParticipant.findMany({
+        where: { raceId, userId: { in: [alice.userId, bob.userId] } },
+        orderBy: { userId: "asc" },
+      });
+      const byUser = new Map(after.map((participant) => [participant.userId, participant]));
+      assert.equal(byUser.get(alice.userId).totalSteps, 0);
+      assert.equal(byUser.get(bob.userId).totalSteps, 5400);
+      assert.equal(
+        after.reduce((sum, participant) => sum + participant.totalSteps, 0),
+        beforeSum,
+        "a reflected Shortcut transfers rather than mints or destroys steps",
+      );
+
+      const impacts = await prisma.raceImpactEvent.findMany({
+        where: { raceId, powerupType: "SHORTCUT" },
+        orderBy: { deltaSteps: "asc" },
+      });
+      assert.deepEqual(
+        impacts.map((impact) => [impact.recipientUserId, impact.deltaSteps]),
+        [[alice.userId, -400], [bob.userId, 400]],
+      );
+      const sourceEvent = await prisma.racePowerupEvent.findFirstOrThrow({
+        where: { raceId, powerupType: "MYSTERY_POTION", eventType: "POWERUP_USED" },
+        orderBy: { createdAt: "desc" },
+      });
+      assert.equal(sourceEvent.actorUserId, bob.userId);
+      assert.equal(sourceEvent.targetUserId, alice.userId);
+      assert.deepEqual(sourceEvent.metadata, { rolled: "SHORTCUT", stolen: 400 });
+    } finally {
+      await deterministicServer.close();
+    }
+  });
+});
+
+})();
