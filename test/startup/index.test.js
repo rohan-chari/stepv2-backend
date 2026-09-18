@@ -286,6 +286,47 @@ test("http and resolution process roles do not start the wrong schedulers", () =
   assert.deepEqual(cronCalls, ["heartbeat", "billing"]);
 });
 
+test("dedicated worker roles own only their core queue workers", () => {
+  const run = (processRole) => {
+    const calls = [];
+    const track = (name) => () => calls.push(name);
+
+    startServer({
+      app: {
+        listen(...args) {
+          args[2]();
+          return { close() {} };
+        },
+      },
+      processRole,
+      cronStartDelayMs: 0,
+      // Keeps today's fallback "all" startup path from starting unrelated jobs.
+      // Once the dedicated role exists, its explicit role branch should run first.
+      capacityHomeOpenIsolation: true,
+      registerEventHandlers() {},
+      registerNotificationHandlers() {},
+      registerRaceListCacheInvalidation() {},
+      scheduleGenerationHeartbeat: track("heartbeat"),
+      scheduleStepSyncStreamWorker: track("step"),
+      schedulePowerupRecalcStreamWorker: track("powerup"),
+      scheduleRaceDirtyStreamWorker: track("race"),
+      scheduleRaceResolutionRecoverySweep: track("raceRecovery"),
+      scheduleGlobalEventBoundaryStreamWorker: track("event"),
+      scheduleGlobalEventRedisScheduleHydrator: track("eventHydrator"),
+      scheduleGlobalEventBoundaryStreamScheduler: track("eventScheduler"),
+      scheduleNotificationDeliveryStreamWorker: track("notification"),
+      logger: { log() {} },
+    });
+
+    return calls.filter((name) => name !== "heartbeat");
+  };
+
+  assert.deepEqual(run("step"), ["step"]);
+  assert.deepEqual(run("race"), ["powerup", "race", "raceRecovery"]);
+  assert.deepEqual(run("event"), ["eventHydrator", "eventScheduler", "event"]);
+  assert.deepEqual(run("notification"), ["notification"]);
+});
+
 test("home-open capacity keeps the cron process idle", () => {
   const run = (capacityHomeOpenIsolation) => {
     const calls = [];
