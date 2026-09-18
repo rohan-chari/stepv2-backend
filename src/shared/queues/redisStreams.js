@@ -1,0 +1,163 @@
+const os = require("node:os");
+
+const STREAMS = Object.freeze({
+  STEP_SYNC: "queue:step-sync:v1",
+  POWERUP_RECALC: "queue:powerup-recalc:v1",
+  RACE_DIRTY: "queue:race-dirty:v1",
+});
+
+const GROUPS = Object.freeze({
+  STEP_SYNC: "step-workers-v1",
+  POWERUP_RECALC: "powerup-workers-v1",
+  RACE_DIRTY: "race-workers-v1",
+});
+
+let client = null;
+
+function prefix() {
+  return process.env.CACHE_ENV_PREFIX || "";
+}
+
+function streamName(name) {
+  const suffix = STREAMS[name] || name;
+  if (!suffix) throw new TypeError("stream name is required");
+  return `${prefix()}${suffix}`;
+}
+
+function consumerName(role = "worker") {
+  const instance = process.env.NODE_APP_INSTANCE == null
+    ? "0"
+    : String(process.env.NODE_APP_INSTANCE);
+  return `${os.hostname()}:${instance}:${process.pid}:${role}`;
+}
+
+function getClient() {
+  if (client) return client;
+  const url = String(process.env.REDIS_URL || "").trim();
+  if (!url) {
+    const error = new Error("REDIS_URL is required for queue-first work");
+    error.code = "QUEUE_REDIS_UNAVAILABLE";
+    throw error;
+  }
+  const IORedis = require("ioredis");
+  client = new IORedis(url, {
+    enableOfflineQueue: false,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 1500,
+    retryStrategy: (attempt) => Math.min(attempt * 200, 5000),
+    lazyConnect: false,
+  });
+  client.on("error", (error) => {
+    console.error("[redisStreams] connection error:", error?.message || error);
+  });
+  return client;
+}
+
+function encodeFields(fields) {
+  const args = [];
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (value === undefined) continue;
+    args.push(String(key), value === null ? "" : String(value));
+  }
+  if (!args.length) throw new TypeError("stream message fields are required");
+  return args;
+}
+
+function decodeEntry(entry) {
+  if (!Array.isArray(entry) || entry.length !== 2) return null;
+  const [id, raw] = entry;
+  const fields = {};
+  for (let i = 0; i < raw.length; i += 2) fields[raw[i]] = raw[i + 1];
+  return { id, fields };
+}
+
+async function publish(stream, fields) {
+  try {
+    const redis = getClient();
+    return await redis.xadd(streamName(stream), "*", ...encodeFields(fields));
+  } catch (error) {
+    if (!error.code) error.code = "QUEUE_REDIS_UNAVAILABLE";
+    throw error;
+  }
+}
+
+async function ensureGroup(stream, group) {
+  try {
+    const redis = getClient();
+    await redis.xgroup("CREATE", streamName(stream), group, "0", "MKSTREAM");
+    return true;
+  } catch (error) {
+    if (String(error?.message || "").includes("BUSYGROUP")) return true;
+    if (!error.code) error.code = "QUEUE_REDIS_UNAVAILABLE";
+    throw error;
+  }
+}
+
+async function readGroup({ stream, group, consumer, count = 10, blockMs = 5000 }) {
+  const redis = getClient();
+  const result = await redis.xreadgroup(
+    "GROUP", group, consumer,
+    "COUNT", Math.max(1, Number(count) || 1),
+    "BLOCK", Math.max(1, Number(blockMs) || 1),
+    "STREAMS", streamName(stream), ">"
+  );
+  if (!Array.isArray(result) || !result.length) return [];
+  return (result[0]?.[1] || []).map(decodeEntry).filter(Boolean);
+}
+
+async function ack(stream, group, messageId) {
+  const redis = getClient();
+  return Number(await redis.xack(streamName(stream), group, messageId)) > 0;
+}
+
+async function reclaimIdle({
+  stream,
+  group,
+  consumer,
+  minIdleMs = 30000,
+  count = 25,
+}) {
+  const redis = getClient();
+  const result = await redis.xautoclaim(
+    streamName(stream),
+    group,
+    consumer,
+    Math.max(1, Number(minIdleMs) || 1),
+    "0-0",
+    "COUNT",
+    Math.max(1, Number(count) || 1),
+  );
+  const entries = Array.isArray(result) ? result[1] : [];
+  return (entries || []).map(decodeEntry).filter(Boolean);
+}
+
+async function pendingSummary(stream, group) {
+  const redis = getClient();
+  const result = await redis.xpending(streamName(stream), group);
+  return {
+    count: Number(result?.[0] || 0),
+    minId: result?.[1] || null,
+    maxId: result?.[2] || null,
+  };
+}
+
+async function close() {
+  if (!client) return;
+  const current = client;
+  client = null;
+  await current.quit().catch(() => current.disconnect());
+}
+
+module.exports = {
+  STREAMS,
+  GROUPS,
+  streamName,
+  consumerName,
+  publish,
+  ensureGroup,
+  readGroup,
+  ack,
+  reclaimIdle,
+  pendingSummary,
+  close,
+};
