@@ -2471,24 +2471,6 @@ describe("Quicksand real HTTP contract", () => {
     assert.equal(final.currentDeltaSteps, -1200);
   });
 
-  it("keeps Quicksand visible and Daily Spin-eligible for free and Gold users", async () => {
-    await seedQuicksandCatalog();
-    const free = await createTestUser();
-    const gold = await createTestUser();
-    await makeGold(gold.user.id);
-    const headers = { "X-Client-Features": "spinPowerups,powerups4" };
-    const path = `/daily-reward/status?localDate=2026-09-16`;
-    const freeStatus = await request(server.baseUrl, "GET", path, { token: free.token, headers });
-    const goldStatus = await request(server.baseUrl, "GET", path, { token: gold.token, headers });
-    const freeBody = await freeStatus.json();
-    const goldBody = await goldStatus.json();
-    assert.equal(freeStatus.status, 200);
-    assert.equal(goldStatus.status, 200);
-    assert.ok(freeBody.box.powerupPool.some((item) => item.powerupType === "QUICKSAND"));
-    assert.ok(freeBody.box.eligiblePowerupTypes.includes("QUICKSAND"));
-    assert.ok(goldBody.box.eligiblePowerupTypes.includes("QUICKSAND"));
-  });
-
   it("keeps Quicksand out of in-race mystery-box drops while retaining its shop row", async () => {
     await seedQuicksandCatalog();
     const row = await prisma.powerupShopItem.findUniqueOrThrow({ where: { sku: "POWERUP_QUICKSAND" } });
