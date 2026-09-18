@@ -67,7 +67,7 @@ module.exports = {
     app("steps-tracker", PROD_DIR, 2, {
       STEPS_PROCESS_ROLE: "http",
       DATABASE_POOL_MAX_HTTP: "10",
-      DATABASE_POOL_TOTAL_BUDGET: "32",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
       // The guarded reload validates and exports these from the deployed .env.
       // Declaring them here makes PM2 replace any stale saved values.
       MIN_SUPPORTED_APP_VERSION: process.env.MIN_SUPPORTED_APP_VERSION,
