@@ -300,14 +300,11 @@ function createStepsRouter(dependencies = {}) {
         // Exact case-sensitive value only. Headerless and any other value keep
         // the legacy unrestricted sync contract.
         homePull: req.get("X-Step-Sync-Intent") === "home-pull",
+        legacyEventRecap:
+          Array.isArray(req.body?.samples) &&
+          req.body.samples.length > 0 &&
+          !req.clientFeatures?.has("simple_event_recap_v1"),
       });
-      if (Array.isArray(req.body?.samples) && req.body.samples.length && !req.clientFeatures?.has('simple_event_recap_v1')) {
-        try {
-          await require('../../home/services/legacyEventRecapInput').finalizeLegacyEventRecap({
-            userId: req.user.id, prisma: dependencies.prisma, now: dependencies.now,
-          });
-        } catch (error) { console.error('Legacy recap deferred:', error.code || error.name); }
-      }
       if (
         req.clientFeatures?.has("impact_summaries") !== true ||
         req.clientFeatures?.has("impact_summary_expiry_v1") !== true
