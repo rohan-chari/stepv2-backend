@@ -14,6 +14,7 @@ const baseDatabaseUrl =
   process.env.DATABASE_URL ||
   "postgresql://rohan@localhost:5432/steps-tracker-integration_test";
 const redisUrl = process.env.REDIS_URL || "";
+const queueRedisUrl = process.env.QUEUE_REDIS_URL || redisUrl;
 const baseRedisPrefix = process.env.CACHE_ENV_PREFIX || "integration:";
 
 function walkTestFiles(dir) {
@@ -109,6 +110,7 @@ function runShard(shard, tempDir) {
       ...process.env,
       DATABASE_URL: shardDatabaseUrl(shard.index),
       REDIS_URL: redisUrl,
+      QUEUE_REDIS_URL: queueRedisUrl,
       CACHE_ENV_PREFIX: baseRedisPrefix + "shard:" + (shard.index + 1) + ":",
       INTEGRATION_SHARD_INDEX: String(shard.index + 1),
       INTEGRATION_SHARD_COUNT: String(shardCount),
