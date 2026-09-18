@@ -32,6 +32,7 @@ let ownedRedis = null;
 let redisUrl;
 let inspector;
 let originalRedisUrl;
+let originalQueueRedisUrl;
 let originalPrefix;
 let testPrefix;
 
@@ -143,6 +144,7 @@ function worker() {
 describe("STEP_SYNC queue worker core behavior", () => {
   before(async (t) => {
     originalRedisUrl = process.env.REDIS_URL;
+    originalQueueRedisUrl = process.env.QUEUE_REDIS_URL;
     originalPrefix = process.env.CACHE_ENV_PREFIX;
 
     if (String(process.env.REDIS_URL || "").trim()) {
@@ -157,6 +159,7 @@ describe("STEP_SYNC queue worker core behavior", () => {
     }
 
     process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
     server = await getSharedServer();
     inspector = new IORedis(redisUrl, {
       lazyConnect: true,
@@ -170,6 +173,7 @@ describe("STEP_SYNC queue worker core behavior", () => {
     await closeQueueRedis();
     testPrefix = `${originalPrefix || "integration:"}step-worker:${crypto.randomUUID()}:`;
     process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
     process.env.CACHE_ENV_PREFIX = testPrefix;
     await cleanDatabase();
     await ensureGroup(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC);
@@ -180,6 +184,7 @@ describe("STEP_SYNC queue worker core behavior", () => {
     await closeQueueRedis();
     await deletePrefix(testPrefix);
     process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
     process.env.CACHE_ENV_PREFIX = originalPrefix || "";
   });
 
@@ -189,6 +194,8 @@ describe("STEP_SYNC queue worker core behavior", () => {
     if (ownedRedis) await ownedRedis.close();
     if (originalRedisUrl === undefined) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = originalRedisUrl;
+    if (originalQueueRedisUrl === undefined) delete process.env.QUEUE_REDIS_URL;
+    else process.env.QUEUE_REDIS_URL = originalQueueRedisUrl;
     if (originalPrefix === undefined) delete process.env.CACHE_ENV_PREFIX;
     else process.env.CACHE_ENV_PREFIX = originalPrefix;
   });
@@ -262,7 +269,7 @@ describe("STEP_SYNC queue worker core behavior", () => {
 
     const deadPort = await closedPort();
     await closeQueueRedis();
-    process.env.REDIS_URL = `redis://127.0.0.1:${deadPort}/15`;
+    process.env.QUEUE_REDIS_URL = `redis://127.0.0.1:${deadPort}/15`;
 
     const firstAttempt = worker();
     assert.equal(
@@ -283,7 +290,7 @@ describe("STEP_SYNC queue worker core behavior", () => {
       });
 
     await closeQueueRedis();
-    process.env.REDIS_URL = redisUrl;
+    process.env.QUEUE_REDIS_URL = redisUrl;
 
     assert.equal(
       (await pendingSummary(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC)).count,
