@@ -235,7 +235,7 @@ describe("Quicksand Gold shop publication — integration", () => {
     assert.equal(adUnlock.status, 404);
   });
 
-  it("keeps Daily Spin eligibility Gold-only and preserves grandfathered inventory use", async () => {
+  it("keeps Quicksand Daily Spin-eligible for free and Gold users and preserves grandfathered inventory use", async () => {
     const free = await createTestUser();
     const gold = await createTestUser();
     await makeGold(gold.user.id);
@@ -254,7 +254,7 @@ describe("Quicksand Gold shop publication — integration", () => {
     assert.ok(
       freeBox.powerupPool.some((item) => item.powerupType === "QUICKSAND")
     );
-    assert.equal(freeBox.eligiblePowerupTypes.includes("QUICKSAND"), false);
+    assert.equal(freeBox.eligiblePowerupTypes.includes("QUICKSAND"), true);
     assert.equal(goldBox.eligiblePowerupTypes.includes("QUICKSAND"), true);
 
     await prisma.userPowerupItem.create({
