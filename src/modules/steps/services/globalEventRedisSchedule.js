@@ -1,6 +1,6 @@
 const {
   withCommandClient,
-  publish,
+  streamName,
   STREAMS,
 } = require("../../../shared/queues/redisStreams");
 
@@ -67,32 +67,60 @@ async function nextBoundaryAt() {
 async function publishDueBoundaries({ now = new Date(), limit = 100 } = {}) {
   const current = new Date(now);
   const max = Math.min(500, Math.max(1, Number(limit) || 100));
-  const members = await withCommandClient(async (redis) => {
+  const scheduledAt = current.toISOString();
+
+  const result = await withCommandClient(async (redis) => {
+    // The sorted-set removal and stream append must be one Redis-side atomic
+    // operation. For each valid member, XADD runs before ZREM. If XADD fails
+    // (for example WRONGTYPE or an infrastructure error), Redis aborts the
+    // script at that command and that member remains scheduled for retry.
+    //
+    // Malformed members preserve the old behavior: they are removed so one bad
+    // value cannot poison every scheduler tick forever.
     const script = `
 local rows = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, ARGV[2])
-if #rows > 0 then
-  redis.call("ZREM", KEYS[1], unpack(rows))
+local published = 0
+
+for _, member in ipairs(rows) do
+  local boundaryType, entitlementId, revision = string.match(member, "^([^:]+):([^:]+):(%d+)$")
+
+  if (boundaryType == "START" or boundaryType == "END") and entitlementId and revision then
+    redis.call(
+      "XADD",
+      KEYS[2],
+      "*",
+      "schemaVersion", "1",
+      "boundaryType", boundaryType,
+      "entitlementId", entitlementId,
+      "scheduleRevision", revision,
+      "scheduledAt", ARGV[3],
+      "enqueuedAt", ARGV[3]
+    )
+    redis.call("ZREM", KEYS[1], member)
+    published = published + 1
+  else
+    redis.call("ZREM", KEYS[1], member)
+  end
 end
-return rows
+
+return {published, #rows}
 `;
-    return redis.eval(script, 1, scheduleKey(), String(current.getTime()), String(max));
+
+    return redis.eval(
+      script,
+      2,
+      scheduleKey(),
+      streamName(STREAMS.GLOBAL_EVENT_BOUNDARY),
+      String(current.getTime()),
+      String(max),
+      scheduledAt,
+    );
   });
 
-  let published = 0;
-  for (const member of members || []) {
-    const parsed = parseBoundaryMember(member);
-    if (!parsed) continue;
-    await publish(STREAMS.GLOBAL_EVENT_BOUNDARY, {
-      schemaVersion: 1,
-      boundaryType: parsed.boundaryType,
-      entitlementId: parsed.entitlementId,
-      scheduleRevision: parsed.scheduleRevision,
-      scheduledAt: current.toISOString(),
-      enqueuedAt: current.toISOString(),
-    });
-    published += 1;
-  }
-  return { published, examined: (members || []).length };
+  return {
+    published: Number(result?.[0] || 0),
+    examined: Number(result?.[1] || 0),
+  };
 }
 
 module.exports = {
