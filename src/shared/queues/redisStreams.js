@@ -226,6 +226,58 @@ async function queueHealth(stream, group, { nowMs = Date.now() } = {}) {
   };
 }
 
+function compareStreamIds(left, right) {
+  const [leftMs = "0", leftSeq = "0"] = String(left).split("-", 2);
+  const [rightMs = "0", rightSeq = "0"] = String(right).split("-", 2);
+  const leftTime = BigInt(leftMs);
+  const rightTime = BigInt(rightMs);
+  if (leftTime !== rightTime) return leftTime < rightTime ? -1 : 1;
+  const leftSequence = BigInt(leftSeq);
+  const rightSequence = BigInt(rightSeq);
+  return leftSequence === rightSequence ? 0 : leftSequence < rightSequence ? -1 : 1;
+}
+
+async function trimSafeHistory(stream, group, { keepRecent = 1000 } = {}) {
+  const redis = await commandClient();
+  const physicalStream = streamName(stream);
+  const retainCount = Math.max(0, Math.floor(Number(keepRecent) || 0));
+  const pending = await redis.xpending(physicalStream, group);
+  const oldestPendingId = pending?.[1] || null;
+
+  let recentCutoffId = null;
+  if (retainCount > 0) {
+    const recent = await redis.xrevrange(
+      physicalStream,
+      "+",
+      "-",
+      "COUNT",
+      retainCount,
+    );
+    recentCutoffId = recent?.at(-1)?.[0] || null;
+  }
+
+  let cutoffId = null;
+  if (oldestPendingId && recentCutoffId) {
+    cutoffId = compareStreamIds(oldestPendingId, recentCutoffId) <= 0
+      ? oldestPendingId
+      : recentCutoffId;
+  } else {
+    cutoffId = oldestPendingId || recentCutoffId;
+  }
+
+  if (cutoffId) {
+    const trimmed = await redis.xtrim(physicalStream, "MINID", cutoffId);
+    return { trimmed: Number(trimmed || 0), cutoffId };
+  }
+
+  if (retainCount === 0) {
+    const trimmed = await redis.xtrim(physicalStream, "MAXLEN", 0);
+    return { trimmed: Number(trimmed || 0), cutoffId: null };
+  }
+
+  return { trimmed: 0, cutoffId: null };
+}
+
 async function pendingSummary(stream, group) {
   const redis = await commandClient();
   const result = await redis.xpending(streamName(stream), group);
@@ -262,5 +314,6 @@ module.exports = {
   claimIdempotentWindow,
   pendingSummary,
   queueHealth,
+  trimSafeHistory,
   close,
 };
