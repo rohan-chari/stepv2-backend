@@ -68,25 +68,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
     const cleaned = removeOverlaps(normalizeSamples(message.canonical.samples));
     const requestedAt = new Date(message.requestedAt);
 
-    const beforeSourceWrites = message.homePull
-      ? async (tx) => {
-          const stamped = await tx.$queryRaw`
-            UPDATE "users"
-               SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
-             WHERE "id" = ${message.userId}
-               AND ("last_home_pull_step_sync_at" IS NULL OR
-                    "last_home_pull_step_sync_at" <=
-                      CURRENT_TIMESTAMP - INTERVAL '30 seconds')
-            RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
-          `;
-          if (stamped.length !== 1) {
-            const error = new Error("Step sync is cooling down");
-            error.code = "STEP_SYNC_COOLDOWN";
-            error.nonRetryable = true;
-            throw error;
-          }
-        }
-      : null;
+    const beforeSourceWrites = null;
 
     async function execute(tx, reservation) {
       const result = await persistStepInput({
