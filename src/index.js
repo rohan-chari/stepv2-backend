@@ -278,6 +278,26 @@ function startServer({
       // the historical "all" role for local development and injected startup
       // tests, but never let HTTP workers claim durable resolution work.
       if (processRole === "http") return;
+      if (processRole === "step") {
+        retainStopHandle(scheduleStepStream());
+        return;
+      }
+      if (processRole === "race") {
+        retainStopHandle(schedulePowerupStream());
+        retainStopHandle(scheduleRaceDirtyStream());
+        retainStopHandle(scheduleRaceRecovery());
+        return;
+      }
+      if (processRole === "event") {
+        retainStopHandle(scheduleGlobalEventRedisScheduleHydratorJob());
+        retainStopHandle(scheduleGlobalEventBoundaryStreamSchedulerJob());
+        retainStopHandle(scheduleGlobalEventBoundaryStreamWorkerJob());
+        return;
+      }
+      if (processRole === "notification") {
+        retainStopHandle(scheduleNotificationDeliveryStreamWorkerJob());
+        return;
+      }
       if (processRole === "resolution") {
         scheduleQueueFirstRacePipeline();
         retainStopHandle(scheduleGlobalEventBoundaryStreamWorkerJob());
