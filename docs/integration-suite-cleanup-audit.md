@@ -550,3 +550,6 @@ For the queue refactor, old scheduler/polling/rollout tests should not be mechan
 ## Cleanup execution status
 
 Powerup, scoring, settlement/lifecycle, funded-prize, and race-lock canonical suites have been created. Remaining root integration files are being moved to targeted non-default suites or deleted when obsolete.
+
+
+Final default integration target reached: 17 test files. Final hygiene pass: moved-suite flattening, support shims, and npm script separation.
