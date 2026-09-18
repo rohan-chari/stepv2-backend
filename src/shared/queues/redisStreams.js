@@ -241,8 +241,28 @@ async function trimSafeHistory(stream, group, { keepRecent = 1000 } = {}) {
   const redis = await commandClient();
   const physicalStream = streamName(stream);
   const retainCount = Math.max(0, Math.floor(Number(keepRecent) || 0));
-  const pending = await redis.xpending(physicalStream, group);
+
+  const [pending, groups] = await Promise.all([
+    redis.xpending(physicalStream, group),
+    redis.xinfo("GROUPS", physicalStream),
+  ]);
   const oldestPendingId = pending?.[1] || null;
+  const groupRow = (groups || [])
+    .map(pairsToObject)
+    .find((row) => row.name === group) || {};
+  const lastDeliveredId = groupRow["last-delivered-id"] || "0-0";
+
+  // Pending entries are not the only live queue work. Entries newer than the
+  // consumer group's last-delivered-id have never been delivered at all and
+  // must also form a hard trim boundary.
+  const unread = await redis.xrange(
+    physicalStream,
+    `(${lastDeliveredId}`,
+    "+",
+    "COUNT",
+    1,
+  );
+  const firstUnreadId = unread?.[0]?.[0] || null;
 
   let recentCutoffId = null;
   if (retainCount > 0) {
@@ -256,26 +276,43 @@ async function trimSafeHistory(stream, group, { keepRecent = 1000 } = {}) {
     recentCutoffId = recent?.at(-1)?.[0] || null;
   }
 
-  let cutoffId = null;
-  if (oldestPendingId && recentCutoffId) {
-    cutoffId = compareStreamIds(oldestPendingId, recentCutoffId) <= 0
-      ? oldestPendingId
-      : recentCutoffId;
-  } else {
-    cutoffId = oldestPendingId || recentCutoffId;
-  }
+  const candidates = [
+    oldestPendingId,
+    firstUnreadId,
+    recentCutoffId,
+  ].filter(Boolean);
+  const cutoffId = candidates.reduce((oldest, candidate) => (
+    oldest == null || compareStreamIds(candidate, oldest) < 0
+      ? candidate
+      : oldest
+  ), null);
 
   if (cutoffId) {
     const trimmed = await redis.xtrim(physicalStream, "MINID", cutoffId);
-    return { trimmed: Number(trimmed || 0), cutoffId };
+    return {
+      trimmed: Number(trimmed || 0),
+      cutoffId,
+      oldestPendingId,
+      firstUnreadId,
+    };
   }
 
   if (retainCount === 0) {
     const trimmed = await redis.xtrim(physicalStream, "MAXLEN", 0);
-    return { trimmed: Number(trimmed || 0), cutoffId: null };
+    return {
+      trimmed: Number(trimmed || 0),
+      cutoffId: null,
+      oldestPendingId: null,
+      firstUnreadId: null,
+    };
   }
 
-  return { trimmed: 0, cutoffId: null };
+  return {
+    trimmed: 0,
+    cutoffId: null,
+    oldestPendingId: null,
+    firstUnreadId: null,
+  };
 }
 
 async function pendingSummary(stream, group) {
