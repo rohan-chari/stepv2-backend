@@ -58,7 +58,7 @@ function buildRaceDirtyStreamWorker(dependencies = {}) {
       : await jobModel.enqueue({
           raceId: message.raceId,
           userId: message.userId,
-          resolutionTimeZone: null,
+          resolutionTimeZone: message.timeZone,
           now: now(),
           dirtyEnvelope: dirtyEnvelopeFor(message),
           burstCoalescing: false,
