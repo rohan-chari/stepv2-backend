@@ -745,7 +745,7 @@ const {
 } = require("../../../src/modules/powerups/models/raceActiveEffect");
 const {
   optionHPositionFairness,
-} = require("../../scripts/balance-apply");
+} = require("../../../scripts/balance-apply");
 const {
   mergeOverDefaults,
 } = require("../../../src/modules/economy/balanceConfig");
