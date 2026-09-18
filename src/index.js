@@ -279,9 +279,14 @@ function startServer({
         retainStopHandle(scheduleRaceDirtyStream());
         return retainStopHandle(scheduleRaceRecovery());
       };
-      // Production uses separate HTTP, resolution, and cron processes. Keep
-      // the historical "all" role for local development and injected startup
-      // tests, but never let HTTP workers claim durable resolution work.
+      const scheduleResolutionDomain = () => {
+        retainStopHandle(schedulePowerupStream());
+        retainStopHandle(scheduleRaceDirtyStream());
+        return retainStopHandle(scheduleRaceRecovery());
+      };
+      // Production uses explicit HTTP, step, resolution, event, notification
+      // and cron ownership. Keep the historical "all" role for local
+      // development and injected startup tests only.
       if (processRole === "http") return;
       if (processRole === "step") {
         retainStopHandle(scheduleStepStream());
@@ -315,8 +320,7 @@ function startServer({
         return;
       }
       if (processRole === "resolution") {
-        scheduleQueueFirstRacePipeline();
-        retainStopHandle(scheduleGlobalEventBoundaryStreamWorkerJob());
+        scheduleResolutionDomain();
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
@@ -387,8 +391,6 @@ function startServer({
       scheduleRanks();
       scheduleRankedWeeks();
       retainStopHandle(scheduleGlobalEvents({ queueFirstBoundaryTransport: true }));
-      retainStopHandle(scheduleGlobalEventRedisScheduleHydratorJob());
-      retainStopHandle(scheduleGlobalEventBoundaryStreamSchedulerJob());
       scheduleAutoStartRaces();
       // Established fan-outs share the single operational brake.
       if (!userFanoutDisabled("LIVE_PLACEMENT_DISABLED")) {
