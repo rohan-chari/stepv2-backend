@@ -8,17 +8,31 @@ const PROD_DIR = "/var/www/step-tracker-backend";
 const PROD_SCRIPT = `${PROD_DIR}/src/index.js`;
 const EXPECTED = Object.freeze({
   "steps-tracker": 2,
+  "steps-tracker-step": 1,
+  "steps-tracker-resolution": 1,
+  "steps-tracker-event": 1,
+  "steps-tracker-notification": 1,
+  "steps-tracker-cron": 1,
+});
+const LEGACY_EXPECTED = Object.freeze({
+  "steps-tracker": 2,
   "steps-tracker-resolution": 1,
   "steps-tracker-cron": 1,
 });
 const ROLE_BY_NAME = Object.freeze({
   "steps-tracker": "http",
+  "steps-tracker-step": "step",
   "steps-tracker-resolution": "resolution",
+  "steps-tracker-event": "event",
+  "steps-tracker-notification": "notification",
   "steps-tracker-cron": "cron",
 });
 const VARIABLE_BY_ROLE = Object.freeze({
   http: "DATABASE_POOL_MAX_HTTP",
+  step: "DATABASE_POOL_MAX_STEP",
   resolution: "DATABASE_POOL_MAX_RESOLUTION",
+  event: "DATABASE_POOL_MAX_EVENT",
+  notification: "DATABASE_POOL_MAX_NOTIFICATION",
   cron: "DATABASE_POOL_MAX_CRON",
 });
 const LEGACY_POOL_MAX = 20;
@@ -51,22 +65,22 @@ function intersectPersistentOrphans(initial, later) {
   return later.filter((candidate) => initial.some((entry) => isSameProcess(entry, candidate)));
 }
 
-function classifyTopology({ pm2, processes, daemonPid }) {
+function classifyTopology({ pm2, processes, daemonPid, expected = EXPECTED }) {
   const registered = pm2.filter((entry) => (
     entry.status === "online"
     && entry.cwd === PROD_DIR
-    && Object.hasOwn(EXPECTED, entry.name)
+    && Object.hasOwn(expected, entry.name)
   ));
   const registeredPids = new Set(registered.map(({ pid }) => pid));
   const productionChildren = processes.filter((entry) => (
     isProductionNodeProcess(entry, daemonPid)
   ));
   const osPids = new Set(productionChildren.map(({ pid }) => pid));
-  const counts = Object.fromEntries(Object.keys(EXPECTED).map((name) => [
+  const counts = Object.fromEntries(Object.keys(expected).map((name) => [
     name,
     registered.filter((entry) => entry.name === name).length,
   ]));
-  const countErrors = Object.entries(EXPECTED)
+  const countErrors = Object.entries(expected)
     .filter(([name, expected]) => counts[name] !== expected)
     .map(([name, expected]) => ({ name, expected, actual: counts[name] }));
   const orphans = productionChildren.filter(({ pid }) => !registeredPids.has(pid));
@@ -101,7 +115,9 @@ function validateStaticPoolBudget(apps) {
     throw new Error(`Unexpected production process definition ${unexpectedProduction[0].name}`);
   }
   const production = productionApps(apps);
-  const roleTotals = { http: 0, resolution: 0, cron: 0 };
+  const roleTotals = Object.fromEntries(
+    [...new Set(Object.values(ROLE_BY_NAME))].map((role) => [role, 0]),
+  );
   const targets = {};
   const targetSources = {};
   const seenBudgets = new Set();
@@ -221,7 +237,11 @@ function exactLiveProduction(pm2) {
   if (new Set(identities).size !== identities.length) {
     throw new Error("Live production process identities must be unique");
   }
-  const expectedIdentities = ["http:0", "http:1", "resolution:0", "cron:0"].sort();
+  const expectedIdentities = Object.entries(EXPECTED)
+    .flatMap(([name, count]) =>
+      Array.from({ length: count }, (_, index) => `${ROLE_BY_NAME[name]}:${index}`)
+    )
+    .sort();
   if (identities.slice().sort().join(",") !== expectedIdentities.join(",")) {
     throw new Error(`Live production identities must be ${expectedIdentities.join(",")}`);
   }
@@ -242,7 +262,10 @@ function validateBaseline(baseline) {
   if (!baseline || baseline.schema !== BASELINE_SCHEMA || !baseline.processes) {
     throw new Error(`Pool baseline must use ${BASELINE_SCHEMA}`);
   }
-  const expected = ["http:0", "http:1", "resolution:0", "cron:0"];
+  const expected = Object.entries(EXPECTED)
+    .flatMap(([name, count]) =>
+      Array.from({ length: count }, (_, index) => `${ROLE_BY_NAME[name]}:${index}`)
+    );
   if (Object.keys(baseline.processes).sort().join(",") !== expected.sort().join(",")) {
     throw new Error("Pool baseline must contain the exact production process identities");
   }
@@ -257,9 +280,10 @@ function validateBaseline(baseline) {
 }
 
 function validateTransitionOrder(transitionedRoles) {
-  const joined = transitionedRoles.join(",");
-  if (!["http", "http,cron", "http,cron,resolution"].includes(joined)) {
-    throw new Error("Transitioned roles must follow http, then cron, then resolution");
+  const order = ["http", "step", "resolution", "event", "notification", "cron"];
+  const expected = order.slice(0, transitionedRoles.length).join(",");
+  if (transitionedRoles.join(",") !== expected) {
+    throw new Error(`Transitioned roles must follow ${order.join(", then ")}`);
   }
 }
 
@@ -375,7 +399,10 @@ function readPm2() {
       "NODE_APP_INSTANCE",
       "STEPS_PROCESS_ROLE",
       "DATABASE_POOL_MAX_HTTP",
+      "DATABASE_POOL_MAX_STEP",
       "DATABASE_POOL_MAX_RESOLUTION",
+      "DATABASE_POOL_MAX_EVENT",
+      "DATABASE_POOL_MAX_NOTIFICATION",
       "DATABASE_POOL_MAX_CRON",
       "DATABASE_POOL_TOTAL_BUDGET",
     ]) {
@@ -506,6 +533,21 @@ async function main() {
   }
 
   const firstSnapshot = snapshot();
+  if (process.argv.includes("--source-topology")) {
+    const target = classifyTopology(firstSnapshot);
+    if (target.healthy) {
+      printResult(target);
+      console.log("Production source topology already matches the split target");
+      return;
+    }
+    const legacy = classifyTopology({ ...firstSnapshot, expected: LEGACY_EXPECTED });
+    printResult(legacy);
+    if (!legacy.healthy) {
+      throw new Error("Production source topology is neither the reviewed legacy layout nor the split target");
+    }
+    console.log("Production source topology matches the reviewed legacy 4-process layout");
+    return;
+  }
   const firstResult = classifyTopology(firstSnapshot);
   printResult(firstResult);
 
