@@ -14,7 +14,7 @@
     "test": "node --test",
     "test:unit": "node --test --test-concurrency=1 --test-force-exit 'test/commands/**/*.test.js' 'test/handlers/**/*.test.js' 'test/http/**/*.test.js' 'test/jobs/**/*.test.js' 'test/lib/**/*.test.js' 'test/modules/**/*.test.js' 'test/queries/**/*.test.js' 'test/services/**/*.test.js' 'test/startup/**/*.test.js' 'test/utils/**/*.test.js'",
     "race-placement:catch-up": "node scripts/catch-up-race-placement-transition-jobs.js",
-    "test:integration": "node scripts/run-local-integration-tests.cjs",
+    "test:integration": "node scripts/run-sharded-integration-tests.cjs",
     "identity-search-indexes:apply": "psql \"$DATABASE_URL\" --set=ON_ERROR_STOP=1 --file=scripts/race-experience-identity-search-indexes.sql",
     "migrate": "npx prisma migrate dev",
     "generate": "npx prisma generate",
@@ -58,7 +58,8 @@
     "test:reliability": "node scripts/run-local-integration-tests.cjs 'test/reliability/**/*.test.js'",
     "test:contracts": "node scripts/run-local-integration-tests.cjs 'test/contracts/**/*.test.js'",
     "test:http-service": "node scripts/run-local-integration-tests.cjs 'test/http-and-service/**/*.test.js'",
-    "test:maintenance": "node scripts/run-local-integration-tests.cjs 'test/maintenance/**/*.test.js'"
+    "test:maintenance": "node scripts/run-local-integration-tests.cjs 'test/maintenance/**/*.test.js'",
+    "test:integration:serial": "node scripts/run-local-integration-tests.cjs"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
