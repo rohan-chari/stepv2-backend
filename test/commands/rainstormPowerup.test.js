@@ -93,6 +93,11 @@ function makeDeps(overrides = {}) {
         async findActiveForParticipant(participantId) {
           return existingEffects[participantId] || [];
         },
+        async findActiveForParticipants(participantIds) {
+          return participantIds.flatMap((participantId) =>
+            existingEffects[participantId] || []
+          );
+        },
         async findActiveForRace() { return raceEffects; },
         async create(data) {
           const e = { id: `eff-${effectsCreated.length + 1}`, ...data };
@@ -231,7 +236,13 @@ test("RAINSTORM rejects when there is no other active runner", async () => {
 test("COMPRESSION_SOCKS blocks the rain for that victim only (shield consumed)", async () => {
   const ctx = makeDeps({
     existingEffects: {
-      "rp-2": [{ id: "shield-1", type: "COMPRESSION_SOCKS" }],
+      "rp-2": [{
+        id: "shield-1",
+        targetParticipantId: "rp-2",
+        type: "COMPRESSION_SOCKS",
+        status: "ACTIVE",
+        expiresAt: new Date(NOW.getTime() + ONE_HOUR_MS),
+      }],
     },
   });
   const use = buildUsePowerup(ctx.deps);
