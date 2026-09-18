@@ -266,7 +266,7 @@ const RaceParticipant = {
     );
   },
 
-  // One-row solo box disclosure context. Match rawPositionFor's whole-race
+  // One-row solo box disclosure context. Match leaderboardPositionFor's whole-race
   // fallback and stable joinedAt tie order, plus the roll's persisted totals.
   // Window aggregates scan only this race's accepted rows; no roster hydration.
   async findMysteryBoxPreviewContext(raceId, userId) {
