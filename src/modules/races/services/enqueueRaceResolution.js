@@ -421,6 +421,7 @@ async function enqueueRaceResolutionForUser(
     if (result.length) {
       await Promise.all(result.map((row) => publishRaceDirty(row, {
         userId,
+        timeZone,
         reason: reason || "FULL",
         requestedAt: now,
       })));
