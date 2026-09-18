@@ -406,6 +406,20 @@ Do not hand-edit PM2 state to make a check green. Compare the live state with
 `ecosystem.config.js`, fix the reviewed config if necessary, and use the guarded
 wrapper.
 
+## Reusable specialized runbooks
+
+These remain current because they cover uncommon, specialized operations rather
+than ordinary deploy flow:
+
+- `docs/capacity-load-runbook.md` — isolated production-shaped capacity testing.
+- `docs/redis-cache-runbook.md` — Redis/cache operational procedures.
+- `docs/race-experience-identity-search-index-runbook.md` — the non-transactional
+  identity-search extension/index procedure invoked by the integration runner.
+
+Do not promote a feature-specific dated rollout note back into live operational
+authority. If a specialized procedure becomes part of normal deployment, merge
+it into this file instead.
+
 ## Historical documentation
 
 - `docs/archive/operations-history/` contains former root runbooks.
