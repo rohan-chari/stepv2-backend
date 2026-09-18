@@ -545,3 +545,8 @@ This is stricter than the KEEP/MERGE/MOVE audit above. These files validate beha
 Important: funded prize-pool tests are **not** in this delete set. The product has moved from participant buy-ins to app-funded prizes, so prize settlement remains current while participant buy-in behavior is obsolete.
 
 For the queue refactor, old scheduler/polling/rollout tests should not be mechanically rewritten. Only these enduring guarantees should survive into the new lean queue suite: duplicate delivery safety, single-writer fencing, stale generation rejection, crash/reclaim recovery, and final scoring parity.
+
+
+## Cleanup execution status
+
+Powerup, scoring, settlement/lifecycle, funded-prize, and race-lock canonical suites have been created. Remaining root integration files are being moved to targeted non-default suites or deleted when obsolete.
