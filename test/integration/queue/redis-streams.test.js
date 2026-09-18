@@ -13,6 +13,7 @@ const {
   reclaimIdle,
   pendingSummary,
   queueHealth,
+  trimSafeHistory,
   close: closeQueueRedis,
 } = require("../../../src/shared/queues/redisStreams");
 const {
@@ -241,6 +242,55 @@ describe("queue-first Redis Streams transport", () => {
     assert.equal(health.waitingCount, 1);
     assert.equal(health.consumerCount, 1);
     assert.ok(health.oldestPendingAgeMs >= 1000);
+  });
+
+  it("trims old ACKed entries while keeping recent history", async () => {
+    await ensureGroup(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC);
+
+    const first = await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "trim-1" });
+    const second = await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "trim-2" });
+    const third = await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "trim-3" });
+
+    const entries = await readGroup({
+      stream: STREAMS.STEP_SYNC,
+      group: GROUPS.STEP_SYNC,
+      consumer: "trim-consumer",
+      count: 3,
+      blockMs: 5,
+    });
+    assert.deepEqual(entries.map((entry) => entry.id), [first, second, third]);
+    assert.equal(await ack(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, first), true);
+    assert.equal(await ack(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, second), true);
+    assert.equal(await ack(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, third), true);
+
+    await trimSafeHistory(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, { keepRecent: 1 });
+
+    const remaining = await inspector.xrange(streamName(STREAMS.STEP_SYNC), "-", "+");
+    assert.deepEqual(remaining.map(([id]) => id), [third]);
+  });
+
+  it("never trims a pending entry", async () => {
+    await ensureGroup(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC);
+
+    const first = await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "pending-trim-1" });
+    const second = await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "pending-trim-2" });
+    const third = await publish(STREAMS.STEP_SYNC, { schemaVersion: 1, syncId: "pending-trim-3" });
+
+    const entries = await readGroup({
+      stream: STREAMS.STEP_SYNC,
+      group: GROUPS.STEP_SYNC,
+      consumer: "trim-pending-consumer",
+      count: 3,
+      blockMs: 5,
+    });
+    assert.deepEqual(entries.map((entry) => entry.id), [first, second, third]);
+    assert.equal(await ack(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, first), true);
+    assert.equal(await ack(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, third), true);
+
+    await trimSafeHistory(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, { keepRecent: 0 });
+
+    const remaining = await inspector.xrange(streamName(STREAMS.STEP_SYNC), "-", "+");
+    assert.equal(remaining.some(([id]) => id === second), true, "pending entry must survive trimming");
   });
 
   it("keeps queue types isolated from each other", async () => {
