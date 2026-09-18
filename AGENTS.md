@@ -1,5 +1,14 @@
 # AGENTS.md — steps-tracker backend
 
+## Operational source of truth
+
+For production/staging topology, database backups, migrations, PM2 operations,
+queue/Redis rollout, deployment, verification, and rollback, follow
+`OPERATIONS.md`. If an older document conflicts with it, `OPERATIONS.md` wins.
+Files under `docs/archive/` are historical only and must never be treated as
+current operational instructions.
+
+
 ## Always ask before deploying to prod
 
 **Never deploy to production without explicit, in-the-moment confirmation.**
@@ -12,7 +21,7 @@ deploys and prod data changes are the high-risk, hard-to-reverse step.
   touching prod ("Ready to deploy to prod? It will run migration X + restart").
 - Earlier approval to deploy does **not** roll forward to later changes — ask
   each time.
-- Staging is fine to deploy to without asking; **prod is not**.
+- Staging is stopped by default. Starting, reloading, or deploying staging requires explicit in-the-moment authorization for that staging task; stop it again when the task is complete.
 - This also covers one-off prod DB scripts/`UPDATE`s and running seeds on prod.
 
 ## Permanent behavior over release flags and kill switches
