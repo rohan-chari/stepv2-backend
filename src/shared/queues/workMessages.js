@@ -62,6 +62,9 @@ function parseRaceDirty(fields) {
     sourceGeneration: fields.sourceGeneration
       ? integerString(fields.sourceGeneration, "sourceGeneration")
       : null,
+    jobGeneration: fields.jobGeneration
+      ? integerString(fields.jobGeneration, "jobGeneration")
+      : null,
     reason: required(fields, "reason"),
     requestedAt: required(fields, "requestedAt"),
   };
