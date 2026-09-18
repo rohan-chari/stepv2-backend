@@ -106,6 +106,8 @@ function buildStepSyncStreamWorker(dependencies = {}) {
         dailyExisted: result.dailyExisted,
         record: result.record,
         sourceEnvelope: serializedSourceEnvelope(result.sourceEnvelope),
+        scoringChanged: result.scoringChanged === true,
+        repairRequired: result.repairRequired === true,
         canonicalCoverageThrough: result.canonicalCoverageThrough
           ? new Date(result.canonicalCoverageThrough).toISOString()
           : null,
@@ -166,8 +168,8 @@ function buildStepSyncStreamWorker(dependencies = {}) {
           canonicalCoverageThrough: stored.canonicalCoverageThrough
             ? new Date(stored.canonicalCoverageThrough)
             : existing.canonicalCoverageThrough,
-          scoringChanged: true,
-          repairRequired: false,
+          scoringChanged: stored.scoringChanged === true,
+          repairRequired: stored.repairRequired === true,
         },
         responseJson: stored,
       };
@@ -327,7 +329,9 @@ function buildStepSyncStreamWorker(dependencies = {}) {
     }
 
     await reconcileHistorical(message, persisted);
-    await publishDownstream(message, persisted);
+    if (persisted.result.scoringChanged || persisted.result.repairRequired) {
+      await publishDownstream(message, persisted);
+    }
   }
 
   async function processEntry(entry) {
