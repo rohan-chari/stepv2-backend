@@ -30,6 +30,7 @@ function parseStepSync(fields) {
     idempotencyKey: required(fields, "idempotencyKey"),
     timeZone: fields.timeZone || "UTC",
     homePull: fields.homePull === "true",
+    legacyEventRecap: fields.legacyEventRecap === "true",
     requestHash: required(fields, "requestHash"),
     canonical,
     requestedAt: required(fields, "requestedAt"),
