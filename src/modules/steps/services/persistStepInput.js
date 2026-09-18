@@ -19,31 +19,45 @@ function resultingGeneration(state, scoringChanged) {
   return scoringChanged && state?.inserted !== true ? current + 1n : current;
 }
 
-async function upsertDailyStep(tx, { userId, date, steps }) {
+async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
   let rows = await tx.$queryRawUnsafe(
     `WITH prior AS (
-       SELECT EXISTS(
-         SELECT 1 FROM steps WHERE user_id=$1 AND date=$2::date
-       ) AS existed
+       SELECT steps AS "priorSteps",
+              sync_requested_at AS "priorSyncRequestedAt",
+              TRUE AS existed
+         FROM steps
+        WHERE user_id=$1 AND date=$2::date
      ), persisted AS (
-       INSERT INTO steps (id,user_id,date,steps,step_goal,created_at)
-       VALUES (gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP)
-       ON CONFLICT (user_id,date) DO UPDATE SET steps=EXCLUDED.steps
-         WHERE steps.steps IS DISTINCT FROM EXCLUDED.steps
+       INSERT INTO steps (
+         id,user_id,date,steps,step_goal,created_at,sync_requested_at
+       )
+       VALUES (
+         gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP,$4::timestamptz
+       )
+       ON CONFLICT (user_id,date) DO UPDATE
+         SET steps=EXCLUDED.steps,
+             sync_requested_at=EXCLUDED.sync_requested_at
+       WHERE steps.sync_requested_at IS NULL
+          OR steps.sync_requested_at <= EXCLUDED.sync_requested_at
        RETURNING id,user_id AS "userId",steps,step_goal AS "stepGoal",
                  date,created_at AS "createdAt"
      )
-     SELECT persisted.*,prior.existed,TRUE AS "storageChanged"
-       FROM persisted CROSS JOIN prior
+     SELECT persisted.*,
+            COALESCE(prior.existed,FALSE) AS existed,
+            (NOT COALESCE(prior.existed,FALSE)
+              OR prior."priorSteps" IS DISTINCT FROM persisted.steps) AS "storageChanged"
+       FROM persisted
+       LEFT JOIN prior ON TRUE
      UNION ALL
      SELECT id,user_id AS "userId",steps,step_goal AS "stepGoal",date,
             created_at AS "createdAt",TRUE AS existed,FALSE AS "storageChanged"
-       FROM steps WHERE user_id=$1 AND date=$2::date
-         AND steps IS NOT DISTINCT FROM $3
-         AND NOT EXISTS (SELECT 1 FROM persisted)`,
+       FROM steps
+      WHERE user_id=$1 AND date=$2::date
+        AND NOT EXISTS (SELECT 1 FROM persisted)`,
     userId,
     new Date(date),
     Number(steps),
+    requestTimestamp,
   );
   if (rows.length === 0) {
     rows = await tx.$queryRawUnsafe(
@@ -81,7 +95,11 @@ function buildPersistStepInput(dependencies = {}) {
     let dailyStorageChanged = false;
 
     if (daily) {
-      const persistedDaily = await upsertDailyStep(tx, { userId, ...daily });
+      const persistedDaily = await upsertDailyStep(tx, {
+        userId,
+        ...daily,
+        requestTimestamp,
+      });
       record = persistedDaily.record;
       dailyExisted = persistedDaily.existed;
       dailyStorageChanged = persistedDaily.storageChanged;
