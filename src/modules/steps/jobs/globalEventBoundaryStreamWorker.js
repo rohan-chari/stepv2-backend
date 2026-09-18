@@ -8,6 +8,7 @@ const {
   reclaimIdle,
   ack,
   consumerName,
+  withCommandClient,
 } = require("../../../shared/queues/redisStreams");
 const {
   parseGlobalEventBoundary,
@@ -27,6 +28,27 @@ const {
 const RECLAIM_IDLE_MS = 30_000;
 const READ_COUNT = 10;
 const CONCURRENCY = 3;
+const FANOUT_RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function fanoutReceiptKey(message) {
+  const prefix = process.env.CACHE_ENV_PREFIX || "";
+  return `${prefix}queue:global-event-boundary:fanout:v1:${message.boundaryType}:${message.entitlementId}:${message.scheduleRevision}`;
+}
+
+async function hasFanoutReceipt(message) {
+  return withCommandClient(async (redis) =>
+    (await redis.exists(fanoutReceiptKey(message))) === 1);
+}
+
+async function markFanoutReceipt(message) {
+  return withCommandClient((redis) =>
+    redis.set(
+      fanoutReceiptKey(message),
+      "1",
+      "PX",
+      FANOUT_RECEIPT_TTL_MS,
+    ));
+}
 
 function buildGlobalEventBoundaryStreamWorker(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
@@ -67,7 +89,28 @@ function buildGlobalEventBoundaryStreamWorker(dependencies = {}) {
     if (Number(initial.scheduleRevision || 0) !== message.scheduleRevision) {
       return { raceIds: [], notify: null };
     }
-    if (initial.startProcessedAt) return { raceIds: [], notify: null };
+    if (initial.startProcessedAt) {
+      if (initial.startOutcome !== "ACTIVATED_ON_TIME") {
+        return { raceIds: [], notify: null, userId: initial.userId };
+      }
+      const impacts = await prisma.globalEventRaceImpact.findMany({
+        where: { eventId: initial.eventId, userId: initial.userId },
+        select: { raceId: true },
+      });
+      const raceIds = [...new Set(impacts.map((row) => row.raceId))].sort();
+      return {
+        raceIds,
+        userId: initial.userId,
+        notify: raceIds.length ? {
+          recipientUserId: initial.userId,
+          entitlementId: initial.id,
+          eventId: initial.eventId,
+          scheduleRevision: Number(initial.scheduleRevision || 0),
+          availableAt: new Date(initial.startsAt),
+          expiresAt: new Date(initial.endsAt),
+        } : null,
+      };
+    }
 
     const discovered = await discoverStart(initial);
     const discoveredRaceIds = [...new Set(discovered.map((row) => row.raceId))].sort();
@@ -173,9 +216,19 @@ function buildGlobalEventBoundaryStreamWorker(dependencies = {}) {
       where: { id: message.entitlementId },
     });
     if (!initial ||
-        Number(initial.scheduleRevision || 0) !== message.scheduleRevision ||
-        initial.endProcessedAt) {
+        Number(initial.scheduleRevision || 0) !== message.scheduleRevision) {
       return { raceIds: [], notify: null, userId: initial?.userId || null };
+    }
+    if (initial.endProcessedAt) {
+      const replayImpacts = await prisma.globalEventRaceImpact.findMany({
+        where: { eventId: initial.eventId, userId: initial.userId },
+        select: { raceId: true },
+      });
+      return {
+        raceIds: [...new Set(replayImpacts.map((row) => row.raceId))].sort(),
+        notify: null,
+        userId: initial.userId,
+      };
     }
     const impacts = await prisma.globalEventRaceImpact.findMany({
       where: { eventId: initial.eventId, userId: initial.userId },
@@ -250,10 +303,19 @@ function buildGlobalEventBoundaryStreamWorker(dependencies = {}) {
   async function processEntry(entry) {
     try {
       const message = parseGlobalEventBoundary(entry.fields);
+      if (await hasFanoutReceipt(message)) {
+        await ack(STREAMS.GLOBAL_EVENT_BOUNDARY, GROUPS.GLOBAL_EVENT_BOUNDARY, entry.id);
+        return true;
+      }
       const result = message.boundaryType === "START"
         ? await processStart(message)
         : await processEnd(message);
       await publishFanout(message, result);
+      // The receipt is written only after every downstream publish succeeds.
+      // A crash before this point leaves the boundary pending, and a replay can
+      // reconstruct fanout from durable Postgres state. A completed replay sees
+      // the receipt and does not create duplicate stream entries.
+      await markFanoutReceipt(message);
       await ack(STREAMS.GLOBAL_EVENT_BOUNDARY, GROUPS.GLOBAL_EVENT_BOUNDARY, entry.id);
       return true;
     } catch (error) {
