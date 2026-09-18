@@ -147,6 +147,9 @@ function createStepsRouter(dependencies = {}) {
   router.use(async (req, res, next) => {
     const endpoint = telemetryEndpoint(req);
     if (!endpoint) return next();
+    // sync-v2 is queue-first: authentication + validation + Redis XADD only.
+    // The Step Worker owns the bounded Postgres write concurrency.
+    if (endpoint === "sync-v2") return next();
     const started = process.hrtime.bigint();
     try {
       const release = await stepAdmission.acquire();
