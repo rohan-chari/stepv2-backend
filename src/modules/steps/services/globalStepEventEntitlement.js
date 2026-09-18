@@ -557,18 +557,21 @@ async function writeEnrollmentCandidates(event, candidateUsers, {
       if (insert.count) await entitlementsChanged(prepared.map(row => row.userId));
       return insert.count || 0;
     }, { timeout: 15_000, maxWait: 10_000 });
-    const scheduledEntitlements = await prisma.globalStepEventEntitlement.findMany({
-      where: {
-        eventId: event.id,
-        userId: { in: candidateUsers.map((row) => row.id) },
-      },
-      select: {
-        id: true,
-        startsAt: true,
-        endsAt: true,
-        scheduleRevision: true,
-      },
-    });
+    const scheduledEntitlements =
+      typeof prisma.globalStepEventEntitlement?.findMany === "function"
+        ? await prisma.globalStepEventEntitlement.findMany({
+            where: {
+              eventId: event.id,
+              userId: { in: candidateUsers.map((row) => row.id) },
+            },
+            select: {
+              id: true,
+              startsAt: true,
+              endsAt: true,
+              scheduleRevision: true,
+            },
+          })
+        : [];
     if (scheduledEntitlements.length) {
       await require("./globalEventRedisSchedule").scheduleEntitlements(scheduledEntitlements);
     }
