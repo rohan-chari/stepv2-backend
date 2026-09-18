@@ -11,7 +11,7 @@ const {
   pickTypeForRarity,
   canonicalRarityFor,
 } = require("../powerupOdds");
-const { leaderboardPositionFor } = require("../rawPosition");
+const { rawPositionFor } = require("../rawPosition");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
@@ -166,15 +166,14 @@ function buildOpenMysteryBox(dependencies = {}) {
 
     const maxSlots = participant.powerupSlots || DEFAULT_POWERUP_SLOTS;
 
-    // Current position for odds, from the EFFECTIVE leaderboard totals.
-    // This intentionally follows the same boosted/effect-sensitive totalSteps
-    // ranking the player sees. Team races use summed team totalSteps.
-    // getRaceProgress disclosure uses the same position contract so the quoted
-    // odds and the actual roll cannot drift.
+    // Mystery-box odds position comes from persisted RAW walked steps when the
+    // whole accepted field has rawSteps. If any row is unhealed, the helper
+    // falls back race-wide to totalSteps so mixed-source ranking is impossible.
+    // getRaceProgress and rerolls use the same helper/source.
     const allParticipants = participantsFromRace
       ? participantsFromRace.filter((entry) => entry.status === "ACCEPTED")
       : await participantModel.findAcceptedByRace(raceId);
-    const { position, totalParticipants } = leaderboardPositionFor({
+    const { position, totalParticipants } = rawPositionFor({
       participants: allParticipants,
       race,
       userId,
