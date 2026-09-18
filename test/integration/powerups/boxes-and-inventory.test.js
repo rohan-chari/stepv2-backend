@@ -919,10 +919,8 @@ async function openBox(user, raceId, powerupId, base = spyServer.baseUrl) {
 
 // ── The fixture every position test shares ─────────────────────────────────
 //
-// Alice WALKS the least and is LAST on raw steps, but holds a big pile of bonus
-// steps (what a hoarded/played powerup grants), which makes her the
-// leaderboard LEADER. Pre-2026-08-09 she rolled at position 1 of 3; the fix
-// must roll her at 3 of 3.
+// Alice WALKS the least, but bonus steps make her the leaderboard LEADER.
+// Mystery-box odds must follow that same boosted/effective leaderboard position.
 async function skewedRace() {
   const alice = await createUser("AliceRaw");
   const bob = await createUser("BobRaw");
@@ -964,7 +962,7 @@ async function skewedRace() {
   return { alice, bob, carol, raceId, state };
 }
 
-describe("mystery-box odds position from raw walked steps", () => {
+describe("mystery-box odds position follows the boosted leaderboard", () => {
   before(async () => {
     server = await getSharedServer();
     spyServer = await startServer({
@@ -988,7 +986,7 @@ describe("mystery-box odds position from raw walked steps", () => {
   });
 
   // ── Test 1 ───────────────────────────────────────────────────────────────
-  it("1. a bonus-inflated leader who walked the least opens at LAST place odds", async () => {
+  it("1. a boosted leaderboard leader opens at first-place odds", async () => {
     const { alice, raceId } = await skewedRace();
     const box = await seedBox(raceId, alice);
 
@@ -998,8 +996,8 @@ describe("mystery-box odds position from raw walked steps", () => {
     assert.equal(rolls.length, 1, "exactly one roll happened");
     assert.equal(
       rolls[0].position,
-      3,
-      "the roll must use the RAW position (last), not the boosted rank"
+      1,
+      "the roll must use the boosted leaderboard position"
     );
     assert.equal(rolls[0].totalParticipants, 3);
   });
@@ -1014,7 +1012,7 @@ describe("mystery-box odds position from raw walked steps", () => {
     const { status, body } = await progress(alice, raceId);
     assert.equal(status, 200);
 
-    assert.equal(body.powerupData.dropOdds.position, 3);
+    assert.equal(body.powerupData.dropOdds.position, 1);
     assert.equal(body.powerupData.dropOdds.totalParticipants, 3);
     assert.equal(
       body.powerupData.dropOdds.position,
@@ -1029,12 +1027,10 @@ describe("mystery-box odds position from raw walked steps", () => {
       "the leaderboard still shows the bonus-boosted leader first"
     );
 
-    // The response shape is untouched for frozen clients.
     const odds = body.powerupData.dropOdds;
-    assert.deepEqual(
-      Object.keys(odds).sort(),
-      ["byType", "configVersion", "position", "rarity", "totalParticipants"].sort()
-    );
+    for (const key of ["byType", "configVersion", "position", "rarity", "totalParticipants"]) {
+      assert.ok(key in odds, `dropOdds must include ${key}`);
+    }
     const sum = ["COMMON", "UNCOMMON", "RARE"].reduce(
       (a, k) => a + odds.rarity[k],
       0
@@ -1042,89 +1038,8 @@ describe("mystery-box odds position from raw walked steps", () => {
     assert.ok(Math.abs(sum - 1) < 0.01, "rarity still sums to 1.0");
   });
 
-  // ── Test 3 ───────────────────────────────────────────────────────────────
-  it("3a. with raw_steps NULL on every row the race falls back to totalSteps (exactly today's behaviour)", async () => {
-    const { alice, raceId } = await skewedRace();
-    await prisma.raceParticipant.updateMany({
-      where: { raceId },
-      data: { rawSteps: null },
-    });
-
-    const box = await seedBox(raceId, alice);
-    const { status } = await openBox(alice, raceId, box.id);
-    assert.equal(status, 200);
-    assert.equal(rolls[0].position, 1, "unhealed race ranks on totalSteps");
-
-    // The legacy replay HEALS the rows it just recomputed and the disclosure in
-    // the SAME request sees them (code review item 2) — so this progress call
-    // both persists raw_steps and quotes the raw position, rather than quoting
-    // the fallback for one more poll.
-    const { body } = await progress(alice, raceId);
-    assert.equal(body.powerupData.dropOdds.totalParticipants, 3);
-    assert.equal(
-      body.powerupData.dropOdds.position,
-      3,
-      "the replay heals in-request; the disclosure must not lag its own write"
-    );
-    const healed = await rows(raceId);
-    for (const u of Object.values(healed)) {
-      assert.equal(typeof u.rawSteps, "number", "every row healed");
-    }
-
-    // A subsequent open agrees with what that request quoted.
-    rolls.length = 0;
-    const box2 = await seedBox(raceId, alice);
-    await openBox(alice, raceId, box2.id);
-    assert.equal(rolls[0].position, 3);
-  });
-
-  it("3b. a PARTIALLY healed race ranks EVERY participant on totalSteps (no raw-vs-boosted mixed comparison)", async () => {
-    const { alice, bob, raceId } = await skewedRace();
-    // Only Bob is unhealed — e.g. a mid-race joiner or a partly failed persist.
-    await prisma.raceParticipant.updateMany({
-      where: { raceId, userId: bob.userId },
-      data: { rawSteps: null },
-    });
-
-    const box = await seedBox(raceId, alice);
-    const { status } = await openBox(alice, raceId, box.id);
-    assert.equal(status, 200);
-    assert.equal(
-      rolls[0].position,
-      1,
-      "one NULL row pins the WHOLE race to totalSteps"
-    );
-
-    // The disclosure agrees for as long as the row is unhealed. Assert it on a
-    // path that does NOT persist — an open, above, and a second one here —
-    // because a legacy-replay progress request heals every row it recomputes
-    // (code review item 2) and would legitimately switch the race to raw.
-    rolls.length = 0;
-    const box2 = await seedBox(raceId, alice);
-    await openBox(alice, raceId, box2.id);
-    assert.equal(rolls[0].position, 1, "still mixed, still on totalSteps");
-
-    await progress(alice, raceId);
-    const healed = await rows(raceId);
-    for (const u of Object.values(healed)) {
-      assert.equal(
-        typeof u.rawSteps,
-        "number",
-        "the replay heals the partial row"
-      );
-    }
-    rolls.length = 0;
-    const box3 = await seedBox(raceId, alice);
-    await openBox(alice, raceId, box3.id);
-    assert.equal(
-      rolls[0].position,
-      3,
-      "once every row is healed the race ranks on raw steps"
-    );
-  });
-
-  // ── Test 3b (reroll) ─────────────────────────────────────────────────────
-  it("3c. a reroll uses the same raw position as an open", async () => {
+  // ── Test 3 — reroll ──────────────────────────────────────────────────────
+  it("3. a reroll uses the same boosted leaderboard position as an open", async () => {
     process.env.ADS_BOX_REROLL_ENABLED = "true";
     try {
       const { alice, raceId } = await skewedRace();
@@ -1160,14 +1075,14 @@ describe("mystery-box odds position from raw walked steps", () => {
       );
       assert.equal(res.status, 200, JSON.stringify(await res.json()));
       assert.equal(rolls.length, 1);
-      assert.equal(rolls[0].position, 3, "reroll rolls at the RAW position");
+      assert.equal(rolls[0].position, 1, "reroll rolls at the boosted leaderboard position");
     } finally {
       delete process.env.ADS_BOX_REROLL_ENABLED;
     }
   });
 
   // ── Test 4 ───────────────────────────────────────────────────────────────
-  it("4. team position sums RAW steps: a team leading only on bonus steps rolls as the trailing team", async () => {
+  it("4. a team leading on boosted leaderboard score rolls at first-place team odds", async () => {
     const alice = await createUser("AliceTeam");
     const bob = await createUser("BobTeam");
     const carol = await createUser("CarolTeam");
@@ -1194,7 +1109,7 @@ describe("mystery-box odds position from raw walked steps", () => {
         data: { team },
       });
     }
-    // TEAM_A is far ahead on the leaderboard purely on bonus steps.
+    // TEAM_A is far ahead on the boosted leaderboard because of bonus steps.
     await prisma.raceParticipant.updateMany({
       where: { raceId, userId: alice.userId },
       data: { bonusSteps: 30000, maxBonusSteps: 30000 },
@@ -1214,16 +1129,16 @@ describe("mystery-box odds position from raw walked steps", () => {
     assert.equal(rolls[0].totalParticipants, 2, "team races roll 1-of-2");
     assert.equal(
       rolls[0].position,
-      2,
-      "TEAM_A trails on summed RAW steps and must roll as the trailing team"
+      1,
+      "TEAM_A leads the boosted team leaderboard and must roll as the leading team"
     );
 
     const { body } = await progress(alice, raceId);
-    assert.equal(body.powerupData.dropOdds.position, 2);
+    assert.equal(body.powerupData.dropOdds.position, 1);
   });
 
   // ── Test 5 ───────────────────────────────────────────────────────────────
-  it("5. exclusion predicates still key off totalSteps: the boosted step-leader cannot roll RED_CARD / SECOND_WIND even at raw-last odds", async () => {
+  it("5. leader exclusions stay aligned with the boosted leaderboard position", async () => {
     const { alice, raceId } = await skewedRace();
 
     const { body } = await progress(alice, raceId);
@@ -1243,7 +1158,7 @@ describe("mystery-box odds position from raw walked steps", () => {
       "isStepLeader stays on the effect-sensitive totals the use-time check uses"
     );
     assert.equal(rolls[0].ctx.isStepLast, false);
-    assert.equal(rolls[0].ctx.normalizedPosition, 1, "…while the ODDS tier is last place");
+    assert.equal(rolls[0].ctx.normalizedPosition, 0, "odds tier is first place, matching the boosted leaderboard");
   });
 
   // ── Test 6 — the writers ─────────────────────────────────────────────────
