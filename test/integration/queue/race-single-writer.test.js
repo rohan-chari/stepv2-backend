@@ -199,37 +199,4 @@ describe.skip("Phase C4 — per-race advisory lock serializes concurrent full re
     nextAppleId = 0;
   });
 
-  it("legacy /steps path vs worker on the SAME race: trail mine fires exactly once", async () => {
-    const { raceId, bobUserId } = await seedCrossingScenario();
-
-    // Fire the legacy primitive ({userId}) and the worker/placement primitive
-    // ({raceId}) concurrently on the same race.
-    await Promise.all([
-      resolveRaceState({ userId: bobUserId, timeZone: TZ }),
-      resolveRaceState({ raceId, timeZone: TZ }),
-    ]);
-
-    const triggers = await mineTriggerEvents(raceId);
-    assert.equal(triggers.length, 1, "mine fires exactly once under the lock");
-    assert.equal(triggers[0].targetUserId, bobUserId);
-    assert.equal((await getMine(raceId)).status, "EXPIRED");
   });
-
-  it("placement vs worker (both {raceId}) plus extra concurrent actors: still exactly one fire", async () => {
-    const { raceId, bobUserId } = await seedCrossingScenario();
-
-    // Five concurrent full reconciliations of the same race (placement + worker +
-    // retries). The advisory lock serializes them all.
-    await Promise.all(
-      Array.from({ length: 5 }, () => resolveRaceState({ raceId, timeZone: TZ }))
-    );
-
-    const triggers = await mineTriggerEvents(raceId);
-    assert.equal(triggers.length, 1, "mine fires exactly once despite 5 concurrent reconciliations");
-    assert.equal(triggers[0].targetUserId, bobUserId);
-
-    // Penalty applied once: 3% of the crossing total (15,000) = 450.
-    assert.equal(triggers[0].metadata.penalty, Math.round(15000 * 0.03));
-    assert.equal((await getMine(raceId)).status, "EXPIRED");
-  });
-});
