@@ -1,0 +1,884 @@
+// Canonical lean integration suite.
+
+
+// ---- consolidated from team-pool-multiplier.test.js ----
+(function team_pool_multiplier_test_js(){
+const assert = require("node:assert/strict");
+const { describe, it, before, beforeEach, after } = require("node:test");
+
+const {
+  cleanDatabase,
+  prisma,
+  request,
+  getSharedServer,
+  createTestUser,
+} = require("../setup");
+
+const { appSettings } = require("../../../src/shared/config/appSettings");
+const { resolveExpiredRaces } = require("../../../src/modules/races/jobs/raceExpiry");
+
+// Item 5 (batch 2026-08-08) — team race payout buff.
+//
+// The pool formula is  players x durationPoints(days) x PRIZE_COIN_UNIT , and a
+// TEAM race multiplies it by a per-duration-band factor STAMPED on the row at
+// creation (races.team_pool_mult_bps, basis points; NULL == 1.0). Every figure
+// below is proved through the real expiry path (resolveExpiredRaces ->
+// completeRace) and read back off the coin ledger, and every projection is read
+// off real HTTP, so a projection can never disagree with a settlement.
+//
+// Arithmetic, stated once (durationPoints: <=1d 1, <=3d 2, <=7d 4, >=8d 8):
+//   14d 5v5 : 10 x 8 x 20 = 1600 ; x1.875 = 3000 ; / 5 winners = 600 each
+//    7d 5v5 : 10 x 4 x 20 =  800 ; x1.5   = 1200 ; / 5 winners = 240 each
+//    3d 2v2 :  4 x 2 x 20 =  160 ; x1.0   =  160 ; / 2 winners =  80 each
+
+const FUNDED_FLAG = "fundedPrizePoolsEnabled";
+const POOL_REASON = "race_prize_pool_payout";
+const REFUND_REASON = "race_buy_in_refund";
+const TEAM_HEADERS = { "X-Client-Features": "characters,team_races" };
+
+let server;
+let seq = 0;
+
+async function makeUser({ coins = 0 } = {}) {
+  const { user, token } = await createTestUser({
+    appleId: `apple-tpm-${++seq}`,
+    email: `tpm-${seq}@example.com`,
+    coins,
+  });
+  return { userId: user.id, token };
+}
+
+function req(method, path, { body, token, headers } = {}) {
+  return request(server.baseUrl, method, path, { body, token, headers });
+}
+
+async function coinsOf(userId) {
+  return (await prisma.user.findUnique({ where: { id: userId } })).coins;
+}
+
+async function txns(raceId, reason) {
+  return prisma.coinTransaction.findMany({
+    where: { reason, refId: { startsWith: `${raceId}:` } },
+  });
+}
+
+// Run `fn` with env overrides applied, restoring the previous values after.
+async function withEnv(overrides, fn) {
+  const previous = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    previous[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+// An ACTIVE team race row, optionally already past its deadline. `multBps` is
+// written directly so a test can pin the stamp (including NULL = legacy row)
+// without depending on what the env said at creation time.
+async function seedTeamRace({
+  durationDays,
+  multBps,
+  funded = true,
+  expired = true,
+  teamSize = 5,
+  payoutRoundingVersion = 0,
+  prizePoolMaxCoins = null,
+  potCoins = 0,
+  buyInAmount = 0,
+}) {
+  return prisma.race.create({
+    data: {
+      creatorId: null,
+      name: `Team ${durationDays}d`,
+      targetSteps: 0,
+      status: "ACTIVE",
+      isPublic: true,
+      timeBased: true,
+      maxParticipants: teamSize * 2,
+      maxDurationDays: durationDays,
+      payoutPreset: "WINNER_TAKES_ALL",
+      fundedPrize: funded,
+      potCoins,
+      buyInAmount,
+      isTeamRace: true,
+      teamSize,
+      teamAName: "Reds",
+      teamBName: "Blues",
+      teamPoolMultBps: multBps === undefined ? null : multBps,
+      payoutRoundingVersion,
+      prizePoolMaxCoins,
+      startedAt: new Date(Date.now() - durationDays * 24 * 60 * 60 * 1000),
+      endsAt: expired
+        ? new Date(Date.now() - 60 * 60 * 1000)
+        : new Date(Date.now() + 60 * 60 * 1000),
+    },
+    select: { id: true, startedAt: true },
+  });
+}
+
+// `members`: [{ team, steps, forfeited?, buyIn? }] in the order they joined.
+async function addMembers(race, members) {
+  const users = [];
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    const u = await makeUser();
+    users.push(u);
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: race.id,
+        userId: u.userId,
+        status: "ACCEPTED",
+        team: m.team,
+        totalSteps: m.steps,
+        finishedAt: new Date(Date.now() - 30 * 60 * 1000),
+        finishTotalSteps: m.steps,
+        joinedAt: new Date(new Date(race.startedAt).getTime() + i * 1000),
+        forfeitedAt: m.forfeited ? new Date(Date.now() - 45 * 60 * 1000) : null,
+        ...(m.buyIn
+          ? { buyInAmount: m.buyIn, buyInStatus: "COMMITTED" }
+          : {}),
+      },
+    });
+  }
+  return users;
+}
+
+// A 5v5 where TEAM_A always out-steps TEAM_B. Returns { a: [...], b: [...] }.
+async function addFiveVsFive(race) {
+  const users = await addMembers(race, [
+    ...[0, 1, 2, 3, 4].map((i) => ({ team: "TEAM_A", steps: 90000 - i * 100 })),
+    ...[0, 1, 2, 3, 4].map((i) => ({ team: "TEAM_B", steps: 50000 - i * 100 })),
+  ]);
+  return { a: users.slice(0, 5), b: users.slice(5) };
+}
+
+describe("team race payout buff (item 5)", () => {
+  before(async () => {
+    server = await getSharedServer();
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase();
+    seq = 0;
+    await appSettings.setFlag(FUNDED_FLAG, true);
+    await appSettings.setFlag("teamRacesEnabled", true);
+  });
+
+  after(async () => {
+    await appSettings.setFlag(FUNDED_FLAG, false);
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", false);
+  });
+
+  // ── 1. the three duration bands ──────────────────────────────────────────
+
+  it("1: a 14-day 5v5 pays each winner 600 (1600 x 1.875 = 3000, / 5)", async () => {
+    const race = await seedTeamRace({ durationDays: 14, multBps: 18750 });
+    const { a, b } = await addFiveVsFive(race);
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.status, "COMPLETED");
+    assert.equal(settled.winnerTeam, "TEAM_A");
+    assert.equal(settled.prizePoolCoins, 3000, "10 x durationPoints(14)=8 x 20 = 1600, x1.875");
+    assert.equal(settled.potCoins, 3000);
+
+    for (const w of a) assert.equal(await coinsOf(w.userId), 600);
+    for (const l of b) assert.equal(await coinsOf(l.userId), 0);
+
+    const rows = await txns(race.id, POOL_REASON);
+    assert.equal(rows.length, 5);
+    assert.deepEqual(
+      rows.map((r) => r.amount).sort((x, y) => x - y),
+      [600, 600, 600, 600, 600]
+    );
+    assert.equal(rows.reduce((s, r) => s + r.amount, 0), 3000);
+  });
+
+  it("2: a 7-day 5v5 pays each winner 240 (800 x 1.5 = 1200, / 5)", async () => {
+    const race = await seedTeamRace({ durationDays: 7, multBps: 15000 });
+    const { a, b } = await addFiveVsFive(race);
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.prizePoolCoins, 1200, "10 x durationPoints(7)=4 x 20 = 800, x1.5");
+    for (const w of a) assert.equal(await coinsOf(w.userId), 240);
+    for (const l of b) assert.equal(await coinsOf(l.userId), 0);
+    assert.equal((await txns(race.id, POOL_REASON)).length, 5);
+  });
+
+  it("3: a 3-day 2v2 is unchanged — 160 pool, 80 each (multiplier 1.0)", async () => {
+    const race = await seedTeamRace({
+      durationDays: 3,
+      multBps: 10000,
+      teamSize: 2,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 9000 },
+      { team: "TEAM_A", steps: 8000 },
+      { team: "TEAM_B", steps: 3000 },
+      { team: "TEAM_B", steps: 2000 },
+    ]);
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.prizePoolCoins, 160, "4 x durationPoints(3)=2 x 20, x1.0");
+    assert.equal(await coinsOf(users[0].userId), 80);
+    assert.equal(await coinsOf(users[1].userId), 80);
+    assert.equal(await coinsOf(users[2].userId), 0);
+    assert.equal(await coinsOf(users[3].userId), 0);
+  });
+
+  // ── 2. legacy rows: NULL stamp == today's numbers ─────────────────────────
+
+  it("4: a legacy team race (teamPoolMultBps NULL) settles at exactly today's numbers", async () => {
+    const race = await seedTeamRace({ durationDays: 14, multBps: null });
+    const { a, b } = await addFiveVsFive(race);
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.teamPoolMultBps, null);
+    assert.equal(settled.prizePoolCoins, 1600, "pre-buff pool");
+    for (const w of a) assert.equal(await coinsOf(w.userId), 320, "pre-buff per-head");
+    for (const l of b) assert.equal(await coinsOf(l.userId), 0);
+  });
+
+  // ── 3. the cap binds AFTER multiplication ─────────────────────────────────
+
+  it("5: poolMax clamps the MULTIPLIED pool, not the base pool", async () => {
+    // Base pool 1600 is under the 2000 ceiling; multiplied 3000 is over it, so
+    // a cap applied before the multiplier would leave 1600 x 1.875 = 3000.
+    await withEnv({ PRIZE_POOL_MAX_COINS: "2000" }, async () => {
+      const race = await seedTeamRace({ durationDays: 14, multBps: 18750 });
+      const { a } = await addFiveVsFive(race);
+
+      await resolveExpiredRaces();
+
+      const settled = await prisma.race.findUnique({ where: { id: race.id } });
+      assert.equal(settled.prizePoolCoins, 2000, "clamped to poolMax after x1.875");
+      for (const w of a) assert.equal(await coinsOf(w.userId), 400);
+    });
+  });
+
+  // ── 4. stamp at creation, settle from the stamp ───────────────────────────
+
+  it("6: creation stamps the band from env; team races only", async () => {
+    const creator = await makeUser();
+    await req("GET", "/auth/me", { token: creator.token, headers: TEAM_HEADERS });
+
+    // A non-team race never carries a multiplier.
+    const solo = await req("POST", "/races", {
+      token: creator.token,
+      body: { name: "Solo", maxDurationDays: 14, isPublic: true },
+    });
+    assert.equal(solo.status, 201);
+    const soloRow = await prisma.race.findUnique({
+      where: { id: (await solo.json()).race.id },
+    });
+    assert.equal(soloRow.teamPoolMultBps, null, "solo races stamp NULL");
+
+    for (const [days, bps] of [[3, 10000], [7, 15000], [14, 18750]]) {
+      const teamCreator = await makeUser();
+      await req("GET", "/auth/me", { token: teamCreator.token, headers: TEAM_HEADERS });
+      const res = await req("POST", "/races", {
+        token: teamCreator.token,
+        headers: TEAM_HEADERS,
+        body: {
+          name: `Team ${days}`,
+          maxDurationDays: days,
+          isTeamRace: true,
+          teamSize: 2,
+        },
+      });
+      assert.equal(res.status, 201, `create ${days}d status ${res.status}`);
+      const row = await prisma.race.findUnique({
+        where: { id: (await res.json()).race.id },
+      });
+      assert.equal(row.teamPoolMultBps, bps, `${days}-day band`);
+    }
+  });
+
+  it("7: an env change reprices only NEW races — an in-flight stamped race never reprices", async () => {
+    // Created under today's env: 1.875 for a 14-day race.
+    const inFlight = await seedTeamRace({ durationDays: 14, multBps: 18750 });
+    const { a } = await addFiveVsFive(inFlight);
+
+    await withEnv({ TEAM_POOL_MULT_LONG: "3.0" }, async () => {
+      const creator = await makeUser();
+      await req("GET", "/auth/me", { token: creator.token, headers: TEAM_HEADERS });
+      const res = await req("POST", "/races", {
+        token: creator.token,
+        headers: TEAM_HEADERS,
+        body: {
+          name: "Repriced",
+          maxDurationDays: 14,
+          isTeamRace: true,
+          teamSize: 2,
+        },
+      });
+      assert.equal(res.status, 201);
+      const fresh = await prisma.race.findUnique({
+        where: { id: (await res.json()).race.id },
+      });
+      assert.equal(fresh.teamPoolMultBps, 30000, "new race takes the new env");
+
+      // The already-stamped race settles off its STAMP, not the live env.
+      await resolveExpiredRaces();
+    });
+
+    const settled = await prisma.race.findUnique({ where: { id: inFlight.id } });
+    assert.equal(settled.prizePoolCoins, 3000, "still 1.875, not 3.0");
+    for (const w of a) assert.equal(await coinsOf(w.userId), 600);
+  });
+
+  it("8: a malformed multiplier env falls back to the default, never NaN", async () => {
+    await withEnv(
+      { TEAM_POOL_MULT_LONG: "not-a-number", TEAM_POOL_MULT_MID: "0" },
+      async () => {
+        const creator = await makeUser();
+        await req("GET", "/auth/me", {
+          token: creator.token,
+          headers: TEAM_HEADERS,
+        });
+        for (const [days, bps] of [[14, 18750], [7, 15000]]) {
+          const res = await req("POST", "/races", {
+            token: creator.token,
+            headers: TEAM_HEADERS,
+            body: {
+              name: `Bad env ${days}`,
+              maxDurationDays: days,
+              isTeamRace: true,
+              teamSize: 2,
+            },
+          });
+          assert.equal(res.status, 201);
+          const row = await prisma.race.findUnique({
+            where: { id: (await res.json()).race.id },
+          });
+          assert.equal(row.teamPoolMultBps, bps, `${days}d fell back to default`);
+        }
+      }
+    );
+  });
+
+  // ── 5. projection == settlement ───────────────────────────────────────────
+
+  it("9: the pool advertised on GET /races/:id mid-race is what settlement pays", async () => {
+    const race = await seedTeamRace({
+      durationDays: 14,
+      multBps: 18750,
+      expired: false,
+    });
+    const { a } = await addFiveVsFive(race);
+
+    const detail = await req("GET", `/races/${race.id}`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    assert.equal(detail.status, 200);
+    const body = await detail.json();
+    assert.equal(body.prizePool.coins, 3000, "projection carries the multiplier");
+    assert.equal(body.prizePool.projected, true);
+    assert.equal(body.projectedPotCoins, 3000);
+
+    // Now let the deadline pass and settle for real.
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60 * 1000) },
+    });
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(
+      settled.prizePoolCoins,
+      body.prizePool.coins,
+      "settlement matches the advertised projection"
+    );
+    const paid = (await txns(race.id, POOL_REASON)).reduce(
+      (s, r) => s + r.amount,
+      0
+    );
+    assert.equal(paid, body.prizePool.coins);
+
+    const after = await req("GET", `/races/${race.id}`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const afterBody = await after.json();
+    assert.equal(afterBody.prizePool.coins, 3000);
+    assert.equal(afterBody.prizePool.projected, false);
+  });
+
+  it("9a: an active v1 team race still advertises its projected pool", async () => {
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
+    const race = await seedTeamRace({
+      durationDays: 14,
+      multBps: 18750,
+      payoutRoundingVersion: 1,
+      expired: false,
+    });
+    const { a } = await addFiveVsFive(race);
+
+    const detail = await req("GET", `/races/${race.id}`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    assert.equal(detail.status, 200);
+    const body = await detail.json();
+    assert.equal(body.prizePool.coins, 3000);
+    assert.equal(body.prizePool.projected, true);
+    assert.equal(body.projectedPotCoins, 3000);
+    const expectedPayouts = { first: 600, second: 600, third: 600 };
+    const expectedPayoutTiers = Array.from({ length: 5 }, (_, index) => ({
+      placement: index + 1,
+      amount: 600,
+    }));
+    assert.deepEqual(body.payouts, expectedPayouts);
+    assert.deepEqual(body.payoutTiers, expectedPayoutTiers);
+
+    const list = await req("GET", "/races", {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const listBody = await list.json();
+    const listed = (listBody.active || []).find((entry) => entry.id === race.id);
+    assert.equal(listed.prizePool.coins, 3000);
+    assert.equal(listed.projectedPotCoins, 3000);
+    assert.deepEqual(listed.payouts, expectedPayouts);
+    assert.deepEqual(listed.payoutTiers, expectedPayoutTiers);
+
+    const progress = await req("GET", `/races/${race.id}/progress`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const progressBody = (await progress.json()).progress;
+    assert.equal(progressBody.prizePool.coins, 3000);
+    assert.equal(progressBody.projectedPotCoins, 3000);
+    assert.deepEqual(progressBody.payouts, expectedPayouts);
+    assert.deepEqual(progressBody.payoutTiers, expectedPayoutTiers);
+
+    const home = await req("GET", "/home/race-card", {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const homeBody = await home.json();
+    assert.equal(homeBody.state, "ACTIVE_RACE");
+    assert.equal(homeBody.data.prizePool.coins, 3000);
+    assert.equal(homeBody.data.projectedPotCoins, 3000);
+    assert.deepEqual(homeBody.data.payouts, expectedPayouts);
+    assert.deepEqual(homeBody.data.payoutTiers, expectedPayoutTiers);
+
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    });
+    await resolveExpiredRaces();
+    const completed = await req("GET", `/races/${race.id}`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const completedBody = await completed.json();
+    assert.deepEqual(completedBody.payouts, expectedPayouts);
+    assert.deepEqual(completedBody.payoutTiers, expectedPayoutTiers);
+    const completedListBody = await (await req("GET", "/races", {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const completedListed = completedListBody.completed.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(completedListed.payouts, expectedPayouts);
+    assert.deepEqual(completedListed.payoutTiers, expectedPayoutTiers);
+  });
+
+  it("9b: every active 2v2 surface projects the same two 40-coin team awards settlement pays", async () => {
+    // Production permanently uses the SQL summary path. Node tests retain a
+    // legacy override for protected comparator coverage, so enable the real
+    // production path explicitly for this public-contract regression.
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
+    const race = await seedTeamRace({
+      durationDays: 1,
+      multBps: 10000,
+      teamSize: 2,
+      payoutRoundingVersion: 1,
+      expired: false,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 9000 },
+      { team: "TEAM_A", steps: 8000 },
+      { team: "TEAM_B", steps: 3000 },
+      { team: "TEAM_B", steps: 2000 },
+    ]);
+    const expectedPayouts = { first: 40, second: 40, third: 0 };
+    const expectedPayoutTiers = [
+      { placement: 1, amount: 40 },
+      { placement: 2, amount: 40 },
+    ];
+
+    const detail = await req("GET", `/races/${race.id}`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const detailBody = await detail.json();
+    assert.equal(detailBody.prizePool.coins, 80);
+    assert.deepEqual(detailBody.payouts, expectedPayouts);
+    assert.deepEqual(detailBody.payoutTiers, expectedPayoutTiers);
+
+    const listBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const listed = listBody.active.find((entry) => entry.id === race.id);
+    assert.deepEqual(listed.payouts, expectedPayouts);
+    assert.deepEqual(listed.payoutTiers, expectedPayoutTiers);
+
+    const progressBody = (await (await req("GET", `/races/${race.id}/progress`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json()).progress;
+    assert.deepEqual(progressBody.payouts, expectedPayouts);
+    assert.deepEqual(progressBody.payoutTiers, expectedPayoutTiers);
+
+    const homeBody = await (await req("GET", "/home/race-card", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    assert.deepEqual(homeBody.data.payouts, expectedPayouts);
+    assert.deepEqual(homeBody.data.payoutTiers, expectedPayoutTiers);
+
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    });
+    await resolveExpiredRaces();
+    const completedBody = await (await req("GET", `/races/${race.id}`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    assert.deepEqual(completedBody.payouts, expectedPayouts);
+    assert.deepEqual(completedBody.payoutTiers, expectedPayoutTiers);
+    const completedListBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const completedListed = completedListBody.completed.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(completedListed.payouts, expectedPayouts);
+    assert.deepEqual(completedListed.payoutTiers, expectedPayoutTiers);
+    assert.deepEqual(
+      (await txns(race.id, POOL_REASON)).map((row) => row.amount).sort((a, b) => a - b),
+      [40, 40],
+    );
+  });
+
+  it("9c: active v1 projection includes the exact per-recipient rounding liability", async () => {
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
+    const race = await seedTeamRace({
+      durationDays: 1,
+      multBps: 10000,
+      teamSize: 2,
+      payoutRoundingVersion: 1,
+      prizePoolMaxCoins: 43,
+      expired: false,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 9000 },
+      { team: "TEAM_A", steps: 8000 },
+      { team: "TEAM_B", steps: 3000 },
+      { team: "TEAM_B", steps: 2000 },
+    ]);
+    const projectedBody = await (await req("GET", `/races/${race.id}`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    assert.equal(projectedBody.prizePool.coins, 50, "43 raw becomes two rounded 25 awards");
+    assert.equal(projectedBody.projectedPotCoins, 50);
+    assert.deepEqual(projectedBody.payouts, { first: 25, second: 25, third: 0 });
+    assert.deepEqual(projectedBody.payoutTiers, [
+      { placement: 1, amount: 25 },
+      { placement: 2, amount: 25 },
+    ]);
+    const projectedListBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const projectedListed = projectedListBody.active.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(projectedListed.payouts, projectedBody.payouts);
+    assert.deepEqual(projectedListed.payoutTiers, projectedBody.payoutTiers);
+
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    });
+    await resolveExpiredRaces();
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.prizePoolCoins, 50);
+    assert.deepEqual(settled.payoutRoundingMetadata, {
+      payoutRoundingVersion: 1,
+      rawAwardCoins: 43,
+      roundedAwardCoins: 50,
+      roundingSubsidyCoins: 7,
+      recipientCount: 2,
+      smallAwardRecipientCount: 0,
+    });
+    const settledListBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const settledListed = settledListBody.completed.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(settledListed.payouts, projectedBody.payouts);
+    assert.deepEqual(settledListed.payoutTiers, projectedBody.payoutTiers);
+    assert.deepEqual(
+      (await txns(race.id, POOL_REASON)).map((row) => row.amount).sort((a, b) => a - b),
+      [25, 25],
+    );
+  });
+
+  // ── 6. tie: mint and split across BOTH teams ──────────────────────────────
+
+  it("10: a funded team-race tie splits the multiplied pool evenly across all non-forfeited members, remainder to the top stepper", async () => {
+    // 1-day band (x1.0) with a forfeiter, so the pool (4 walkers) does not
+    // divide evenly across the 3 members who actually split it:
+    //   4 x durationPoints(1)=1 x 20 = 80 ; 80 / 3 = 26 each, remainder 2.
+    // Team totals tie at 100 each (forfeited totals still count for the team).
+    const race = await seedTeamRace({
+      durationDays: 1,
+      multBps: 10000,
+      teamSize: 2,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 60 },
+      { team: "TEAM_A", steps: 40, forfeited: true },
+      { team: "TEAM_B", steps: 70 },
+      { team: "TEAM_B", steps: 30 },
+    ]);
+    const [a1, aForfeit, b1, b2] = users;
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.status, "COMPLETED");
+    assert.equal(settled.winnerTeam, null, "tie");
+    assert.equal(settled.prizePoolCoins, 80, "the tie now STAMPS the pool");
+    assert.equal(settled.potCoins, 80);
+
+    assert.equal(await coinsOf(b1.userId), 28, "top stepper takes the remainder");
+    assert.equal(await coinsOf(a1.userId), 26);
+    assert.equal(await coinsOf(b2.userId), 26);
+    assert.equal(await coinsOf(aForfeit.userId), 0, "forfeiters are paid nothing");
+
+    const rows = await txns(race.id, POOL_REASON);
+    assert.equal(rows.length, 3);
+    assert.equal(rows.reduce((s, r) => s + r.amount, 0), 80);
+
+    const parts = await prisma.raceParticipant.findMany({
+      where: { raceId: race.id },
+    });
+    for (const p of parts) {
+      assert.equal(p.placement, 1, "a tie places everyone 1st");
+    }
+  });
+
+  it("11: a tied team race with a multiplier band mints the MULTIPLIED pool", async () => {
+    const race = await seedTeamRace({ durationDays: 14, multBps: 18750 });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 5000 },
+      { team: "TEAM_B", steps: 5000 },
+    ]);
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    // 2 x 8 x 20 = 320 ; x1.875 = 600 ; / 2 = 300 each.
+    assert.equal(settled.prizePoolCoins, 600);
+    assert.equal(await coinsOf(users[0].userId), 300);
+    assert.equal(await coinsOf(users[1].userId), 300);
+  });
+
+  it("12: a tie still refunds every buy-in (legacy buy-in team race, no minting)", async () => {
+    const race = await seedTeamRace({
+      durationDays: 1,
+      multBps: null,
+      funded: false,
+      teamSize: 1,
+      potCoins: 100,
+      buyInAmount: 50,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 5000, buyIn: 50 },
+      { team: "TEAM_B", steps: 5000, buyIn: 50 },
+    ]);
+
+    await resolveExpiredRaces();
+
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.winnerTeam, null);
+    assert.equal(settled.potCoins, 0, "pot zeroed");
+    assert.equal(settled.prizePoolCoins, 0, "a buy-in race mints nothing");
+    for (const u of users) assert.equal(await coinsOf(u.userId), 50, "refunded");
+    assert.equal((await txns(race.id, REFUND_REASON)).length, 2);
+    assert.equal((await txns(race.id, POOL_REASON)).length, 0);
+  });
+
+  // ── 7. tournaments are explicitly unaffected ──────────────────────────────
+
+  it("13: tournaments ignore the team multiplier entirely", async () => {
+    await appSettings.setFlag("tournamentsEnabled", true);
+    const FEAT = { "X-Client-Features": "tournaments" };
+
+    await withEnv(
+      {
+        TEAM_POOL_MULT_SHORT: "5",
+        TEAM_POOL_MULT_MID: "5",
+        TEAM_POOL_MULT_LONG: "5",
+      },
+      async () => {
+        const users = [];
+        for (let i = 0; i < 4; i++) {
+          const u = await makeUser();
+          await req("GET", "/races", { token: u.token, headers: FEAT });
+          users.push(u);
+        }
+        const created = await req("POST", "/tournaments", {
+          token: users[0].token,
+          headers: FEAT,
+          body: {
+            name: "Cup 4",
+            bracketSize: 4,
+            matchupDurationDays: 2,
+            buyInAmount: 0,
+            isPublic: true,
+          },
+        });
+        assert.equal(created.status, 201);
+        const { tournament } = await created.json();
+        for (const u of users.slice(1)) {
+          const join = await req("POST", `/tournaments/${tournament.id}/join`, {
+            token: u.token,
+            headers: FEAT,
+          });
+          assert.equal(join.status, 201);
+        }
+
+        const detail = await req("GET", `/tournaments/${tournament.id}`, {
+          token: users[0].token,
+          headers: FEAT,
+        });
+        const body = await detail.json();
+        const t = body.tournament || body;
+        // 4 players x durationPoints(4)=4 x the permanent v2 unit 10 = 160.
+        assert.equal(t.prizePool.coins, 160, "tournament pool unmultiplied");
+
+        // ...and the matchup races the bracket created carry no stamp.
+        const matchups = await prisma.race.findMany({
+          where: { tournamentId: tournament.id },
+        });
+        assert.ok(matchups.length > 0);
+        for (const m of matchups) {
+          assert.equal(m.teamPoolMultBps, null, "tournament race stamps NULL");
+        }
+      }
+    );
+  });
+});
+
+})();
+
+
+// ---- consolidated from seeded-join-scoring.test.js ----
+(function seeded_join_scoring_test_js(){
+const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const { describe, it, before, beforeEach, after } = require('node:test');
+const { cleanDatabase, createTestUser, startServer, prisma, request } = require('../setup');
+const { buildRaceResolutionWorkerV2 } = require('../../../src/modules/races/jobs/raceResolutionQueueV2');
+const { buildRaceExpiryRunner } = require('../../../src/modules/races/jobs/raceExpiry');
+const HEADERS = { 'X-Client-Features': 'seeded_race_buckets,powerups3,powerups4,powerups5' };
+describe('current Join preserves scoring, effects and box boundaries', () => {
+  let server, clock;
+  before(async () => { server = await startServer({ now: () => new Date(clock) }); });
+  after(async () => server.close());
+  beforeEach(async () => { await cleanDatabase(); clock = '2026-09-09T16:30:00Z'; await prisma.raceSeed.updateMany({data:{powerupsEnabled:true,timeBased:true}}); });
+  const worker = () => buildRaceResolutionWorkerV2({prisma,now:()=>new Date(clock),processRole:'all',logger:{log(){},error(){},warn(){}}});
+  async function join(account,kind){const response=await request(server.baseUrl,'POST',`/races/seeded/${kind}/join-current`,{token:account.token,headers:HEADERS,body:{requestId:randomUUID()}});assert.equal(response.status,200,await response.clone().text());return response.json();}
+  async function sync(account,steps,samples){const response=await request(server.baseUrl,'POST','/steps/sync-v2',{token:account.token,headers:{...HEADERS,'Idempotency-Key':randomUUID()},body:{date:'2026-09-09',steps,samples:samples||[]}});assert.equal(response.status,202,await response.clone().text());}
+  async function progress(account,raceId){const response=await request(server.baseUrl,'GET',`/races/${raceId}/progress`,{token:account.token,headers:HEADERS});assert.equal(response.status,200);return (await response.json()).progress;}
+  it('HTTP step sync processes its queued score without a seeded membership probe', async () => {
+    const account = await createTestUser({ autoJoinFeaturedRaces: false });
+    const joined = await join(account, 'DAILY_10K');
+    const queuedWorker = buildRaceResolutionWorkerV2({ prisma, bootAt: 0, now: () => new Date(clock), processRole: 'all', logger: { log() {}, error() {}, warn() {} } });
+    clock = '2026-09-09T16:31:00Z';
+    await queuedWorker.tick();
+    clock = '2026-09-09T16:32:00Z';
+    await queuedWorker.tick();
+    const originalQueryRaw = prisma.$queryRaw;
+    let membershipProbes = 0;
+    prisma.$queryRaw = function (...args) {
+      const sql = Array.isArray(args[0]) ? args[0].join('?') : String(args[0]?.sql || args[0]);
+      if (sql.includes('FROM seeded_challenge_preparation_groups g JOIN races')) membershipProbes += 1;
+      return originalQueryRaw.apply(this, args);
+    };
+    try {
+      clock = '2026-09-09T16:40:00Z';
+      await sync(account, 100, [{ periodStart: '2026-09-09T16:35:00Z', periodEnd: '2026-09-09T16:40:00Z', steps: 100 }]);
+      const queued = await prisma.raceResolutionJobV2.findUnique({ where: { raceId: joined.raceId } });
+      assert.ok(queued.dirtyReasons.length > 0);
+      assert.ok(queued.dirtyReasons.every(reason => ['STEP_SYNC', 'STEP_INPUT_CHANGED'].includes(reason)), JSON.stringify(queued.dirtyReasons));
+      clock = new Date(Math.max(new Date(clock).getTime(), new Date(queued.requestedAt).getTime()) + 60000).toISOString();
+      const scoreWorker = buildRaceResolutionWorkerV2({ prisma, bootAt: 0, now: () => new Date(clock), processRole: 'all', logger: { log() {}, error() {}, warn() {} } });
+      const tickResult = await scoreWorker.tick();
+      assert.ok(tickResult > 0, JSON.stringify({ queued, tickResult }));
+      assert.equal((await progress(account, joined.raceId)).participants.find(row => row.userId === account.user.id).totalSteps, 100);
+      assert.equal(membershipProbes, 0);
+    } finally { prisma.$queryRaw = originalQueryRaw; }
+  });
+  for(const kind of ['DAILY_10K','WEEKLY_50K']) it(`${kind}: daily-only sync never credits an unknowable pre-join day`,async()=>{
+    const account=await createTestUser({autoJoinFeaturedRaces:false});
+    await sync(account,10000);const joined=await join(account,kind);
+    clock='2026-09-09T18:00:00Z';await sync(account,12000);await worker().processRace({raceId:joined.raceId});
+    assert.equal((await progress(account,joined.raceId)).participants.find(p=>p.userId===account.user.id).totalSteps,0);
+    assert.equal(await prisma.racePowerup.count({where:{userId:account.user.id,status:'MYSTERY_BOX'}}),0);
+  });
+  for(const kind of ['DAILY_10K','WEEKLY_50K']) it(`${kind}: buff, leech and mystery boxes count only the post-join half of a sample through settlement`,async()=>{
+    const alice=await createTestUser({autoJoinFeaturedRaces:false});const bob=await createTestUser({autoJoinFeaturedRaces:false});
+    for(const account of [alice,bob])await sync(account,6000,[{periodStart:'2026-09-09T15:00:00Z',periodEnd:'2026-09-09T16:00:00Z',steps:6000}]);
+    const joined=await join(alice,kind);const other=await join(bob,kind);assert.equal(other.raceId,joined.raceId);
+    for(const [index,type] of ['RUNNERS_HIGH','LEECH'].entries()){
+      const held=await prisma.racePowerup.create({data:{raceId:joined.raceId,participantId:joined.participantId,userId:alice.user.id,type,rarity:'UNCOMMON',status:'HELD',earnedAtSteps:90000+index}});
+      const used=await request(server.baseUrl,'POST',`/races/${joined.raceId}/powerups/${held.id}/use`,{token:alice.token,headers:HEADERS,body:type==='LEECH'?{targetUserId:bob.user.id}:{}});
+      assert.equal(used.status,200,await used.clone().text());
+    }
+    clock='2026-09-09T18:00:00Z';
+    for(const account of [alice,bob])await sync(account,12000,[{periodStart:'2026-09-09T16:00:00Z',periodEnd:'2026-09-09T17:00:00Z',steps:6000}]);
+    await worker().processRace({raceId:joined.raceId});
+    const board=await progress(alice,joined.raceId);
+    const home=await request(server.baseUrl,'GET','/home/race-card?homeActiveRaces=1&homePersistedTotals=1',{token:alice.token,headers:HEADERS});assert.equal(home.status,200);
+    const homeRace=(await home.json()).data.races.find(row=>row.raceId===joined.raceId);assert.ok(homeRace);assert.equal(homeRace.top3.find(row=>row.userId===alice.user.id).totalSteps,7500);
+    assert.equal(board.participants.find(p=>p.userId===alice.user.id).totalSteps,7500);
+    assert.equal(board.participants.find(p=>p.userId===bob.user.id).totalSteps,1500);
+    assert.equal(await prisma.racePowerup.count({where:{userId:alice.user.id,raceId:joined.raceId,status:'MYSTERY_BOX'}}),1);
+    assert.equal((await prisma.raceParticipant.findUnique({where:{id:joined.participantId}})).nextBoxAtSteps,4000);
+    clock=new Date(new Date(joined.windowEnd).getTime()+60000).toISOString();
+    await buildRaceExpiryRunner({now:()=>new Date(clock),logger:{log(){}}})();
+    const response=await request(server.baseUrl,'GET',`/races/${joined.raceId}`,{token:alice.token,headers:HEADERS});assert.equal(response.status,200);const race=await response.json();
+    assert.equal(race.status,'COMPLETED');assert.equal(race.participants.find(p=>p.userId===alice.user.id).totalSteps,7500);assert.equal(race.participants.find(p=>p.userId===bob.user.id).totalSteps,1500);
+  });
+});
+
+})();
