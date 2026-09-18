@@ -17,6 +17,7 @@ function baseDeps(overrides = {}) {
     app: fakeApp(),
     port: 3000,
     cronStartDelayMs: 0,
+    processRole: "all",
     registerEventHandlers: noop,
     registerNotificationHandlers: noop,
     registerRaceListCacheInvalidation: noop,
