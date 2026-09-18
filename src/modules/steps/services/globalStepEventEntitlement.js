@@ -913,6 +913,7 @@ async function processDueEntitlementBoundaries({
             prisma,
             ids: dueStarts.map((row) => row.id),
             now: current,
+            appendDomainEvent,
           });
           result.starts += startedBatch.starts;
           result.stale += startedBatch.stale;
@@ -1056,7 +1057,12 @@ async function discoverDueStartIds({ prisma = defaultPrisma, now = new Date(), b
   return rows;
 }
 
-async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = new Date() } = {}) {
+async function processDueStartMicroBatch({
+  prisma = defaultPrisma,
+  ids,
+  now = new Date(),
+  appendDomainEvent = defaultAppendDomainEvent,
+} = {}) {
   const candidateIds = [...new Set((ids || []).filter(Boolean))].slice(0, 100);
   if (!candidateIds.length) return { starts: 0, stale: 0, claimed: 0 };
   const current = new Date(now);
@@ -1192,6 +1198,29 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
         await deferUntilAfterCommit(() => redisCache.publishDurableQueueWakeup(
           "resolution", { workKind: "ordinary" },
         ));
+      }
+    }
+    if (activeIds.length) {
+      const activeSet = new Set(activeIds);
+      for (const entitlement of ordered) {
+        if (!activeSet.has(entitlement.id)) continue;
+        await appendDomainEvent(tx, {
+          eventKey: `GLOBAL_STEP_EVENT_ACTIVATED_V1:${entitlement.id}`,
+          eventType: "GLOBAL_STEP_EVENT_ACTIVATED_V1",
+          schemaVersion: 1,
+          aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+          aggregateId: entitlement.id,
+          occurredAt: current,
+          availableAt: current,
+          payload: {
+            eventId: entitlement.eventId,
+            entitlementId: entitlement.id,
+            multiplier: entitlement.event.multiplier,
+            startsAt: entitlement.startsAt,
+            endsAt: entitlement.endsAt,
+          },
+          audience: [{ recipientId: entitlement.userId, facts: {} }],
+        });
       }
     }
     await require('./eventRecapStartCount').stampEventRecapStartCounts(tx, [...activeIds, ...noRaceIds]);
