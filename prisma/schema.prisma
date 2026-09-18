@@ -937,6 +937,11 @@ model Step {
   stepGoal  Int?     @map("step_goal")
   date      DateTime @db.Date
   createdAt DateTime @default(now()) @map("created_at")
+  // Accepted-at fence for queue-first daily writes. Redis Stream delivery and
+  // worker completion can be out of order, so only a sync accepted at or after
+  // this timestamp may replace this day's canonical total. Nullable keeps
+  // existing rows and mixed-version deploys backward-compatible.
+  syncRequestedAt DateTime? @db.Timestamptz(3) @map("sync_requested_at")
   user      User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, date])
