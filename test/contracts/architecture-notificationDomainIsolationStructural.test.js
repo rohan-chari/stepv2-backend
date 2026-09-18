@@ -50,7 +50,11 @@ test("visible-handler registry, V1 producer matrix, and literal key fixtures hav
 });
 
 test("every active producer row is named by real integration-path coverage", () => {
-  const integrationRoot = path.join(ROOT, "test/integration");
+  const integrationRoots = [
+    path.join(ROOT, "test/integration"),
+    path.join(ROOT, "test/reliability"),
+    path.join(ROOT, "test/http-and-service"),
+  ];
   const readIntegrationTests = (dir) => fs.readdirSync(dir, { withFileTypes: true })
     .flatMap((entry) => {
       const full = path.join(dir, entry.name);
@@ -59,7 +63,9 @@ test("every active producer row is named by real integration-path coverage", () 
         ? [fs.readFileSync(full, "utf8")]
         : [];
     });
-  const integrationSource = readIntegrationTests(integrationRoot).join("\n");
+  const integrationSource = integrationRoots
+    .flatMap((root) => readIntegrationTests(root))
+    .join("\n");
   const dormant = new Set([
     "RACE_BUYIN_CHANGED_V1",
     "DAILY_REWARD_REMINDER_V1",
