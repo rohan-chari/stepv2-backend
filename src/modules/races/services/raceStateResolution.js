@@ -1304,6 +1304,7 @@ async function discoverActiveImpactSources({
 }
 
 function buildResolveRaceState(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const stepsModel = dependencies.Steps || Steps;
@@ -1313,7 +1314,11 @@ function buildResolveRaceState(dependencies = {}) {
   const powerupEventModel =
     dependencies.RacePowerupEvent || RacePowerupEvent;
   const globalStepEventModel =
-    dependencies.GlobalStepEvent || GlobalStepEvent;
+    dependencies.GlobalStepEvent || (
+      hasInjectedDeps
+        ? { async findActiveInRange() { return []; } }
+        : GlobalStepEvent
+    );
   const prefetchRaceScoringModels =
     dependencies.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
   const strictScoringPrefetch = dependencies.strictScoringPrefetch === true;
