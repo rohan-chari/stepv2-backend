@@ -12,6 +12,7 @@ async function queueStepSync({
   idempotencyKey,
   timeZone = "UTC",
   homePull = false,
+  legacyEventRecap = false,
   now = () => new Date(),
 }) {
   validateIdempotencyKey(idempotencyKey);
@@ -25,6 +26,7 @@ async function queueStepSync({
     idempotencyKey,
     timeZone,
     homePull: homePull ? "true" : "false",
+    legacyEventRecap: legacyEventRecap ? "true" : "false",
     requestHash: hash,
     canonicalJson: json,
     requestedAt: acceptedAt.toISOString(),
