@@ -35,6 +35,7 @@ const {
   scheduleGenerationHeartbeat,
   scheduleGlobalEventBoundaryDrain,
   scheduleGlobalEventEntitlementEventReconciler,
+  scheduleStepSyncStreamWorker,
 } = require("./modules/steps");
 const { scheduleStepSampleRetention } = require("./modules/steps");
 const {
@@ -66,6 +67,7 @@ const {
 } = require("./modules/notifications");
 const {
   scheduleRaceResolutionWorkerV2,
+  scheduleRaceDirtyStreamWorker,
   scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTaskRunner,
   scheduleRaceSeriesRenewal,
@@ -82,6 +84,9 @@ const {
   registerRaceListCacheInvalidation,
 } = require("./modules/races");
 const { scheduleGiveawayRetention } = require("./modules/giveaways");
+const {
+  schedulePowerupRecalcStreamWorker,
+} = require("./modules/powerups");
 const {
   scheduleFeedbackEmailAttemptExpiry,
 } = require("./modules/feedback/jobs/feedbackEmailAttemptExpiry");
@@ -160,6 +165,10 @@ function startServer({
   // the reverse-handoff rollback target — but this binary never schedules it, so
   // only one bulk writer per race exists at a time.
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorkerV2,
+  scheduleStepSyncStreamWorker: scheduleStepStream = scheduleStepSyncStreamWorker,
+  schedulePowerupRecalcStreamWorker:
+    schedulePowerupStream = schedulePowerupRecalcStreamWorker,
+  scheduleRaceDirtyStreamWorker: scheduleRaceDirtyStream = scheduleRaceDirtyStreamWorker,
   scheduleRacePlacementTransitions:
     schedulePlacementTransitions = scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTasks:
@@ -244,12 +253,17 @@ function startServer({
         }
         return retainStopHandle(handle);
       };
+      const scheduleQueueFirstRacePipeline = () => {
+        retainStopHandle(scheduleStepStream());
+        retainStopHandle(schedulePowerupStream());
+        return retainStopHandle(scheduleRaceDirtyStream());
+      };
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup
       // tests, but never let HTTP workers claim durable resolution work.
       if (processRole === "http") return;
       if (processRole === "resolution") {
-        scheduleTrackedResolutionWorker();
+        scheduleQueueFirstRacePipeline();
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
@@ -402,7 +416,7 @@ function startServer({
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       if (processRole !== "cron") {
-        scheduleTrackedResolutionWorker();
+        scheduleQueueFirstRacePipeline();
         retainStopHandle(scheduleHistoricalRaceReconciliationWorker());
         retainStopHandle(schedulePlacementTransitions());
         scheduleAdminCommands();
