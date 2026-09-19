@@ -1546,6 +1546,10 @@ function buildGetRaceProgress(deps = {}) {
       powerupData.activeEffects = await Promise.all(powerupData.activeEffects);
     }
 
+    const canonicalPlacementByUserId = new Map(
+      entries.map((entry) => [entry.userId, Number(entry.placement || 0) || null])
+    );
+
     const leaderboard = entries
       .map((entry) => {
         // §6a — a masked row must NOT leak the player's multiplier.
@@ -1624,9 +1628,15 @@ function buildGetRaceProgress(deps = {}) {
         if (a.stealthed && b.stealthed) {
           return String(a.userId).localeCompare(String(b.userId));
         }
+        const aPlacement = canonicalPlacementByUserId.get(a.userId);
+        const bPlacement = canonicalPlacementByUserId.get(b.userId);
+        if (aPlacement != null && bPlacement != null && aPlacement !== bPlacement) {
+          return aPlacement - bPlacement;
+        }
         const aSteps = a.totalSteps ?? 0;
         const bSteps = b.totalSteps ?? 0;
-        return bSteps - aSteps;
+        if (aSteps !== bSteps) return bSteps - aSteps;
+        return String(a.userId).localeCompare(String(b.userId));
       });
 
     // Apply IMPOSTER display swaps (display path only).
