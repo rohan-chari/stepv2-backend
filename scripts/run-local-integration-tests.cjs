@@ -9,9 +9,12 @@ if (!['postgres:', 'postgresql:'].includes(target.protocol) ||
     !['localhost', '127.0.0.1', '[::1]'].includes(target.hostname) || !/_test$/.test(database)) {
   throw new Error('Integration runner requires a loopback PostgreSQL *_test database');
 }
+const localRedisUrl = 'redis://127.0.0.1:6379';
+const redisUrl = process.env.REDIS_URL || localRedisUrl;
+const queueRedisUrl = process.env.QUEUE_REDIS_URL || redisUrl;
 const env = { ...process.env, DATABASE_URL: target.toString(), NODE_ENV: 'test',
-  REDIS_URL: process.env.REDIS_URL || '',
-  QUEUE_REDIS_URL: process.env.QUEUE_REDIS_URL || process.env.REDIS_URL || '',
+  REDIS_URL: redisUrl,
+  QUEUE_REDIS_URL: queueRedisUrl,
   CACHE_ENV_PREFIX: process.env.CACHE_ENV_PREFIX || 'integration:',
   ADMIN_EMAILS: process.env.ADMIN_EMAILS || 'admin@test.com',
   SESSION_TOKEN_SECRET: process.env.SESSION_TOKEN_SECRET || 'integration-test-only-session-secret',
