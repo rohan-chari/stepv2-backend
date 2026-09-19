@@ -268,7 +268,7 @@ async function computeHitchhikeCopiedSteps(
       0,
       Number(frozenCapture.rawSourceHighWater) || 0,
     );
-    if (!(exactSteps > frozenRawHighWater)) {
+    if (exactSteps === frozenRawHighWater) {
       return Number(frozenCapture.effectiveContribution) || 0;
     }
     const corrected = await attributionCaptureModel.correctFrozenV3({
