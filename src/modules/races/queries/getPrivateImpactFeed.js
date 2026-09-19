@@ -58,6 +58,7 @@ function buildGetPrivateImpactFeed(dependencies = {}) {
     limitValue,
     v2Enabled,
     completedEnabled,
+    reconciliationEnabled = false,
   }) {
     const race = await model.getRaceAccess({ raceId, userId });
     ensureAccepted(race);
@@ -66,7 +67,13 @@ function buildGetPrivateImpactFeed(dependencies = {}) {
     if (race.status === "ACTIVE") {
       if (!v2Enabled) return { events: [], nextCursor: null };
       const cursor = decodeV2Cursor(cursorValue);
-      const rows = await model.listActivity({ raceId, userId, cursor, limit });
+      const rows = await model.listActivity({
+        raceId,
+        userId,
+        cursor,
+        limit,
+        reconciliationEnabled,
+      });
       const more = rows.length > limit;
       const page = rows.slice(0, limit);
       return {
