@@ -1092,6 +1092,29 @@ async function refundRedeemedOnRejection({
   } catch {}
 }
 
+async function rebaseDecoyUsageCooldownOnConsume({
+  usageStateModel,
+  db,
+  raceId,
+  ownerUserId,
+  sourcePowerupId,
+  consumedAt,
+}) {
+  const existing = typeof usageStateModel.findForUpdate === "function"
+    ? await usageStateModel.findForUpdate(db, raceId, ownerUserId, "DECOY")
+    : null;
+  await usageStateModel.upsertUsed({
+    db,
+    userId: ownerUserId,
+    raceId,
+    powerupType: "DECOY",
+    lastUsedAt: existing?.lastUsedAt || consumedAt,
+    activeUntil: consumedAt,
+    nextUsableAt: new Date(consumedAt.getTime() + DECOY_POST_POP_COOLDOWN_MS),
+    sourcePowerupId: existing?.sourcePowerupId || sourcePowerupId || null,
+  });
+}
+
 function buildUsePowerup(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   // A clock-only injection is an integration-test seam over the full
@@ -1137,7 +1160,16 @@ function buildUsePowerup(dependencies = {}) {
     attackerUserId,
     raceId,
   }) {
-    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: now() });
+    const consumedAt = now();
+    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: consumedAt });
+    await rebaseDecoyUsageCooldownOnConsume({
+      usageStateModel,
+      db,
+      raceId,
+      ownerUserId: ownerParticipant.userId,
+      sourcePowerupId: decoy.powerupId,
+      consumedAt,
+    });
     await appendDomainEvent(db, decoyConsumptionEvent({
       decoy, ownerParticipant, attackPowerupType, outcome, attackerUserId, raceId,
     }));
@@ -2383,6 +2415,7 @@ function buildUsePowerup(dependencies = {}) {
         }
       }
       const consumedDecoyIds = [];
+      const decoyConsumptions = [];
       const decoyEvents = [];
       const decoyResolution = await resolveAoEDecoySlots({
         victims,
@@ -2398,6 +2431,7 @@ function buildUsePowerup(dependencies = {}) {
           const consumption = { ...input, attackerUserId: userId, raceId };
           if (hasInjectedDeps) return consumeDecoy(consumption);
           consumedDecoyIds.push(input.decoy.id);
+          decoyConsumptions.push(consumption);
           decoyEvents.push(decoyConsumptionEvent(consumption));
         },
         attackPowerupType: type,
@@ -2453,6 +2487,16 @@ function buildUsePowerup(dependencies = {}) {
       // same atomic commit as item consumption, with no per-recipient SQL.
       if (!hasInjectedDeps) {
         await effectModel.consumeDecoys(consumedDecoyIds, currentTime);
+        for (const consumption of decoyConsumptions) {
+          await rebaseDecoyUsageCooldownOnConsume({
+            usageStateModel,
+            db,
+            raceId,
+            ownerUserId: consumption.ownerParticipant.userId,
+            sourcePowerupId: consumption.decoy.powerupId,
+            consumedAt: currentTime,
+          });
+        }
         await bulkAppendDomainEvents(db, decoyEvents);
       }
       if (typeof effectModel.updateManyStatus === "function") {
@@ -5117,6 +5161,7 @@ const usePowerup = buildUsePowerup();
 module.exports = {
   buildUsePowerup,
   usePowerup,
+  rebaseDecoyUsageCooldownOnConsume,
   PowerupUseError,
   assertHitchhikeAvailableForFinalTarget,
   isLiveHitchhikeAt,
