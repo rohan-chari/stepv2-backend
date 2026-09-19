@@ -55,6 +55,11 @@ function makeDeps(overrides = {}) {
     get upserts() { return upserts; },
     deps: {
       prisma: {
+        userPowerupItem: {
+          async findUnique() {
+            return { quantity };
+          },
+        },
         async $transaction(fn) { return fn(tx); },
       },
       RacePowerup: {
@@ -102,6 +107,7 @@ test("retry after a successful return is idempotent and never increments stash t
 
   assert.equal(retry.returned, false);
   assert.equal(retry.alreadyReturned, true);
+  assert.equal(retry.quantity, 1);
   assert.equal(ctx.quantity, 1);
   assert.equal(ctx.upserts, 1);
 });
