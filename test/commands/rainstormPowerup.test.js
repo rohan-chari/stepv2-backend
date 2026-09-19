@@ -9,9 +9,10 @@ const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups
 // every OTHER active (unfinished) participant — never on the caster. As a
 // shop-only powerup it can NEVER be reflected by a Mirror: a victim's Mirror
 // does not protect them and is not consumed. The only per-victim defense is
-// COMPRESSION_SOCKS, which consumes (BLOCKED) and protects that victim. Never
-// stacks: while any RAINSTORM is active in the race a second use is rejected.
-// Writes one POWERUP_USED feed event.
+// COMPRESSION_SOCKS, which consumes (BLOCKED) and protects that victim.
+// A victim already under a live Rainstorm is skipped, so a later caster cannot
+// extend that victim's continuous 0.5x window. A different caster may still
+// rain on other dry rivals. Writes one POWERUP_USED feed event.
 //
 // Written from the spec + the imposter/cleanse usePowerup mock patterns, NOT
 // by mirroring implementation.
@@ -181,8 +182,7 @@ test("RAINSTORM skips finished participants", async () => {
   assert.equal(ctx.effectsCreated[0].targetUserId, "user-2");
 });
 
-// Bug batch 2026-07-21 (B4): the storm limit is per-caster — another user's
-// active storm no longer blocks yours; only your own does.
+// A caster still cannot start a second storm while their own is active.
 test("RAINSTORM rejects when the caster already has an active storm", async () => {
   const ctx = makeDeps({
     raceEffects: [
@@ -208,18 +208,82 @@ test("RAINSTORM rejects when the caster already has an active storm", async () =
   assert.equal(ctx.effectsCreated.length, 0);
 });
 
-test("RAINSTORM allows a caster to storm while another user's storm is active", async () => {
+test("RAINSTORM skips a rival already wet from another caster but still hits dry rivals", async () => {
+  const existingRain = {
+    id: "eff-old",
+    type: "RAINSTORM",
+    status: "ACTIVE",
+    sourceUserId: "user-3",
+    targetParticipantId: "rp-2",
+    targetUserId: "user-2",
+    expiresAt: new Date(NOW.getTime() + ONE_HOUR_MS),
+  };
   const ctx = makeDeps({
-    raceEffects: [
-      { id: "eff-old", type: "RAINSTORM", status: "ACTIVE", sourceUserId: "user-2" },
-    ],
+    raceEffects: [existingRain],
+    existingEffects: { "rp-2": [existingRain] },
   });
   const use = buildUsePowerup(ctx.deps);
 
-  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+  });
 
-  assert.ok(result.affected >= 1, "storm lands despite the rival's active storm");
-  assert.ok(ctx.effectsCreated.length >= 1);
+  assert.equal(result.affected, 1);
+  assert.deepEqual(
+    ctx.effectsCreated.map((effect) => effect.targetUserId),
+    ["user-3"],
+    "the already-wet victim must not receive a second Rainstorm row",
+  );
+  assert.deepEqual(
+    ctx.effectUpdates,
+    [],
+    "skipping an already-wet victim must not consume or mutate their effects",
+  );
+});
+
+test("RAINSTORM rejects without consuming the item when every eligible rival is already wet", async () => {
+  const wetBob = {
+    id: "rain-bob",
+    type: "RAINSTORM",
+    status: "ACTIVE",
+    sourceUserId: "other-1",
+    targetParticipantId: "rp-2",
+    targetUserId: "user-2",
+    expiresAt: new Date(NOW.getTime() + ONE_HOUR_MS),
+  };
+  const wetCarol = {
+    id: "rain-carol",
+    type: "RAINSTORM",
+    status: "ACTIVE",
+    sourceUserId: "other-2",
+    targetParticipantId: "rp-3",
+    targetUserId: "user-3",
+    expiresAt: new Date(NOW.getTime() + ONE_HOUR_MS),
+  };
+  const ctx = makeDeps({
+    raceEffects: [wetBob, wetCarol],
+    existingEffects: {
+      "rp-2": [wetBob],
+      "rp-3": [wetCarol],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({
+      userId: "user-1",
+      raceId: "race-1",
+      powerupId: "pw-1",
+    }),
+    (error) =>
+      error instanceof PowerupUseError &&
+      error.code === "NO_ELIGIBLE_TARGETS",
+  );
+
+  assert.equal(ctx.updatedPowerup, null);
+  assert.equal(ctx.effectsCreated.length, 0);
 });
 
 test("RAINSTORM rejects when there is no other active runner", async () => {
