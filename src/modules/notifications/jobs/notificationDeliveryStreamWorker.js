@@ -1,44 +1,76 @@
-const { prisma: defaultPrisma } = require("../../../db");
-const {
-  STREAMS,
-  GROUPS,
-  ensureGroup,
-  readGroup,
-  reclaimIdle,
-  ack,
-  consumerName,
-} = require("../../../shared/queues/redisStreams");
 const {
   parseNotificationDelivery,
 } = require("../../../shared/queues/workMessages");
-const {
-  createInboxAlert: defaultCreateInboxAlert,
-} = require("../../inbox/services/inbox");
-const {
-  DeviceToken: defaultDeviceToken,
-} = require("../../../shared/push/deviceToken");
-const {
-  apnsService: defaultApns,
-} = require("../../../shared/push/apns");
-const {
-  fcmService: defaultFcm,
-} = require("../../../shared/push/fcm");
-
 const RECLAIM_IDLE_MS = 30_000;
-const READ_COUNT = 25;
+const READ_COUNT = 100;
+const PREFETCH_MAX_AGE_MS = 5000;
 const CONCURRENCY = 10;
 const DELIVERY_LEASE_MS = 30_000;
 
 function buildNotificationDeliveryStreamWorker(dependencies = {}) {
-  const prisma = dependencies.prisma || defaultPrisma;
-  const DeviceToken = dependencies.DeviceToken || defaultDeviceToken;
-  const apns = dependencies.apnsService || defaultApns;
-  const fcm = dependencies.fcmService || defaultFcm;
-  const createInboxAlert = dependencies.createInboxAlert || defaultCreateInboxAlert;
+  const prisma = dependencies.prisma || require("../../../db").prisma;
+  const DeviceToken = dependencies.DeviceToken || require("../../../shared/push/deviceToken").DeviceToken;
+  const apns = dependencies.apnsService || require("../../../shared/push/apns").apnsService;
+  const fcm = dependencies.fcmService || require("../../../shared/push/fcm").fcmService;
+  const createInboxAlert = dependencies.createInboxAlert || require("../../inbox/services/inbox").createInboxAlert;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
 
-  async function loadGlobalEventIntent(message) {
+  const queue = dependencies.queue || require("../../../shared/queues/redisStreams");
+  const { STREAMS, GROUPS, ack, consumerName } = queue;
+  const concurrency = Math.max(1, Number(dependencies.concurrency) || CONCURRENCY);
+
+  function eligible(message, entitlement) {
+    return entitlement && entitlement.userId === message.recipientUserId &&
+      Number(entitlement.scheduleRevision || 0) === message.sourceRevision &&
+      entitlement.startProcessedAt &&
+      ["ACTIVATED_ON_TIME", "ACTIVATED_LATE_JOIN"].includes(entitlement.startOutcome) &&
+      new Date(entitlement.endsAt) > new Date(now()) &&
+      new Date(message.expiresAt) > new Date(now());
+  }
+
+  async function prefetchBatch(entries) {
+    const preparedAt = new Date(now()).getTime();
+    const messages = entries.flatMap((entry) => {
+      try {
+        const message = parseNotificationDelivery(entry.fields);
+        return message.type === "GLOBAL_EVENT_STARTED" &&
+          message.sourceType === "GLOBAL_STEP_EVENT_ENTITLEMENT" ? [message] : [];
+      } catch { return []; } // processEntry retains the existing invalid-message handling.
+    });
+    const entitlements = new Map();
+    const impactKeys = new Set();
+    const tokensByUser = new Map();
+    if (!messages.length) return { preparedAt, entitlements, impactKeys, tokensByUser };
+    const rows = await prisma.globalStepEventEntitlement.findMany({
+      where: { id: { in: [...new Set(messages.map((message) => message.sourceId))] } },
+      include: { event: true },
+    });
+    for (const row of rows) entitlements.set(row.id, row);
+    const sources = new Map();
+    for (const message of messages) {
+      const row = entitlements.get(message.sourceId);
+      if (eligible(message, row)) sources.set(`${row.eventId}:${row.userId}`, { eventId: row.eventId, userId: row.userId });
+    }
+    if (sources.size) {
+      // One row per eligible event/user, not one row per race membership.
+      const impacts = await prisma.globalEventRaceImpact.groupBy({
+        by: ["eventId", "userId"], where: { OR: [...sources.values()] },
+      });
+      for (const row of impacts) impactKeys.add(`${row.eventId}:${row.userId}`);
+      const userIds = [...new Set(impacts.map((row) => row.userId))];
+      if (userIds.length) {
+        const tokens = await DeviceToken.findForDeliveryByUserIds(userIds);
+        for (const token of tokens) {
+          if (!tokensByUser.has(token.userId)) tokensByUser.set(token.userId, []);
+          tokensByUser.get(token.userId).push(token);
+        }
+      }
+    }
+    return { preparedAt, entitlements, impactKeys, tokensByUser };
+  }
+
+  async function loadGlobalEventIntent(message, prefetch = null) {
     if (message.type !== "GLOBAL_EVENT_STARTED" ||
         message.sourceType !== "GLOBAL_STEP_EVENT_ENTITLEMENT") {
       const error = new Error("unsupported notification stream source");
@@ -46,22 +78,16 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
       error.nonRetryable = true;
       throw error;
     }
-    const entitlement = await prisma.globalStepEventEntitlement.findUnique({
+    const entitlement = prefetch ? prefetch.entitlements.get(message.sourceId) : await prisma.globalStepEventEntitlement.findUnique({
       where: { id: message.sourceId },
       include: { event: true },
     });
-    if (!entitlement) return null;
-    if (Number(entitlement.scheduleRevision || 0) !== message.sourceRevision) return null;
-    const current = new Date(now());
-    if (!entitlement.startProcessedAt ||
-        !["ACTIVATED_ON_TIME", "ACTIVATED_LATE_JOIN"].includes(entitlement.startOutcome) ||
-        new Date(entitlement.endsAt) <= current) {
-      return null;
-    }
-    const impact = await prisma.globalEventRaceImpact.findFirst({
-      where: { eventId: entitlement.eventId, userId: entitlement.userId },
-      select: { id: true },
-    });
+    if (!eligible(message, entitlement)) return null;
+    const impact = prefetch ? prefetch.impactKeys.has(`${entitlement.eventId}:${entitlement.userId}`)
+      : await prisma.globalEventRaceImpact.findFirst({
+          where: { eventId: entitlement.eventId, userId: entitlement.userId },
+          select: { id: true },
+        });
     if (!impact) return null;
 
     const multiplier = Number(entitlement.event?.multiplier || 2);
@@ -114,8 +140,10 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
     });
   }
 
-  async function deliver(message) {
-    const intent = await loadGlobalEventIntent(message);
+  async function deliver(message, prefetch = null) {
+    // Batch-local reuse only. Slow batches and retries must read fresh decisions.
+    if (prefetch && new Date(now()).getTime() - prefetch.preparedAt >= PREFETCH_MAX_AGE_MS) prefetch = null;
+    const intent = await loadGlobalEventIntent(message, prefetch);
     if (!intent) return { terminal: true, reason: "INELIGIBLE" };
     const current = new Date(now());
 
@@ -139,7 +167,8 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
     if (!claim || claim.busy) return { terminal: false, reason: "BUSY" };
     if (claim.terminal) return { terminal: true, replay: true };
 
-    const tokens = await DeviceToken.findByUserId(message.recipientUserId);
+    const tokens = prefetch ? (prefetch.tokensByUser.get(message.recipientUserId) || [])
+      : await DeviceToken.findByUserId(message.recipientUserId);
     if (!tokens.length) {
       await prisma.inboxDeliveryOutbox.update({
         where: { id: claim.outbox.id },
@@ -156,7 +185,12 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
 
     const accepted = [];
     let transientFailure = false;
+    let expired = false;
     for (const token of tokens) {
+      if (new Date(message.expiresAt) <= new Date(now()) || new Date(intent.entitlement.endsAt) <= new Date(now())) {
+        expired = true;
+        break;
+      }
       const provider = token.platform === "android" ? fcm : apns;
       const result = await provider.sendNotification({
         deviceToken: token.token,
@@ -194,6 +228,14 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
       return { terminal: true, sent: accepted.length };
     }
 
+    if (expired) {
+      await prisma.inboxDeliveryOutbox.update({
+        where: { id: claim.outbox.id },
+        data: { status: "EXPIRED", leaseUntil: null, leaseToken: null, retryAt: null },
+      });
+      return { terminal: true, sent: 0 };
+    }
+
     if (transientFailure) {
       await prisma.inboxDeliveryOutbox.update({
         where: { id: claim.outbox.id },
@@ -221,10 +263,10 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
     return { terminal: true, sent: 0 };
   }
 
-  async function processEntry(entry) {
+  async function processEntry(entry, prefetch = null) {
     try {
       const message = parseNotificationDelivery(entry.fields);
-      const result = await deliver(message);
+      const result = await deliver(message, prefetch);
       if (result.terminal) {
         await ack(STREAMS.NOTIFICATION_DELIVERY, GROUPS.NOTIFICATION_DELIVERY, entry.id);
       }
@@ -242,10 +284,30 @@ function buildNotificationDeliveryStreamWorker(dependencies = {}) {
     }
   }
 
-  return { processEntry, deliver };
+  async function processEntries(entries, { shouldStop = () => false } = {}) {
+    let completed = 0;
+    for (let offset = 0; offset < entries.length && !shouldStop(); offset += READ_COUNT) {
+      const batch = entries.slice(offset, offset + READ_COUNT);
+      const prefetch = await prefetchBatch(batch);
+      let cursor = 0;
+      async function consume() {
+        while (!shouldStop()) {
+          const index = cursor++;
+          if (index >= batch.length) return;
+          if (await processEntry(batch[index], prefetch)) completed += 1;
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(concurrency, batch.length) }, consume));
+    }
+    return completed;
+  }
+
+  return { processEntries, processEntry, deliver };
 }
 
 function scheduleNotificationDeliveryStreamWorker(dependencies = {}) {
+  const { STREAMS, GROUPS, ensureGroup, reclaimIdle, readGroup, consumerName } =
+    dependencies.queue || require("../../../shared/queues/redisStreams");
   const worker = dependencies.worker || buildNotificationDeliveryStreamWorker(dependencies);
   const logger = dependencies.logger || console;
   const consumer = dependencies.consumer || consumerName("notification-delivery");
@@ -254,6 +316,7 @@ function scheduleNotificationDeliveryStreamWorker(dependencies = {}) {
   let running;
 
   async function processBatch(entries) {
+    if (worker.processEntries) return worker.processEntries(entries, { shouldStop: () => stopped });
     let cursor = 0;
     async function consume() {
       while (!stopped) {
@@ -276,7 +339,7 @@ function scheduleNotificationDeliveryStreamWorker(dependencies = {}) {
           group: GROUPS.NOTIFICATION_DELIVERY,
           consumer,
           minIdleMs: RECLAIM_IDLE_MS,
-          count: 50,
+          count: READ_COUNT,
         });
         if (reclaimed.length) {
           await processBatch(reclaimed);
