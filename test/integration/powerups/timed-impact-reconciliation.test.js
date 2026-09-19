@@ -1,6 +1,13 @@
 const assert = require("node:assert/strict");
+const { randomUUID } = require("node:crypto");
 const { beforeEach, describe, it } = require("node:test");
-const { cleanDatabase, createTestUser, prisma } = require("../setup");
+const {
+  cleanDatabase,
+  createTestUser,
+  getSharedServer,
+  prisma,
+  request,
+} = require("../setup");
 const {
   buildHistoricalRaceReconciliationWorker,
 } = require("../../../src/modules/races/jobs/historicalRaceReconciliation");
@@ -235,4 +242,124 @@ describe("timed impact receipt reconciliation", () => {
     assert.equal(activity.impactValueStatus, "PROVISIONAL");
     assert.equal(activity.wasReconciled, false);
   });
+
+  it("reconciles an active receipt from the real step-sync path", async () => {
+    const wallNow = new Date();
+    const raceStart = new Date(wallNow.getTime() - 4 * 60 * 60 * 1000);
+    const effectStart = new Date(wallNow.getTime() - 2 * 60 * 60 * 1000);
+    const effectEnd = new Date(wallNow.getTime() - 60 * 60 * 1000);
+    const raceEnd = new Date(wallNow.getTime() + 24 * 60 * 60 * 1000);
+    const account = await createTestUser({ displayName: "Real sync impact" });
+    const race = await prisma.race.create({
+      data: {
+        creatorId: account.user.id,
+        name: "Real sync impact reconciliation",
+        targetSteps: 100000,
+        status: "ACTIVE",
+        startedAt: raceStart,
+        endsAt: raceEnd,
+        timezone: "UTC",
+        powerupsEnabled: true,
+        timeBased: true,
+        maxDurationDays: 2,
+      },
+    });
+    const participant = await prisma.raceParticipant.create({
+      data: {
+        raceId: race.id,
+        userId: account.user.id,
+        status: "ACCEPTED",
+        joinedAt: raceStart,
+        totalSteps: 100,
+        rawSteps: 100,
+      },
+    });
+    const powerup = await prisma.racePowerup.create({
+      data: {
+        raceId: race.id,
+        participantId: participant.id,
+        userId: account.user.id,
+        type: "RUNNERS_HIGH",
+        rarity: "RARE",
+        status: "USED",
+      },
+    });
+    const effect = await prisma.raceActiveEffect.create({
+      data: {
+        raceId: race.id,
+        targetParticipantId: participant.id,
+        targetUserId: account.user.id,
+        sourceUserId: account.user.id,
+        powerupId: powerup.id,
+        type: "RUNNERS_HIGH",
+        status: "EXPIRED",
+        startsAt: effectStart,
+        expiresAt: effectEnd,
+        metadata: { multiplier: 2, stepsAtBuffStart: 0 },
+      },
+    });
+    await prisma.raceImpactEvent.create({
+      data: {
+        raceId: race.id,
+        recipientUserId: account.user.id,
+        sourceKind: "ACTIVE_EFFECT",
+        sourceId: effect.id,
+        powerupType: "RUNNERS_HIGH",
+        deltaSteps: 100,
+        description: "Runner’s High wore off. You gained 100 steps.",
+        valueStatus: "SYNCED_SNAPSHOT",
+        calculationVersion: 2,
+        resolvedAt: effectEnd,
+      },
+    });
+
+    const server = await getSharedServer();
+    const response = await request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token: account.token,
+      headers: {
+        "Idempotency-Key": randomUUID(),
+        "X-App-Version": "9.9.9",
+      },
+      body: {
+        date: wallNow.toISOString().slice(0, 10),
+        steps: 1000,
+        samples: [{
+          periodStart: effectStart.toISOString(),
+          periodEnd: effectEnd.toISOString(),
+          steps: 1000,
+        }],
+      },
+    });
+    assert.equal(response.status, 202, await response.text());
+
+    const intent = await prisma.historicalRaceReconciliationIntent.findUniqueOrThrow({
+      where: { raceId_userId: { raceId: race.id, userId: account.user.id } },
+    });
+    assert.equal(intent.status, "QUEUED");
+    assert.ok(intent.changedStart.getTime() <= effectStart.getTime());
+    assert.ok(intent.changedEnd.getTime() >= effectEnd.getTime());
+
+    const result = await worker().runOnce(new Date());
+    assert.equal(result.corrected, 1);
+
+    const [row] = await RaceImpactEvent.listActivity({
+      raceId: race.id,
+      userId: account.user.id,
+      limit: 50,
+    });
+    const activity = activityProjection(row);
+    assert.equal(activity.deltaSteps, 1000);
+    assert.equal(activity.impactValueStatus, "RECONCILED");
+    assert.equal(activity.wasReconciled, true);
+
+    const scoredParticipant = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { id: participant.id },
+    });
+    assert.equal(
+      scoredParticipant.totalSteps,
+      2000,
+      "normal race resolution owns the active leaderboard recompute",
+    );
+  });
+
 });
