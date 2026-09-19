@@ -225,10 +225,32 @@ async function computeHitchhikeCopiedSteps(
   const targetEffects = types.flatMap((type) => byType[type] || []);
   const clippedSamples = {
     async sumStepsInWindow(userId, start, end) {
-      const clippedStart = new Date(Math.max(new Date(start).getTime(), windowStart));
-      const clippedEnd = new Date(Math.min(new Date(end).getTime(), windowEnd));
+      const clippedStart = new Date(
+        Math.max(new Date(start).getTime(), windowStart),
+      );
+      const clippedEnd = new Date(
+        Math.min(new Date(end).getTime(), windowEnd),
+      );
       if (!(clippedEnd > clippedStart)) return 0;
-      return stepSampleModel.sumStepsInWindow(userId, clippedStart, clippedEnd);
+
+      // The scorer already read the exact full Hitchhike window above. When a
+      // modifier spans that whole window (for example Runner's High across the
+      // entire copy interval), reuse that value instead of issuing the same
+      // step_samples aggregate twice. Narrow modifier segments still read their
+      // own exact ranges.
+      if (
+        userId === effect.targetUserId &&
+        clippedStart.getTime() === windowStart &&
+        clippedEnd.getTime() === windowEnd
+      ) {
+        return exactSteps;
+      }
+
+      return stepSampleModel.sumStepsInWindow(
+        userId,
+        clippedStart,
+        clippedEnd,
+      );
     },
   };
   const modifiers = await computeEffectModifiers(
