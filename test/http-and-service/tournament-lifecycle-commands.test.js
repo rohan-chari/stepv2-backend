@@ -218,6 +218,17 @@ describe("tournament lifecycle commands — kick / invite / share-link / forfeit
 
     const row = await participantRow(t.id, e.userId);
     assert.equal(row.status, "INVITED");
+
+    assert.equal(
+      await prisma.domainEventOutbox.count({
+        where: {
+          eventType: "TOURNAMENT_INVITE_SENT_V1",
+          aggregateId: t.id,
+        },
+      }),
+      1,
+      "TOURNAMENT_INVITE_SENT_V1 is appended by the real invite request path",
+    );
   });
 
   it("invite partial success: skips non-friends/already-in/self silently, reports featureless friends in needsUpdate", async () => {
