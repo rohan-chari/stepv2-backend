@@ -3,24 +3,25 @@ const {AppError}=require('../../../shared/errors/AppError');
 const {awardCoins}=require('../../../shared/economy/awardCoins');
 const {deductCoinsAtomic}=require('../../../shared/economy/deductCoinsAtomic');
 const {PRODUCTS,GOLD_BENEFIT_VERSION,productForPurchase}=require('../catalog');
+const {isBillingEnvironmentAllowed}=require('../services/billingEnvironmentPolicy');
 const error=(message,code='BILLING_UNAVAILABLE',status=503)=>new AppError(message,code,status);
 const keyFor=(config,p)=>JSON.stringify([config.projectId,p.appId,p.store,p.environment,p.transactionId]);
 const instant=(v)=>{const d=new Date(v);if(v==null||!Number.isFinite(d.getTime()))throw error('Invalid verified billing date');return d;};
-function validatePurchase(config,identity,p){
+function validatePurchase(config,identity,p,allowSandboxForProduction=false){
  const product=PRODUCTS.find(item=>item.id===p.productId),app=p.store==='app_store'?config.iosAppId:p.store==='play_store'?config.androidAppId:null;
  if(!product||!app||p.appId!==app||typeof p.transactionId!=='string'||!p.transactionId||p.transactionId.length>256||!Number.isSafeInteger(p.quantity)||p.quantity<1||!Number.isSafeInteger(product.coins*p.quantity)||['subscription','non_consumable'].includes(product.kind)&&p.quantity!==1)throw error('Unrecognized verified purchase');
- if(p.environment!==identity.environment)throw error('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
+ if(!isBillingEnvironmentAllowed({identityEnvironment:identity.environment,purchaseEnvironment:p.environment,allowSandboxForProduction}))throw error('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
  if(product.kind==='non_consumable'&&(typeof p.purchaseStatus!=='string'||!p.purchaseStatus))throw error('Missing verified non-consumable state');
  instant(p.purchasedAt);if(p.expiresAt)instant(p.expiresAt);return product;
 }
-function refundSignal(config,identity,inbox){
+function refundSignal(config,identity,inbox,allowSandboxForProduction=false){
  const e=inbox.payload?.event;if(!e||e.app_user_id!==identity.id)return null;
  const refunded=e.type==='CANCELLATION'&&e.cancel_reason==='CUSTOMER_SUPPORT';const reversed=e.type==='REFUND_REVERSED';
  if(!refunded&&!reversed)return null;
  const store=e.store==='APP_STORE'?'app_store':e.store==='PLAY_STORE'?'play_store':null;
  const environment=String(e.environment||'').toLowerCase(),appId=e.app_id;
  const platform=store==='app_store'?'ios':store==='play_store'?'android':null;
- if(!platform||appId!==config[`${platform}AppId`]||environment!==identity.environment||!PRODUCTS.some(p=>p[platform]===e.product_id||(inbox.payload.source==='revenuecat_transactions_export'&&platform==='android'&&p[platform].split(':')[0]===e.product_id))||typeof e.transaction_id!=='string'||!Number.isFinite(e.event_timestamp_ms))return null;
+ if(!platform||appId!==config[`${platform}AppId`]||!isBillingEnvironmentAllowed({identityEnvironment:identity.environment,purchaseEnvironment:environment,allowSandboxForProduction})||!PRODUCTS.some(p=>p[platform]===e.product_id||(inbox.payload.source==='revenuecat_transactions_export'&&platform==='android'&&p[platform].split(':')[0]===e.product_id))||typeof e.transaction_id!=='string'||!Number.isFinite(e.event_timestamp_ms))return null;
  return {key:keyFor(config,{appId,store,environment,transactionId:e.transaction_id}),refunded,observedAt:new Date(e.event_timestamp_ms),at:new Date(Number.isFinite(e.refunded_at_ms)?e.refunded_at_ms:e.event_timestamp_ms),source:inbox.id,storeProductId:e.product_id,exported:inbox.payload.source==='revenuecat_transactions_export'};
 }
 async function claimLease(db,identityId){
@@ -97,9 +98,9 @@ async function grantCosmetics(tx,identity,now=new Date(),verifiedPermanentIds=[]
   await tx.userShopItem.upsert({where:{userId_shopItemId:{userId:identity.userId,shopItemId:item.id}},create:{userId:identity.userId,shopItemId:item.id},update:{}});
  }
 }
-async function applyHistory({db,config,identity,token,history}){
+async function applyHistory({db,config,identity,token,history,allowSandboxForProduction=false}){
  if(!Array.isArray(history.purchases)||!Array.isArray(history.subscriptions))throw error('Invalid verified billing history');
- for(const p of history.purchases)validatePurchase(config,identity,p);
+ for(const p of history.purchases)validatePurchase(config,identity,p,allowSandboxForProduction);
  const observedAt=instant(history.observedAt);
  return db.$transaction(async tx=>{
   await tx.$queryRawUnsafe('SELECT identity_id FROM billing_reconciliation WHERE identity_id = $1 FOR UPDATE',identity.id);
@@ -110,10 +111,10 @@ async function applyHistory({db,config,identity,token,history}){
   if(!current||current.deletedAt||!user)throw error('Billing account was deleted','PURCHASE_ACCOUNT_MISMATCH',409);
   if(current.environment!==identity.environment||(user.billingRealm||'production')!==current.environment)throw error('Account billing realm mismatch','BILLING_REALM_MISMATCH',409);
   const inbox=await tx.billingInbox.findMany({where:{identityId:identity.id,processedAt:null},orderBy:{createdAt:'asc'}});
-  const signals=inbox.map(i=>refundSignal(config,identity,i)).filter(Boolean).sort((a,b)=>a.observedAt-b.observedAt);
+  const signals=inbox.map(i=>refundSignal(config,identity,i,allowSandboxForProduction)).filter(Boolean).sort((a,b)=>a.observedAt-b.observedAt);
   const latestSignals=new Map(signals.map(s=>[s.key,s]));
   for(const p of history.purchases){
-   const product=validatePurchase(config,identity,p),canonicalKey=keyFor(config,p),gold=isGoldPurchase(product,p),direct=isDirectCharacterProduct(product);
+   const product=validatePurchase(config,identity,p,allowSandboxForProduction),canonicalKey=keyFor(config,p),gold=isGoldPurchase(product,p),direct=isDirectCharacterProduct(product);
    let receipt=await tx.billingPurchase.findUnique({where:{canonicalKey}});
    if(receipt&&receipt.identityId!==identity.id){
     // A RevenueCat sandbox transfer can bring a complete StoreKit history to
@@ -161,7 +162,7 @@ async function applyHistory({db,config,identity,token,history}){
    if(receipt&&!receipt.refundedAt&&receipt.refundCount>0&&receipt.refundObservedAt&&(!receipt.effectiveExpiresAt||instant(p.effectiveExpiresAt)>receipt.effectiveExpiresAt))await tx.billingPurchase.update({where:{id:receipt.id},data:{effectiveExpiresAt:instant(p.effectiveExpiresAt)}});
   }
   for(const s of history.subscriptions){
-   validatePurchase(config,identity,{...s,transactionId:s.providerId,quantity:1,purchasedAt:s.startsAt});
+   validatePurchase(config,identity,{...s,transactionId:s.providerId,quantity:1,purchasedAt:s.startsAt},allowSandboxForProduction);
    const id=JSON.stringify([config.projectId,s.appId,s.store,s.environment,s.providerId]);
    const existing=await tx.billingSubscription.findUnique({where:{id}});
    // Sandbox receipt transfers retain historical subscription provenance. Do
@@ -178,7 +179,7 @@ async function applyHistory({db,config,identity,token,history}){
   const permanent=await require('./permanentState').syncPermanent({tx,identity,history,observedAt});
   await grantCosmetics(tx,identity,new Date(),permanent.verifiedPurchaseIds);
   // Unknown refund transactions remain retryable until complete history sees them.
-  for(const item of inbox){const signal=refundSignal(config,identity,item);if(signal&&!await tx.billingPurchase.findUnique({where:{canonicalKey:signal.key}}))continue;await tx.billingInbox.update({where:{id:item.id},data:{processedAt:new Date()}});}
+  for(const item of inbox){const signal=refundSignal(config,identity,item,allowSandboxForProduction);if(signal&&!await tx.billingPurchase.findUnique({where:{canonicalKey:signal.key}}))continue;await tx.billingInbox.update({where:{id:item.id},data:{processedAt:new Date()}});}
   return {complete:!permanent.verificationDeferred,verificationDeferred:permanent.verificationDeferred};
  },{maxWait:10000,timeout:30000});
 }
