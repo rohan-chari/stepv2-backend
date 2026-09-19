@@ -86,3 +86,24 @@ it('verifies permanent ownership with strict state, quantity and finite numeric 
  row.status=null;await assert.rejects(provider().getCustomerHistory({id:'identity',environment:'production'}),/status/i);
  row.status='owned';row.quantity=2;await assert.rejects(provider().getCustomerHistory({id:'identity',environment:'production'}),/quantity/i);
 });
+
+
+it('includes TestFlight sandbox purchases for an authorized production identity only',async()=>{
+ const row={id:'sandbox-purchase',customer_id:'identity',original_customer_id:'identity',product_id:'coin',purchased_at:1000,quantity:1,status:'owned',store:'app_store',environment:'sandbox',store_purchase_identifier:'sandbox-store',ownership:'purchased',revenue_in_usd:{gross:0.99}};
+ const fetch=async url=>{const path=new URL(url).pathname;let body;
+  if(path.endsWith('/products/coin'))body={id:'coin',app_id:'app_ios',store_identifier:'bara_coins_500_v1'};
+  else if(path.endsWith('/subscriptions'))body={items:[],next_page:null};
+  else body={items:[row],next_page:null};
+  return new Response(JSON.stringify(body));
+ };
+ const provider=createRevenueCatProvider({config,fetch});
+ const denied=await provider.getCustomerHistory({id:'identity',environment:'production'});
+ assert.equal(denied.purchases.length,0);
+ const allowed=await provider.getCustomerHistory(
+  {id:'identity',environment:'production'},
+  {allowSandboxForProduction:true},
+ );
+ assert.equal(allowed.purchases.length,1);
+ assert.equal(allowed.purchases[0].environment,'sandbox');
+ assert.equal(allowed.purchases[0].transactionId,'sandbox-store');
+});
