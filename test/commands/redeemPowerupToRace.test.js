@@ -27,6 +27,7 @@ function makeDeps(overrides = {}) {
     participants: overrides.participants || [
       { id: "rp-1", userId: "user-1", status: "ACCEPTED" },
     ],
+    raceEffects: overrides.raceEffects || [],
   };
   const calls = { decrements: [], created: [] };
 
@@ -38,8 +39,22 @@ function makeDeps(overrides = {}) {
         return {
           id: "race-1",
           status: state.raceStatus,
+          isTeamRace: overrides.isTeamRace === true,
           participants: state.participants,
         };
+      },
+    },
+    RaceActiveEffect: {
+      async findActiveByTypeForParticipant(participantId, type) {
+        return state.raceEffects.find(
+          (effect) =>
+            effect.targetParticipantId === participantId &&
+            effect.type === type &&
+            effect.status !== "EXPIRED",
+        ) || null;
+      },
+      async findActiveForRace() {
+        return state.raceEffects;
       },
     },
     UserPowerupItem: {
@@ -123,5 +138,51 @@ test("redeem rejects when the user is not an accepted participant", async () => 
       redeem({ userId: "user-1", raceId: "race-1", powerupType: "HITCHHIKE" }),
     (err) => err instanceof RedeemPowerupError
   );
+  assert.equal(deps.calls.created.length, 0);
+});
+
+test("redeem Rainstorm keeps stash inventory when every eligible rival is already wet", async () => {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+  const deps = makeDeps({
+    quantity: 1,
+    participants: [
+      { id: "rp-1", userId: "user-1", status: "ACCEPTED" },
+      { id: "rp-2", userId: "user-2", status: "ACCEPTED" },
+      { id: "rp-3", userId: "user-3", status: "ACCEPTED" },
+    ],
+    raceEffects: [
+      {
+        id: "wet-2",
+        type: "RAINSTORM",
+        status: "ACTIVE",
+        sourceUserId: "other-a",
+        targetParticipantId: "rp-2",
+        expiresAt,
+      },
+      {
+        id: "wet-3",
+        type: "RAINSTORM",
+        status: "ACTIVE",
+        sourceUserId: "other-b",
+        targetParticipantId: "rp-3",
+        expiresAt,
+      },
+    ],
+  });
+  const redeem = buildRedeemPowerupToRace(deps);
+
+  await assert.rejects(
+    () =>
+      redeem({
+        userId: "user-1",
+        raceId: "race-1",
+        powerupType: "RAINSTORM",
+      }),
+    (error) =>
+      error instanceof RedeemPowerupError &&
+      error.code === "NO_ELIGIBLE_TARGETS",
+  );
+
+  assert.equal(deps.state.quantity, 1);
   assert.equal(deps.calls.created.length, 0);
 });
