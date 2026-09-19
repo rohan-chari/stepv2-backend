@@ -1,6 +1,7 @@
 const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
-const { RacePowerup } = require("../../powerups/models/racePowerup");\nconst { isStealablePowerup } = require("../../powerups/services/powerupStealability");
+const { RacePowerup } = require("../../powerups/models/racePowerup");
+const { isStealablePowerup } = require("../../powerups/services/powerupStealability");
 
 function routeError(message, statusCode) {
   const error = new Error(message);
