@@ -592,7 +592,7 @@ describe("historical late event-time effect reconciliation", () => {
         status: "USED",
       },
     });
-    await prisma.raceActiveEffect.create({
+    const runnerHigh = await prisma.raceActiveEffect.create({
       data: {
         raceId: caster.race.id,
         targetParticipantId: targetParticipant.id,
@@ -635,7 +635,26 @@ describe("historical late event-time effect reconciliation", () => {
     await enqueue(targetData, startsAt, expiresAt, 2);
 
     const result = await worker().runOnce();
-    assert.equal(result.corrected, 1);
+    assert.equal(
+      result.corrected,
+      2,
+      "late samples correct both the target's Runner's High and the caster's Hitchhike",
+    );
+
+    assert.equal(
+      (await prisma.raceParticipant.findUniqueOrThrow({
+        where: { id: targetParticipant.id },
+      })).totalSteps,
+      19_930,
+      "target receives their own +9,965 Runner's High correction",
+    );
+    assert.equal(
+      await prisma.historicalEffectCorrection.count({
+        where: { effectId: runnerHigh.id },
+      }),
+      1,
+      "Runner's High correction is audited once",
+    );
 
     const projection = await prisma.historicalEffectContribution.findUniqueOrThrow({
       where: {
@@ -671,12 +690,23 @@ describe("historical late event-time effect reconciliation", () => {
     assert.equal(retry.noop, 1);
     assert.equal(
       (await prisma.raceParticipant.findUniqueOrThrow({
+        where: { id: targetParticipant.id },
+      })).totalSteps,
+      19_930,
+      "retry must not apply Runner's High twice",
+    );
+    assert.equal(
+      (await prisma.raceParticipant.findUniqueOrThrow({
         where: { id: caster.participant.id },
       })).totalSteps,
       10_965,
+      "retry must not apply Hitchhike twice",
     );
     assert.equal(await prisma.historicalEffectCorrection.count({
       where: { effectId: hitchhike.id },
+    }), 1);
+    assert.equal(await prisma.historicalEffectCorrection.count({
+      where: { effectId: runnerHigh.id },
     }), 1);
   });
 
