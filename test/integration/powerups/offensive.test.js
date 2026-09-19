@@ -244,55 +244,77 @@ describe("B4 — per-caster rainstorm limit + 0.5x stacking clamp", () => {
     assert.equal(bobRedeem.status, 200, "per-caster: B can redeem while A's storm is active");
   });
 
-  it("a victim under TWO storms scores at exactly 0.5x (not 0.25x)", async () => {
+  it("a later Rainstorm skips an already-wet victim without extending their 0.5x window", async () => {
     await seedStoreCatalog();
     const alice = await createUser("AliceB4d");
     const bob = await createUser("BobB4d");
-    const carol = await createUser("CarolB4d"); // the victim
+    const carol = await createUser("CarolB4d"); // already-wet victim
     await makeFriends(alice, bob);
     await makeFriends(alice, carol);
     const raceId = await createActiveRace(alice, [bob, carol]);
 
-    // Alice and Bob both cast — Carol is hit by both storms.
     const a = await castRainstorm(alice, raceId, "b4d-alice");
     const aStorm = (await a.redeemRes.json()).result.powerup.id;
     assert.equal((await usePowerup(alice.token, raceId, aStorm)).status, 200);
+
+    const carolP = await prisma.raceParticipant.findFirst({
+      where: { raceId, userId: carol.userId },
+    });
+    const before = await prisma.raceActiveEffect.findMany({
+      where: {
+        raceId,
+        type: "RAINSTORM",
+        targetParticipantId: carolP.id,
+        status: "ACTIVE",
+      },
+    });
+    assert.equal(before.length, 1, "Alice's storm wets Carol exactly once");
+    const originalCarolStorm = before[0];
+
+    // Bob may still cast because Alice is dry. Carol is already wet, so Bob's
+    // fan-out must skip her instead of extending her existing penalty window.
     const b = await castRainstorm(bob, raceId, "b4d-bob");
     const bStorm = (await b.redeemRes.json()).result.powerup.id;
     assert.equal((await usePowerup(bob.token, raceId, bStorm)).status, 200);
 
-    // Sanity: Carol has two active RAINSTORM effects.
-    const carolP = await prisma.raceParticipant.findFirst({
-      where: { raceId, userId: carol.userId },
+    const after = await prisma.raceActiveEffect.findMany({
+      where: {
+        raceId,
+        type: "RAINSTORM",
+        targetParticipantId: carolP.id,
+        status: "ACTIVE",
+      },
     });
-    const carolStorms = await prisma.raceActiveEffect.findMany({
-      where: { raceId, type: "RAINSTORM", targetParticipantId: carolP.id, status: "ACTIVE" },
-    });
-    assert.equal(carolStorms.length, 2, "victim is under two storms");
+    assert.equal(after.length, 1, "already-wet victim receives no second storm");
+    assert.equal(after[0].id, originalCarolStorm.id);
+    assert.equal(
+      new Date(after[0].expiresAt).getTime(),
+      new Date(originalCarolStorm.expiresAt).getTime(),
+      "later caster must not extend the original Rainstorm expiry",
+    );
 
-    // Anchor both storms to a fixed past window so Carol's sample lands inside.
+    // Anchor Carol's ONE storm to a fixed window so her sample lands inside.
     const windowStart = minutesAgo(40);
     const windowEnd = new Date(Date.now() + 20 * 60 * 1000);
-    for (const s of carolStorms) {
-      await prisma.raceActiveEffect.update({
-        where: { id: s.id },
-        data: { startsAt: windowStart, expiresAt: windowEnd },
-      });
-    }
+    await prisma.raceActiveEffect.update({
+      where: { id: originalCarolStorm.id },
+      data: { startsAt: windowStart, expiresAt: windowEnd },
+    });
 
-    // Carol walks 1000 steps entirely within the storm window.
     await recordSamples(carol.token, [
-      { periodStart: minutesAgo(30).toISOString(), periodEnd: minutesAgo(20).toISOString(), steps: 1000 },
+      {
+        periodStart: minutesAgo(30).toISOString(),
+        periodEnd: minutesAgo(20).toISOString(),
+        steps: 1000,
+      },
     ]);
 
     const progress = await getProgress(carol.token, raceId);
     const carolProg = findUser(progress, carol.userId);
-    // Single 0.5x: 1000 - round(1000 * 0.5) = 500. Double-application would be
-    // 1000 - (500 + 500) = 0.
     assert.equal(
       carolProg.totalSteps,
       500,
-      "overlapping storms clamp the victim at a single 0.5x"
+      "the original Rainstorm still applies exactly one 0.5x penalty",
     );
   });
 });
