@@ -1,5 +1,10 @@
 const DEFAULT_CORRECTION_HORIZON_DAYS = 45;
 const MAX_DISCOVERY_LIMIT = 100;
+const RECONCILABLE_EFFECT_TYPES = Object.freeze([
+  "RUNNERS_HIGH", "WRONG_TURN", "LEG_CRAMP", "QUICKSAND", "RAINSTORM",
+  "CAMPFIRE_REST", "UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER",
+  "HITCHHIKE",
+]);
 
 function correctionHorizonDays() {
   const configured = Number(process.env.STEP_CORRECTION_HORIZON_DAYS);
@@ -38,10 +43,21 @@ function buildHistoricalRaceDiscovery({ prisma, now = () => new Date() }) {
           AND race.started_at < $3::timestamp
           AND COALESCE(race.ends_at,race.started_at) > $2::timestamp
           AND (race.status='active' OR COALESCE(race.completed_at,race.ends_at,race.started_at) >= $4::timestamp)
+          AND EXISTS (
+            SELECT 1
+              FROM race_active_effects effect
+             WHERE effect.race_id=race.id
+               AND effect.target_participant_id=participant.id
+               AND effect.type = ANY($8::text[])
+               AND effect.starts_at < $3::timestamp
+               AND effect.expires_at IS NOT NULL
+               AND effect.expires_at > $2::timestamp
+          )
           AND ($5::text IS NULL OR (race.id,participant.id) > ($5::text,$6::text))
         ORDER BY race.id, participant.id
         LIMIT $7`,
-      userId, start, end, through, cursor?.raceId || null, cursor?.participantId || null, boundedLimit,
+      userId, start, end, through, cursor?.raceId || null, cursor?.participantId || null,
+      boundedLimit, RECONCILABLE_EFFECT_TYPES,
     );
     const last = rows.length === boundedLimit ? rows[rows.length - 1] : null;
     return {
@@ -57,5 +73,6 @@ module.exports = {
   MAX_DISCOVERY_LIMIT,
   correctionHorizonDays,
   correctionThrough,
+  RECONCILABLE_EFFECT_TYPES,
   buildHistoricalRaceDiscovery,
 };
