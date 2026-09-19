@@ -1,8 +1,6 @@
-const { prisma: defaultPrisma } = require("../../../db");
-const { scheduleEntitlements } = require("../services/globalEventRedisSchedule");
-
 async function hydrateGlobalEventRedisSchedule({
-  prisma = defaultPrisma,
+  prisma = require("../../../db").prisma,
+  scheduleEntitlements = require("../services/globalEventRedisSchedule").scheduleEntitlements,
   now = new Date(),
   horizonEnd = new Date(new Date(now).getTime() + 72 * 60 * 60 * 1000),
   batchSize = 500,
@@ -25,7 +23,8 @@ async function hydrateGlobalEventRedisSchedule({
           },
           {
             endProcessedAt: null,
-            endsAt: { gt: current, lte: horizon },
+            // Pending ENDs remain recoverable after their timestamp passes.
+            endsAt: { lte: horizon },
           },
         ],
       },
@@ -42,29 +41,15 @@ async function hydrateGlobalEventRedisSchedule({
     });
     if (!rows.length) break;
 
-    const boundaries = [];
-    for (const row of rows) {
-      // scheduleEntitlements writes both edges. Keeping already-processed edges
-      // in the sorted set would create harmless duplicate work, so only hydrate
-      // rows whose START is still pending. END-only recovery is written directly
-      // below.
-      if (!row.startProcessedAt) {
-        boundaries.push(row);
-      } else if (!row.endProcessedAt && new Date(row.endsAt) <= horizon) {
-        // For an already-started entitlement, add only END.
-        const { withCommandClient } = require("../../../shared/queues/redisStreams");
-        const { scheduleKey, boundaryMember } = require("../services/globalEventRedisSchedule");
-        await withCommandClient((redis) => redis.zadd(
-          scheduleKey(),
-          new Date(row.endsAt).getTime(),
-          boundaryMember("END", row),
-        ));
-        scheduled += 1;
-      }
+    const starts = rows.filter((row) => !row.startProcessedAt);
+    const ends = rows.filter((row) => row.startProcessedAt && !row.endProcessedAt);
+    if (ends.length) {
+      await scheduleEntitlements(ends, { start: false });
+      scheduled += ends.length;
     }
-    if (boundaries.length) {
-      await scheduleEntitlements(boundaries);
-      scheduled += boundaries.length * 2;
+    if (starts.length) {
+      await scheduleEntitlements(starts);
+      scheduled += starts.length * 2;
     }
     cursor = rows.at(-1).id;
     if (rows.length < take) break;
