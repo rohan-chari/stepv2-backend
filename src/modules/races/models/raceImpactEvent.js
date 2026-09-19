@@ -52,11 +52,13 @@ function popupProjection(row) {
       typeof row.sourceFeedEventId === "string" ? row.sourceFeedEventId : null,
     impactScope: "ACTIVE_SYNCED_SNAPSHOT",
     valueStatus: VALUE_STATUS,
-    impactValueStatus: row.impactValueStatus || "PROVISIONAL",
-    wasReconciled: row.wasReconciled === true,
-    reconciledAt: row.reconciledAt instanceof Date ? row.reconciledAt : null,
-    displayDescription:
-      typeof row.displayDescription === "string" ? row.displayDescription : null,
+    ...(typeof row.impactValueStatus === "string" ? {
+      impactValueStatus: row.impactValueStatus,
+      wasReconciled: row.wasReconciled === true,
+      reconciledAt: row.reconciledAt instanceof Date ? row.reconciledAt : null,
+      displayDescription:
+        typeof row.displayDescription === "string" ? row.displayDescription : null,
+    } : {}),
     resolvedAt: row.resolvedAt,
   };
 }
@@ -74,10 +76,12 @@ function activityProjection(row) {
     sourceFeedEventId: popup.sourceFeedEventId,
     impactScope: popup.impactScope,
     valueStatus: popup.valueStatus,
-    impactValueStatus: popup.impactValueStatus,
-    wasReconciled: popup.wasReconciled,
-    reconciledAt: popup.reconciledAt,
-    displayDescription: popup.displayDescription,
+    ...(typeof popup.impactValueStatus === "string" ? {
+      impactValueStatus: popup.impactValueStatus,
+      wasReconciled: popup.wasReconciled,
+      reconciledAt: popup.reconciledAt,
+      displayDescription: popup.displayDescription,
+    } : {}),
     createdAt: popup.resolvedAt,
   };
 }
@@ -257,7 +261,13 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
       });
     },
 
-    async listUnacknowledged({ raceId, userId, limit = 20, resolvedAfter = null }, client = prisma) {
+    async listUnacknowledged({
+      raceId,
+      userId,
+      limit = 20,
+      resolvedAfter = null,
+      reconciliationEnabled = false,
+    }, client = prisma) {
       const rows = await client.raceImpactEvent.findMany({
         where: {
           raceId,
@@ -271,10 +281,18 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
         orderBy: [{ resolvedAt: "asc" }, { id: "asc" }],
         take: Math.min(20, Math.max(1, Number(limit) || 20)),
       });
-      return overlayReconciledImpactRows(rows, { raceId, userId }, client);
+      return reconciliationEnabled
+        ? overlayReconciledImpactRows(rows, { raceId, userId }, client)
+        : rows;
     },
 
-    async listActivity({ raceId, userId, cursor = null, limit = 50 }, client = prisma) {
+    async listActivity({
+      raceId,
+      userId,
+      cursor = null,
+      limit = 50,
+      reconciliationEnabled = false,
+    }, client = prisma) {
       const rows = await client.raceImpactEvent.findMany({
         where: {
           raceId,
@@ -290,7 +308,9 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
         orderBy: [{ resolvedAt: "desc" }, { id: "desc" }],
         take: Math.min(50, Math.max(1, Number(limit) || 50)) + 1,
       });
-      return overlayReconciledImpactRows(rows, { raceId, userId }, client);
+      return reconciliationEnabled
+        ? overlayReconciledImpactRows(rows, { raceId, userId }, client)
+        : rows;
     },
 
     async findOwn({ raceId, userId, id }, client = prisma) {
