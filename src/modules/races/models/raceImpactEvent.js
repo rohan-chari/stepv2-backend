@@ -30,7 +30,8 @@ function isValidEvent(row) {
     row &&
       presentationId(row.id) &&
       typeof row.powerupType === "string" && row.powerupType.length > 0 &&
-      Number.isInteger(row.deltaSteps) && row.deltaSteps !== 0 &&
+      Number.isInteger(row.deltaSteps) &&
+      (row.deltaSteps !== 0 || row.impactValueStatus === "RECONCILED") &&
       typeof row.description === "string" && row.description.trim().length > 0 &&
       row.valueStatus === VALUE_STATUS &&
       row.calculationVersion === CALCULATION_VERSION &&
@@ -142,31 +143,22 @@ async function overlayReconciledImpactRows(rows, { raceId, userId }, client) {
   )];
   if (effectIds.length === 0) return rows;
 
-  const [projections, corrections] = await Promise.all([
-    client.historicalEffectContribution.findMany({
-      where: {
-        raceId,
-        userId,
-        effectId: { in: effectIds },
-        calculationVersion: 1,
-      },
-      select: { effectId: true, currentDeltaSteps: true },
-    }),
-    client.historicalEffectCorrection.findMany({
-      where: { raceId, userId, effectId: { in: effectIds }, calculationVersion: 1 },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { effectId: true, createdAt: true },
-    }),
-  ]);
+  const projections = await client.historicalEffectContribution.findMany({
+    where: {
+      raceId,
+      userId,
+      effectId: { in: effectIds },
+      calculationVersion: 1,
+    },
+    select: {
+      effectId: true,
+      currentDeltaSteps: true,
+      updatedAt: true,
+    },
+  });
   const projectionByEffectId = new Map(
     projections.map((row) => [row.effectId, row]),
   );
-  const reconciledAtByEffectId = new Map();
-  for (const correction of corrections) {
-    if (!reconciledAtByEffectId.has(correction.effectId)) {
-      reconciledAtByEffectId.set(correction.effectId, correction.createdAt);
-    }
-  }
 
   return rows.map((row) => {
     const reconcilable =
@@ -183,8 +175,8 @@ async function overlayReconciledImpactRows(rows, { raceId, userId }, client) {
       deltaSteps,
       impactValueStatus: reconciled ? "RECONCILED" : "PROVISIONAL",
       wasReconciled: reconciled,
-      reconciledAt: reconciled
-        ? (reconciledAtByEffectId.get(row.sourceId) || null)
+      reconciledAt: reconciled && projection.updatedAt instanceof Date
+        ? projection.updatedAt
         : null,
       displayDescription: impactDisplayDescription(row.powerupType, deltaSteps, reconciled),
     };
