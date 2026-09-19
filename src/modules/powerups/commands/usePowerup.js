@@ -89,6 +89,7 @@ const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence")
 const {
   shouldSkipRedirectedDuplicate,
 } = require("../constants/powerupPolicy");
+const { UNSTEALABLE_TYPES } = require("../services/powerupStealability");
 
 async function applyImmediatePenalty(
   participantModel,
