@@ -3101,7 +3101,7 @@ function buildUsePowerup(dependencies = {}) {
       // mutual-swap flow — both are deliberately ignored, so a legacy client
       // can never lose its own powerup here.
       const targetHeld = await powerupModel.findHeldByParticipant(targetParticipant.id);
-      const stealable = targetHeld.filter((p) => !UNSTEALABLE_TYPES.includes(p.type));
+      const stealable = targetHeld.filter((p) => !UNSTEALABLE_TYPES.has(p.type));
       if (stealable.length === 0) {
         throw new PowerupUseError("Target has no powerup to steal", 400);
       }
