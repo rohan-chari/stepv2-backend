@@ -2492,7 +2492,7 @@ function buildUsePowerup(dependencies = {}) {
         for (const consumption of decoyConsumptions) {
           await rebaseDecoyUsageCooldownOnConsume({
             usageStateModel,
-            db,
+            db: transactionDb,
             raceId,
             ownerUserId: consumption.ownerParticipant.userId,
             sourcePowerupId: consumption.decoy.powerupId,
