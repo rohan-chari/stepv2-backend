@@ -44,7 +44,7 @@ function buildHistoricalRaceReconciliationIntentModel(prisma) {
          SELECT historical_race_reconciliation_intents.id FROM historical_race_reconciliation_intents
            JOIN races r ON r.id=historical_race_reconciliation_intents.race_id
            WHERE historical_race_reconciliation_intents.phase2_eligible=true
-             AND r.status='completed'
+             AND r.status IN ('active','completed')
              AND (historical_race_reconciliation_intents.status='queued' OR (historical_race_reconciliation_intents.status='running' AND historical_race_reconciliation_intents.lease_expires_at <= $1))
              AND historical_race_reconciliation_intents.available_at <= $1 AND historical_race_reconciliation_intents.attempt_count < $3
            ORDER BY historical_race_reconciliation_intents.available_at,historical_race_reconciliation_intents.id LIMIT $2 FOR UPDATE SKIP LOCKED

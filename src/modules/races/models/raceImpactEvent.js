@@ -4,6 +4,11 @@ const { POWERUP_NAMES } = require("../../powerups/commands/rollPowerup");
 const CALCULATION_VERSION = 2;
 const VALUE_STATUS = "SYNCED_SNAPSHOT";
 const PRESENTATION_PREFIX = "impact:";
+const RECONCILABLE_TIMED_IMPACT_TYPES = new Set([
+  "RUNNERS_HIGH", "WRONG_TURN", "LEG_CRAMP", "QUICKSAND", "RAINSTORM",
+  "CAMPFIRE_REST", "UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER",
+  "HITCHHIKE",
+]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function presentationId(id) {
@@ -25,7 +30,8 @@ function isValidEvent(row) {
     row &&
       presentationId(row.id) &&
       typeof row.powerupType === "string" && row.powerupType.length > 0 &&
-      Number.isInteger(row.deltaSteps) && row.deltaSteps !== 0 &&
+      Number.isInteger(row.deltaSteps) &&
+      (row.deltaSteps !== 0 || row.impactValueStatus === "RECONCILED") &&
       typeof row.description === "string" && row.description.trim().length > 0 &&
       row.valueStatus === VALUE_STATUS &&
       row.calculationVersion === CALCULATION_VERSION &&
@@ -52,6 +58,13 @@ function popupProjection(row) {
       typeof row.sourceFeedEventId === "string" ? row.sourceFeedEventId : null,
     impactScope: "ACTIVE_SYNCED_SNAPSHOT",
     valueStatus: VALUE_STATUS,
+    ...(typeof row.impactValueStatus === "string" ? {
+      impactValueStatus: row.impactValueStatus,
+      wasReconciled: row.wasReconciled === true,
+      reconciledAt: row.reconciledAt instanceof Date ? row.reconciledAt : null,
+      displayDescription:
+        typeof row.displayDescription === "string" ? row.displayDescription : null,
+    } : {}),
     resolvedAt: row.resolvedAt,
   };
 }
@@ -69,6 +82,12 @@ function activityProjection(row) {
     sourceFeedEventId: popup.sourceFeedEventId,
     impactScope: popup.impactScope,
     valueStatus: popup.valueStatus,
+    ...(typeof popup.impactValueStatus === "string" ? {
+      impactValueStatus: popup.impactValueStatus,
+      wasReconciled: popup.wasReconciled,
+      reconciledAt: popup.reconciledAt,
+      displayDescription: popup.displayDescription,
+    } : {}),
     createdAt: popup.resolvedAt,
   };
 }
@@ -95,6 +114,73 @@ function naturalExpiryImpactDescription(powerupType, deltaSteps) {
     .join(" ");
   const amount = Math.abs(deltaSteps).toLocaleString("en-US");
   return `${title} wore off. You ${deltaSteps > 0 ? "gained" : "lost"} ${amount} steps.`;
+}
+
+function impactDisplayDescription(powerupType, deltaSteps, reconciled) {
+  const title = POWERUP_NAMES[powerupType] || String(powerupType || "Effect")
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+  const sign = deltaSteps > 0 ? "+" : deltaSteps < 0 ? "−" : "";
+  const amount = Math.abs(deltaSteps).toLocaleString("en-US");
+  return reconciled
+    ? `${title} ${sign}${amount} steps. Updated after step sync.`
+    : `${title} ${sign}${amount} steps so far. This may update as your steps sync.`;
+}
+
+async function overlayReconciledImpactRows(rows, { raceId, userId }, client) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows || [];
+  const effectIds = [...new Set(
+    rows
+      .filter((row) =>
+        row?.sourceKind === "ACTIVE_EFFECT" &&
+        RECONCILABLE_TIMED_IMPACT_TYPES.has(row.powerupType) &&
+        typeof row.sourceId === "string"
+      )
+      .map((row) => row.sourceId),
+  )];
+  if (effectIds.length === 0) return rows;
+
+  const projections = await client.historicalEffectContribution.findMany({
+    where: {
+      raceId,
+      userId,
+      effectId: { in: effectIds },
+      calculationVersion: 1,
+    },
+    select: {
+      effectId: true,
+      currentDeltaSteps: true,
+      updatedAt: true,
+    },
+  });
+  const projectionByEffectId = new Map(
+    projections.map((row) => [row.effectId, row]),
+  );
+
+  return rows.map((row) => {
+    const reconcilable =
+      row?.sourceKind === "ACTIVE_EFFECT" &&
+      RECONCILABLE_TIMED_IMPACT_TYPES.has(row.powerupType);
+    if (!reconcilable) return row;
+    const projection = projectionByEffectId.get(row.sourceId);
+    const reconciled = Boolean(projection);
+    const deltaSteps = reconciled
+      ? Number(projection.currentDeltaSteps) || 0
+      : row.deltaSteps;
+    return {
+      ...row,
+      deltaSteps,
+      impactValueStatus: reconciled ? "RECONCILED" : "PROVISIONAL",
+      wasReconciled: reconciled,
+      reconciledAt: reconciled && projection.updatedAt instanceof Date
+        ? projection.updatedAt
+        : null,
+      displayDescription: impactDisplayDescription(row.powerupType, deltaSteps, reconciled),
+    };
+  });
 }
 
 function buildRaceImpactEventModel(prisma = defaultPrisma) {
@@ -170,8 +256,14 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
       });
     },
 
-    async listUnacknowledged({ raceId, userId, limit = 20, resolvedAfter = null }, client = prisma) {
-      return client.raceImpactEvent.findMany({
+    async listUnacknowledged({
+      raceId,
+      userId,
+      limit = 20,
+      resolvedAfter = null,
+      reconciliationEnabled = false,
+    }, client = prisma) {
+      const rows = await client.raceImpactEvent.findMany({
         where: {
           raceId,
           recipientUserId: userId,
@@ -184,10 +276,19 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
         orderBy: [{ resolvedAt: "asc" }, { id: "asc" }],
         take: Math.min(20, Math.max(1, Number(limit) || 20)),
       });
+      return reconciliationEnabled
+        ? overlayReconciledImpactRows(rows, { raceId, userId }, client)
+        : rows;
     },
 
-    async listActivity({ raceId, userId, cursor = null, limit = 50 }, client = prisma) {
-      return client.raceImpactEvent.findMany({
+    async listActivity({
+      raceId,
+      userId,
+      cursor = null,
+      limit = 50,
+      reconciliationEnabled = false,
+    }, client = prisma) {
+      const rows = await client.raceImpactEvent.findMany({
         where: {
           raceId,
           recipientUserId: userId,
@@ -202,6 +303,9 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
         orderBy: [{ resolvedAt: "desc" }, { id: "desc" }],
         take: Math.min(50, Math.max(1, Number(limit) || 50)) + 1,
       });
+      return reconciliationEnabled
+        ? overlayReconciledImpactRows(rows, { raceId, userId }, client)
+        : rows;
     },
 
     async findOwn({ raceId, userId, id }, client = prisma) {
