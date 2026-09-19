@@ -148,22 +148,25 @@ function poolSnapshot(role, instance, nowMs) {
     oldestBucketAt: buckets[0].minuteStartedAt,
     newestBucketAt: buckets.at(-1).minuteStartedAt,
     coverageMinutes: 60,
-    pool: {
-      max: {
+    pool: (() => {
+      const max = {
         http: 10,
         step: 3,
         resolution: 6,
         event: 3,
         notification: 4,
         cron: 3,
-      }[role],
-      configSource: `DATABASE_POOL_MAX_${role.toUpperCase()}`,
-      total: 4,
-      idle: 2,
-      nonIdle: 2,
-      checkedOut: 2,
-      waiting: 0,
-    },
+      }[role];
+      return {
+        max,
+        configSource: `DATABASE_POOL_MAX_${role.toUpperCase()}`,
+        total: Math.min(2, max),
+        idle: 1,
+        nonIdle: 1,
+        checkedOut: 1,
+        waiting: 0,
+      };
+    })(),
     process: { rssBytes: 1024, cpuOneCorePercent: 2, eventLoopP99Ms: 1 },
     buckets,
   };
