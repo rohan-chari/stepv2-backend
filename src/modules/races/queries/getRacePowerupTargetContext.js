@@ -11,6 +11,7 @@ const {
 } = require("../services/powerupTargetEligibility");
 const {
   stealableParticipants: defaultStealableParticipants,
+  participantInventorySummary: defaultParticipantInventorySummary,
 } = require("../services/stealableTargetCache");
 
 const TARGETED_TYPES = new Set([
@@ -41,6 +42,8 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
   const displayCache = dependencies.raceOpenDisplayCache || defaultDisplayCache;
   const stealableParticipants =
     dependencies.stealableParticipants || defaultStealableParticipants;
+  const participantInventorySummary =
+    dependencies.participantInventorySummary || defaultParticipantInventorySummary;
   const now = dependencies.now || (() => new Date());
 
   return async function getRacePowerupTargetContext({
@@ -104,10 +107,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       typeof displayCache.effects === "function"
         ? displayCache.effects(raceId)
         : Promise.resolve([]);
-    const inventoryPromise = powerupModel.findInventoryForParticipants(
-      [mine.id],
-      ["HELD", "MYSTERY_BOX", "QUEUED"]
-    );
+    const inventoryPromise = participantInventorySummary(mine.id);
     const stealablePromise =
       powerupType === "SNEAKY_SWAP"
         ? stealableParticipants(
@@ -118,7 +118,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           )
         : Promise.resolve(new Set());
 
-    const [effects, inventoryRows, stealableParticipantIds] = await Promise.all([
+    const [effects, inventorySummary, stealableParticipantIds] = await Promise.all([
       effectsPromise,
       inventoryPromise,
       stealablePromise,
@@ -172,10 +172,6 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         }
         return ordered.indexOf(left) - ordered.indexOf(right);
       });
-    const slotRows = inventoryRows.filter(
-      (row) => row.status === "HELD" || row.status === "MYSTERY_BOX"
-    );
-
     return {
       contract: "race-powerup-target-context-v2",
       ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
@@ -218,13 +214,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       }),
       powerupData: {
         powerupSlots: mine.powerupSlots ?? 3,
-        inventory: slotRows.map((row) => ({
-          id: row.id,
-          type: row.type,
-          rarity: row.rarity,
-          status: row.status,
-        })),
-        queuedBoxCount: inventoryRows.filter((row) => row.status === "QUEUED").length,
+        inventory: Array.isArray(inventorySummary?.inventory)
+          ? inventorySummary.inventory
+          : [],
+        queuedBoxCount: inventorySummary?.queuedBoxCount ?? 0,
         myPlacement:
           viewerIsDetoured ||
           (!privacySafeDisplayRanks && placementPrivacyActive)
