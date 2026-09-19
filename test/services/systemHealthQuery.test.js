@@ -85,9 +85,21 @@ function snapshot(role, instance, nowMs, coverage = 60) {
   };
 }
 
+function allProcessSnapshots(nowMs, coverage = 60) {
+  return [
+    snapshot("http", "0", nowMs, coverage),
+    snapshot("http", "1", nowMs, coverage),
+    snapshot("step", "0", nowMs, coverage),
+    snapshot("resolution", "0", nowMs, coverage),
+    snapshot("event", "0", nowMs, coverage),
+    snapshot("notification", "0", nowMs, coverage),
+    snapshot("cron", "0", nowMs, coverage),
+  ];
+}
+
 test("admin system health returns the exact ordered available envelope and merged p95", async () => {
   const nowMs = Date.parse("2026-08-29T19:30:00.000Z");
-  const values = [snapshot("http", "0", nowMs), snapshot("http", "1", nowMs), snapshot("resolution", "0", nowMs), snapshot("cron", "0", nowMs)];
+  const values = allProcessSnapshots(nowMs);
   const get = buildGetSystemHealth({
     now: () => new Date(nowMs),
     snapshotReader: async () => ({ ok: true, disabled: false, values }),
@@ -97,8 +109,11 @@ test("admin system health returns the exact ordered available envelope and merge
   assert.equal(result.schema, "admin-system-health-v1");
   assert.equal(result.status, "available");
   assert.equal(result.overall, "healthy");
-  assert.equal(result.freshProcesses, 4);
-  assert.deepEqual(result.processes.map(({ role, instance }) => `${role}:${instance}`), ["http:0", "http:1", "resolution:0", "cron:0"]);
+  assert.equal(result.freshProcesses, 7);
+  assert.deepEqual(
+    result.processes.map(({ role, instance }) => `${role}:${instance}`),
+    ["http:0", "http:1", "step:0", "resolution:0", "event:0", "notification:0", "cron:0"],
+  );
   assert.equal(result.stepIngestion.requests, 120);
   assert.deepEqual(result.failureWindows.map((row) => row.window), ["60m", "24h", "7d"]);
 });
@@ -112,7 +127,11 @@ test("missing, stale, malformed, and Redis-down snapshots fail open without inve
   malformed.pool.idle = malformed.pool.total + 1;
   const get = buildGetSystemHealth({
     now: () => new Date(nowMs),
-    snapshotReader: async () => ({ ok: true, disabled: false, values: [stale, malformed, null, null] }),
+    snapshotReader: async () => ({
+      ok: true,
+      disabled: false,
+      values: [stale, malformed, null, null, null, null, null],
+    }),
     historyReader: async () => ({ status: "unavailable", minutes: [] }),
   });
   const partial = await get({ window: "60m" });
@@ -159,7 +178,7 @@ test("60m/24h/7d failure windows expose observed request and server numerators w
       ],
     };
   });
-  const values = [snapshot("http", "0", nowMs), snapshot("http", "1", nowMs), snapshot("resolution", "0", nowMs), snapshot("cron", "0", nowMs)];
+  const values = allProcessSnapshots(nowMs);
   const get = buildGetSystemHealth({
     now: () => new Date(nowMs),
     snapshotReader: async () => ({ ok: true, values }),
