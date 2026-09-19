@@ -176,19 +176,18 @@ async function lockPowerupUseParticipants(tx, { raceId, powerupId, planTargeted 
 // getRaceProgress (each of the leecher's in-window steps removes one from the
 // victim, capped); the switch case here just parks the effect for the
 // capability-versioned window (§7.5).
-// HITCHHIKE (§7) is a store-bought TARGETED link. It gets its Socks-blocks /
-// Mirror-never-reflects behavior purely by LIST MEMBERSHIP — OFFENSIVE_TYPES for
-// target resolution + enemy-only validation + the Compression Socks block,
-// SHOP_POWERUP_TYPES to skip the Mirror reflect pre-check, TARGETED_TYPES for the
-// shared targeting validation. There is deliberately NO hard-coded branch in the
-// style of the IMPOSTER one further down. Its effect is target-driven and scored
+// HITCHHIKE (§7) is a store-bought TARGETED link. Enemy-targeted Hitchhikes
+// keep the normal Decoy/Socks defense chain and are never Mirror-reflected.
+// A same-team Hitchhike is cooperative: it bypasses target defenses entirely
+// while retaining the normal caster/target occupancy guards. Its effect is
+// target-driven and scored
 // in src/utils/hitchhikeCopies.js (the caster COPIES the target's raw in-window
 // steps 1:1; the target loses nothing); the switch case here just parks the
 // 60-minute link.
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE", "DRILL_SERGEANT"];
-// The three coin-shop-only powerups (they exist ONLY via the powerup shop:
-// IMPOSTER, RAINSTORM, SIGNAL_JAMMER). Product rule: none of them can EVER be
-// reflected by a Mirror, but ALL of them can be blocked by Compression Socks.
+// Shop-only offensive powerups are never reflected by a Mirror. They normally
+// remain blockable by Compression Socks; friendly teammate Hitchhike is the
+// explicit cooperative exception and bypasses defenses without consuming them.
 // So they are excluded from the Mirror pre-check (single-target) and from the
 // per-victim Mirror branch (Rainstorm AoE), while the Socks block still applies:
 //   * SIGNAL_JAMMER stays in OFFENSIVE_TYPES → gets the single-target Socks block.
