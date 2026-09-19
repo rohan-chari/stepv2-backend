@@ -55,13 +55,14 @@
     "team-payouts:repair": "node scripts/repair-open-fixed-team-payouts.js",
     "race-effects:backfill-deadlines": "node scripts/backfill-race-effect-deadlines.js",
     "test:performance": "node scripts/run-local-integration-tests.cjs 'test/performance/**/*.test.js'",
-    "test:reliability": "node scripts/run-local-integration-tests.cjs 'test/reliability/**/*.test.js'",
+    "test:reliability": "node scripts/run-sharded-reliability-tests.cjs",
     "test:contracts": "node scripts/run-local-integration-tests.cjs 'test/contracts/**/*.test.js'",
     "test:http-service": "node scripts/run-local-integration-tests.cjs 'test/http-and-service/**/*.test.js'",
     "test:maintenance": "node scripts/run-local-integration-tests.cjs 'test/maintenance/**/*.test.js'",
     "test:integration:serial": "node scripts/run-local-integration-tests.cjs",
     "queues:preflight": "node scripts/queue-preflight.js",
-    "queues:health": "node scripts/queue-health.js"
+    "queues:health": "node scripts/queue-health.js",
+    "test:reliability:serial": "node scripts/run-local-integration-tests.cjs 'test/reliability/**/*.test.js'"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
