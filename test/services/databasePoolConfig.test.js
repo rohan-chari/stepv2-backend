@@ -7,8 +7,11 @@ const {
 
 const ROLE_CASES = [
   ["http", "DATABASE_POOL_MAX_HTTP", "10"],
-  ["resolution", "DATABASE_POOL_MAX_RESOLUTION", "8"],
-  ["cron", "DATABASE_POOL_MAX_CRON", "4"],
+  ["step", "DATABASE_POOL_MAX_STEP", "3"],
+  ["resolution", "DATABASE_POOL_MAX_RESOLUTION", "6"],
+  ["event", "DATABASE_POOL_MAX_EVENT", "3"],
+  ["notification", "DATABASE_POOL_MAX_NOTIFICATION", "4"],
+  ["cron", "DATABASE_POOL_MAX_CRON", "3"],
   ["all", "DATABASE_POOL_MAX_ALL", "10"],
   ["staging_all", "DATABASE_POOL_MAX_ALL", "10"],
 ];
@@ -41,7 +44,7 @@ test("non-production falls through to the generic and compatibility defaults", (
   }), { role: "one-off-tool", max: 20, source: "compatibility-default" });
 });
 
-test("deployment B production requires a known role and its exact role variable", () => {
+test("production requires a known role and its exact role variable", () => {
   assert.throws(
     () => resolveDatabasePoolConfig({
       NODE_ENV: "production",
@@ -101,7 +104,7 @@ test("malformed supplied values fail even when they belong to another ordinary r
   assert.throws(
     () => resolveDatabasePoolConfig({
       NODE_ENV: "test",
-      DATABASE_POOL_TOTAL_BUDGET: "32.0",
+      DATABASE_POOL_TOTAL_BUDGET: "39.0",
     }),
     /DATABASE_POOL_TOTAL_BUDGET/,
   );
