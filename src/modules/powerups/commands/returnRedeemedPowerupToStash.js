@@ -97,7 +97,7 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
         },
       });
       return {
-        quantity: Math.max(0, Number(stashRow.quantity) || 0),
+        quantity: Math.max(0, Number(stashRow?.quantity) || 0),
       };
     });
 
