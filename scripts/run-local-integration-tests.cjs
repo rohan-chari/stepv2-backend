@@ -11,6 +11,7 @@ if (!['postgres:', 'postgresql:'].includes(target.protocol) ||
 }
 const env = { ...process.env, DATABASE_URL: target.toString(), NODE_ENV: 'test',
   REDIS_URL: process.env.REDIS_URL || '',
+  QUEUE_REDIS_URL: process.env.QUEUE_REDIS_URL || process.env.REDIS_URL || '',
   CACHE_ENV_PREFIX: process.env.CACHE_ENV_PREFIX || 'integration:',
   ADMIN_EMAILS: process.env.ADMIN_EMAILS || 'admin@test.com',
   SESSION_TOKEN_SECRET: process.env.SESSION_TOKEN_SECRET || 'integration-test-only-session-secret',
