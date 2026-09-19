@@ -27,6 +27,19 @@ const RECLAIM_IDLE_MS = 30_000;
 const READ_COUNT = 10;
 const CONCURRENCY = 3;
 const LEASE_MS = 30_000;
+const ACTIVE_RECONCILABLE_EFFECT_TYPES = Object.freeze([
+  "runners_high",
+  "wrong_turn",
+  "leg_cramp",
+  "quicksand",
+  "rainstorm",
+  "campfire_rest",
+  "uprising",
+  "rally_flag",
+  "coin_flip",
+  "ghost_pepper",
+  "hitchhike",
+]);
 
 function serializedSourceEnvelope(sourceEnvelope) {
   if (!sourceEnvelope) return null;
@@ -206,9 +219,8 @@ function buildStepSyncStreamWorker(dependencies = {}) {
     );
   }
 
-  async function publishDownstream(message, persisted) {
+  async function publishDownstream(message, persisted, races) {
     const generation = String(persisted.result.generation);
-    const races = await activeRacesForUser(message.userId);
     for (const race of races) {
       await publish(STREAMS.RACE_DIRTY, {
         schemaVersion: RACE_DIRTY_VERSION,
@@ -246,12 +258,12 @@ function buildStepSyncStreamWorker(dependencies = {}) {
       cursor: null,
       limit: 100,
     });
-    const eligible = discovered.rows.filter((row) =>
-      ["active", "completed"].includes(String(row.raceStatus).toLowerCase()),
+    const completed = discovered.rows.filter(
+      (row) => String(row.raceStatus).toLowerCase() === "completed",
     );
-    if (eligible.length) {
+    if (completed.length) {
       await historicalIntentModel.admitMany({
-        rows: eligible,
+        rows: completed,
         changedStart: sourceEnvelope.changedStart,
         changedEnd: sourceEnvelope.changedEnd,
         sourceGeneration: persisted.result.generation,
@@ -268,6 +280,48 @@ function buildStepSyncStreamWorker(dependencies = {}) {
         now: new Date(message.requestedAt),
       });
     }
+  }
+
+  async function reconcileActiveTimedImpacts(message, persisted, races) {
+    const sourceEnvelope = persisted.result.sourceEnvelope;
+    if (!sourceEnvelope || !Array.isArray(races) || races.length === 0) return;
+
+    const raceIds = races.map((race) => race.raceId);
+    const participantIds = races.map((race) => race.participantId);
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT DISTINCT effect.race_id AS "raceId",
+              participant.id AS "participantId",
+              participant.user_id AS "userId",
+              race.status AS "raceStatus",
+              race.started_at AS "startedAt",
+              race.ends_at AS "endsAt"
+         FROM race_active_effects effect
+         JOIN race_participants participant
+           ON participant.id=effect.target_participant_id
+         JOIN races race
+           ON race.id=effect.race_id
+        WHERE effect.race_id = ANY($1::text[])
+          AND effect.target_participant_id = ANY($2::text[])
+          AND effect.status IN ('active_effect','expired_effect')
+          AND effect.type::text = ANY($3::text[])
+          AND effect.starts_at < $5::timestamp
+          AND effect.expires_at IS NOT NULL
+          AND effect.expires_at > $4::timestamp`,
+      raceIds,
+      participantIds,
+      ACTIVE_RECONCILABLE_EFFECT_TYPES,
+      sourceEnvelope.changedStart,
+      sourceEnvelope.changedEnd,
+    );
+    if (rows.length === 0) return;
+
+    await historicalIntentModel.admitMany({
+      rows,
+      changedStart: sourceEnvelope.changedStart,
+      changedEnd: sourceEnvelope.changedEnd,
+      sourceGeneration: persisted.result.generation,
+      now: new Date(message.requestedAt),
+    });
   }
 
   async function afterCommit(message, persisted) {
@@ -314,7 +368,9 @@ function buildStepSyncStreamWorker(dependencies = {}) {
 
     await reconcileHistorical(message, persisted);
     if (persisted.result.scoringChanged || persisted.result.repairRequired) {
-      await publishDownstream(message, persisted);
+      const races = await activeRacesForUser(message.userId);
+      await reconcileActiveTimedImpacts(message, persisted, races);
+      await publishDownstream(message, persisted, races);
     }
   }
 
