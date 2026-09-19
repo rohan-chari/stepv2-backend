@@ -71,6 +71,7 @@ test("every active producer row is named by real integration-path coverage", () 
     "DAILY_REWARD_REMINDER_V1",
     "TOURNAMENT_COMPLETED_V1",
   ]);
+  const missingIntegrationEvidence = [];
   for (const row of Object.values(PRODUCER_MATRIX)) {
     if (dormant.has(row.eventType)) {
       assert.equal(row.producerStatus, "DORMANT_COMPATIBILITY_ONLY");
@@ -80,12 +81,15 @@ test("every active producer row is named by real integration-path coverage", () 
     }
     assert.equal(row.producerStatus, "ACTIVE", row.eventType);
     assert.equal(row.durableSource, "DomainEventOutbox", row.eventType);
-    assert.match(
-      integrationSource,
-      new RegExp(`\\b${row.eventType}\\b`),
-      `${row.eventType} requires checked-in real command/job/request integration evidence`,
-    );
+    if (!new RegExp(`\\b${row.eventType}\\b`).test(integrationSource)) {
+      missingIntegrationEvidence.push(row.eventType);
+    }
   }
+  assert.deepEqual(
+    missingIntegrationEvidence,
+    [],
+    `active producers missing checked-in real command/job/request integration evidence: ${missingIntegrationEvidence.join(", ")}`,
+  );
 });
 
 test("projection uses an explicit V1 registry and no event-bus dispatch engine", () => {
