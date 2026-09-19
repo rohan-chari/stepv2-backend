@@ -143,6 +143,7 @@ describe("timed impact receipt reconciliation", () => {
       raceId: data.race.id,
       userId: data.account.user.id,
       limit: 50,
+      reconciliationEnabled: true,
     });
     assert.equal(rows.length, 1);
 
@@ -181,6 +182,7 @@ describe("timed impact receipt reconciliation", () => {
       raceId: data.race.id,
       userId: data.account.user.id,
       limit: 50,
+      reconciliationEnabled: true,
     });
     assert.equal(rows.length, 1);
     const activity = activityProjection(rows[0]);
@@ -236,6 +238,7 @@ describe("timed impact receipt reconciliation", () => {
       raceId: data.race.id,
       userId: data.account.user.id,
       limit: 50,
+      reconciliationEnabled: true,
     });
     const activity = activityProjection(row);
     assert.equal(activity.deltaSteps, 8);
@@ -346,6 +349,7 @@ describe("timed impact receipt reconciliation", () => {
       raceId: race.id,
       userId: account.user.id,
       limit: 50,
+      reconciliationEnabled: true,
     });
     const activity = activityProjection(row);
     assert.equal(activity.deltaSteps, 1000);
