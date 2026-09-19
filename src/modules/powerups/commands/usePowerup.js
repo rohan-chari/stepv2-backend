@@ -1159,12 +1159,13 @@ function buildUsePowerup(dependencies = {}) {
     outcome,
     attackerUserId,
     raceId,
+    usageDb = db,
   }) {
     const consumedAt = now();
     await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: consumedAt });
     await rebaseDecoyUsageCooldownOnConsume({
       usageStateModel,
-      db,
+      db: usageDb,
       raceId,
       ownerUserId: ownerParticipant.userId,
       sourcePowerupId: decoy.powerupId,
@@ -1328,6 +1329,7 @@ function buildUsePowerup(dependencies = {}) {
     onPerformanceContext = null,
   }, execution = null) {
     const transactionDb = execution?.tx || db;
+    const consumeDecoyForUse = (input) => consumeDecoy({ ...input, usageDb: transactionDb });
     const rawEventModel = eventModelDependency;
     let decoyActivityContext = null;
     const buildEventData = (event, activityV1 = null) => {
@@ -2429,7 +2431,7 @@ function buildUsePowerup(dependencies = {}) {
         now: () => currentTime,
         consumeDecoy: (input) => {
           const consumption = { ...input, attackerUserId: userId, raceId };
-          if (hasInjectedDeps) return consumeDecoy(consumption);
+          if (hasInjectedDeps) return consumeDecoyForUse(consumption);
           consumedDecoyIds.push(input.decoy.id);
           decoyConsumptions.push(consumption);
           decoyEvents.push(decoyConsumptionEvent(consumption));
@@ -2584,7 +2586,7 @@ function buildUsePowerup(dependencies = {}) {
         now,
         currentTime: now(),
         finalize: finalizeSelfContainedUse,
-        consumeDecoy,
+        consumeDecoy: consumeDecoyForUse,
       });
     }
 
@@ -3363,7 +3365,7 @@ function buildUsePowerup(dependencies = {}) {
             isTeamRace,
             random: execution?.decoyRandom || random,
           });
-        await consumeDecoy({
+        await consumeDecoyForUse({
           decoy,
           ownerParticipant: holder,
           attackPowerupType: type,
@@ -4160,7 +4162,7 @@ function buildUsePowerup(dependencies = {}) {
           effectsByParticipant,
           random,
           now: () => currentTime,
-          consumeDecoy: (input) => consumeDecoy({
+          consumeDecoy: (input) => consumeDecoyForUse({
             ...input,
             attackerUserId: userId,
             raceId,
