@@ -537,7 +537,7 @@ describe("historical late event-time effect reconciliation", () => {
     assert.equal(await prisma.historicalRaceReconciliationIntent.count({ where: { raceId: data.race.id } }), 1);
   });
 
-  it("corrects a frozen V4 Hitchhike when target samples arrive after expiry", async () => {
+  it("corrects a frozen V3 Hitchhike when target samples arrive after expiry", async () => {
     const caster = await fixture({ totalSteps: 1_000 });
     const targetAccount = await createTestUser({ displayName: "Late Hitchhike target" });
     const targetParticipant = await prisma.raceParticipant.create({
@@ -576,7 +576,11 @@ describe("historical late event-time effect reconciliation", () => {
         status: "EXPIRED",
         startsAt,
         expiresAt,
-        metadata: { copyRatio: 0.5, scoringVersion: 4 },
+        metadata: {
+          copyRatio: 0.5,
+          scoringVersion: 3,
+          lateSampleReconciliationV1: true,
+        },
       },
     });
     const rhPowerup = await prisma.racePowerup.create({
@@ -608,7 +612,7 @@ describe("historical late event-time effect reconciliation", () => {
         raceId: caster.race.id,
         sourceUserId: caster.account.user.id,
         targetUserId: targetAccount.user.id,
-        scoringVersion: 4,
+        scoringVersion: 3,
         raceTimezone: "UTC",
         castDayStart: new Date("2026-09-16T00:00:00.000Z"),
         castDailySteps: 0,
