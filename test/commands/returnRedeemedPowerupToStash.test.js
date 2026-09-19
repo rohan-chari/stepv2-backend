@@ -43,6 +43,7 @@ function makeDeps(overrides = {}) {
       async upsert() {
         quantity += 1;
         upserts += 1;
+        return { quantity };
       },
     },
   };
@@ -77,6 +78,7 @@ test("returns a redeemed HELD race item to global stash exactly once", async () 
 
   assert.equal(result.returned, true);
   assert.equal(result.powerupType, "RAINSTORM");
+  assert.equal(result.quantity, 1);
   assert.equal(ctx.row.status, "DISCARDED");
   assert.equal(ctx.quantity, 1);
   assert.equal(ctx.claims, 1);
