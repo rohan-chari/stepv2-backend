@@ -277,8 +277,9 @@ const LEECH_SCORING_VERSION = 2;
 const LEECH_MAX_PER_VICTIM = 1;
 // HITCHHIKE (§7.1): store-only, non-upgradeable, fixed 60-minute window. The
 // caster COPIES 50% of the target's recorded eligible steps — the target
-// loses nothing. Metadata carries `{ copyRatio, scoringVersion }` and the scorer
-// reads copyRatio (defaulting to 1), so a rebalance is data-only. At most ONE
+// loses nothing. Metadata carries the copy/scoring contract. New V3 casts also
+// opt into generation-fenced late-sample repair; older V3 rows stay immutable
+// so already-manually-corrected testflight incidents cannot be double credited.
 // active link per caster AND one per target (§7.2): unlike Leech, Hitchhike is not
 // zero-sum, so concurrent links would compound.
 const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
@@ -3864,10 +3865,12 @@ function buildUsePowerup(dependencies = {}) {
           expiresAt: new Date(currentTime.getTime() + HITCHHIKE_DURATION_MS),
           metadata: {
             copyRatio: HITCHHIKE_COPY_RATIO,
-            // Release B stamps new casts onto the durable v3 attribution path.
-            // Existing v1/v2 effects remain readable through their versioned
-            // scoring paths for frozen-client and in-flight-race compatibility.
+            // V3 keeps the terminal window immutable, but this opt-in lets
+            // a newer exact-sample generation repair a capture that froze before
+            // delayed Health samples arrived. Existing V3 rows without the bit
+            // retain the old immutable behavior.
             scoringVersion: HITCHHIKE_EFFECTIVE_SCORING_VERSION,
+            lateSampleReconciliationV1: true,
           },
         });
         result.effect = effect;
