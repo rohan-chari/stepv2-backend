@@ -7,16 +7,15 @@ const {
 } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
-// HITCHHIKE (§7) — store-only, TARGETED, 60-minute 1:1 raw-step COPY. Using it
+// HITCHHIKE (§7) — store-only, TARGETED, 60-minute 50% eligible-step COPY. Using it
 // parks a HITCHHIKE effect on the chosen rival (targetUserId = the walked-on
 // racer, sourceUserId = the hitchhiker). The copy itself is scored later from
 // the TARGET's in-window steps (src/modules/powerups/hitchhikeCopies.js) — not here.
 //
-// Socks/Mirror behavior is achieved by LIST MEMBERSHIP alone (§7.2):
-//   OFFENSIVE_TYPES  => Compression Socks blocks it
-//   SHOP_POWERUP_TYPES => a Mirror can NEVER reflect it
-//   TARGETED_TYPES   => the shared targeting validation applies
-// There is deliberately no hard-coded IMPOSTER-style branch.
+// Enemy-targeted Hitchhike keeps normal target defenses: Socks can block it,
+// Decoy can redirect it, and Mirror never reflects it. In a team race, a
+// teammate-targeted Hitchhike is cooperative and ignores all target defenses
+// without consuming them.
 // ---------------------------------------------------------------------------
 
 const NOW = new Date("2026-07-20T12:00:00Z");
@@ -190,7 +189,11 @@ test("HITCHHIKE parks a 60-minute 50% link on the target and marks the powerup U
     NOW.getTime() + SIXTY_MIN_MS,
     "hitchhike window is exactly 60 minutes"
   );
-  assert.deepEqual(eff.metadata, { copyRatio: 0.5, scoringVersion: 3 });
+  assert.deepEqual(eff.metadata, {
+    copyRatio: 0.5,
+    scoringVersion: 3,
+    lateSampleReconciliationV1: true,
+  });
   assert.equal(ctx.updatedPowerup.status, "USED");
 });
 
@@ -322,6 +325,39 @@ test("HITCHHIKE rejects a second link ON a target that already has one (409 HITC
   );
   assert.equal(ctx.effectsCreated.length, 0);
   assert.equal(ctx.updatedPowerup, null, "powerup NOT consumed on rejection");
+});
+
+test("teammate HITCHHIKE ignores defenses and leaves them untouched", async () => {
+  const ctx = makeDeps({
+    isTeamRace: true,
+    user1: { team: "TEAM_A" },
+    user2: { team: "TEAM_A" },
+    user3: { team: "TEAM_B" },
+    existingEffects: {
+      "rp-2": [
+        { id: "stealth-1", type: "STEALTH_MODE" },
+        { id: "decoy-1", type: "DECOY", expiresAt: new Date(NOW.getTime() + 60_000) },
+        { id: "socks-1", type: "COMPRESSION_SOCKS" },
+        { id: "mirror-1", type: "MIRROR" },
+      ],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+    targetUserId: "user-2",
+  });
+
+  assert.equal(result.outcome, "APPLIED");
+  assert.notEqual(result.blocked, true);
+  assert.notEqual(result.redirected, true);
+  assert.notEqual(result.reflected, true);
+  assert.equal(ctx.effectsCreated.length, 1);
+  assert.equal(ctx.effectsCreated[0].targetUserId, "user-2");
+  assert.deepEqual(ctx.effectUpdates, [], "friendly Hitchhike must not consume defenses");
 });
 
 test("HITCHHIKE can target an eligible teammate in a team race", async () => {

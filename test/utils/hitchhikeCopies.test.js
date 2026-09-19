@@ -231,6 +231,119 @@ test("v3 uses one checkpointed coarse daily delta as an alternative to absent sa
   assert.equal(persisted.castDailySteps, 1_000);
 });
 
+test("v3 late-sample reconciliation corrects a frozen zero when a newer scoring generation brings late modified samples", async () => {
+  const frozenAt = new Date("2026-09-19T13:56:10.748Z");
+  const effect = hitch({
+    id: "hh-v3-late",
+    raceId: "race-1",
+    startsAt: new Date("2026-09-19T12:56:10.748Z"),
+    expiresAt: frozenAt,
+    metadata: {
+      copyRatio: 0.5,
+      scoringVersion: 3,
+      lateSampleReconciliationV1: true,
+    },
+  });
+  let correction = null;
+  let sampleReads = 0;
+  const runnerHigh = {
+    id: "rh-1",
+    type: "RUNNERS_HIGH",
+    targetParticipantId: "rp-target",
+    targetUserId: "target",
+    sourceUserId: "target",
+    startsAt: effect.startsAt,
+    expiresAt: frozenAt,
+    status: "EXPIRED",
+    metadata: { multiplier: 2 },
+  };
+
+  const copied = await computeHitchhikeCopiedSteps(
+    effect,
+    {
+      async sumStepsInWindow() {
+        sampleReads += 1;
+        return 9_965;
+      },
+    },
+    new Date("2026-09-19T15:15:19.000Z"),
+    {
+      raceId: "race-1",
+      targetParticipantId: "rp-target",
+      raceActiveEffectModel: {
+        async findEffectsForRaceByTypes() {
+          return { RUNNERS_HIGH: [runnerHigh] };
+        },
+      },
+      attributionCaptureModel: {
+        async findFrozen() {
+          return {
+            effectId: effect.id,
+            scoringVersion: 3,
+            scoringInputGeneration: 1n,
+            effectiveContribution: 0,
+            rawSourceHighWater: 0,
+            captureThrough: frozenAt,
+            frozenAt,
+          };
+        },
+        async readScoringInput() {
+          return { generation: 2n, fingerprint: "b".repeat(64) };
+        },
+        async correctFrozenV3(input) {
+          correction = input;
+          return {
+            effectiveContribution: input.effectiveContribution,
+            scoringInputGeneration: input.scoringInputGeneration,
+            frozenAt,
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(sampleReads, 1);
+  assert.equal(copied, 9_965);
+  assert.ok(correction);
+  assert.equal(correction.rawSourceHighWater, 9_965);
+  assert.equal(correction.effectiveContribution, 9_965);
+  assert.equal(correction.scoringInputGeneration, 2n);
+  assert.equal(correction.captureThrough.getTime(), frozenAt.getTime());
+});
+
+test("v3 late-sample reconciliation keeps the frozen fast path when the target scoring generation did not advance", async () => {
+  let sampleReads = 0;
+  const copied = await computeHitchhikeCopiedSteps(
+    hitch({
+      id: "hh-v3-stable",
+      raceId: "race-1",
+      metadata: {
+        copyRatio: 0.5,
+        scoringVersion: 3,
+        lateSampleReconciliationV1: true,
+      },
+    }),
+    { async sumStepsInWindow() { sampleReads += 1; return 99_999; } },
+    NOW,
+    {
+      attributionCaptureModel: {
+        async findFrozen() {
+          return {
+            effectiveContribution: 750,
+            scoringInputGeneration: 7n,
+            frozenAt: T1,
+          };
+        },
+        async readScoringInput() {
+          return { generation: 7n, fingerprint: null };
+        },
+      },
+    },
+  );
+  assert.equal(copied, 750);
+  assert.equal(sampleReads, 0);
+});
+
 test("v3 settlement reads a frozen signed capture without reopening source data", async () => {
   let sampleReads = 0;
   const copied = await computeHitchhikeCopiedSteps(

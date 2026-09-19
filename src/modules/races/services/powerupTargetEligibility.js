@@ -55,7 +55,12 @@ function eligiblePowerupTargets({
     if (teamRace && participant.team != null && participant.team === me.team && powerupType !== "HITCHHIKE") return false;
 
     const targetEffects = active.get(participant.id) || new Set();
-    if (targetEffects.has("STEALTH_MODE")) return false;
+    const friendlyHitchhike =
+      powerupType === "HITCHHIKE" &&
+      teamRace &&
+      participant.team != null &&
+      participant.team === me.team;
+    if (!friendlyHitchhike && targetEffects.has("STEALTH_MODE")) return false;
     if (conflicts && [...conflicts].some((type) => targetEffects.has(type))) return false;
     if (powerupType === "SHORTCUT" && Math.max(0, Number(participant.totalSteps) || 0) === 0) return false;
     if (powerupType === "HITCHHIKE" && targetEffects.has("HITCHHIKE")) return false;

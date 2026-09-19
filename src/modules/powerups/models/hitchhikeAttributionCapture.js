@@ -221,6 +221,55 @@ function buildHitchhikeAttributionCaptureModel(client = defaultPrisma) {
       });
     },
 
+    // Forward-only V3 late-sample repair. The terminal boundary remains
+    // immutable; only newer exact timestamped evidence may replace the frozen
+    // contribution. Existing V3 rows without the effect-level opt-in never call
+    // this method. Requiring BOTH a newer scoring generation and a changed exact
+    // raw total prevents unrelated later syncs from reopening settled data while
+    // still allowing legitimate downward Health/sample corrections.
+    async correctFrozenV3({
+      effect,
+      scoringInputGeneration,
+      scoringInputFingerprint = null,
+      rawSourceHighWater,
+      effectiveContribution,
+      captureThrough,
+    }) {
+      const rows = await client.$queryRawUnsafe(
+        `UPDATE hitchhike_attribution_captures
+            SET scoring_input_generation = $2::bigint,
+                scoring_input_fingerprint = $3,
+                raw_source_kind = 'EXACT_SAMPLES',
+                raw_source_high_water = $4,
+                effective_contribution = $5,
+                updated_at = now()
+          WHERE effect_id = $1
+            AND scoring_version = 3
+            AND frozen_at IS NOT NULL
+            AND frozen_at = $6::timestamp
+            AND scoring_input_generation < $2::bigint
+            AND raw_source_high_water <> $4
+          RETURNING
+            effect_id AS "effectId",
+            scoring_input_generation AS "scoringInputGeneration",
+            raw_source_kind AS "rawSourceKind",
+            raw_source_high_water AS "rawSourceHighWater",
+            effective_contribution AS "effectiveContribution",
+            capture_through AS "captureThrough",
+            frozen_at AS "frozenAt"`,
+        effect.id,
+        scoringInputGeneration,
+        scoringInputFingerprint,
+        Math.max(0, Math.floor(Number(rawSourceHighWater) || 0)),
+        Math.floor(Number(effectiveContribution) || 0),
+        captureThrough,
+      );
+      if (rows[0]) return rows[0];
+      return client.hitchhikeAttributionCapture.findUnique({
+        where: { effectId: effect.id },
+      });
+    },
+
     async readScoringInput(userId) {
       const row = await client.userScoringInputVersion.findUnique({
         where: { userId },

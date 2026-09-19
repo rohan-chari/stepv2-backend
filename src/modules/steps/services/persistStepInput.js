@@ -19,7 +19,13 @@ function resultingGeneration(state, scoringChanged) {
   return scoringChanged && state?.inserted !== true ? current + 1n : current;
 }
 
-async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
+async function upsertDailyStep(tx, {
+  userId,
+  date,
+  steps,
+  requestTimestamp,
+  requestOrder = null,
+}) {
   let rows = await tx.$queryRawUnsafe(
     `WITH prior AS (
        SELECT steps AS "priorSteps",
@@ -29,16 +35,29 @@ async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
         WHERE user_id=$1 AND date=$2::date
      ), persisted AS (
        INSERT INTO steps (
-         id,user_id,date,steps,step_goal,created_at,sync_requested_at
+         id,user_id,date,steps,step_goal,created_at,sync_requested_at,sync_stream_id
        )
        VALUES (
-         gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP,$4::timestamptz
+         gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP,
+         $4::timestamptz,$5::text
        )
        ON CONFLICT (user_id,date) DO UPDATE
          SET steps=EXCLUDED.steps,
-             sync_requested_at=EXCLUDED.sync_requested_at
-       WHERE steps.sync_requested_at IS NULL
-          OR steps.sync_requested_at <= EXCLUDED.sync_requested_at
+             sync_requested_at=EXCLUDED.sync_requested_at,
+             sync_stream_id=EXCLUDED.sync_stream_id
+       WHERE CASE
+         WHEN EXCLUDED.sync_stream_id IS NOT NULL
+          AND steps.sync_stream_id IS NOT NULL
+         THEN ROW(
+           split_part(steps.sync_stream_id, '-', 1)::bigint,
+           split_part(steps.sync_stream_id, '-', 2)::bigint
+         ) < ROW(
+           split_part(EXCLUDED.sync_stream_id, '-', 1)::bigint,
+           split_part(EXCLUDED.sync_stream_id, '-', 2)::bigint
+         )
+         ELSE steps.sync_requested_at IS NULL
+           OR steps.sync_requested_at <= EXCLUDED.sync_requested_at
+       END
        RETURNING id,user_id AS "userId",steps,step_goal AS "stepGoal",
                  date,created_at AS "createdAt"
      )
@@ -58,6 +77,7 @@ async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
     new Date(date),
     Number(steps),
     requestTimestamp,
+    requestOrder,
   );
   if (rows.length === 0) {
     rows = await tx.$queryRawUnsafe(
@@ -82,6 +102,7 @@ function buildPersistStepInput(dependencies = {}) {
     daily,
     samples,
     requestTimestamp,
+    requestOrder = null,
     beforeSourceWrites = null,
   }) {
     if (!tx) throw new TypeError("persistStepInput requires transaction client");
@@ -99,6 +120,7 @@ function buildPersistStepInput(dependencies = {}) {
         userId,
         ...daily,
         requestTimestamp,
+        requestOrder,
       });
       record = persistedDaily.record;
       dailyExisted = persistedDaily.existed;

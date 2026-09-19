@@ -29,13 +29,11 @@ describe("power-up runtime policy", () => {
     }), false);
   });
 
-  it("preserves direct cross-caster Rainstorm overlap policy", () => {
-    assert.equal(getPowerupPolicy("RAINSTORM").directDuplicatePolicy, "PER_CASTER");
-    assert.equal(shouldSkipRedirectedDuplicate({
-      type: "RAINSTORM", wasRedirected: false,
-      activeEffects: [{ type: "RAINSTORM", status: "ACTIVE", expiresAt: new Date("2026-09-17T13:00:00.000Z") }],
-      now: new Date("2026-09-17T12:00:00.000Z"),
-    }), false);
+  it("marks direct Rainstorm duplicates as recipient skips", () => {
+    assert.equal(
+      getPowerupPolicy("RAINSTORM").directDuplicatePolicy,
+      "SKIP_RECIPIENT",
+    );
   });
 
   it("has explicit redirected-duplicate coverage for every configured policy", () => {

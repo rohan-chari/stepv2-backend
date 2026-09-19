@@ -6,11 +6,12 @@ function valid(value) {
   return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 2 &&
     Number.isSafeInteger(value.queuedBoxCount) && value.queuedBoxCount >= 0 &&
     Array.isArray(value.slotPowerups) && value.slotPowerups.length <= 32 &&
-    value.slotPowerups.every(row => row && Object.keys(row).length === 4 &&
+    value.slotPowerups.every(row => row && Object.keys(row).length === 5 &&
       typeof row.id === 'string' && row.id.length > 0 && row.id.length <= 128 &&
       ['HELD', 'MYSTERY_BOX'].includes(row.status) &&
       (row.type === null || typeof row.type === 'string') &&
-      (row.rarity === null || typeof row.rarity === 'string'));
+      (row.rarity === null || typeof row.rarity === 'string') &&
+      typeof row.redeemedFromInventory === 'boolean');
 }
 async function loadMany(participants, powerupModel) {
   const out = new Map(participants.map(row => [row.id, { slotPowerups: [], queuedBoxCount: 0 }]));
@@ -23,6 +24,7 @@ async function loadMany(participants, powerupModel) {
       if (row.status === 'QUEUED') value.queuedBoxCount++;
       else if (row.status === 'HELD' || row.status === 'MYSTERY_BOX') value.slotPowerups.push({
         id: row.id, type: row.type, rarity: row.rarity, status: row.status,
+        redeemedFromInventory: row.redeemedFromInventory === true,
       });
     }
   }

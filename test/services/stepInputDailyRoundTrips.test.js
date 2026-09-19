@@ -2,8 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-  upsertDailyStep,
+  upsertDailyStep: upsertIntakeDailyStep,
 } = require("../../src/modules/steps/services/stepInputIntake");
+const {
+  upsertDailyStep: upsertQueuedDailyStep,
+} = require("../../src/modules/steps/services/persistStepInput");
 
 test("daily classification and persistence use one database round trip", async () => {
   const calls = [];
@@ -24,7 +27,7 @@ test("daily classification and persistence use one database round trip", async (
     },
   };
 
-  const result = await upsertDailyStep(tx, {
+  const result = await upsertIntakeDailyStep(tx, {
     userId: "user-1",
     date: "2026-09-01",
     steps: 123,
@@ -45,4 +48,38 @@ test("daily classification and persistence use one database round trip", async (
     existed: true,
     storageChanged: true,
   });
+});
+
+
+test("queue daily persistence uses the Redis stream id as the same-millisecond ordering fence", async () => {
+  const calls = [];
+  const tx = {
+    async $queryRawUnsafe(sql, ...params) {
+      calls.push({ sql, params });
+      return [{
+        id: "step-1",
+        userId: "user-1",
+        steps: 1000,
+        stepGoal: null,
+        date: new Date("2026-09-19T00:00:00.000Z"),
+        createdAt: new Date("2026-09-19T12:00:00.000Z"),
+        existed: true,
+        storageChanged: true,
+      }];
+    },
+  };
+
+  await upsertQueuedDailyStep(tx, {
+    userId: "user-1",
+    date: "2026-09-19",
+    steps: 1000,
+    requestTimestamp: new Date("2026-09-19T12:00:00.123Z"),
+    requestOrder: "1758283200123-1",
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].params[4], "1758283200123-1");
+  assert.match(calls[0].sql, /sync_stream_id/);
+  assert.match(calls[0].sql, /split_part\(steps\.sync_stream_id/);
+  assert.match(calls[0].sql, /split_part\(EXCLUDED\.sync_stream_id/);
 });

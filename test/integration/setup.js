@@ -277,8 +277,9 @@ async function cleanDatabase() {
   // One server-side block rather than one Prisma round trip per table: the
   // latter can exceed Prisma's default 5s interactive-transaction timeout on
   // a busy local adapter pool.
-  await prisma.$executeRawUnsafe(`
-    DO $$
+  const dollarQuote = "$" + "$";
+  const cleanupSql = `
+    DO ${dollarQuote}
     DECLARE table_name text;
     BEGIN
       -- RaceSeries.current_race_id and Race.series_id intentionally form a
@@ -295,8 +296,25 @@ async function cleanDatabase() {
           AND to_regclass(format('public.%I', table_name)) IS NULL THEN CONTINUE; END IF;
         EXECUTE format('DELETE FROM %I', table_name);
       END LOOP;
-    END $$;
-  `);
+    END ${dollarQuote};
+  `;
+
+  // A shared in-shard HTTP server can still be finishing an async DB write as
+  // the next case begins cleanup. PostgreSQL 40P01 is explicitly retryable;
+  // retry only that condition, with a tiny bounded delay. Any other cleanup
+  // error remains a hard test failure.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await prisma.$executeRawUnsafe(cleanupSql);
+      break;
+    } catch (error) {
+      const deadlock =
+        error?.meta?.code === "40P01" ||
+        /40P01|deadlock detected/i.test(String(error?.message || ""));
+      if (!deadlock || attempt >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
 }
 
 async function startServer(dependencies = {}) {

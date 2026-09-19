@@ -89,7 +89,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         now().getTime()
       );
       const ordered = [...race.participants].sort(compareParticipantsForPlacement);
-      const myIndex = ordered.findIndex((row) => row.userId === userId);
+      const orderIndexByUserId = new Map(
+        ordered.map((participant, index) => [participant.userId, index]),
+      );
+      const myIndex = orderIndexByUserId.get(userId) ?? -1;
       const maskedUserIds = new Set(
         ordered
           .filter(
@@ -115,7 +118,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         const rightMasked = viewerIsDetoured || maskedUserIds.has(right.userId);
         if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
         if (leftMasked) return String(left.userId).localeCompare(String(right.userId));
-        return ordered.indexOf(left) - ordered.indexOf(right);
+        return (
+          (orderIndexByUserId.get(left.userId) ?? 0) -
+          (orderIndexByUserId.get(right.userId) ?? 0)
+        );
       });
       const slotRows = inventoryRows.filter(
         (row) => row.status === "HELD" || row.status === "MYSTERY_BOX"
@@ -124,7 +130,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         contract: "race-powerup-target-context-v1",
         ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
         participants: presentationOrdered.map((participant) => {
-          const index = ordered.indexOf(participant);
+          const index = orderIndexByUserId.get(participant.userId) ?? -1;
           const actuallyStealthed =
             participant.userId !== userId &&
             participant.finishedAt == null &&
@@ -224,16 +230,6 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
     const race = core
       ? await displayCache.fullDisplayContext(raceId, { race: core, userId })
       : null;
-    if (race?.participants?.length) {
-      const presentations = await userPresentationCache.getMany(
-        race.participants.map((participant) => participant.userId),
-        true
-      );
-      race.participants = race.participants.map((participant) => ({
-        ...participant,
-        user: presentations.get(participant.userId) || null,
-      }));
-    }
     if (!race) throw domainError("Race not found", 404, "RACE_NOT_FOUND");
     if (race.status !== "ACTIVE") {
       throw domainError("Race is not active", 400, "RACE_NOT_ACTIVE");
@@ -276,13 +272,26 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       now: now(),
     });
 
+    // Presentation is cache-backed and needed only for rows the picker can
+    // actually show. Do not fan a target-selection request out across the full
+    // race roster when most participants are ineligible.
+    const eligiblePresentations = eligible.length
+      ? await userPresentationCache.getMany(
+          eligible.map((participant) => participant.userId),
+          true,
+        )
+      : new Map();
+
     const { stealthedUserIds, viewerIsDetoured } = collectRaceIllusions(
       effects,
       userId,
       now().getTime()
     );
     const ordered = [...race.participants].sort(compareParticipantsForPlacement);
-    const myIndex = ordered.findIndex((row) => row.userId === userId);
+    const orderIndexByUserId = new Map(
+      ordered.map((participant, index) => [participant.userId, index]),
+    );
+    const myIndex = orderIndexByUserId.get(userId) ?? -1;
     const maskedUserIds = new Set(
       ordered
         .filter(
@@ -313,13 +322,16 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         if (leftMasked) {
           return String(left.userId).localeCompare(String(right.userId));
         }
-        return ordered.indexOf(left) - ordered.indexOf(right);
+        return (
+          (orderIndexByUserId.get(left.userId) ?? 0) -
+          (orderIndexByUserId.get(right.userId) ?? 0)
+        );
       });
     return {
       contract: "race-powerup-target-context-v2",
       ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
       participants: presentationOrdered.map((participant) => {
-        const index = ordered.indexOf(participant);
+        const index = orderIndexByUserId.get(participant.userId) ?? -1;
         const actuallyStealthed =
           participant.userId !== userId &&
           participant.finishedAt == null &&
@@ -329,10 +341,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           userId: participant.userId,
           displayName: masked
             ? "???"
-            : participant.user?.displayName ?? null,
+            : eligiblePresentations.get(participant.userId)?.displayName ?? null,
           profilePhotoUrl: masked
             ? null
-            : participant.user?.profilePhotoUrl ?? null,
+            : eligiblePresentations.get(participant.userId)?.profilePhotoUrl ?? null,
           ...(powerupType === "BOUNTY"
             ? { totalSteps: masked ? null : participant.totalSteps ?? 0 }
             : {}),

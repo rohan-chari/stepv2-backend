@@ -86,6 +86,9 @@ const {
 const {
   redeemPowerupToRace: defaultRedeemPowerupToRace,
 } = require("../powerups");
+const {
+  returnRedeemedPowerupToStash: defaultReturnRedeemedPowerupToStash,
+} = require("../powerups");
 const { getRaces: defaultGetRaces } = require("./queries/getRaces");
 const {
   serializeTeamPayoutStamp,
@@ -417,6 +420,9 @@ function createRacesRouter(dependencies = {}) {
     dependencies.rerollMysteryBoxBatch || defaultRerollMysteryBoxBatch;
   const redeemPowerupToRace =
     dependencies.redeemPowerupToRace || defaultRedeemPowerupToRace;
+  const returnRedeemedPowerupToStash =
+    dependencies.returnRedeemedPowerupToStash ||
+    defaultReturnRedeemedPowerupToStash;
   const getRaceInventory =
     dependencies.getRaceInventory || defaultGetRaceInventory;
   const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
@@ -2285,6 +2291,33 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
+  // POST /races/:raceId/powerups/:powerupId/return-to-stash
+  // Reverses only a still-HELD row that carries explicit inventory-redemption
+  // provenance. Additive endpoint used for pre-use cancel/error recovery and
+  // for a stranded HELD row after an app crash.
+  router.post(
+    "/:raceId/powerups/:powerupId/return-to-stash",
+    async (req, res) => {
+      try {
+        const result = await returnRedeemedPowerupToStash({
+          userId: req.user.id,
+          raceId: req.params.raceId,
+          powerupId: req.params.powerupId,
+        });
+        res.json(result);
+      } catch (error) {
+        if (error.name === "ReturnRedeemedPowerupError") {
+          return res.status(error.statusCode || 400).json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+          });
+        }
+        console.error("Return redeemed powerup error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    },
+  );
+
   router.post("/:raceId/powerups/:powerupId/use", async (req, res) => {
     const performance = beginRacePerformance(performanceQueryCounter);
     let perfOutcome = "error";
@@ -2344,6 +2377,9 @@ function createRacesRouter(dependencies = {}) {
             ...(error.code ? { code: error.code } : {}),
             ...(error.powerupType
               ? { powerupType: error.powerupType }
+              : {}),
+            ...(error.refundedPowerup
+              ? { refundedPowerup: error.refundedPowerup }
               : {}),
           });
       }

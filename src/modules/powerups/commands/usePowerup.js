@@ -176,19 +176,18 @@ async function lockPowerupUseParticipants(tx, { raceId, powerupId, planTargeted 
 // getRaceProgress (each of the leecher's in-window steps removes one from the
 // victim, capped); the switch case here just parks the effect for the
 // capability-versioned window (§7.5).
-// HITCHHIKE (§7) is a store-bought TARGETED link. It gets its Socks-blocks /
-// Mirror-never-reflects behavior purely by LIST MEMBERSHIP — OFFENSIVE_TYPES for
-// target resolution + enemy-only validation + the Compression Socks block,
-// SHOP_POWERUP_TYPES to skip the Mirror reflect pre-check, TARGETED_TYPES for the
-// shared targeting validation. There is deliberately NO hard-coded branch in the
-// style of the IMPOSTER one further down. Its effect is target-driven and scored
+// HITCHHIKE (§7) is a store-bought TARGETED link. Enemy-targeted Hitchhikes
+// keep the normal Decoy/Socks defense chain and are never Mirror-reflected.
+// A same-team Hitchhike is cooperative: it bypasses target defenses entirely
+// while retaining the normal caster/target occupancy guards. Its effect is
+// target-driven and scored
 // in src/utils/hitchhikeCopies.js (the caster COPIES the target's raw in-window
 // steps 1:1; the target loses nothing); the switch case here just parks the
 // 60-minute link.
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE", "DRILL_SERGEANT"];
-// The three coin-shop-only powerups (they exist ONLY via the powerup shop:
-// IMPOSTER, RAINSTORM, SIGNAL_JAMMER). Product rule: none of them can EVER be
-// reflected by a Mirror, but ALL of them can be blocked by Compression Socks.
+// Shop-only offensive powerups are never reflected by a Mirror. They normally
+// remain blockable by Compression Socks; friendly teammate Hitchhike is the
+// explicit cooperative exception and bypasses defenses without consuming them.
 // So they are excluded from the Mirror pre-check (single-target) and from the
 // per-victim Mirror branch (Rainstorm AoE), while the Socks block still applies:
 //   * SIGNAL_JAMMER stays in OFFENSIVE_TYPES → gets the single-target Socks block.
@@ -278,8 +277,9 @@ const LEECH_SCORING_VERSION = 2;
 const LEECH_MAX_PER_VICTIM = 1;
 // HITCHHIKE (§7.1): store-only, non-upgradeable, fixed 60-minute window. The
 // caster COPIES 50% of the target's recorded eligible steps — the target
-// loses nothing. Metadata carries `{ copyRatio, scoringVersion }` and the scorer
-// reads copyRatio (defaulting to 1), so a rebalance is data-only. At most ONE
+// loses nothing. Metadata carries the copy/scoring contract. New V3 casts also
+// opt into generation-fenced late-sample repair; older V3 rows stay immutable
+// so already-manually-corrected testflight incidents cannot be double credited.
 // active link per caster AND one per target (§7.2): unlike Leech, Hitchhike is not
 // zero-sum, so concurrent links would compound.
 const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
@@ -1051,14 +1051,14 @@ async function refundRedeemedOnRejection({
   raceId,
   powerupId,
 }) {
-  if (typeof db?.$transaction !== "function") return;
+  if (typeof db?.$transaction !== "function") return null;
   const powerup = await powerupModel.findById(powerupId);
-  if (!powerup) return;
-  if (powerup.userId !== userId || powerup.raceId !== raceId) return;
-  if (powerup.status !== "HELD") return;
-  if (powerup.redeemedFromInventory !== true) return;
+  if (!powerup) return null;
+  if (powerup.userId !== userId || powerup.raceId !== raceId) return null;
+  if (powerup.status !== "HELD") return null;
+  if (powerup.redeemedFromInventory !== true) return null;
 
-  await db.$transaction(async (tx) => {
+  const refunded = await db.$transaction(async (tx) => {
     // Only the caller that flips HELD -> DISCARDED performs the hand-back.
     const discarded = await tx.racePowerup.updateMany({
       // Revalidate the full pre-read tuple atomically. Pickpocket can transfer
@@ -1076,12 +1076,16 @@ async function refundRedeemedOnRejection({
       data: { status: "DISCARDED" },
     });
     if (discarded.count) await slotsChanged({ participantId: powerup.participantId });
-    if (discarded.count !== 1) return;
-    await tx.userPowerupItem.upsert({
+    if (discarded.count !== 1) return null;
+    const stashRow = await tx.userPowerupItem.upsert({
       where: { userId_powerupType: { userId, powerupType: powerup.type } },
       create: { userId, powerupType: powerup.type, quantity: 1 },
       update: { quantity: { increment: 1 } },
     });
+    return {
+      powerupType: powerup.type,
+      quantity: Math.max(0, Number(stashRow?.quantity) || 0),
+    };
   });
 
   // C4 (spec §5 Phase E): the discard hand-back returns a redeemed powerup to
@@ -1090,6 +1094,7 @@ async function refundRedeemedOnRejection({
   try {
     await require("../services/powerupInventoryCache").invalidateSafe(userId);
   } catch {}
+  return refunded;
 }
 
 async function rebaseDecoyUsageCooldownsOnConsume({
@@ -1633,6 +1638,7 @@ function buildUsePowerup(dependencies = {}) {
     const hitchhikeCheckTime = type === "HITCHHIKE" ? now() : null;
     let liveHitchhikeLinks = null;
     let hitchhikeDecoyResolution = null;
+    let rainstormRaceEffects = null;
     const activeImpactEnabled = true;
     const activeImpactCapable = requestHasFeature(
       clientFeatures,
@@ -2618,15 +2624,18 @@ function buildUsePowerup(dependencies = {}) {
       if (targetUserId) {
         throw new PowerupUseError("Rainstorm hits every racer. You cannot specify a target", 400);
       }
-      // B4: PER-CASTER limit. Each user may have one active storm at a time;
-      // different users' storms may overlap (a victim under two storms is
-      // clamped at a single 0.5x in scoring). A caster's own storm does not
-      // exempt them from being a normal victim of someone else's storm.
-      const raceEffects = await effectModel.findActiveForRace(raceId);
-      const activeStorm = raceEffects.find(
-        (e) => e.type === "RAINSTORM" &&
+      // One live storm per caster remains unchanged. Cross-caster storms are
+      // allowed only for DRY recipients: a runner already under Rainstorm is
+      // skipped until their existing window ends, so another cast can never
+      // extend one continuous 0.5x penalty window.
+      const rainCheckTime = now();
+      rainstormRaceEffects = await effectModel.findActiveForRace(raceId);
+      const activeStorm = rainstormRaceEffects.find(
+        (e) =>
+          e.type === "RAINSTORM" &&
           e.sourceUserId === userId &&
-          e.expiresAt && new Date(e.expiresAt) > now()
+          e.expiresAt &&
+          new Date(e.expiresAt) > rainCheckTime
       );
       if (activeStorm) {
         throw new PowerupUseError(
@@ -2636,11 +2645,31 @@ function buildUsePowerup(dependencies = {}) {
           { retainHeld: true }
         );
       }
-      const otherRunners = acceptedParticipants.filter(
-        (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
+      const alreadyWetParticipantIds = new Set(
+        rainstormRaceEffects
+          .filter(
+            (e) =>
+              e.type === "RAINSTORM" &&
+              e.targetParticipantId &&
+              e.expiresAt &&
+              new Date(e.expiresAt) > rainCheckTime
+          )
+          .map((e) => e.targetParticipantId)
       );
-      if (otherRunners.length === 0) {
-        throw new PowerupUseError("No other active runners to rain on", 400);
+      const dryRunners = acceptedParticipants.filter(
+        (p) =>
+          p.userId !== userId &&
+          isAliveTarget(p) &&
+          isEnemy(p) &&
+          !alreadyWetParticipantIds.has(p.id)
+      );
+      if (dryRunners.length === 0) {
+        throw new PowerupUseError(
+          "Everyone you can rain on is already under Rainstorm",
+          409,
+          "NO_ELIGIBLE_TARGETS",
+          { retainHeld: true }
+        );
       }
     }
 
@@ -2730,6 +2759,15 @@ function buildUsePowerup(dependencies = {}) {
         throw new PowerupUseError("You can't target a teammate", 400, "INVALID_TARGET");
       }
     }
+    // A teammate Hitchhike is cooperative, not an attack. It still obeys the
+    // normal Hitchhike caster/target occupancy limits, but target defenses must
+    // not hide, redirect, reflect, block, or be consumed by the friendly link.
+    const friendlyHitchhike =
+      type === "HITCHHIKE" &&
+      isTeamRace &&
+      targetParticipant != null &&
+      myParticipant.team != null &&
+      targetParticipant.team === myParticipant.team;
 
     // IMPOSTER: targeted but not offensive. Validate the chosen rival is a real
     // active participant (the display swap stores their userId in metadata).
@@ -2815,7 +2853,7 @@ function buildUsePowerup(dependencies = {}) {
     // inventory by the item-12 unwind if it was a redeemed one). Auto-targeted
     // RED_CARD / PINECONE_TOSS are NOT in TARGETED_TYPES, so a stealthed leader
     // can still be red-carded (powerups-stealth-redcard.test.js stays green).
-    if (TARGETED_TYPES.includes(type)) {
+    if (TARGETED_TYPES.includes(type) && !friendlyHitchhike) {
       const targetedParticipant =
         targetParticipant || imposterTargetParticipant || bountyTargetParticipant;
       if (targetedParticipant) {
@@ -3211,36 +3249,43 @@ function buildUsePowerup(dependencies = {}) {
     // item, feed, scoring state, and activation coins as one rejected action.
     // The race mutation lock keeps this snapshot stable until the later consume.
     if (type === "HITCHHIKE" && targetParticipant) {
-      const decoy = await effectModel.findActiveByTypeForParticipant(
-        targetParticipant.id,
-        "DECOY",
-        { expiresAfter: hitchhikeCheckTime },
-      );
-      if (decoy) {
-        const redirect = pickDecoyRedirectVictim({
-          acceptedParticipants,
-          isAliveTarget,
-          attackerUserId: userId,
-          holderParticipant: targetParticipant,
-          isTeamRace,
-          random,
-        });
-        hitchhikeDecoyResolution = {
-          decoy,
-          holder: targetParticipant,
-          redirect,
-        };
-        if (redirect) {
-          assertHitchhikeAvailableForFinalTarget({
-            liveLinks: liveHitchhikeLinks,
-            targetUserId: redirect.userId,
-          });
-        }
-      } else {
+      if (friendlyHitchhike) {
         assertHitchhikeAvailableForFinalTarget({
           liveLinks: liveHitchhikeLinks,
           targetUserId: resolvedTargetUserId,
         });
+      } else {
+        const decoy = await effectModel.findActiveByTypeForParticipant(
+          targetParticipant.id,
+          "DECOY",
+          { expiresAfter: hitchhikeCheckTime },
+        );
+        if (decoy) {
+          const redirect = pickDecoyRedirectVictim({
+            acceptedParticipants,
+            isAliveTarget,
+            attackerUserId: userId,
+            holderParticipant: targetParticipant,
+            isTeamRace,
+            random,
+          });
+          hitchhikeDecoyResolution = {
+            decoy,
+            holder: targetParticipant,
+            redirect,
+          };
+          if (redirect) {
+            assertHitchhikeAvailableForFinalTarget({
+              liveLinks: liveHitchhikeLinks,
+              targetUserId: redirect.userId,
+            });
+          }
+        } else {
+          assertHitchhikeAvailableForFinalTarget({
+            liveLinks: liveHitchhikeLinks,
+            targetUserId: resolvedTargetUserId,
+          });
+        }
       }
     }
 
@@ -3361,7 +3406,12 @@ function buildUsePowerup(dependencies = {}) {
     // (one redirect max — a second Decoy on the new victim does not chain): their
     // Socks is caught by the block below (targetParticipant now points at them),
     // and their Mirror is handled here.
-    if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+    if (
+      !friendlyHitchhike &&
+      !reflected &&
+      OFFENSIVE_TYPES.includes(type) &&
+      targetParticipant
+    ) {
       const decoy = type === "HITCHHIKE"
         ? hitchhikeDecoyResolution?.decoy || null
         : plannedDecoyResolution
@@ -3548,7 +3598,11 @@ function buildUsePowerup(dependencies = {}) {
     // so this same check is what lets an attacker's own active socks block
     // the bounced attack (Mirror consumed above, socks consumed here, effect
     // lands on no one).
-    if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+    if (
+      !friendlyHitchhike &&
+      OFFENSIVE_TYPES.includes(type) &&
+      targetParticipant
+    ) {
       const shield = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -3840,10 +3894,12 @@ function buildUsePowerup(dependencies = {}) {
           expiresAt: new Date(currentTime.getTime() + HITCHHIKE_DURATION_MS),
           metadata: {
             copyRatio: HITCHHIKE_COPY_RATIO,
-            // Release B stamps new casts onto the durable v3 attribution path.
-            // Existing v1/v2 effects remain readable through their versioned
-            // scoring paths for frozen-client and in-flight-race compatibility.
+            // V3 keeps the terminal window immutable, but this opt-in lets
+            // a newer exact-sample generation repair a capture that froze before
+            // delayed Health samples arrived. Existing V3 rows without the bit
+            // retain the old immutable behavior.
             scoringVersion: HITCHHIKE_EFFECTIVE_SCORING_VERSION,
+            lateSampleReconciliationV1: true,
           },
         });
         result.effect = effect;
@@ -4160,11 +4216,18 @@ function buildUsePowerup(dependencies = {}) {
         // Ascending-userId fan-out (spec §5a item 7). Rainstorm is the
         // multi-target powerup path: it touches one row per victim, so it takes
         // the SAME global lock order as every other multi-row writer.
-        const victims = acceptedParticipants
+        const directVictims = acceptedParticipants
           .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
           .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
         const effectsByParticipant = new Map();
-        if (typeof effectModel.findActiveForParticipants === "function") {
+        if (Array.isArray(rainstormRaceEffects)) {
+          for (const effect of rainstormRaceEffects) {
+            if (!effect?.targetParticipantId) continue;
+            const list = effectsByParticipant.get(effect.targetParticipantId) || [];
+            list.push(effect);
+            effectsByParticipant.set(effect.targetParticipantId, list);
+          }
+        } else if (typeof effectModel.findActiveForParticipants === "function") {
           for (const effect of await effectModel.findActiveForParticipants(
             acceptedParticipants.map((p) => p.id),
           )) {
@@ -4172,7 +4235,25 @@ function buildUsePowerup(dependencies = {}) {
             list.push(effect);
             effectsByParticipant.set(effect.targetParticipantId, list);
           }
+        } else if (typeof effectModel.findActiveForParticipant === "function") {
+          for (const participant of directVictims) {
+            effectsByParticipant.set(
+              participant.id,
+              (await effectModel.findActiveForParticipant(participant.id)) || [],
+            );
+          }
         }
+        // Skip before Decoy/Umbrella/Socks resolution. "Already wet" is not an
+        // attack attempt against that runner, so it must not consume a defense.
+        const victims = directVictims.filter((participant) => {
+          const effects = effectsByParticipant.get(participant.id) || [];
+          return !effects.some(
+            (effect) =>
+              effect.type === "RAINSTORM" &&
+              effect.expiresAt &&
+              new Date(effect.expiresAt) > currentTime
+          );
+        });
         const decoyCooldownConsumptions = [];
         const decoyResolution = await resolveAoEDecoySlots({
           victims,
@@ -5179,13 +5260,14 @@ function buildUsePowerup(dependencies = {}) {
     } catch (err) {
       if (err instanceof PowerupUseError) {
         try {
-          await refundRedeemedOnRejection({
+          const refundedPowerup = await refundRedeemedOnRejection({
             db,
             powerupModel,
             userId: args.userId,
             raceId: args.raceId,
             powerupId: args.powerupId,
           });
+          if (refundedPowerup) err.refundedPowerup = refundedPowerup;
         } catch (refundErr) {
           console.error("usePowerup redeemed-refund failed:", refundErr);
         }

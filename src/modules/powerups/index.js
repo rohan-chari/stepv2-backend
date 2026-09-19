@@ -28,6 +28,7 @@ Object.assign(module.exports, require("./commands/rollPowerup"));
 Object.assign(module.exports, require("./commands/usePowerup"));
 Object.assign(module.exports, require("./commands/discardPowerup"));
 Object.assign(module.exports, require("./commands/redeemPowerupToRace"));
+Object.assign(module.exports, require("./commands/returnRedeemedPowerupToStash"));
 Object.assign(module.exports, require("./commands/grantPowerupToUser"));
 Object.assign(module.exports, require("./commands/purchasePowerupItem"));
 Object.assign(module.exports, require("./commands/unlockPowerupWithAds"));

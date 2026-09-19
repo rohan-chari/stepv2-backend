@@ -28,6 +28,7 @@ async function getRaceInventory(userId, raceId, supportsPowerups4 = false) {
       type: p.type,
       rarity: p.rarity,
       earnedAtSteps: p.earnedAtSteps,
+      redeemedFromInventory: p.redeemedFromInventory === true,
       createdAt: p.createdAt,
     })),
     mysteryBoxes: mysteryBoxes.map((p) => ({

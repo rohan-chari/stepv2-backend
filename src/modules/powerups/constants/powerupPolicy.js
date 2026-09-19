@@ -16,7 +16,7 @@ const POWERUP_POLICY = Object.freeze({
     shop: true,
     targetMode: "AOE_ENEMY",
     persistence: "TIMED_EFFECT",
-    directDuplicatePolicy: "PER_CASTER",
+    directDuplicatePolicy: "SKIP_RECIPIENT",
     redirectedDuplicate: REDIRECTED_DUPLICATE_POLICIES.RAINSTORM,
     effectWriteMode: "MULTI_TARGET",
   }),

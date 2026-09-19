@@ -1398,6 +1398,7 @@ function buildGetRaceProgress(deps = {}) {
         type: p.type,
         rarity: p.rarity,
         status: p.status,
+        redeemedFromInventory: p.redeemedFromInventory === true,
       }));
 
       // Viewer-only advisory preview. Keep it off the shared snapshot and avoid

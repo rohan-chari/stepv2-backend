@@ -96,6 +96,42 @@ test("Hitchhike hides occupied targets and returns none when caster already has 
   assert.deepEqual(casterAlreadyLinked, []);
 });
 
+test("friendly Hitchhike keeps defended teammates targetable", () => {
+  const now = new Date("2026-09-19T00:00:00.000Z");
+  const roster = [
+    { id: "me-p", userId: "me", status: "ACCEPTED", team: "TEAM_A" },
+    { id: "mate-p", userId: "mate", status: "ACCEPTED", team: "TEAM_A" },
+    { id: "enemy-p", userId: "enemy", status: "ACCEPTED", team: "TEAM_B" },
+  ];
+  const targets = eligiblePowerupTargets({
+    powerupType: "HITCHHIKE",
+    participants: roster,
+    viewerUserId: "me",
+    isTeamRace: true,
+    effects: [
+      {
+        type: "STEALTH_MODE",
+        status: "ACTIVE",
+        targetParticipantId: "mate-p",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+      {
+        type: "STEALTH_MODE",
+        status: "ACTIVE",
+        targetParticipantId: "enemy-p",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    ],
+    now,
+  });
+
+  assert.deepEqual(
+    targets.map((p) => p.userId),
+    ["mate"],
+    "teammate defenses are ignored; enemy defenses still apply",
+  );
+});
+
 test("Quicksand hides rivals already frozen by Leg Cramp or Quicksand", () => {
   const now = new Date("2026-09-19T00:00:00.000Z");
   const quicksandParticipants = [

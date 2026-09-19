@@ -15,14 +15,19 @@ races, or alter the existing immutable impact event. The repair recomputes the
 affected timed attribution from authoritative samples using the canonical race
 scorer, then applies the difference exactly once under the existing race fence.
 
-The first release supports only:
+The first release supports:
 
 `RUNNERS_HIGH`, `WRONG_TURN`, `LEG_CRAMP`, `QUICKSAND`, `RAINSTORM`,
 `CAMPFIRE_REST`, `UPRISING`, `RALLY_FLAG`, `COIN_FLIP`, and `GHOST_PEPPER`.
 
-It explicitly excludes Leech, Hitchhike, Drill Sergeant, Piggy Bank, Bounty,
-Trail Mine, completed-race global 2×, recap correction, payout/reward reversal,
-and historical backfill.
+It also supports one narrow cross-user case: newly cast Hitchhike V3 effects
+stamped with `lateSampleReconciliationV1: true`. A late source generation for
+the walked-on target may repair the caster's frozen copied-step contribution
+from exact timestamped samples. Older V3 Hitchhikes remain immutable.
+
+It explicitly excludes Leech, older Hitchhike rows, Drill Sergeant, Piggy Bank,
+Bounty, Trail Mine, completed-race global 2×, recap correction,
+payout/reward reversal, and historical backfill.
 
 ## User story
 
@@ -81,8 +86,8 @@ artifacts. Phase 2 must never update or delete those rows.
 - No completed-race global 2× repair; active global 2× remains on its existing
   dynamic path.
 - No recap correction; the current first-write-wins behavior remains unchanged.
-- No Leech/Hitchhike, Drill Sergeant, Piggy Bank, Bounty, Trail Mine,
-  payout/reward/economy, or notification redesign.
+- No Leech, legacy/unflagged Hitchhike repair, Drill Sergeant, Piggy Bank,
+  Bounty, Trail Mine, payout/reward/economy, or notification redesign.
 - No per-sample or per-effect queue jobs.
 - No synchronous correction in `/steps/sync-v2`.
 - No Health completeness watermark and no arbitrary lateness cutoff.

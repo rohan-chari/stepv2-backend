@@ -16,7 +16,8 @@
 //   * unlockPowerupWithAds.js      (ad-funded purchase, quantity increment)
 //   * grantPowerupToUser.js        (daily reward box, drops, admin grants)
 //   * redeemPowerupToRace.js       (decrementIfAvailable — the "use" seam)
-//   * usePowerup.js                (discard hand-back of a redeemed powerup)
+//   * usePowerup.js                (rejection hand-back of a redeemed powerup)
+//   * returnRedeemedPowerupToStash.js (explicit pre-use/crash-recovery return)
 // The 60s TTL is the backstop for a missed one.
 const { prisma } = require("../../../db");
 const derivedCache = require("../../../shared/cache/derivedCache");
