@@ -18,8 +18,20 @@ async function extractRelationalSummary({client,identity,generatedAt,signal,obse
     await pages('users','id,is_review_account,created_at,metrics_v2_signup_eligible,metrics_v2_signup_epoch_id,metrics_v2_eligible_epoch_id,metrics_v2_eligible_at','users');
     await pages('races','id,creator_id,seed_id,tournament_id,status,powerups_enabled,started_at,created_at,completed_at','races');
     await pages('participants','id,user_id,race_id,joined_at,finished_at,forfeited_at','race_participants',"status='accepted'");
-    // All retained user/day history is needed for the historical signup cohorts;
-    // the hard extraction budget fails closed instead of silently truncating it.
+    // All retained user/day history is needed for the historical signup cohorts.
+    // Probe the remaining row budget before materializing this potentially huge
+    // source. Without this, an over-budget dataset can spend long enough paging
+    // that the outer HTTP/build deadline wins first, hiding the real size-budget
+    // failure and doing unnecessary database work.
+    const remainingRows=Math.max(0,LIMITS.rows-rows);
+    check();
+    const activityBudgetProbe=await client.query(
+      'SELECT count(*)::int AS count FROM (SELECT 1 FROM user_activity_days LIMIT $1) budget_probe',
+      [remainingRows+1],
+    );
+    if(Number(activityBudgetProbe.rows[0]?.count||0)>remainingRows){
+      throw Error('Analytics extraction size budget exceeded');
+    }
     input.activity=[];let afterUser=null,afterDate=null;
     while(true){check();const result=await client.query("SELECT user_id,to_char(activity_date,'YYYY-MM-DD') activity_date FROM user_activity_days WHERE ($1::text IS NULL OR (user_id,activity_date)>($1::text,$2::date)) ORDER BY user_id,activity_date LIMIT $3",[afterUser,afterDate,LIMITS.page]);observe({event:'query',phase:'extraction',source:'activity',rows:result.rows.length});rows+=result.rows.length;bytes+=Buffer.byteLength(JSON.stringify(result.rows));if(rows>LIMITS.rows||bytes>LIMITS.bytes)throw Error('Analytics extraction size budget exceeded');input.activity.push(...result.rows);if(result.rows.length<LIMITS.page)break;afterUser=result.rows.at(-1).user_id;afterDate=result.rows.at(-1).activity_date;}
 
