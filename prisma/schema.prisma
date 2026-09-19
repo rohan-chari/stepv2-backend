@@ -942,6 +942,9 @@ model Step {
   // this timestamp may replace this day's canonical total. Nullable keeps
   // existing rows and mixed-version deploys backward-compatible.
   syncRequestedAt DateTime? @db.Timestamptz(3) @map("sync_requested_at")
+  // Queue-first tie-breaker. Redis Stream IDs are strictly ordered even when
+  // two syncs share the same millisecond acceptedAt timestamp.
+  syncStreamId   String?   @map("sync_stream_id")
   user      User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, date])
