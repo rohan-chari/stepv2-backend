@@ -217,7 +217,10 @@ function homeGiveawayBanner() { return `${PREFIX.HOME_GIVEAWAY_BANNER}:active`; 
 const DATABASE_POOL_IDENTITIES = new Set([
   "http:0",
   "http:1",
+  "step:0",
   "resolution:0",
+  "event:0",
+  "notification:0",
   "cron:0",
 ]);
 
