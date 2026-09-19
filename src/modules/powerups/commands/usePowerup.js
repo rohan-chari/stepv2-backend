@@ -1092,27 +1092,42 @@ async function refundRedeemedOnRejection({
   } catch {}
 }
 
-async function rebaseDecoyUsageCooldownOnConsume({
+async function rebaseDecoyUsageCooldownsOnConsume({
   usageStateModel,
   db,
   raceId,
-  ownerUserId,
-  sourcePowerupId,
+  consumptions,
   consumedAt,
 }) {
-  const existing = typeof usageStateModel.findForUpdate === "function"
-    ? await usageStateModel.findForUpdate(db, raceId, ownerUserId, "DECOY")
-    : null;
-  await usageStateModel.upsertUsed({
-    db,
-    userId: ownerUserId,
-    raceId,
-    powerupType: "DECOY",
-    lastUsedAt: existing?.lastUsedAt || consumedAt,
-    activeUntil: consumedAt,
-    nextUsableAt: new Date(consumedAt.getTime() + DECOY_POST_POP_COOLDOWN_MS),
-    sourcePowerupId: existing?.sourcePowerupId || sourcePowerupId || null,
-  });
+  const rows = (consumptions || []).filter((row) => row?.userId);
+  if (!rows.length) return;
+
+  const nextUsableAt = new Date(consumedAt.getTime() + DECOY_POST_POP_COOLDOWN_MS);
+  if (typeof usageStateModel.rebaseDecoyConsumedMany === "function") {
+    await usageStateModel.rebaseDecoyConsumedMany({
+      db,
+      raceId,
+      consumptions: rows,
+      consumedAt,
+      nextUsableAt,
+    });
+    return;
+  }
+
+  // Lightweight injected unit doubles may only implement the original upsert
+  // seam. Production uses the batched model path above.
+  for (const row of rows) {
+    await usageStateModel.upsertUsed({
+      db,
+      userId: row.userId,
+      raceId,
+      powerupType: "DECOY",
+      lastUsedAt: consumedAt,
+      activeUntil: consumedAt,
+      nextUsableAt,
+      sourcePowerupId: row.sourcePowerupId || null,
+    });
+  }
 }
 
 function buildUsePowerup(dependencies = {}) {
@@ -1163,12 +1178,14 @@ function buildUsePowerup(dependencies = {}) {
   }) {
     const consumedAt = now();
     await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: consumedAt });
-    await rebaseDecoyUsageCooldownOnConsume({
+    await rebaseDecoyUsageCooldownsOnConsume({
       usageStateModel,
       db: usageDb,
       raceId,
-      ownerUserId: ownerParticipant.userId,
-      sourcePowerupId: decoy.powerupId,
+      consumptions: [{
+        userId: ownerParticipant.userId,
+        sourcePowerupId: decoy.powerupId,
+      }],
       consumedAt,
     });
     await appendDomainEvent(db, decoyConsumptionEvent({
@@ -2489,16 +2506,16 @@ function buildUsePowerup(dependencies = {}) {
       // same atomic commit as item consumption, with no per-recipient SQL.
       if (!hasInjectedDeps) {
         await effectModel.consumeDecoys(consumedDecoyIds, currentTime);
-        for (const consumption of decoyConsumptions) {
-          await rebaseDecoyUsageCooldownOnConsume({
-            usageStateModel,
-            db: transactionDb,
-            raceId,
-            ownerUserId: consumption.ownerParticipant.userId,
+        await rebaseDecoyUsageCooldownsOnConsume({
+          usageStateModel,
+          db: transactionDb,
+          raceId,
+          consumptions: decoyConsumptions.map((consumption) => ({
+            userId: consumption.ownerParticipant.userId,
             sourcePowerupId: consumption.decoy.powerupId,
-            consumedAt: currentTime,
-          });
-        }
+          })),
+          consumedAt: currentTime,
+        });
         await bulkAppendDomainEvents(db, decoyEvents);
       }
       if (typeof effectModel.updateManyStatus === "function") {
@@ -5163,7 +5180,7 @@ const usePowerup = buildUsePowerup();
 module.exports = {
   buildUsePowerup,
   usePowerup,
-  rebaseDecoyUsageCooldownOnConsume,
+  rebaseDecoyUsageCooldownsOnConsume,
   PowerupUseError,
   assertHitchhikeAvailableForFinalTarget,
   isLiveHitchhikeAt,
