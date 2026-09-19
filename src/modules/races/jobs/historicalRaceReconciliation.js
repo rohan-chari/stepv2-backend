@@ -59,7 +59,10 @@ async function reconcileIntent({ row, prisma, raceJob, intentModel, now, effectM
   );
   if (effects.length === 0) return { skipped: true };
 
-  const nowAt = race.endsAt && new Date(race.endsAt) > now ? new Date(race.endsAt) : now;
+  const raceIsActive = String(race.status || "").toUpperCase() === "ACTIVE";
+  const nowAt = raceIsActive
+    ? now
+    : (race.endsAt && new Date(race.endsAt) > now ? new Date(race.endsAt) : now);
   let sourceRowsRead = 0;
   const expected = new Map();
 
@@ -412,18 +415,24 @@ async function reconcileIntent({ row, prisma, raceJob, intentModel, now, effectM
       }
     }
 
-    for (const [participantId, delta] of correctionByParticipantId) {
-      if (delta === 0) continue;
-      const correctionParticipant = correctionParticipantById.get(participantId);
-      await tx.raceParticipant.update({
-        where: { id: participantId },
-        data: {
-          totalSteps: { increment: delta },
-          ...(correctionParticipant?.finishTotalSteps != null
-            ? { finishTotalSteps: { increment: delta } }
-            : {}),
-        },
-      });
+    // Active leaderboard totals are owned by the normal race-resolution writer.
+    // Reconciliation for an ACTIVE race updates only the durable impact projection;
+    // otherwise a late sample would be counted once here and again when RACE_DIRTY
+    // recomputes the participant from canonical source data.
+    if (!raceIsActive) {
+      for (const [participantId, delta] of correctionByParticipantId) {
+        if (delta === 0) continue;
+        const correctionParticipant = correctionParticipantById.get(participantId);
+        await tx.raceParticipant.update({
+          where: { id: participantId },
+          data: {
+            totalSteps: { increment: delta },
+            ...(correctionParticipant?.finishTotalSteps != null
+              ? { finishTotalSteps: { increment: delta } }
+              : {}),
+          },
+        });
+      }
     }
     const acknowledged = await intentModel.acknowledgeDryRun({ id: row.id, leaseToken: row.lease_token, claimedGeneration: row.requested_source_generation, now }, tx);
     if (!acknowledged) {
@@ -470,9 +479,11 @@ function buildHistoricalRaceReconciliationWorker({
           cursor: cursor.cursor_race_id ? { raceId: cursor.cursor_race_id, participantId: cursor.cursor_participant_id } : null,
           limit: 100,
         });
-        const completed = page.rows.filter((row) => String(row.raceStatus).toLowerCase() === "completed");
-        if (completed.length) await intentModel.admitMany({
-          rows: completed,
+        const eligible = page.rows.filter((row) =>
+          ["active", "completed"].includes(String(row.raceStatus).toLowerCase())
+        );
+        if (eligible.length) await intentModel.admitMany({
+          rows: eligible,
           changedStart: cursor.changed_start,
           changedEnd: cursor.changed_end,
           sourceGeneration: cursor.requested_source_generation,
