@@ -703,14 +703,14 @@ async function evalLua(script, keys = [], args = [], options = {}) {
 }
 
 async function readDatabasePoolTelemetrySnapshots(keys) {
-  if (!Array.isArray(keys) || keys.length !== 4) {
+  if (!Array.isArray(keys) || keys.length !== 7) {
     return { ok: false, disabled: false, values: [] };
   }
   try {
     const client = await readyClient();
     if (!client) return { ok: false, disabled: true, values: [] };
     const raws = await client.mget(...keys.map(prefixed));
-    if (!Array.isArray(raws) || raws.length !== 4) {
+    if (!Array.isArray(raws) || raws.length !== keys.length) {
       return { ok: false, disabled: false, values: [] };
     }
     return {
