@@ -601,7 +601,11 @@ describe("Leech expiry boundary — integration", () => {
       const start = sameDay ? hourFloor(6) : new Date(hourFloor(48).toISOString().slice(0, 10));
       await prisma.race.update({ where: { id: raceId }, data: { startedAt: start, timezone: "UTC" } });
       await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: start } });
-      const dailyDate = new Date(new Date().toISOString().slice(0, 10));
+      // Anchor daily-only fixtures to the effect-expiry UTC date. Using
+      // "today" makes the test fail for a few hours after UTC midnight because
+      // hourFloor(3) is still yesterday, turning the supposed pre-expiry 100
+      // steps into post-expiry walking.
+      const dailyDate = new Date(hourFloor(3).toISOString().slice(0, 10));
       if (dailyOnly) await prisma.step.create({ data: { userId: victim.userId, date: dailyDate, steps: 0 } });
       const held = await giveHeld(raceId, attacker.userId, "LEECH");
       let concurrentUse;
