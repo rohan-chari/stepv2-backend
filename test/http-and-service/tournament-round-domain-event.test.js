@@ -142,3 +142,125 @@ test("real tournament advancement appends matchup, elimination, and next-round d
   });
   assert.equal(updated.currentRound, 2);
 });
+
+
+test("real tournament final appends champion and runner-up elimination domain events", async () => {
+  const [creator, runnerUp, earlierLoserA, earlierLoserB] = await Promise.all([
+    createTestUser({ displayName: "Champion" }),
+    createTestUser({ displayName: "Runner Up" }),
+    createTestUser({ displayName: "Earlier Loser A" }),
+    createTestUser({ displayName: "Earlier Loser B" }),
+  ]);
+
+  const championUserId = creator.user.id;
+  const runnerUpUserId = runnerUp.user.id;
+  const now = new Date();
+
+  const tournament = await prisma.tournament.create({
+    data: {
+      creatorId: championUserId,
+      name: "Final advance evidence",
+      status: "ACTIVE",
+      bracketSize: 4,
+      matchupDurationDays: 2,
+      buyInAmount: 0,
+      potCoins: 0,
+      powerupsEnabled: false,
+      isPublic: false,
+      currentRound: 2,
+      totalRounds: 2,
+      startedAt: now,
+    },
+  });
+
+  for (const [userId, eliminatedInRound] of [
+    [championUserId, null],
+    [runnerUpUserId, null],
+    [earlierLoserA.user.id, 1],
+    [earlierLoserB.user.id, 1],
+  ]) {
+    await prisma.tournamentParticipant.create({
+      data: {
+        tournamentId: tournament.id,
+        userId,
+        status: "ACCEPTED",
+        joinedAt: now,
+        ...(eliminatedInRound == null ? {} : { eliminatedInRound }),
+      },
+    });
+  }
+
+  const finalRace = await prisma.race.create({
+    data: {
+      creatorId: championUserId,
+      name: "Tournament Final",
+      targetSteps: 0,
+      status: "COMPLETED",
+      startedAt: now,
+      maxDurationDays: 2,
+      timeBased: true,
+      isPublic: false,
+      maxParticipants: 2,
+      powerupsEnabled: false,
+      tournamentId: tournament.id,
+      tournamentRound: 2,
+      tournamentMatchIndex: 0,
+      winnerUserId: championUserId,
+    },
+  });
+
+  for (const userId of [championUserId, runnerUpUserId]) {
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: finalRace.id,
+        userId,
+        status: "ACCEPTED",
+        joinedAt: now,
+        baselineSteps: 0,
+      },
+    });
+  }
+
+  await advanceTournament({ tournamentId: tournament.id });
+
+  const events = await prisma.domainEventOutbox.findMany({
+    where: {
+      aggregateId: tournament.id,
+      eventType: {
+        in: [
+          "TOURNAMENT_CHAMPION_V1",
+          "TOURNAMENT_ELIMINATED_V1",
+        ],
+      },
+    },
+    include: { audience: true },
+    orderBy: { eventKey: "asc" },
+  });
+
+  const championEvents = events.filter(
+    (event) => event.eventType === "TOURNAMENT_CHAMPION_V1",
+  );
+  assert.equal(championEvents.length, 1);
+  assert.deepEqual(
+    championEvents[0].audience.map((row) => row.recipientId),
+    [championUserId],
+  );
+
+  const runnerUpEvents = events.filter(
+    (event) => event.eventType === "TOURNAMENT_ELIMINATED_V1",
+  );
+  assert.equal(runnerUpEvents.length, 1);
+  assert.deepEqual(
+    runnerUpEvents[0].audience.map((row) => row.recipientId),
+    [runnerUpUserId],
+  );
+
+  const updated = await prisma.tournament.findUnique({
+    where: { id: tournament.id },
+    select: { status: true, championUserId: true },
+  });
+  assert.deepEqual(updated, {
+    status: "COMPLETED",
+    championUserId,
+  });
+});
