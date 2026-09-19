@@ -5,6 +5,7 @@ const {
   buildViewerDisplayPlacementMap,
 } = require("../services/viewerDisplayPlacements");
 const defaultDisplayCache = require("../services/raceOpenDisplayCache");
+const defaultUserPresentationCache = require("../../social/services/userPresentationCache");
 const {
   eligiblePowerupTargets,
 } = require("../services/powerupTargetEligibility");
@@ -38,6 +39,8 @@ function domainError(message, statusCode, code) {
 function buildGetRacePowerupTargetContext(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const displayCache = dependencies.raceOpenDisplayCache || defaultDisplayCache;
+  const userPresentationCache =
+    dependencies.userPresentationCache || defaultUserPresentationCache;
   const stealableParticipants =
     dependencies.stealableParticipants || defaultStealableParticipants;
   const participantInventorySummary =
@@ -87,7 +90,25 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       };
     }
 
-    const race = await raceModel.findPowerupTargetContext(raceId);
+    let race;
+    if (dependencies.Race) {
+      race = await raceModel.findPowerupTargetContext(raceId);
+    } else {
+      const core = await displayCache.core(raceId);
+      race = core
+        ? await displayCache.fullDisplayContext(raceId, { race: core, userId })
+        : null;
+      if (race?.participants?.length) {
+        const presentations = await userPresentationCache.getMany(
+          race.participants.map((participant) => participant.userId),
+          true
+        );
+        race.participants = race.participants.map((participant) => ({
+          ...participant,
+          user: presentations.get(participant.userId) || null,
+        }));
+      }
+    }
     if (!race) throw domainError("Race not found", 404, "RACE_NOT_FOUND");
     if (race.status !== "ACTIVE") {
       throw domainError("Race is not active", 400, "RACE_NOT_ACTIVE");
