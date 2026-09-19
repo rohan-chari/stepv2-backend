@@ -12,7 +12,7 @@ const {
 
 beforeEach(cleanDatabase);
 
-test("real tournament advancement appends TOURNAMENT_ROUND_STARTED_V1 for the next-round survivors", async () => {
+test("real tournament advancement appends matchup, elimination, and next-round domain events", async () => {
   const [creator, racerB, racerC, racerD] = await Promise.all([
     createTestUser({ displayName: "Creator" }),
     createTestUser({ displayName: "Racer B" }),
@@ -98,18 +98,43 @@ test("real tournament advancement appends TOURNAMENT_ROUND_STARTED_V1 for the ne
   const events = await prisma.domainEventOutbox.findMany({
     where: {
       aggregateId: tournament.id,
-      eventType: "TOURNAMENT_ROUND_STARTED_V1",
+      eventType: {
+        in: [
+          "TOURNAMENT_MATCHUP_WON_V1",
+          "TOURNAMENT_ELIMINATED_V1",
+          "TOURNAMENT_ROUND_STARTED_V1",
+        ],
+      },
     },
     include: { audience: true },
     orderBy: { eventKey: "asc" },
   });
 
-  assert.equal(events.length, 2);
+  const byType = (eventType) => events.filter((event) => event.eventType === eventType);
+
+  const matchupWonEvents = byType("TOURNAMENT_MATCHUP_WON_V1");
+  assert.equal(matchupWonEvents.length, 2);
   assert.deepEqual(
-    new Set(events.flatMap((event) => event.audience.map((row) => row.recipientId))),
+    new Set(matchupWonEvents.flatMap((event) => event.audience.map((row) => row.recipientId))),
     new Set(winners),
   );
-  assert.ok(events.every((event) => event.payload.roundId === `${tournament.id}:round:2`));
+
+  const eliminatedEvents = byType("TOURNAMENT_ELIMINATED_V1");
+  assert.equal(eliminatedEvents.length, 2);
+  assert.deepEqual(
+    new Set(eliminatedEvents.flatMap((event) => event.audience.map((row) => row.recipientId))),
+    new Set(losers),
+  );
+
+  const roundStartedEvents = byType("TOURNAMENT_ROUND_STARTED_V1");
+  assert.equal(roundStartedEvents.length, 2);
+  assert.deepEqual(
+    new Set(roundStartedEvents.flatMap((event) => event.audience.map((row) => row.recipientId))),
+    new Set(winners),
+  );
+  assert.ok(
+    roundStartedEvents.every((event) => event.payload.roundId === `${tournament.id}:round:2`),
+  );
 
   const updated = await prisma.tournament.findUnique({
     where: { id: tournament.id },
