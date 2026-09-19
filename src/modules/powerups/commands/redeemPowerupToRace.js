@@ -94,13 +94,17 @@ function buildRedeemPowerupToRace(deps = {}) {
       );
     }
 
-    // (2) Rainstorm-specific pre-checks — mirror usePowerup, using the SAME
-    //     per-caster rule as B4 (only the redeeming user's own active storm
-    //     blocks them; other players' storms do not).
+    // (2) Rainstorm-specific pre-checks — mirror usePowerup. A caster
+    //     cannot run two storms, and already-wet rivals are not eligible for a
+    //     new direct Rainstorm until their existing window ends.
     if (powerupType === "RAINSTORM") {
+      const rainCheckTime = new Date();
       const raceEffects = await effectModel.findActiveForRace(raceId);
       const ownStorm = raceEffects.find(
-        (e) => e.type === "RAINSTORM" && e.sourceUserId === userId
+        (e) =>
+          e.type === "RAINSTORM" &&
+          e.sourceUserId === userId &&
+          (!e.expiresAt || new Date(e.expiresAt) > rainCheckTime)
       );
       if (ownStorm) {
         throw new RedeemPowerupError(
@@ -109,21 +113,32 @@ function buildRedeemPowerupToRace(deps = {}) {
           "RAINSTORM_ACTIVE"
         );
       }
+      const alreadyWetParticipantIds = new Set(
+        raceEffects
+          .filter(
+            (e) =>
+              e.type === "RAINSTORM" &&
+              e.targetParticipantId &&
+              (!e.expiresAt || new Date(e.expiresAt) > rainCheckTime)
+          )
+          .map((e) => e.targetParticipantId)
+      );
       const isTeamRace = race.isTeamRace === true;
       const isEnemy = (p) =>
         !isTeamRace || (p.team != null && p.team !== myParticipant.team);
       const isAliveTarget = (p) => !p.finishedAt && !p.forfeitedAt;
-      const otherRunners = (race.participants || []).filter(
+      const dryRunners = (race.participants || []).filter(
         (p) =>
           p.status === "ACCEPTED" &&
           p.userId !== userId &&
           isAliveTarget(p) &&
-          isEnemy(p)
+          isEnemy(p) &&
+          !alreadyWetParticipantIds.has(p.id)
       );
-      if (otherRunners.length === 0) {
+      if (dryRunners.length === 0) {
         throw new RedeemPowerupError(
-          "No other active runners to rain on",
-          400,
+          "Everyone you can rain on is already under Rainstorm",
+          409,
           "NO_ELIGIBLE_TARGETS"
         );
       }
