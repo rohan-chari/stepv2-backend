@@ -537,6 +537,128 @@ describe("historical late event-time effect reconciliation", () => {
     assert.equal(await prisma.historicalRaceReconciliationIntent.count({ where: { raceId: data.race.id } }), 1);
   });
 
+  it("corrects a frozen V4 Hitchhike when target samples arrive after expiry", async () => {
+    const caster = await fixture({ totalSteps: 1_000 });
+    const targetAccount = await createTestUser({ displayName: "Late Hitchhike target" });
+    const targetParticipant = await prisma.raceParticipant.create({
+      data: {
+        raceId: caster.race.id,
+        userId: targetAccount.user.id,
+        status: "ACCEPTED",
+        joinedAt: START,
+        totalSteps: 9_965,
+        rawSteps: 9_965,
+      },
+    });
+    await prisma.userScoringInputVersion.create({
+      data: { userId: targetAccount.user.id, generation: 2 },
+    });
+
+    const hhPowerup = await prisma.racePowerup.create({
+      data: {
+        raceId: caster.race.id,
+        participantId: caster.participant.id,
+        userId: caster.account.user.id,
+        type: "HITCHHIKE",
+        status: "USED",
+      },
+    });
+    const startsAt = new Date("2026-09-16T10:00:00.000Z");
+    const expiresAt = new Date("2026-09-16T11:00:00.000Z");
+    const hitchhike = await prisma.raceActiveEffect.create({
+      data: {
+        raceId: caster.race.id,
+        targetParticipantId: targetParticipant.id,
+        targetUserId: targetAccount.user.id,
+        sourceUserId: caster.account.user.id,
+        powerupId: hhPowerup.id,
+        type: "HITCHHIKE",
+        status: "EXPIRED",
+        startsAt,
+        expiresAt,
+        metadata: { copyRatio: 0.5, scoringVersion: 4 },
+      },
+    });
+    const rhPowerup = await prisma.racePowerup.create({
+      data: {
+        raceId: caster.race.id,
+        participantId: targetParticipant.id,
+        userId: targetAccount.user.id,
+        type: "RUNNERS_HIGH",
+        status: "USED",
+      },
+    });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId: caster.race.id,
+        targetParticipantId: targetParticipant.id,
+        targetUserId: targetAccount.user.id,
+        sourceUserId: targetAccount.user.id,
+        powerupId: rhPowerup.id,
+        type: "RUNNERS_HIGH",
+        status: "EXPIRED",
+        startsAt,
+        expiresAt,
+        metadata: { multiplier: 2 },
+      },
+    });
+    await prisma.hitchhikeAttributionCapture.create({
+      data: {
+        effectId: hitchhike.id,
+        raceId: caster.race.id,
+        sourceUserId: caster.account.user.id,
+        targetUserId: targetAccount.user.id,
+        scoringVersion: 4,
+        raceTimezone: "UTC",
+        castDayStart: new Date("2026-09-16T00:00:00.000Z"),
+        castDailySteps: 0,
+        castSampleBoundaryAt: startsAt,
+        scoringInputGeneration: 1,
+        rawSourceKind: "EXACT_SAMPLES",
+        rawSourceHighWater: 0,
+        effectiveContribution: 0,
+        captureThrough: expiresAt,
+        frozenAt: expiresAt,
+      },
+    });
+    await addSamples(targetAccount.user.id, [[startsAt, expiresAt, 9_965]]);
+
+    const targetData = {
+      ...caster,
+      account: targetAccount,
+      participant: targetParticipant,
+    };
+    await enqueue(targetData, startsAt, expiresAt, 2);
+
+    const result = await worker().runOnce();
+    assert.equal(result.corrected, 1);
+
+    const projection = await prisma.historicalEffectContribution.findUniqueOrThrow({
+      where: {
+        raceId_userId_effectId_calculationVersion: {
+          raceId: caster.race.id,
+          userId: caster.account.user.id,
+          effectId: hitchhike.id,
+          calculationVersion: 1,
+        },
+      },
+    });
+    assert.equal(projection.currentDeltaSteps, 9_965);
+    assert.equal(
+      (await prisma.raceParticipant.findUniqueOrThrow({
+        where: { id: caster.participant.id },
+      })).totalSteps,
+      10_965,
+    );
+    const frozen = await prisma.hitchhikeAttributionCapture.findUniqueOrThrow({
+      where: { effectId: hitchhike.id },
+    });
+    assert.equal(frozen.frozenAt.getTime(), expiresAt.getTime());
+    assert.equal(await prisma.historicalEffectCorrection.count({
+      where: { effectId: hitchhike.id },
+    }), 1);
+  });
+
   it("corrects a late Quicksand freeze contribution", async () => {
     const data = await fixture({ totalSteps: 100 });
     const effect = await addEffect(data, "QUICKSAND", START, new Date("2026-09-16T10:30:00Z"));
