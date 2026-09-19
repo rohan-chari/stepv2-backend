@@ -130,3 +130,76 @@ test("target context returns participants in placement order", async () => {
   const result = await getContext({ userId: "u2", raceId: "r", powerupType: "DETOUR_SIGN" });
   assert.deepEqual(result.participants.map((p) => p.userId), ["u1", "u2"]);
 });
+
+
+test("v2 target context uses the indexed placement map on the production cache path", async () => {
+  const race = {
+    id: "race-v2",
+    status: "ACTIVE",
+    powerupsEnabled: true,
+    isTeamRace: false,
+    participants: [
+      {
+        id: "p-me",
+        userId: "me",
+        status: "ACCEPTED",
+        placement: 3,
+        finishedAt: null,
+        forfeitedAt: null,
+        team: null,
+        powerupSlots: 3,
+      },
+      {
+        id: "p-two",
+        userId: "u2",
+        status: "ACCEPTED",
+        placement: 2,
+        finishedAt: null,
+        forfeitedAt: null,
+        team: null,
+      },
+      {
+        id: "p-one",
+        userId: "u1",
+        status: "ACCEPTED",
+        placement: 1,
+        finishedAt: null,
+        forfeitedAt: null,
+        team: null,
+      },
+    ],
+  };
+  const getContext = buildGetRacePowerupTargetContext({
+    raceOpenDisplayCache: {
+      async core() { return { id: race.id }; },
+      async fullDisplayContext() { return race; },
+      async effects() { return []; },
+    },
+    userPresentationCache: {
+      async getMany(userIds) {
+        return new Map(
+          userIds.map((userId) => [
+            userId,
+            { displayName: userId.toUpperCase(), profilePhotoUrl: null },
+          ]),
+        );
+      },
+    },
+    participantInventorySummary: async () => ({
+      inventory: [],
+      queuedBoxCount: 0,
+    }),
+    now: () => new Date("2026-09-19T14:00:00Z"),
+  });
+
+  const result = await getContext({
+    userId: "me",
+    raceId: race.id,
+    powerupType: "LEG_CRAMP",
+  });
+
+  assert.equal(result.contract, "race-powerup-target-context-v2");
+  assert.deepEqual(result.participants.map((p) => p.userId), ["u1", "u2"]);
+  assert.deepEqual(result.participants.map((p) => p.placement), [1, 2]);
+  assert.equal(result.powerupData.myPlacement, 3);
+});
