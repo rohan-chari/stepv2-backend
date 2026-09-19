@@ -54,6 +54,32 @@ const DeviceToken = {
     });
   },
 
+  // Delivery has a per-user cap, unlike findByUserIds' existing fanout contract.
+  // Apply the cap in SQL so one user's token history cannot inflate the batch.
+  async findForDeliveryByUserIds(userIds, client = prisma) {
+    const ids = [...new Set(userIds || [])].filter(Boolean);
+    if (!ids.length) return [];
+    const status = await activeStatusFilter(client);
+    const rows = [];
+    for (let offset = 0; offset < ids.length; offset += 100) {
+      rows.push(...await client.$queryRawUnsafe(`
+        SELECT token.id, token.user_id AS "userId", token.token, token.platform
+          FROM unnest($1::text[]) AS recipient(user_id)
+          CROSS JOIN LATERAL (
+            SELECT id, user_id, token, platform, last_registered_at, updated_at
+              FROM device_tokens
+             WHERE user_id = recipient.user_id
+               AND (status = 'ACTIVE' OR ($2::boolean AND status IS NULL))
+             ORDER BY last_registered_at DESC, updated_at DESC, id DESC
+             LIMIT 10
+          ) token
+         ORDER BY token.user_id, token.last_registered_at DESC, token.updated_at DESC, token.id DESC`,
+        ids.slice(offset, offset + 100), status.status !== "ACTIVE",
+      ));
+    }
+    return rows;
+  },
+
   async deleteTokensExact(pairs, chunkSize = 500) {
     const unique = [
       ...new Map(
