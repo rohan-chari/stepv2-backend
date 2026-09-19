@@ -13,7 +13,8 @@ const liveOutput = process.env.INTEGRATION_LIVE_OUTPUT === "1";
 const baseDatabaseUrl =
   process.env.DATABASE_URL ||
   "postgresql://rohan@localhost:5432/steps-tracker-integration_test";
-const redisUrl = process.env.REDIS_URL || "";
+const localRedisUrl = "redis://127.0.0.1:6379";
+const redisUrl = process.env.REDIS_URL || localRedisUrl;
 const queueRedisUrl = process.env.QUEUE_REDIS_URL || redisUrl;
 const baseRedisPrefix = process.env.CACHE_ENV_PREFIX || "integration:";
 
