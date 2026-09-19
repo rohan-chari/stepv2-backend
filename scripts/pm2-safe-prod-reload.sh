@@ -78,11 +78,11 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
 
   # Start only the candidate artifact, in dependency order. Queue intake can
   # accumulate safely while background owners are down.
-  pm2 start "$CONFIG" --only steps-tracker-step
-  pm2 start "$CONFIG" --only steps-tracker-resolution
-  pm2 start "$CONFIG" --only steps-tracker-event
-  pm2 start "$CONFIG" --only steps-tracker-notification
-  pm2 start "$CONFIG" --only steps-tracker-cron
+  pm2 startOrReload "$CONFIG" --only steps-tracker-step --update-env
+  pm2 startOrReload "$CONFIG" --only steps-tracker-resolution --update-env
+  pm2 startOrReload "$CONFIG" --only steps-tracker-event --update-env
+  pm2 startOrReload "$CONFIG" --only steps-tracker-notification --update-env
+  pm2 startOrReload "$CONFIG" --only steps-tracker-cron --update-env
 
   # Save only after exact topology, HTTP memory safety and the reviewed
   # 39-connection role budget are all proven live.
