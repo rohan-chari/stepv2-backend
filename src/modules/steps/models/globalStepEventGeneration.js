@@ -11,7 +11,10 @@ const READY_WINDOW_MS = 90_000;
 const EXPECTED_LOGICAL_OWNERS = Object.freeze([
   "http:0",
   "http:1",
+  "step:0",
   "resolution:0",
+  "event:0",
+  "notification:0",
   "cron:0",
 ]);
 const GENERATION_CAPABILITIES = Object.freeze([
