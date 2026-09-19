@@ -9,6 +9,9 @@ const {
 const {
   advanceTournament,
 } = require("../../src/modules/tournaments/commands/advanceTournament");
+const {
+  cancelTournament,
+} = require("../../src/modules/tournaments/commands/cancelTournament");
 
 beforeEach(cleanDatabase);
 
@@ -263,4 +266,69 @@ test("real tournament final appends champion and runner-up elimination domain ev
     status: "COMPLETED",
     championUserId,
   });
+});
+
+
+test("real tournament cancellation appends TOURNAMENT_CANCELLED_V1 for accepted and invited racers", async () => {
+  const [creator, accepted, invited] = await Promise.all([
+    createTestUser({ displayName: "Cancel Creator" }),
+    createTestUser({ displayName: "Accepted Racer" }),
+    createTestUser({ displayName: "Invited Racer" }),
+  ]);
+
+  const tournament = await prisma.tournament.create({
+    data: {
+      creatorId: creator.user.id,
+      name: "Cancellation evidence",
+      status: "PENDING",
+      bracketSize: 4,
+      matchupDurationDays: 2,
+      buyInAmount: 0,
+      potCoins: 0,
+      powerupsEnabled: false,
+      isPublic: false,
+      totalRounds: 2,
+    },
+  });
+
+  for (const [userId, status] of [
+    [creator.user.id, "ACCEPTED"],
+    [accepted.user.id, "ACCEPTED"],
+    [invited.user.id, "INVITED"],
+  ]) {
+    await prisma.tournamentParticipant.create({
+      data: {
+        tournamentId: tournament.id,
+        userId,
+        status,
+        joinedAt: new Date(),
+      },
+    });
+  }
+
+  await cancelTournament({
+    userId: creator.user.id,
+    tournamentId: tournament.id,
+  });
+
+  const events = await prisma.domainEventOutbox.findMany({
+    where: {
+      aggregateId: tournament.id,
+      eventType: "TOURNAMENT_CANCELLED_V1",
+    },
+    include: { audience: true },
+    orderBy: { eventKey: "asc" },
+  });
+
+  assert.equal(events.length, 3);
+  assert.deepEqual(
+    new Set(events.flatMap((event) => event.audience.map((row) => row.recipientId))),
+    new Set([creator.user.id, accepted.user.id, invited.user.id]),
+  );
+
+  const updated = await prisma.tournament.findUnique({
+    where: { id: tournament.id },
+    select: { status: true },
+  });
+  assert.deepEqual(updated, { status: "CANCELLED" });
 });
