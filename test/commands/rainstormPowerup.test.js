@@ -51,7 +51,7 @@ function makeDeps(overrides = {}) {
   // Pre-existing ACTIVE effects, keyed by participant id, e.g.
   // { "rp-2": [{ id: "shield-1", type: "COMPRESSION_SOCKS" }] }
   const existingEffects = overrides.existingEffects || {};
-  const raceEffects = overrides.raceEffects || [];
+  const raceEffects = overrides.raceEffects ?? Object.values(existingEffects).flat();
 
   return {
     events,
