@@ -4,6 +4,7 @@ const ACTIVE_CONFLICTS = Object.freeze({
   DETOUR_SIGN: new Set(["DETOUR_SIGN"]),
   SIGNAL_JAMMER: new Set(["SIGNAL_JAMMER"]),
   LEECH: new Set(["LEECH"]),
+  QUICKSAND: new Set(["LEG_CRAMP", "QUICKSAND"]),
 });
 
 function liveEffectsByParticipant(effects, now = new Date()) {
@@ -36,6 +37,17 @@ function eligiblePowerupTargets({
   );
   const active = liveEffectsByParticipant(effects, now);
   const conflicts = ACTIVE_CONFLICTS[powerupType] || null;
+  const viewerHasActiveHitchhike =
+    powerupType === "HITCHHIKE" &&
+    (effects || []).some(
+      (effect) =>
+        effect &&
+        effect.type === "HITCHHIKE" &&
+        effect.sourceUserId === viewerUserId &&
+        (!effect.status || effect.status === "ACTIVE") &&
+        (!effect.expiresAt || new Date(effect.expiresAt).getTime() > now.getTime())
+    );
+  if (viewerHasActiveHitchhike) return [];
 
   return (participants || []).filter((participant) => {
     if (!participant || participant.userId === viewerUserId) return false;
@@ -46,6 +58,8 @@ function eligiblePowerupTargets({
     const targetEffects = active.get(participant.id) || new Set();
     if (targetEffects.has("STEALTH_MODE")) return false;
     if (conflicts && [...conflicts].some((type) => targetEffects.has(type))) return false;
+    if (powerupType === "SHORTCUT" && Math.max(0, Number(participant.totalSteps) || 0) === 0) return false;
+    if (powerupType === "HITCHHIKE" && targetEffects.has("HITCHHIKE")) return false;
 
     if (powerupType === "SNEAKY_SWAP" && !stealableParticipantIds.has(participant.id)) return false;
     if (powerupType === "BOUNTY") {
