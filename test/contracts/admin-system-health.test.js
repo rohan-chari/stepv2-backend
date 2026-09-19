@@ -303,8 +303,11 @@ describe("admin system health", () => {
       })), [
         { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
         { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
-        { role: "resolution", max: 8, configSource: "DATABASE_POOL_MAX_RESOLUTION" },
-        { role: "cron", max: 4, configSource: "DATABASE_POOL_MAX_CRON" },
+        { role: "step", max: 3, configSource: "DATABASE_POOL_MAX_STEP" },
+        { role: "resolution", max: 6, configSource: "DATABASE_POOL_MAX_RESOLUTION" },
+        { role: "event", max: 3, configSource: "DATABASE_POOL_MAX_EVENT" },
+        { role: "notification", max: 4, configSource: "DATABASE_POOL_MAX_NOTIFICATION" },
+        { role: "cron", max: 3, configSource: "DATABASE_POOL_MAX_CRON" },
       ]);
       // The remainder of this test needs deterministic 60-minute fixtures.
       // Remove the real per-boot snapshots after proving their wire contract so
