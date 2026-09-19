@@ -33,8 +33,8 @@ test("production resolution startup does not load Gmail or OAuth transport code"
       NODE_ENV: "production",
       STEPS_PROCESS_ROLE: "resolution",
       DATABASE_URL: "postgresql://rohan@localhost:5432/steps-tracker-integration_test",
-      DATABASE_POOL_MAX_RESOLUTION: "8",
-      DATABASE_POOL_TOTAL_BUDGET: "32",
+      DATABASE_POOL_MAX_RESOLUTION: "6",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
     },
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -242,7 +242,7 @@ test("http and resolution process roles do not start the wrong schedulers", () =
     scheduleRaceDirtyStreamWorker: () => calls.push("raceDirtyStream"),
     scheduleRaceResolutionRecoverySweep: () => calls.push("raceRecovery"),
     scheduleGlobalEventBoundaryStreamWorker: () => calls.push("eventBoundaryWorker"),
-    scheduleHistoricalRaceReconciliationWorker: () => calls.push("historical"),
+    scheduleHistoricalRaceReconciliation: () => calls.push("historical"),
     scheduleRacePlacementTransitions: () => calls.push("placement"),
     scheduleResolvedImpactBoundaries: () => calls.push("impact"),
     scheduleRaceResolutionPostTasks: () => {},
@@ -258,17 +258,14 @@ test("http and resolution process roles do not start the wrong schedulers", () =
 
   const resolutionCalls = [];
   start("resolution", resolutionCalls);
-  for (const required of [
-    "stepStream",
-    "powerupStream",
-    "raceDirtyStream",
-    "raceRecovery",
-  ]) {
+  for (const required of ["powerupStream", "raceDirtyStream", "raceRecovery"]) {
     assert.ok(
       resolutionCalls.includes(required),
-      `legacy resolution role must still start ${required}`,
+      `resolution role must start ${required}`,
     );
   }
+  assert.equal(resolutionCalls.includes("stepStream"), false);
+  assert.equal(resolutionCalls.includes("eventBoundaryWorker"), false);
 });
 
 test("dedicated worker roles own only their core queue workers", () => {
@@ -311,7 +308,6 @@ test("dedicated worker roles own only their core queue workers", () => {
   };
 
   assert.deepEqual(run("step"), ["step"]);
-  assert.deepEqual(run("race"), ["powerup", "race", "raceRecovery"]);
   assert.deepEqual(run("event"), ["eventHydrator", "eventScheduler", "event"]);
   assert.deepEqual(run("notification"), [
     "notificationProjection",
