@@ -151,7 +151,7 @@ Verify:
 - [ ] reviewed fsync policy;
 - [ ] no AOF errors;
 - [ ] no rejected writes from memory exhaustion;
-- [ ] RSS/maxmemory appropriate for the 4-GB host.
+- [ ] RSS/maxmemory appropriate for the measured production droplet capacity.
 
 ## Phase 7 — Verify stream trimming
 
@@ -204,8 +204,9 @@ connection ceiling is not permission to increase them during incident response.
 
 ## Phase 9 — Host memory/CPU/swap check
 
-This is mandatory because the 2-vCPU / 4-GB host now runs more isolated Node
-processes plus a second Redis.
+This is mandatory because the production droplet now runs more isolated Node
+processes plus a second Redis. The managed PostgreSQL service's 2-vCPU / 4-GB
+sizing is separate from the app droplet's memory/CPU capacity.
 
 ```bash
 free -h
