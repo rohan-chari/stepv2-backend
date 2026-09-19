@@ -240,30 +240,50 @@ describe("Decoy shop restoration and post-pop cooldown — HTTP integration", ()
   });
 
   it("allows exactly one hour after pop but rejects one millisecond before", async (t) => {
-    const { owner, raceId, decoy } = await poppedFixture();
-    const effect = await prisma.raceActiveEffect.findFirst({ where: { powerupId: decoy.id } });
-    const fixedNow = Date.now();
+    const { owner, raceId } = await poppedFixture();
+    const usage = await prisma.powerupUsageState.findUnique({
+      where: { raceId_userId_powerupType: { raceId, userId: owner.userId, powerupType: "DECOY" } },
+    });
+    assert.ok(usage);
     const next = await giveHeldPowerup(raceId, owner.userId, "DECOY", 3000);
-    t.mock.timers.enable({ apis: ["Date"], now: fixedNow });
-    await prisma.raceActiveEffect.update({ where: { id: effect.id }, data: { decoyConsumedAt: new Date(fixedNow - HOUR + 1) } });
+    const oneMsBefore = usage.nextUsableAt.getTime() - 1;
+    t.mock.timers.enable({ apis: ["Date"], now: oneMsBefore });
     await assertCooldown(owner, raceId, next);
-    t.mock.timers.setTime(fixedNow + 1);
+    t.mock.timers.setTime(usage.nextUsableAt.getTime());
     assert.equal((await usePowerup(owner, raceId, next.id)).status, 200);
   });
 
-  it("does not start cooldown at activation or natural expiration", async () => {
+  it("keeps natural expiry on the scheduled 24-hour effect plus 1-hour shop cooldown", async (t) => {
     const owner = await createUser("NaturalOwner");
     const attacker = await createUser("NaturalRival");
     const raceId = await createSoloRace([owner, attacker]);
     const first = await giveHeldPowerup(raceId, owner.userId, "DECOY", 1000);
     assert.equal((await usePowerup(owner, raceId, first.id)).status, 200);
+
     const effect = await prisma.raceActiveEffect.findFirst({ where: { powerupId: first.id } });
+    const usage = await prisma.powerupUsageState.findUnique({
+      where: { raceId_userId_powerupType: { raceId, userId: owner.userId, powerupType: "DECOY" } },
+    });
     assert.equal(effect.decoyConsumedAt, null);
+    assert.ok(usage);
+    assert.equal(usage.activeUntil.getTime(), effect.expiresAt.getTime());
+    assert.equal(usage.nextUsableAt.getTime(), effect.expiresAt.getTime() + HOUR);
+
     const next = await giveHeldPowerup(raceId, owner.userId, "DECOY", 3000);
     const activeDenied = await usePowerup(owner, raceId, next.id);
     assert.equal(activeDenied.status, 409);
     assert.equal((await activeDenied.json()).code, "DECOY_ACTIVE");
-    await prisma.raceActiveEffect.update({ where: { id: effect.id }, data: { expiresAt: new Date(Date.now() - 1), status: "EXPIRED" } });
+
+    await prisma.raceActiveEffect.update({
+      where: { id: effect.id },
+      data: { status: "EXPIRED" },
+    });
+    t.mock.timers.enable({ apis: ["Date"], now: usage.nextUsableAt.getTime() - 1 });
+    const cooldownDenied = await usePowerup(owner, raceId, next.id);
+    assert.equal(cooldownDenied.status, 409);
+    assert.equal((await cooldownDenied.json()).code, "POWERUP_COOLDOWN");
+
+    t.mock.timers.setTime(usage.nextUsableAt.getTime());
     assert.equal((await usePowerup(owner, raceId, next.id)).status, 200);
   });
 

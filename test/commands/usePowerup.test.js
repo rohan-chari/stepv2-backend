@@ -427,3 +427,68 @@ test("usePowerup behavior is unchanged for an open-ended race (endsAt null)", as
   assert.equal(result.stolen, 1000);
   assert.equal(ctx.events.some((e) => e.event === "POWERUP_USED"), true);
 });
+
+
+test("Decoy pop rebases the owner's shop cooldown to one hour after consumption", async () => {
+  const consumedAt = new Date("2026-09-19T14:00:00.000Z");
+  const cooldownBatches = [];
+  const ctx = makeDeps({
+    powerupType: "LEG_CRAMP",
+    user3: { finishedAt: new Date("2026-09-19T13:00:00.000Z") },
+    now: () => consumedAt,
+    RaceActiveEffect: {
+      async findActiveByTypeForParticipant(participantId, type) {
+        if (participantId === "rp-user-2" && type === "DECOY") {
+          return {
+            id: "decoy-effect-1",
+            type: "DECOY",
+            powerupId: "decoy-powerup-1",
+            targetParticipantId: "rp-user-2",
+            targetUserId: "user-2",
+            expiresAt: new Date("2026-09-20T13:00:00.000Z"),
+            status: "ACTIVE",
+          };
+        }
+        return null;
+      },
+      async update(id, fields) {
+        return { id, ...fields };
+      },
+    },
+  });
+  ctx.deps.PowerupUsageState = {
+    async findAvailable() { return null; },
+    async upsertUsed() { return null; },
+    async rebaseDecoyConsumedMany(input) {
+      cooldownBatches.push(input);
+      return { count: 1 };
+    },
+  };
+  ctx.deps.appendDomainEvent = async () => {};
+  ctx.deps.prisma = {
+    powerupShopItem: { async findFirst() { return null; } },
+  };
+
+  const use = buildUsePowerup(ctx.deps);
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "attack-1",
+    targetUserId: "user-2",
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.blockedBy, "DECOY");
+  assert.equal(cooldownBatches.length, 1);
+  assert.equal(cooldownBatches[0].raceId, "race-1");
+  assert.equal(cooldownBatches[0].consumptions.length, 1);
+  assert.deepEqual(cooldownBatches[0].consumptions[0], {
+    userId: "user-2",
+    sourcePowerupId: "decoy-powerup-1",
+  });
+  assert.equal(cooldownBatches[0].consumedAt.getTime(), consumedAt.getTime());
+  assert.equal(
+    cooldownBatches[0].nextUsableAt.getTime(),
+    consumedAt.getTime() + 60 * 60 * 1000,
+  );
+});

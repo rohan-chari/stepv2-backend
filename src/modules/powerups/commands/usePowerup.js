@@ -1092,6 +1092,44 @@ async function refundRedeemedOnRejection({
   } catch {}
 }
 
+async function rebaseDecoyUsageCooldownsOnConsume({
+  usageStateModel,
+  db,
+  raceId,
+  consumptions,
+  consumedAt,
+}) {
+  const rows = (consumptions || []).filter((row) => row?.userId);
+  if (!rows.length) return;
+
+  const nextUsableAt = new Date(consumedAt.getTime() + DECOY_POST_POP_COOLDOWN_MS);
+  if (typeof usageStateModel.rebaseDecoyConsumedMany === "function") {
+    await usageStateModel.rebaseDecoyConsumedMany({
+      db,
+      raceId,
+      consumptions: rows,
+      consumedAt,
+      nextUsableAt,
+    });
+    return;
+  }
+
+  // Lightweight injected unit doubles may only implement the original upsert
+  // seam. Production uses the batched model path above.
+  for (const row of rows) {
+    await usageStateModel.upsertUsed({
+      db,
+      userId: row.userId,
+      raceId,
+      powerupType: "DECOY",
+      lastUsedAt: consumedAt,
+      activeUntil: consumedAt,
+      nextUsableAt,
+      sourcePowerupId: row.sourcePowerupId || null,
+    });
+  }
+}
+
 function buildUsePowerup(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   // A clock-only injection is an integration-test seam over the full
@@ -1136,8 +1174,24 @@ function buildUsePowerup(dependencies = {}) {
     outcome,
     attackerUserId,
     raceId,
+    usageDb = db,
+    consumedAt = null,
+    rebaseUsage = true,
   }) {
-    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: now() });
+    const resolvedConsumedAt = consumedAt || now();
+    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: resolvedConsumedAt });
+    if (rebaseUsage) {
+      await rebaseDecoyUsageCooldownsOnConsume({
+        usageStateModel,
+        db: usageDb,
+        raceId,
+        consumptions: [{
+          userId: ownerParticipant.userId,
+          sourcePowerupId: decoy.powerupId,
+        }],
+        consumedAt: resolvedConsumedAt,
+      });
+    }
     await appendDomainEvent(db, decoyConsumptionEvent({
       decoy, ownerParticipant, attackPowerupType, outcome, attackerUserId, raceId,
     }));
@@ -1296,6 +1350,7 @@ function buildUsePowerup(dependencies = {}) {
     onPerformanceContext = null,
   }, execution = null) {
     const transactionDb = execution?.tx || db;
+    const consumeDecoyForUse = (input) => consumeDecoy({ ...input, usageDb: transactionDb });
     const rawEventModel = eventModelDependency;
     let decoyActivityContext = null;
     const buildEventData = (event, activityV1 = null) => {
@@ -2383,6 +2438,7 @@ function buildUsePowerup(dependencies = {}) {
         }
       }
       const consumedDecoyIds = [];
+      const decoyConsumptions = [];
       const decoyEvents = [];
       const decoyResolution = await resolveAoEDecoySlots({
         victims,
@@ -2396,8 +2452,9 @@ function buildUsePowerup(dependencies = {}) {
         now: () => currentTime,
         consumeDecoy: (input) => {
           const consumption = { ...input, attackerUserId: userId, raceId };
-          if (hasInjectedDeps) return consumeDecoy(consumption);
+          if (hasInjectedDeps) return consumeDecoyForUse(consumption);
           consumedDecoyIds.push(input.decoy.id);
+          decoyConsumptions.push(consumption);
           decoyEvents.push(decoyConsumptionEvent(consumption));
         },
         attackPowerupType: type,
@@ -2453,6 +2510,16 @@ function buildUsePowerup(dependencies = {}) {
       // same atomic commit as item consumption, with no per-recipient SQL.
       if (!hasInjectedDeps) {
         await effectModel.consumeDecoys(consumedDecoyIds, currentTime);
+        await rebaseDecoyUsageCooldownsOnConsume({
+          usageStateModel,
+          db: transactionDb,
+          raceId,
+          consumptions: decoyConsumptions.map((consumption) => ({
+            userId: consumption.ownerParticipant.userId,
+            sourcePowerupId: consumption.decoy.powerupId,
+          })),
+          consumedAt: currentTime,
+        });
         await bulkAppendDomainEvents(db, decoyEvents);
       }
       if (typeof effectModel.updateManyStatus === "function") {
@@ -2540,7 +2607,7 @@ function buildUsePowerup(dependencies = {}) {
         now,
         currentTime: now(),
         finalize: finalizeSelfContainedUse,
-        consumeDecoy,
+        consumeDecoy: consumeDecoyForUse,
       });
     }
 
@@ -3319,7 +3386,7 @@ function buildUsePowerup(dependencies = {}) {
             isTeamRace,
             random: execution?.decoyRandom || random,
           });
-        await consumeDecoy({
+        await consumeDecoyForUse({
           decoy,
           ownerParticipant: holder,
           attackPowerupType: type,
@@ -4106,6 +4173,7 @@ function buildUsePowerup(dependencies = {}) {
             effectsByParticipant.set(effect.targetParticipantId, list);
           }
         }
+        const decoyCooldownConsumptions = [];
         const decoyResolution = await resolveAoEDecoySlots({
           victims,
           acceptedParticipants,
@@ -4116,12 +4184,27 @@ function buildUsePowerup(dependencies = {}) {
           effectsByParticipant,
           random,
           now: () => currentTime,
-          consumeDecoy: (input) => consumeDecoy({
-            ...input,
-            attackerUserId: userId,
-            raceId,
-          }),
+          consumeDecoy: (input) => {
+            decoyCooldownConsumptions.push({
+              userId: input.ownerParticipant.userId,
+              sourcePowerupId: input.decoy.powerupId,
+            });
+            return consumeDecoyForUse({
+              ...input,
+              attackerUserId: userId,
+              raceId,
+              consumedAt: currentTime,
+              rebaseUsage: false,
+            });
+          },
           attackPowerupType: type,
+        });
+        await rebaseDecoyUsageCooldownsOnConsume({
+          usageStateModel,
+          db: transactionDb,
+          raceId,
+          consumptions: decoyCooldownConsumptions,
+          consumedAt: currentTime,
         });
         const affected = new Set();
         const blockedNames = [];
