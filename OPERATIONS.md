@@ -99,22 +99,27 @@ reconstructing commands from historical notes.
 
 Before recommending merge to `main`:
 
-1. `npm run test:unit`
-2. `npm run test:integration`
-3. Specialized suites relevant to the branch:
-   - `test:contracts`
-   - `test:reliability`
-   - `test:performance`
-   - `test:http-service`
-   - `test:maintenance`
-4. Review migrations and production environment additions.
-5. Verify this operations file matches any topology or deployment changes.
-6. For queue-first/scalability work, verify the split topology, queue Redis
+1. Run the required automated release gate:
+   ```bash
+   REDIS_URL=redis://127.0.0.1:6379 \
+   QUEUE_REDIS_URL=redis://127.0.0.1:6379 \
+   npm run test:release
+   ```
+   `test:release` runs `test:unit` first and then `test:integration`. It does
+   **not** deploy anything.
+2. Review migrations and production environment additions.
+3. Verify this operations file matches any topology or deployment changes.
+4. For queue-first/scalability work, verify the split topology, queue Redis
    requirements, and deploy checklists are represented in code/docs.
-7. Review the final branch diff against `main`.
+5. Review the final branch diff against `main`.
 
-A green unit/integration suite does not waive an unresolved production topology
-requirement.
+Unit and integration are the only required automated release suites. Queue and
+worker behavior that matters to production belongs in integration coverage,
+especially under `test/integration/queue`. Specialized historical suites are
+not release gates.
+
+A green release test does not waive an unresolved production topology or
+deployment requirement.
 
 ## Production database backup
 
@@ -174,23 +179,30 @@ pg_restore --clean --if-exists --no-owner -d "<target DATABASE_URL>" backup.dump
 
 After explicit production deploy authorization:
 
-1. Confirm the exact commit intended for production is on `origin/main`.
-2. Confirm the production checkout has no unexpected local modifications.
-3. Take a dated production backup when the change includes a meaningful schema,
+1. Confirm the required automated release gate passed on the exact release
+   candidate:
+   ```bash
+   REDIS_URL=redis://127.0.0.1:6379 \
+   QUEUE_REDIS_URL=redis://127.0.0.1:6379 \
+   npm run test:release
+   ```
+2. Confirm the exact commit intended for production is on `origin/main`.
+3. Confirm the production checkout has no unexpected local modifications.
+4. Take a dated production backup when the change includes a meaningful schema,
    data, queue, or high-risk operational migration.
-4. Check migration state:
+5. Check migration state:
    ```bash
    node scripts/check-prod-migrations.js
    ```
-5. Stop staging if it is running:
+6. Stop staging if it is running:
    ```bash
    pm2 stop steps-tracker-staging
    ```
-6. Verify static topology/pool configuration before process mutation:
+7. Verify static topology/pool configuration before process mutation:
    ```bash
    npm run pm2:topology:check -- --pool-budget-mode=static
    ```
-7. Confirm required production environment values exist, including
+8. Confirm required production environment values exist, including
    `QUEUE_REDIS_URL` when queue-first code is being deployed.
 
 ## Standard production deploy
