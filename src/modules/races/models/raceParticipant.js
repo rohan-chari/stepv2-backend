@@ -236,21 +236,21 @@ const RaceParticipant = {
         WHERE rp.race_id = $1
           AND rp.status = 'accepted'::"RaceParticipantStatus"
         ORDER BY
-          CASE WHEN rp.finished_at IS NOT NULL
-            THEN COALESCE(rp.finish_total_steps, rp.total_steps, 0)
-            ELSE COALESCE(rp.total_steps, 0)
-          END DESC,
+          CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END,
+          CASE WHEN rp.finished_at IS NOT NULL THEN rp.placement END ASC NULLS LAST,
+          CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC NULLS LAST,
+          CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
           rp.joined_at ASC,
-          rp.id ASC
+          rp.user_id ASC
         OFFSET $2 LIMIT $3
       ), ranked AS (
         SELECT page.*, (ROW_NUMBER() OVER (
           ORDER BY
-            CASE WHEN "finishedAt" IS NOT NULL
-              THEN COALESCE("finishTotalSteps", "totalSteps", 0)
-              ELSE COALESCE("totalSteps", 0)
-            END DESC,
-            "joinedAt" ASC, "participantId" ASC
+            CASE WHEN "finishedAt" IS NOT NULL THEN 0 ELSE 1 END,
+            CASE WHEN "finishedAt" IS NOT NULL THEN placement END ASC NULLS LAST,
+            CASE WHEN "finishedAt" IS NOT NULL THEN "finishedAt" END ASC NULLS LAST,
+            CASE WHEN "finishedAt" IS NULL THEN "totalSteps" END DESC NULLS LAST,
+            "joinedAt" ASC, "userId" ASC
         ) + $2)::int AS "computedPlacement"
         FROM page
       )
