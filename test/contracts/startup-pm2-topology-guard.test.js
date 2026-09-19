@@ -291,11 +291,11 @@ test("production reload wrapper supports legacy source then starts every split o
   const stopStep = lines.indexOf("stop_and_wait_if_present steps-tracker-step");
   const stopResolution = lines.indexOf("stop_and_wait_if_present steps-tracker-resolution");
   const sleep = lines.indexOf("sleep 30");
-  const startStep = lines.indexOf('pm2 start "$CONFIG" --only steps-tracker-step');
-  const startResolution = lines.indexOf('pm2 start "$CONFIG" --only steps-tracker-resolution');
-  const startEvent = lines.indexOf('pm2 start "$CONFIG" --only steps-tracker-event');
-  const startNotification = lines.indexOf('pm2 start "$CONFIG" --only steps-tracker-notification');
-  const startCron = lines.indexOf('pm2 start "$CONFIG" --only steps-tracker-cron');
+  const startStep = lines.indexOf('pm2 startOrReload "$CONFIG" --only steps-tracker-step --update-env');
+  const startResolution = lines.indexOf('pm2 startOrReload "$CONFIG" --only steps-tracker-resolution --update-env');
+  const startEvent = lines.indexOf('pm2 startOrReload "$CONFIG" --only steps-tracker-event --update-env');
+  const startNotification = lines.indexOf('pm2 startOrReload "$CONFIG" --only steps-tracker-notification --update-env');
+  const startCron = lines.indexOf('pm2 startOrReload "$CONFIG" --only steps-tracker-cron --update-env');
   const finalPool = lines.findIndex((line) => line.includes("--pool-budget-mode=final"));
   const save = lines.indexOf("pm2 save");
 
