@@ -2618,15 +2618,18 @@ function buildUsePowerup(dependencies = {}) {
       if (targetUserId) {
         throw new PowerupUseError("Rainstorm hits every racer. You cannot specify a target", 400);
       }
-      // B4: PER-CASTER limit. Each user may have one active storm at a time;
-      // different users' storms may overlap (a victim under two storms is
-      // clamped at a single 0.5x in scoring). A caster's own storm does not
-      // exempt them from being a normal victim of someone else's storm.
+      // One live storm per caster remains unchanged. Cross-caster storms are
+      // allowed only for DRY recipients: a runner already under Rainstorm is
+      // skipped until their existing window ends, so another cast can never
+      // extend one continuous 0.5x penalty window.
+      const rainCheckTime = now();
       const raceEffects = await effectModel.findActiveForRace(raceId);
       const activeStorm = raceEffects.find(
-        (e) => e.type === "RAINSTORM" &&
+        (e) =>
+          e.type === "RAINSTORM" &&
           e.sourceUserId === userId &&
-          e.expiresAt && new Date(e.expiresAt) > now()
+          e.expiresAt &&
+          new Date(e.expiresAt) > rainCheckTime
       );
       if (activeStorm) {
         throw new PowerupUseError(
@@ -2636,11 +2639,31 @@ function buildUsePowerup(dependencies = {}) {
           { retainHeld: true }
         );
       }
-      const otherRunners = acceptedParticipants.filter(
-        (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
+      const alreadyWetParticipantIds = new Set(
+        raceEffects
+          .filter(
+            (e) =>
+              e.type === "RAINSTORM" &&
+              e.targetParticipantId &&
+              e.expiresAt &&
+              new Date(e.expiresAt) > rainCheckTime
+          )
+          .map((e) => e.targetParticipantId)
       );
-      if (otherRunners.length === 0) {
-        throw new PowerupUseError("No other active runners to rain on", 400);
+      const dryRunners = acceptedParticipants.filter(
+        (p) =>
+          p.userId !== userId &&
+          isAliveTarget(p) &&
+          isEnemy(p) &&
+          !alreadyWetParticipantIds.has(p.id)
+      );
+      if (dryRunners.length === 0) {
+        throw new PowerupUseError(
+          "Everyone you can rain on is already under Rainstorm",
+          409,
+          "NO_ELIGIBLE_TARGETS",
+          { retainHeld: true }
+        );
       }
     }
 
@@ -4187,7 +4210,7 @@ function buildUsePowerup(dependencies = {}) {
         // Ascending-userId fan-out (spec §5a item 7). Rainstorm is the
         // multi-target powerup path: it touches one row per victim, so it takes
         // the SAME global lock order as every other multi-row writer.
-        const victims = acceptedParticipants
+        const directVictims = acceptedParticipants
           .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
           .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
         const effectsByParticipant = new Map();
@@ -4199,7 +4222,25 @@ function buildUsePowerup(dependencies = {}) {
             list.push(effect);
             effectsByParticipant.set(effect.targetParticipantId, list);
           }
+        } else if (typeof effectModel.findActiveForParticipant === "function") {
+          for (const participant of directVictims) {
+            effectsByParticipant.set(
+              participant.id,
+              (await effectModel.findActiveForParticipant(participant.id)) || [],
+            );
+          }
         }
+        // Skip before Decoy/Umbrella/Socks resolution. "Already wet" is not an
+        // attack attempt against that runner, so it must not consume a defense.
+        const victims = directVictims.filter((participant) => {
+          const effects = effectsByParticipant.get(participant.id) || [];
+          return !effects.some(
+            (effect) =>
+              effect.type === "RAINSTORM" &&
+              effect.expiresAt &&
+              new Date(effect.expiresAt) > currentTime
+          );
+        });
         const decoyCooldownConsumptions = [];
         const decoyResolution = await resolveAoEDecoySlots({
           victims,
