@@ -2284,9 +2284,6 @@ function createRacesRouter(dependencies = {}) {
             ...(error.powerupType
               ? { powerupType: error.powerupType }
               : {}),
-            ...(error.refundedPowerup
-              ? { refundedPowerup: error.refundedPowerup }
-              : {}),
           });
       }
       console.error("Redeem powerup error:", error);
@@ -2380,6 +2377,9 @@ function createRacesRouter(dependencies = {}) {
             ...(error.code ? { code: error.code } : {}),
             ...(error.powerupType
               ? { powerupType: error.powerupType }
+              : {}),
+            ...(error.refundedPowerup
+              ? { refundedPowerup: error.refundedPowerup }
               : {}),
           });
       }
