@@ -26,6 +26,50 @@ const PowerupUsageState = {
     });
   },
 
+  async rebaseDecoyConsumedMany({
+    db = prisma,
+    raceId,
+    consumptions,
+    consumedAt,
+    nextUsableAt,
+  }) {
+    const uniqueByUser = new Map();
+    for (const consumption of consumptions || []) {
+      if (!consumption?.userId) continue;
+      uniqueByUser.set(consumption.userId, consumption);
+    }
+    const rows = [...uniqueByUser.values()];
+    if (!rows.length) return { count: 0 };
+
+    const userIds = rows.map((row) => row.userId);
+    const updated = await db.powerupUsageState.updateMany({
+      where: {
+        raceId,
+        powerupType: "DECOY",
+        userId: { in: userIds },
+      },
+      data: {
+        activeUntil: consumedAt,
+        nextUsableAt,
+      },
+    });
+
+    await db.powerupUsageState.createMany({
+      data: rows.map((row) => ({
+        raceId,
+        userId: row.userId,
+        powerupType: "DECOY",
+        lastUsedAt: consumedAt,
+        activeUntil: consumedAt,
+        nextUsableAt,
+        sourcePowerupId: row.sourcePowerupId || null,
+      })),
+      skipDuplicates: true,
+    });
+
+    return updated;
+  },
+
   async upsertUsed({
     db = prisma,
     userId,
