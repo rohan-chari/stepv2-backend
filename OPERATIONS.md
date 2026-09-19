@@ -107,6 +107,12 @@ Before recommending merge to `main`:
    ```
    `test:release` runs `test:unit` first and then `test:integration`. It does
    **not** deploy anything.
+
+   Unit tests are intentionally isolated from Redis. The `test:unit` script
+   forces `REDIS_URL=`, `QUEUE_REDIS_URL=`, and `CACHE_ENV_PREFIX=unit:`
+   so dependency-injected unit tests cannot read shared/local Redis cache state.
+   The outer `test:release` command may still provide Redis URLs because the
+   integration suite requires them.
 2. Review migrations and production environment additions.
 3. Verify this operations file matches any topology or deployment changes.
 4. For queue-first/scalability work, verify the split topology, queue Redis
@@ -117,6 +123,9 @@ Unit and integration are the only required automated release suites. Queue and
 worker behavior that matters to production belongs in integration coverage,
 especially under `test/integration/queue`. Specialized historical suites are
 not release gates.
+
+Current release-candidate status: unit and integration both pass. Re-run
+`npm run test:release` after any code change before merge/deploy.
 
 A green release test does not waive an unresolved production topology or
 deployment requirement.
