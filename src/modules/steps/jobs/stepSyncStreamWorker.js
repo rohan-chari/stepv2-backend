@@ -64,7 +64,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
     dependencies.HistoricalRaceDiscoveryCursor ||
     buildHistoricalRaceDiscoveryCursorModel(prisma);
 
-  async function persistMessage(message) {
+  async function persistMessage(message, requestOrder) {
     const cleaned = removeOverlaps(normalizeSamples(message.canonical.samples));
     const requestedAt = new Date(message.requestedAt);
 
@@ -80,6 +80,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
         },
         samples: cleaned,
         requestTimestamp: requestedAt,
+        requestOrder,
         beforeSourceWrites,
       });
       const responseJson = {
@@ -321,7 +322,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
     let message;
     try {
       message = parseStepSync(entry.fields);
-      const persisted = await persistMessage(message);
+      const persisted = await persistMessage(message, entry.id);
       await afterCommit(message, persisted);
       await ack(STREAMS.STEP_SYNC, GROUPS.STEP_SYNC, entry.id);
       return true;
