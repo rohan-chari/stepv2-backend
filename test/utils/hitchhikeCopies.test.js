@@ -231,14 +231,18 @@ test("v3 uses one checkpointed coarse daily delta as an alternative to absent sa
   assert.equal(persisted.castDailySteps, 1_000);
 });
 
-test("v4 corrects a frozen zero when a newer scoring generation brings late modified samples", async () => {
+test("v3 late-sample reconciliation corrects a frozen zero when a newer scoring generation brings late modified samples", async () => {
   const frozenAt = new Date("2026-09-19T13:56:10.748Z");
   const effect = hitch({
-    id: "hh-v4-late",
+    id: "hh-v3-late",
     raceId: "race-1",
     startsAt: new Date("2026-09-19T12:56:10.748Z"),
     expiresAt: frozenAt,
-    metadata: { copyRatio: 0.5, scoringVersion: 4 },
+    metadata: {
+      copyRatio: 0.5,
+      scoringVersion: 3,
+      lateSampleReconciliationV1: true,
+    },
   });
   let correction = null;
   let sampleReads = 0;
@@ -275,7 +279,7 @@ test("v4 corrects a frozen zero when a newer scoring generation brings late modi
         async findFrozen() {
           return {
             effectId: effect.id,
-            scoringVersion: 4,
+            scoringVersion: 3,
             scoringInputGeneration: 1n,
             effectiveContribution: 0,
             rawSourceHighWater: 0,
@@ -286,7 +290,7 @@ test("v4 corrects a frozen zero when a newer scoring generation brings late modi
         async readScoringInput() {
           return { generation: 2n, fingerprint: "b".repeat(64) };
         },
-        async correctFrozenV4(input) {
+        async correctFrozenV3(input) {
           correction = input;
           return {
             effectiveContribution: input.effectiveContribution,
@@ -307,13 +311,17 @@ test("v4 corrects a frozen zero when a newer scoring generation brings late modi
   assert.equal(correction.captureThrough.getTime(), frozenAt.getTime());
 });
 
-test("v4 keeps the frozen fast path when the target scoring generation did not advance", async () => {
+test("v3 late-sample reconciliation keeps the frozen fast path when the target scoring generation did not advance", async () => {
   let sampleReads = 0;
   const copied = await computeHitchhikeCopiedSteps(
     hitch({
-      id: "hh-v4-stable",
+      id: "hh-v3-stable",
       raceId: "race-1",
-      metadata: { copyRatio: 0.5, scoringVersion: 4 },
+      metadata: {
+        copyRatio: 0.5,
+        scoringVersion: 3,
+        lateSampleReconciliationV1: true,
+      },
     }),
     { async sumStepsInWindow() { sampleReads += 1; return 99_999; } },
     NOW,
