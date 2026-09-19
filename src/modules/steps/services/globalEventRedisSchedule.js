@@ -31,20 +31,16 @@ async function scheduleEntitlement(entitlement) {
   ));
 }
 
-async function scheduleEntitlements(entitlements) {
+async function scheduleEntitlements(entitlements, { start = true, end = true } = {}) {
   const rows = (entitlements || []).filter(Boolean);
   if (!rows.length) return 0;
   return withCommandClient(async (redis) => {
     const args = [];
     for (const entitlement of rows) {
-      args.push(
-        new Date(entitlement.startsAt).getTime(),
-        boundaryMember("START", entitlement),
-        new Date(entitlement.endsAt).getTime(),
-        boundaryMember("END", entitlement),
-      );
+      if (start) args.push(new Date(entitlement.startsAt).getTime(), boundaryMember("START", entitlement));
+      if (end) args.push(new Date(entitlement.endsAt).getTime(), boundaryMember("END", entitlement));
     }
-    return redis.zadd(scheduleKey(), ...args);
+    return args.length ? redis.zadd(scheduleKey(), ...args) : 0;
   });
 }
 
