@@ -230,16 +230,6 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
     const race = core
       ? await displayCache.fullDisplayContext(raceId, { race: core, userId })
       : null;
-    if (race?.participants?.length) {
-      const presentations = await userPresentationCache.getMany(
-        race.participants.map((participant) => participant.userId),
-        true
-      );
-      race.participants = race.participants.map((participant) => ({
-        ...participant,
-        user: presentations.get(participant.userId) || null,
-      }));
-    }
     if (!race) throw domainError("Race not found", 404, "RACE_NOT_FOUND");
     if (race.status !== "ACTIVE") {
       throw domainError("Race is not active", 400, "RACE_NOT_ACTIVE");
@@ -281,6 +271,16 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       isTeamRace: race.isTeamRace === true,
       now: now(),
     });
+
+    // Presentation is cache-backed and needed only for rows the picker can
+    // actually show. Do not fan a target-selection request out across the full
+    // race roster when most participants are ineligible.
+    const eligiblePresentations = eligible.length
+      ? await userPresentationCache.getMany(
+          eligible.map((participant) => participant.userId),
+          true,
+        )
+      : new Map();
 
     const { stealthedUserIds, viewerIsDetoured } = collectRaceIllusions(
       effects,
@@ -338,10 +338,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           userId: participant.userId,
           displayName: masked
             ? "???"
-            : participant.user?.displayName ?? null,
+            : eligiblePresentations.get(participant.userId)?.displayName ?? null,
           profilePhotoUrl: masked
             ? null
-            : participant.user?.profilePhotoUrl ?? null,
+            : eligiblePresentations.get(participant.userId)?.profilePhotoUrl ?? null,
           ...(powerupType === "BOUNTY"
             ? { totalSteps: masked ? null : participant.totalSteps ?? 0 }
             : {}),
