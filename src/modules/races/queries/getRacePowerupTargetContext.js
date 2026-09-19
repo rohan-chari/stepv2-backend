@@ -89,7 +89,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         now().getTime()
       );
       const ordered = [...race.participants].sort(compareParticipantsForPlacement);
-      const myIndex = ordered.findIndex((row) => row.userId === userId);
+      const orderIndexByUserId = new Map(
+        ordered.map((participant, index) => [participant.userId, index]),
+      );
+      const myIndex = orderIndexByUserId.get(userId) ?? -1;
       const maskedUserIds = new Set(
         ordered
           .filter(
@@ -115,7 +118,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         const rightMasked = viewerIsDetoured || maskedUserIds.has(right.userId);
         if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
         if (leftMasked) return String(left.userId).localeCompare(String(right.userId));
-        return ordered.indexOf(left) - ordered.indexOf(right);
+        return (
+          (orderIndexByUserId.get(left.userId) ?? 0) -
+          (orderIndexByUserId.get(right.userId) ?? 0)
+        );
       });
       const slotRows = inventoryRows.filter(
         (row) => row.status === "HELD" || row.status === "MYSTERY_BOX"
@@ -124,7 +130,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         contract: "race-powerup-target-context-v1",
         ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
         participants: presentationOrdered.map((participant) => {
-          const index = ordered.indexOf(participant);
+          const index = orderIndexByUserId.get(participant.userId) ?? -1;
           const actuallyStealthed =
             participant.userId !== userId &&
             participant.finishedAt == null &&
@@ -313,7 +319,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         if (leftMasked) {
           return String(left.userId).localeCompare(String(right.userId));
         }
-        return ordered.indexOf(left) - ordered.indexOf(right);
+        return (
+          (orderIndexByUserId.get(left.userId) ?? 0) -
+          (orderIndexByUserId.get(right.userId) ?? 0)
+        );
       });
     return {
       contract: "race-powerup-target-context-v2",
