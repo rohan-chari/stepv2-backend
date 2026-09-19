@@ -272,6 +272,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       viewerUserId: userId,
       effects,
       stealableParticipantIds,
+      isTeamRace: race.isTeamRace === true,
       now: now(),
     });
 
