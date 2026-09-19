@@ -20,10 +20,20 @@ const repoRoot = path.resolve(__dirname, "../..");
 function emitRealRoleSnapshot({ role, instance, redisUrl, prefix }) {
   const variable = {
     http: "DATABASE_POOL_MAX_HTTP",
+    step: "DATABASE_POOL_MAX_STEP",
     resolution: "DATABASE_POOL_MAX_RESOLUTION",
+    event: "DATABASE_POOL_MAX_EVENT",
+    notification: "DATABASE_POOL_MAX_NOTIFICATION",
     cron: "DATABASE_POOL_MAX_CRON",
   }[role];
-  const value = { http: "10", resolution: "8", cron: "4" }[role];
+  const value = {
+    http: "10",
+    step: "3",
+    resolution: "6",
+    event: "3",
+    notification: "4",
+    cron: "3",
+  }[role];
   const source = `
     (async () => {
       const db = require('./src/db');
@@ -44,7 +54,7 @@ function emitRealRoleSnapshot({ role, instance, redisUrl, prefix }) {
       REDIS_URL: redisUrl,
       CACHE_ENV_PREFIX: prefix,
       [variable]: value,
-      DATABASE_POOL_TOTAL_BUDGET: "32",
+      DATABASE_POOL_TOTAL_BUDGET: "39",
     },
     encoding: "utf8",
     timeout: 10_000,
@@ -139,7 +149,14 @@ function poolSnapshot(role, instance, nowMs) {
     newestBucketAt: buckets.at(-1).minuteStartedAt,
     coverageMinutes: 60,
     pool: {
-      max: role === "resolution" ? 8 : role === "cron" ? 4 : 10,
+      max: {
+        http: 10,
+        step: 3,
+        resolution: 6,
+        event: 3,
+        notification: 4,
+        cron: 3,
+      }[role],
       configSource: `DATABASE_POOL_MAX_${role.toUpperCase()}`,
       total: 4,
       idle: 2,
@@ -203,7 +220,10 @@ describe("admin system health", () => {
     assert.deepEqual(body.missingProcesses, [
       { role: "http", instance: "0", reason: "unavailable" },
       { role: "http", instance: "1", reason: "unavailable" },
+      { role: "step", instance: "0", reason: "unavailable" },
       { role: "resolution", instance: "0", reason: "unavailable" },
+      { role: "event", instance: "0", reason: "unavailable" },
+      { role: "notification", instance: "0", reason: "unavailable" },
       { role: "cron", instance: "0", reason: "unavailable" },
     ]);
   });
@@ -230,13 +250,24 @@ describe("admin system health", () => {
       await probe.flushdb();
 
       const nowMs = Math.floor(Date.now() / 60_000) * 60_000;
-      for (const [role, instance] of [["http", "0"], ["http", "1"], ["resolution", "0"], ["cron", "0"]]) {
+      for (const [role, instance] of [
+        ["http", "0"],
+        ["http", "1"],
+        ["step", "0"],
+        ["resolution", "0"],
+        ["event", "0"],
+        ["notification", "0"],
+        ["cron", "0"],
+      ]) {
         emitRealRoleSnapshot({ role, instance, redisUrl: live.url, prefix });
       }
       const realSnapshots = await redisCache.readDatabasePoolTelemetrySnapshots([
         cacheKeys.databasePoolTelemetry("http", "0"),
         cacheKeys.databasePoolTelemetry("http", "1"),
+        cacheKeys.databasePoolTelemetry("step", "0"),
         cacheKeys.databasePoolTelemetry("resolution", "0"),
+        cacheKeys.databasePoolTelemetry("event", "0"),
+        cacheKeys.databasePoolTelemetry("notification", "0"),
         cacheKeys.databasePoolTelemetry("cron", "0"),
       ]);
       assert.equal(realSnapshots.ok, true);
@@ -247,8 +278,11 @@ describe("admin system health", () => {
       })), [
         { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
         { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
-        { role: "resolution", max: 8, configSource: "DATABASE_POOL_MAX_RESOLUTION" },
-        { role: "cron", max: 4, configSource: "DATABASE_POOL_MAX_CRON" },
+        { role: "step", max: 3, configSource: "DATABASE_POOL_MAX_STEP" },
+        { role: "resolution", max: 6, configSource: "DATABASE_POOL_MAX_RESOLUTION" },
+        { role: "event", max: 3, configSource: "DATABASE_POOL_MAX_EVENT" },
+        { role: "notification", max: 4, configSource: "DATABASE_POOL_MAX_NOTIFICATION" },
+        { role: "cron", max: 3, configSource: "DATABASE_POOL_MAX_CRON" },
       ]);
       const realAdmin = await createTestUser({
         email: process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com",
@@ -261,7 +295,7 @@ describe("admin system health", () => {
       );
       assert.equal(realResponse.status, 200);
       const realBody = await realResponse.json();
-      assert.equal(realBody.freshProcesses, 4, JSON.stringify(realBody));
+      assert.equal(realBody.freshProcesses, 7, JSON.stringify(realBody));
       assert.deepEqual(realBody.processes.map(({ role, pool }) => ({
         role,
         max: pool.max,
@@ -277,7 +311,15 @@ describe("admin system health", () => {
       // Redis's later-boot protection does not correctly reject older fixtures.
       await probe.flushdb();
 
-      for (const [role, instance] of [["http", "0"], ["http", "1"], ["resolution", "0"], ["cron", "0"]]) {
+      for (const [role, instance] of [
+        ["http", "0"],
+        ["http", "1"],
+        ["step", "0"],
+        ["resolution", "0"],
+        ["event", "0"],
+        ["notification", "0"],
+        ["cron", "0"],
+      ]) {
         const result = await redisCache.writeDatabasePoolTelemetrySnapshot(
           cacheKeys.databasePoolTelemetry(role, instance),
           poolSnapshot(role, instance, nowMs),
@@ -310,13 +352,19 @@ describe("admin system health", () => {
       assert.equal(body.overall, "healthy");
       assert.equal(body.historyStatus, "available");
       assert.equal(body.windowCoverageMinutes, 60);
-      assert.equal(body.freshProcesses, 4);
+      assert.equal(body.freshProcesses, 7);
       assert.deepEqual(body.missingProcesses, []);
-      assert.deepEqual(body.processes.map((row) => `${row.role}:${row.instance}`), ["http:0", "http:1", "resolution:0", "cron:0"]);
+      assert.deepEqual(
+        body.processes.map((row) => `${row.role}:${row.instance}`),
+        ["http:0", "http:1", "step:0", "resolution:0", "event:0", "notification:0", "cron:0"],
+      );
       assert.deepEqual(body.processes.map((row) => row.pool.configSource), [
         "DATABASE_POOL_MAX_HTTP",
         "DATABASE_POOL_MAX_HTTP",
+        "DATABASE_POOL_MAX_STEP",
         "DATABASE_POOL_MAX_RESOLUTION",
+        "DATABASE_POOL_MAX_EVENT",
+        "DATABASE_POOL_MAX_NOTIFICATION",
         "DATABASE_POOL_MAX_CRON",
       ]);
       assert.deepEqual(body.stepIngestion.endpoints.map((row) => row.endpoint), ["steps", "samples", "sync-v2"]);
@@ -341,9 +389,12 @@ describe("admin system health", () => {
       assert.equal(partial.status, "partial");
       assert.equal(partial.overall, "degraded");
       assert.equal(partial.historyStatus, "available");
-      assert.equal(partial.freshProcesses, 3);
+      assert.equal(partial.freshProcesses, 6);
       assert.deepEqual(partial.missingProcesses, [{ role: "http", instance: "1", reason: "malformed" }]);
-      assert.deepEqual(partial.processes.map((row) => `${row.role}:${row.instance}`), ["http:0", "resolution:0", "cron:0"]);
+      assert.deepEqual(
+        partial.processes.map((row) => `${row.role}:${row.instance}`),
+        ["http:0", "step:0", "resolution:0", "event:0", "notification:0", "cron:0"],
+      );
       assert.equal(partial.stepIngestion.contributingHttpProcesses, 1);
     } finally {
       await redisCache.close();
