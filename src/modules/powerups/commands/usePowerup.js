@@ -1084,7 +1084,7 @@ async function refundRedeemedOnRejection({
     });
     return {
       powerupType: powerup.type,
-      quantity: Math.max(0, Number(stashRow.quantity) || 0),
+      quantity: Math.max(0, Number(stashRow?.quantity) || 0),
     };
   });
 
