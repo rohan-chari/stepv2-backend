@@ -1051,14 +1051,14 @@ async function refundRedeemedOnRejection({
   raceId,
   powerupId,
 }) {
-  if (typeof db?.$transaction !== "function") return;
+  if (typeof db?.$transaction !== "function") return null;
   const powerup = await powerupModel.findById(powerupId);
-  if (!powerup) return;
-  if (powerup.userId !== userId || powerup.raceId !== raceId) return;
-  if (powerup.status !== "HELD") return;
-  if (powerup.redeemedFromInventory !== true) return;
+  if (!powerup) return null;
+  if (powerup.userId !== userId || powerup.raceId !== raceId) return null;
+  if (powerup.status !== "HELD") return null;
+  if (powerup.redeemedFromInventory !== true) return null;
 
-  await db.$transaction(async (tx) => {
+  const refunded = await db.$transaction(async (tx) => {
     // Only the caller that flips HELD -> DISCARDED performs the hand-back.
     const discarded = await tx.racePowerup.updateMany({
       // Revalidate the full pre-read tuple atomically. Pickpocket can transfer
@@ -1076,12 +1076,16 @@ async function refundRedeemedOnRejection({
       data: { status: "DISCARDED" },
     });
     if (discarded.count) await slotsChanged({ participantId: powerup.participantId });
-    if (discarded.count !== 1) return;
-    await tx.userPowerupItem.upsert({
+    if (discarded.count !== 1) return null;
+    const stashRow = await tx.userPowerupItem.upsert({
       where: { userId_powerupType: { userId, powerupType: powerup.type } },
       create: { userId, powerupType: powerup.type, quantity: 1 },
       update: { quantity: { increment: 1 } },
     });
+    return {
+      powerupType: powerup.type,
+      quantity: Math.max(0, Number(stashRow.quantity) || 0),
+    };
   });
 
   // C4 (spec §5 Phase E): the discard hand-back returns a redeemed powerup to
@@ -1090,6 +1094,7 @@ async function refundRedeemedOnRejection({
   try {
     await require("../services/powerupInventoryCache").invalidateSafe(userId);
   } catch {}
+  return refunded;
 }
 
 async function rebaseDecoyUsageCooldownsOnConsume({
@@ -5255,13 +5260,14 @@ function buildUsePowerup(dependencies = {}) {
     } catch (err) {
       if (err instanceof PowerupUseError) {
         try {
-          await refundRedeemedOnRejection({
+          const refundedPowerup = await refundRedeemedOnRejection({
             db,
             powerupModel,
             userId: args.userId,
             raceId: args.raceId,
             powerupId: args.powerupId,
           });
+          if (refundedPowerup) err.refundedPowerup = refundedPowerup;
         } catch (refundErr) {
           console.error("usePowerup redeemed-refund failed:", refundErr);
         }
