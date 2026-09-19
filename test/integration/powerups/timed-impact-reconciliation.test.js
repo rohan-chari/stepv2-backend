@@ -476,7 +476,7 @@ describe("timed impact receipt reconciliation", () => {
     assert.equal(activity.reconciledAt.getTime(), projection.updatedAt.getTime());
     assert.equal(
       activity.displayDescription,
-      "Runner’s High 0 steps. Updated after step sync.",
+      "Runner's High 0 steps. Updated after step sync.",
     );
   });
 
