@@ -1175,19 +1175,23 @@ function buildUsePowerup(dependencies = {}) {
     attackerUserId,
     raceId,
     usageDb = db,
+    consumedAt = null,
+    rebaseUsage = true,
   }) {
-    const consumedAt = now();
-    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: consumedAt });
-    await rebaseDecoyUsageCooldownsOnConsume({
-      usageStateModel,
-      db: usageDb,
-      raceId,
-      consumptions: [{
-        userId: ownerParticipant.userId,
-        sourcePowerupId: decoy.powerupId,
-      }],
-      consumedAt,
-    });
+    const resolvedConsumedAt = consumedAt || now();
+    await effectModel.update(decoy.id, { status: "EXPIRED", decoyConsumedAt: resolvedConsumedAt });
+    if (rebaseUsage) {
+      await rebaseDecoyUsageCooldownsOnConsume({
+        usageStateModel,
+        db: usageDb,
+        raceId,
+        consumptions: [{
+          userId: ownerParticipant.userId,
+          sourcePowerupId: decoy.powerupId,
+        }],
+        consumedAt: resolvedConsumedAt,
+      });
+    }
     await appendDomainEvent(db, decoyConsumptionEvent({
       decoy, ownerParticipant, attackPowerupType, outcome, attackerUserId, raceId,
     }));
@@ -4169,6 +4173,7 @@ function buildUsePowerup(dependencies = {}) {
             effectsByParticipant.set(effect.targetParticipantId, list);
           }
         }
+        const decoyCooldownConsumptions = [];
         const decoyResolution = await resolveAoEDecoySlots({
           victims,
           acceptedParticipants,
@@ -4179,12 +4184,27 @@ function buildUsePowerup(dependencies = {}) {
           effectsByParticipant,
           random,
           now: () => currentTime,
-          consumeDecoy: (input) => consumeDecoyForUse({
-            ...input,
-            attackerUserId: userId,
-            raceId,
-          }),
+          consumeDecoy: (input) => {
+            decoyCooldownConsumptions.push({
+              userId: input.ownerParticipant.userId,
+              sourcePowerupId: input.decoy.powerupId,
+            });
+            return consumeDecoyForUse({
+              ...input,
+              attackerUserId: userId,
+              raceId,
+              consumedAt: currentTime,
+              rebaseUsage: false,
+            });
+          },
           attackPowerupType: type,
+        });
+        await rebaseDecoyUsageCooldownsOnConsume({
+          usageStateModel,
+          db: transactionDb,
+          raceId,
+          consumptions: decoyCooldownConsumptions,
+          consumedAt: currentTime,
         });
         const affected = new Set();
         const blockedNames = [];
