@@ -2089,6 +2089,8 @@ function createRacesRouter(dependencies = {}) {
       raceId: req.params.raceId,
       userId: req.user.id,
       resolvedAfter,
+      reconciliationEnabled:
+        req.clientFeatures?.has("timed_impact_reconciliation_v1") === true,
     });
     return res.json({
       notices: result.notices,
@@ -2173,6 +2175,8 @@ function createRacesRouter(dependencies = {}) {
       limitValue: req.query.limit,
       v2Enabled,
       completedEnabled,
+      reconciliationEnabled:
+        req.clientFeatures?.has("timed_impact_reconciliation_v1") === true,
     }));
   }));
 
