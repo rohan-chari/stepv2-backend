@@ -2,12 +2,13 @@ const {prisma:defaultPrisma}=require('../../../db');
 const {readBillingConfig,configured}=require('../catalog');
 const {createRevenueCatProvider}=require('./revenueCatProvider');
 const {reconcileIdentity}=require('./reconcile');
+const {isAdminUser}=require('../../admin/adminAccess');
 async function runBillingReconciliation({db=defaultPrisma,config=readBillingConfig(),provider=createRevenueCatProvider({config}),identityId=null,limit=5,logger=console}={}){
  if(!configured(config))return {available:false,processed:0,failed:0};
  const rows=await db.billingReconciliation.findMany({where:identityId?{identityId}:{nextAttemptAt:{lte:new Date()},OR:[{leaseUntil:null},{leaseUntil:{lte:new Date()}}]},orderBy:{nextAttemptAt:'asc'},take:identityId?1:limit});
  let processed=0,failed=0;
  for(const row of rows){const identity=await db.billingIdentity.findUnique({where:{id:row.identityId}});if(!identity||identity.deletedAt){await db.billingReconciliation.deleteMany({where:{identityId:row.identityId}});continue;}
-  try{const result=await reconcileIdentity({db,config,provider,identity});if(result.complete)processed++;}
+  try{const user=await db.user.findUnique({where:{id:identity.userId}});const allowSandboxForProduction=identity.environment==='production'&&isAdminUser(user);const result=await reconcileIdentity({db,config,provider,identity,allowSandboxForProduction});if(result.complete)processed++;}
   catch(error){failed++;logger.error('Billing reconciliation failed',{identityId:identity.id,code:error.code||'BILLING_RECONCILIATION_FAILED'});}
  }
  return {available:true,processed,failed};
