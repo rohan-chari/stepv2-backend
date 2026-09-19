@@ -189,7 +189,11 @@ test("HITCHHIKE parks a 60-minute 50% link on the target and marks the powerup U
     NOW.getTime() + SIXTY_MIN_MS,
     "hitchhike window is exactly 60 minutes"
   );
-  assert.deepEqual(eff.metadata, { copyRatio: 0.5, scoringVersion: 3 });
+  assert.deepEqual(eff.metadata, {
+    copyRatio: 0.5,
+    scoringVersion: 3,
+    lateSampleReconciliationV1: true,
+  });
   assert.equal(ctx.updatedPowerup.status, "USED");
 });
 
