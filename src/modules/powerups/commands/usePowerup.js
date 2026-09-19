@@ -1633,6 +1633,7 @@ function buildUsePowerup(dependencies = {}) {
     const hitchhikeCheckTime = type === "HITCHHIKE" ? now() : null;
     let liveHitchhikeLinks = null;
     let hitchhikeDecoyResolution = null;
+    let rainstormRaceEffects = null;
     const activeImpactEnabled = true;
     const activeImpactCapable = requestHasFeature(
       clientFeatures,
@@ -2623,8 +2624,8 @@ function buildUsePowerup(dependencies = {}) {
       // skipped until their existing window ends, so another cast can never
       // extend one continuous 0.5x penalty window.
       const rainCheckTime = now();
-      const raceEffects = await effectModel.findActiveForRace(raceId);
-      const activeStorm = raceEffects.find(
+      rainstormRaceEffects = await effectModel.findActiveForRace(raceId);
+      const activeStorm = rainstormRaceEffects.find(
         (e) =>
           e.type === "RAINSTORM" &&
           e.sourceUserId === userId &&
@@ -2640,7 +2641,7 @@ function buildUsePowerup(dependencies = {}) {
         );
       }
       const alreadyWetParticipantIds = new Set(
-        raceEffects
+        rainstormRaceEffects
           .filter(
             (e) =>
               e.type === "RAINSTORM" &&
@@ -4214,7 +4215,14 @@ function buildUsePowerup(dependencies = {}) {
           .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
           .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
         const effectsByParticipant = new Map();
-        if (typeof effectModel.findActiveForParticipants === "function") {
+        if (Array.isArray(rainstormRaceEffects)) {
+          for (const effect of rainstormRaceEffects) {
+            if (!effect?.targetParticipantId) continue;
+            const list = effectsByParticipant.get(effect.targetParticipantId) || [];
+            list.push(effect);
+            effectsByParticipant.set(effect.targetParticipantId, list);
+          }
+        } else if (typeof effectModel.findActiveForParticipants === "function") {
           for (const effect of await effectModel.findActiveForParticipants(
             acceptedParticipants.map((p) => p.id),
           )) {
