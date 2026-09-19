@@ -18,6 +18,8 @@ production.
 ## Canonical documentation
 
 - **Live operations, deploys, backups, rollback:** [OPERATIONS.md](OPERATIONS.md)
+- **Pre-deploy infrastructure checklist:** [PRE_DEPLOY_README.md](PRE_DEPLOY_README.md)
+- **Post-deploy verification checklist:** [POST_DEPLOY_README.md](POST_DEPLOY_README.md)
 - **Agent engineering policy:** [AGENTS.md](AGENTS.md)
 - **Architecture/feature documentation:** [docs/](docs/)
 - **Historical release/deploy evidence:** [docs/archive/](docs/archive/)
