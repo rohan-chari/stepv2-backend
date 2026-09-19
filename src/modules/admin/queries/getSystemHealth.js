@@ -548,7 +548,11 @@ function buildGetSystemHealth(dependencies = {}) {
       if (!parsed.valid) missingProcesses.push({ ...expected, reason: parsed.reason });
       else valid.push(parsed.value);
     }
-    const status = valid.length === 0 ? "unavailable" : valid.length === 4 ? "available" : "partial";
+    const status = valid.length === 0
+      ? "unavailable"
+      : valid.length === EXPECTED.length
+        ? "available"
+        : "partial";
     if (valid.length === 0) {
       return {
         schema: "admin-system-health-v1",
@@ -558,7 +562,7 @@ function buildGetSystemHealth(dependencies = {}) {
         generatedAt: current.toISOString(),
         windowMinutes: 60,
         windowCoverageMinutes: 0,
-        expectedProcesses: 4,
+        expectedProcesses: EXPECTED.length,
         freshProcesses: 0,
         missingProcesses,
         processes: [],
@@ -577,7 +581,7 @@ function buildGetSystemHealth(dependencies = {}) {
       generatedAt: current.toISOString(),
       windowMinutes: 60,
       windowCoverageMinutes: Math.min(...valid.map((snapshot) => snapshot.coverageMinutes)),
-      expectedProcesses: 4,
+      expectedProcesses: EXPECTED.length,
       freshProcesses: valid.length,
       missingProcesses,
       processes,
