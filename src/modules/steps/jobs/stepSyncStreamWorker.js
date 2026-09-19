@@ -246,12 +246,12 @@ function buildStepSyncStreamWorker(dependencies = {}) {
       cursor: null,
       limit: 100,
     });
-    const completed = discovered.rows.filter(
-      (row) => String(row.raceStatus).toLowerCase() === "completed",
+    const eligible = discovered.rows.filter((row) =>
+      ["active", "completed"].includes(String(row.raceStatus).toLowerCase()),
     );
-    if (completed.length) {
+    if (eligible.length) {
       await historicalIntentModel.admitMany({
-        rows: completed,
+        rows: eligible,
         changedStart: sourceEnvelope.changedStart,
         changedEnd: sourceEnvelope.changedEnd,
         sourceGeneration: persisted.result.generation,
