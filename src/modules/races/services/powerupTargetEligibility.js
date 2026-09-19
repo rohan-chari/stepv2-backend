@@ -1,5 +1,3 @@
-const { POWERUPS5_TYPES } = require("../../powerups/constants/powerupPolicy");
-
 const ACTIVE_CONFLICTS = Object.freeze({
   LEG_CRAMP: new Set(["LEG_CRAMP", "WRONG_TURN"]),
   WRONG_TURN: new Set(["WRONG_TURN", "LEG_CRAMP"]),
