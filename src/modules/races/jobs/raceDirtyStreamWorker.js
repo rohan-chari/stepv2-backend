@@ -168,8 +168,31 @@ function buildRaceDirtyStreamWorker(dependencies = {}) {
     return results;
   }
 
+  async function acknowledgeTerminalFailure(entry) {
+    const message = parseRaceDirty(entry.fields);
+    const generation = Number(entry._raceJobGeneration || message.jobGeneration);
+    if (!entry.id || !Number.isSafeInteger(generation) || generation < 1) return false;
+    // recordFailure already committed both the error and pending/processing
+    // scopes. That row, not an indefinitely pending Redis entry, owns recovery.
+    const job = await jobModel.findByRaceId(message.raceId);
+    const failedGeneration = Number(job?.generation);
+    if (!job?.id || job.state !== "FAILED" || !job.completedAt ||
+        !Number.isSafeInteger(failedGeneration) || failedGeneration < generation) return false;
+    logger.error?.(JSON.stringify({
+      event: "race_stream_terminal_failure_v1", outcome: "TERMINAL_FAILED",
+      messageId: entry.id, jobId: job.id, raceId: message.raceId,
+      generation: failedGeneration, errorCode: job.lastErrorCode || "RACE_RESOLUTION_FAILED",
+      recoverySource: "race_resolution_jobs_v2",
+    }));
+    // ACK is transport completion, not scoring success. Never delete or mutate
+    // the failed row here. If Redis fails, the same handoff can be retried.
+    await queue.ack(STREAMS.RACE_DIRTY, GROUPS.RACE_DIRTY, entry.id);
+    return true;
+  }
+
   return {
     processEntries,
+    acknowledgeTerminalFailure,
     processEntry: async (entry) => (await processEntries([entry]))[0]?.completed === true,
     processMessage: async (message) => (await processEntries([{ fields: message }]))[0],
     resolver,
@@ -204,11 +227,10 @@ function scheduleRaceDirtyStreamWorker(dependencies = {}) {
             entry, completed: await worker.processEntry(entry), retryAt: current + 1000,
           })));
           for (const result of results) {
-            if (result.completed || result.outcome === "TERMINAL_FAILED") {
-              // Failed work stays pending in Redis, but must not fill the local
-              // buffer forever and stop unrelated races from being consumed.
+            const failureHandled = result.outcome === "TERMINAL_FAILED" &&
+              await worker.acknowledgeTerminalFailure?.(result.entry);
+            if (result.completed || failureHandled) {
               buffer.delete(result.entry.id);
-              if (!result.completed) logger.error?.("[RACE_DIRTY_STREAM] terminal job remains pending", { messageId: result.entry.id });
             } else buffer.set(result.entry.id, { entry: result.entry, retryAt: result.retryAt || current + 1000 });
           }
         }
