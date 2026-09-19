@@ -4,7 +4,6 @@ const { collectRaceIllusions } = require("../services/raceIllusions");
 const {
   buildViewerDisplayPlacementMap,
 } = require("../services/viewerDisplayPlacements");
-const { RacePowerup } = require("../../powerups");
 const defaultDisplayCache = require("../services/raceOpenDisplayCache");
 const {
   eligiblePowerupTargets,
@@ -38,7 +37,6 @@ function domainError(message, statusCode, code) {
 
 function buildGetRacePowerupTargetContext(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
-  const powerupModel = dependencies.RacePowerup || RacePowerup;
   const displayCache = dependencies.raceOpenDisplayCache || defaultDisplayCache;
   const stealableParticipants =
     dependencies.stealableParticipants || defaultStealableParticipants;
