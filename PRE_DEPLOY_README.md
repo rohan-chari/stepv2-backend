@@ -25,10 +25,11 @@ The reviewed split topology is:
 
 Reviewed steady-state database pool aggregate: **39**.
 
-The current managed PostgreSQL service is believed to allow roughly 96
-connections. Verify the real control-plane value before deploy. The pool budget
-remains 39 even when 96 is confirmed: CPU, memory, lock contention and query
-throughput matter more than consuming the maximum available connection count.
+The current managed PostgreSQL service is believed to be approximately **2
+vCPU / 4 GB RAM with up to ~96 connections**. Verify all three values in the
+DigitalOcean control plane before deploy. The pool budget remains 39 even when
+96 is confirmed: database CPU, memory, lock contention and query throughput
+matter more than consuming the maximum available connection count.
 
 A rolling HTTP replacement can briefly add one extra 10-connection HTTP pool,
 so the reviewed worst-case application ceiling during a target-to-target reload
@@ -84,9 +85,9 @@ let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
 
 Record:
 
-- [ ] CPU count = expected 2 vCPU.
-- [ ] RAM = expected ~4 GB.
-- [ ] swap size/usage.
+- [ ] droplet CPU count recorded.
+- [ ] droplet RAM recorded.
+- [ ] droplet swap size/usage.
 - [ ] filesystem free space.
 - [ ] current PM2 topology.
 - [ ] current restart counts.
@@ -95,8 +96,9 @@ Record:
 - [ ] current load average.
 
 Because this release adds three background Node processes plus a second Redis
-instance, STOP if projected steady-state memory leaves inadequate OS/Postgres
-client headroom or if swap is already under sustained pressure.
+instance, STOP if projected steady-state **droplet** memory leaves inadequate OS
+headroom or if swap is already under sustained pressure. Do not confuse the
+managed database's 2-vCPU/4-GB sizing with the app droplet's resources.
 
 ## Phase 2 — Verify PostgreSQL capacity
 
@@ -192,16 +194,18 @@ visibly rather than silently delete accepted work.
 
 Do not choose a Redis memory ceiling from the 96-connection DB number.
 
-For the 4-GB droplet:
+For the production droplet:
 
-1. record current steady-state Node + cache Redis + OS RSS;
-2. reserve meaningful free/swap headroom;
-3. select a bounded queue Redis ceiling;
-4. record the chosen value in the deploy notes.
+1. record its actual CPU/RAM/swap first;
+2. record current steady-state Node + cache Redis + OS RSS;
+3. reserve meaningful free/swap headroom;
+4. select a bounded queue Redis ceiling;
+5. record the chosen value in the deploy notes.
 
 A reasonable initial target to evaluate is 256 MB, but the operator must verify
-it against the actual baseline and expected queue backlog. Do not increase above
-512 MB on this host without explicit review.
+it against the actual droplet baseline and expected queue backlog. Any material
+increase should be driven by measured queue history/backlog rather than by the
+managed database connection limit.
 
 After provisioning:
 
