@@ -34,7 +34,6 @@ function eligiblePowerupTargets({
   const me = (participants || []).find((p) => p.userId === viewerUserId);
   if (!me) return [];
   const teamRace = isTeamRace === true;
-  if (powerupType === "BOUNTY" && teamRace) return [];
   const active = liveEffectsByParticipant(effects, now);
   const conflicts = ACTIVE_CONFLICTS[powerupType] || null;
   const viewerHasActiveHitchhike =
