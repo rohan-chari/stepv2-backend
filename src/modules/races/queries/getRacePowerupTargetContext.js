@@ -328,7 +328,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       contract: "race-powerup-target-context-v2",
       ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
       participants: presentationOrdered.map((participant) => {
-        const index = ordered.indexOf(participant);
+        const index = orderIndexByUserId.get(participant.userId) ?? -1;
         const actuallyStealthed =
           participant.userId !== userId &&
           participant.finishedAt == null &&
