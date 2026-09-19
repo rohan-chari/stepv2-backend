@@ -1,5 +1,6 @@
 const { AppError } = require('../../../shared/errors/AppError');
 const { PRODUCTS, GOLD_BENEFIT_VERSION } = require('../catalog');
+const { isBillingEnvironmentAllowed } = require('./billingEnvironmentPolicy');
 const ORIGIN='https://api.revenuecat.com';
 const fail=(message='Billing provider unavailable')=>new AppError(message,'BILLING_UNAVAILABLE',503);
 const date=(n)=>{if(typeof n!=='number'||!Number.isFinite(n)) throw fail('Invalid provider timestamp'); const d=new Date(n); if(!Number.isFinite(d.getTime()))throw fail('Invalid provider timestamp'); return d.toISOString();};
@@ -19,7 +20,7 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
   while(path){if(seen.has(path))throw fail('Provider pagination cycle');seen.add(path);const data=await get(path);if(!Array.isArray(data.items))throw fail('Invalid provider list');rows.push(...data.items);if(data.next_page!==null&&data.next_page!==undefined&&typeof data.next_page!=='string')throw fail('Invalid provider pagination');path=data.next_page;}
   return rows;
  }
- return {async getCustomerHistory(identity, { goldTransactionId = null } = {}){
+ return {async getCustomerHistory(identity, { goldTransactionId = null, allowSandboxForProduction = false } = {}){
   const observedAt=new Date().toISOString();
   const customer=`${prefix}customers/${encodeURIComponent(identity.id)}`;
   // Fetch every page: one provider identity can retain both TestFlight and
@@ -40,7 +41,7 @@ function createRevenueCatProvider({config,fetch:fetchFn=globalThis.fetch}) {
    // the provenance ID to match rejects legitimate transferred receipts.
    if(row.customer_id!==identity.id||row.ownership!=='purchased')throw new AppError('Purchase belongs to another Bara account','PURCHASE_ACCOUNT_MISMATCH',409);
    if(!['production','sandbox'].includes(row.environment)||!['production','sandbox'].includes(identity.environment))throw new AppError('Purchase environment does not match this account','BILLING_REALM_MISMATCH',409);
-   return row.environment===identity.environment;
+   return isBillingEnvironmentAllowed({identityEnvironment:identity.environment,purchaseEnvironment:row.environment,allowSandboxForProduction});
   }
   const purchases=[],subscriptions=[],goldSubscriptionIds=new Set();
   const cutoverAt = config.monthlyGoldContractCutoverAt == null
