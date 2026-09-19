@@ -53,6 +53,14 @@ function hitchhikeCopyRatio(effect) {
   return Number.isFinite(raw) && raw > 0 ? raw : HITCHHIKE_DEFAULT_COPY_RATIO;
 }
 
+function asGeneration(value) {
+  try {
+    return BigInt(value ?? 0);
+  } catch {
+    return 0n;
+  }
+}
+
 function toMsOrNull(value) {
   if (value == null) return null;
   const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
@@ -141,11 +149,30 @@ async function computeHitchhikeCopiedSteps(
   const {nowMs,windowStart,windowEnd,rawEnd,scoringVersion}=window;
 
   let existingCapture = null;
+  let frozenCapture = null;
+  let frozenCorrectionInput = null;
   if (scoringVersion === 3 &&
       typeof attributionCaptureModel?.findFrozen === "function") {
     const frozen = await attributionCaptureModel.findFrozen(effect.id);
-    if (frozen) return Number(frozen.effectiveContribution) || 0;
-    if (typeof attributionCaptureModel.findByEffect === "function") {
+    if (frozen) {
+      const repairEnabled =
+        effect.metadata?.lateSampleReconciliationV1 === true &&
+        typeof attributionCaptureModel.readScoringInput === "function" &&
+        typeof attributionCaptureModel.correctFrozenV3 === "function";
+      if (!repairEnabled) return Number(frozen.effectiveContribution) || 0;
+
+      const scoringInput = await attributionCaptureModel.readScoringInput(
+        effect.targetUserId,
+      );
+      if (
+        asGeneration(scoringInput?.generation) <=
+        asGeneration(frozen.scoringInputGeneration)
+      ) {
+        return Number(frozen.effectiveContribution) || 0;
+      }
+      frozenCapture = frozen;
+      frozenCorrectionInput = scoringInput;
+    } else if (typeof attributionCaptureModel.findByEffect === "function") {
       existingCapture = await attributionCaptureModel.findByEffect(effect.id);
     }
   }
@@ -168,7 +195,8 @@ async function computeHitchhikeCopiedSteps(
   // only when a cast-time checkpoint already exists; a legacy/imported v3 row
   // without one cannot safely distinguish pre-cast walking from post-cast
   // walking and therefore remains sample-only until its first checkpoint.
-  if (scoringVersion === 3 &&
+  if (!frozenCapture &&
+      scoringVersion === 3 &&
       typeof attributionCaptureModel?.readDailySteps === "function") {
     try {
       currentDailySteps = await attributionCaptureModel.readDailySteps(
@@ -184,6 +212,9 @@ async function computeHitchhikeCopiedSteps(
 
   if (scoringVersion < 2 || !targetParticipantId || !raceId ||
       typeof raceActiveEffectModel?.findEffectsForRaceByTypes !== "function") {
+    if (frozenCapture) {
+      return Number(frozenCapture.effectiveContribution) || 0;
+    }
     return Math.floor(exactSteps * hitchhikeCopyRatio(effect));
   }
 
@@ -206,6 +237,31 @@ async function computeHitchhikeCopiedSteps(
     new Date(windowEnd)
   );
   const exactCopiedSteps = hitchhikeExactContribution(effect,exactSteps,modifiers);
+
+  // A opted-in frozen V3 capture may advance only from newer exact source
+  // evidence. The window end/frozen boundary never moves. This handles delayed
+  // Health samples without turning every later sync into a historical replay.
+  if (frozenCapture) {
+    const frozenRawHighWater = Math.max(
+      0,
+      Number(frozenCapture.rawSourceHighWater) || 0,
+    );
+    if (!(exactSteps > frozenRawHighWater)) {
+      return Number(frozenCapture.effectiveContribution) || 0;
+    }
+    const corrected = await attributionCaptureModel.correctFrozenV3({
+      effect,
+      scoringInputGeneration: frozenCorrectionInput?.generation ?? 0n,
+      scoringInputFingerprint: frozenCorrectionInput?.fingerprint ?? null,
+      rawSourceHighWater: exactSteps,
+      effectiveContribution: exactCopiedSteps,
+      captureThrough: new Date(rawEnd),
+    });
+    return Number(
+      corrected?.effectiveContribution ?? exactCopiedSteps,
+    ) || 0;
+  }
+
   if (scoringVersion === 3 && typeof attributionCaptureModel?.selectBoundaryContribution === "function") {
     return attributionCaptureModel.selectBoundaryContribution({
       effectId: effect.id, exactSteps, exactCopiedSteps, rawEnd, nowMs,
