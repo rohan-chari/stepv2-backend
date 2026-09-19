@@ -116,6 +116,22 @@ describe("featured tournament public HTTP behavior — integration", () => {
       assert.equal(joined.status, 201);
     }
 
+    // Filling the bracket is a real HTTP start path. It must durably append one
+    // TOURNAMENT_STARTED_V1 event per first-round racer before notification
+    // projection can fan out the visible start notifications.
+    const startedEvents = await prisma.domainEventOutbox.findMany({
+      where: {
+        aggregateId: fourLobby.id,
+        eventType: "TOURNAMENT_STARTED_V1",
+      },
+      include: { audience: true },
+    });
+    assert.equal(startedEvents.length, 4);
+    assert.deepEqual(
+      new Set(startedEvents.flatMap((event) => event.audience.map((row) => row.recipientId))),
+      new Set([viewer.id, fillerA.id, fillerB.id, fillerC.id]),
+    );
+
     const suggested = await request(server.baseUrl, "GET", "/home/suggested-races", {
       token: viewer.token,
       headers: HEADERS,
