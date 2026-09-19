@@ -277,8 +277,9 @@ async function cleanDatabase() {
   // One server-side block rather than one Prisma round trip per table: the
   // latter can exceed Prisma's default 5s interactive-transaction timeout on
   // a busy local adapter pool.
+  const dollarQuote = "$" + "$";
   const cleanupSql = `
-    DO $
+    DO ${dollarQuote}
     DECLARE table_name text;
     BEGIN
       -- RaceSeries.current_race_id and Race.series_id intentionally form a
@@ -295,7 +296,7 @@ async function cleanDatabase() {
           AND to_regclass(format('public.%I', table_name)) IS NULL THEN CONTINUE; END IF;
         EXECUTE format('DELETE FROM %I', table_name);
       END LOOP;
-    END $;
+    END ${dollarQuote};
   `;
 
   // A shared in-shard HTTP server can still be finishing an async DB write as
