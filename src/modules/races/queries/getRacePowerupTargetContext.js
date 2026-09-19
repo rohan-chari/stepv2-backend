@@ -4,7 +4,14 @@ const { collectRaceIllusions } = require("../services/raceIllusions");
 const {
   buildViewerDisplayPlacementMap,
 } = require("../services/viewerDisplayPlacements");
-const { RaceActiveEffect, RacePowerup } = require("../../powerups");
+const { RacePowerup } = require("../../powerups");
+const defaultDisplayCache = require("../services/raceOpenDisplayCache");
+const {
+  eligiblePowerupTargets,
+} = require("../services/powerupTargetEligibility");
+const {
+  stealableParticipants: defaultStealableParticipants,
+} = require("../services/stealableTargetCache");
 
 const TARGETED_TYPES = new Set([
   "LEG_CRAMP",
@@ -30,8 +37,10 @@ function domainError(message, statusCode, code) {
 
 function buildGetRacePowerupTargetContext(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
-  const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
+  const displayCache = dependencies.raceOpenDisplayCache || defaultDisplayCache;
+  const stealableParticipants =
+    dependencies.stealableParticipants || defaultStealableParticipants;
   const now = dependencies.now || (() => new Date());
 
   return async function getRacePowerupTargetContext({
@@ -43,11 +52,6 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
   }) {
     if (!TARGETED_TYPES.has(powerupType)) return null;
 
-    // Keep a compatibility fallback for injected/older model seams, but the
-    // production model has a narrow persisted target-context query. Bounty does
-    // not need the full progress payload here: persisted participant totals,
-    // active illusions, and the viewer's inventory are sufficient to build the
-    // action-time picker. This avoids loading the full progress/accessory graph.
     if (
       powerupType === "BOUNTY" &&
       typeof raceModel.findPowerupTargetContext !== "function"
@@ -64,30 +68,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         );
       }
       return {
-        contract: "race-powerup-target-context-v1",
-        participants: (Array.isArray(progress.participants)
+        contract: "race-powerup-target-context-v2",
+        participants: Array.isArray(progress.participants)
           ? progress.participants
-          : []).map((participant) => ({
-          userId: participant.userId,
-          displayName: participant.displayName,
-          profilePhotoUrl: participant.profilePhotoUrl ?? null,
-          team: participant.team ?? null,
-          forfeitedAt: participant.forfeitedAt ?? null,
-          stealthed: participant.stealthed === true,
-          totalSteps: participant.stealthed === true
-            ? null
-            : participant.totalSteps ?? 0,
-          placement: participant.placement ?? null,
-          ...(privacySafeDisplayRanks
-            ? { displayPlacement: participant.displayPlacement ?? null }
-            : {}),
-        })),
-        ...(privacySafeDisplayRanks
-          ? {
-              placementPrivacyActive:
-                progress.placementPrivacyActive === true,
-            }
-          : {}),
+          : [],
         powerupData: {
           powerupSlots: progress.powerupData.powerupSlots ?? 3,
           inventory: Array.isArray(progress.powerupData.inventory)
@@ -96,9 +80,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           queuedBoxCount: progress.powerupData.queuedBoxCount ?? 0,
           myPlacement: progress.myPlacement ?? null,
           ...(privacySafeDisplayRanks
-            ? {
-                myDisplayPlacement: progress.myDisplayPlacement ?? null,
-              }
+            ? { myDisplayPlacement: progress.myDisplayPlacement ?? null }
             : {}),
         },
       };
@@ -118,13 +100,39 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       );
     }
 
-    const [effects, inventoryRows] = await Promise.all([
-      effectModel.findActiveForRace(raceId),
-      powerupModel.findInventoryForParticipants(
-        [mine.id],
-        ["HELD", "MYSTERY_BOX", "QUEUED"]
-      ),
+    const effectsPromise =
+      typeof displayCache.effects === "function"
+        ? displayCache.effects(raceId)
+        : Promise.resolve([]);
+    const inventoryPromise = powerupModel.findInventoryForParticipants(
+      [mine.id],
+      ["HELD", "MYSTERY_BOX", "QUEUED"]
+    );
+    const stealablePromise =
+      powerupType === "SNEAKY_SWAP"
+        ? stealableParticipants(
+            raceId,
+            race.participants
+              .filter((participant) => participant.userId !== userId)
+              .map((participant) => participant.id)
+          )
+        : Promise.resolve(new Set());
+
+    const [effects, inventoryRows, stealableParticipantIds] = await Promise.all([
+      effectsPromise,
+      inventoryPromise,
+      stealablePromise,
     ]);
+
+    const eligible = eligiblePowerupTargets({
+      powerupType,
+      participants: race.participants,
+      viewerUserId: userId,
+      effects,
+      stealableParticipantIds,
+      now: now(),
+    });
+
     const { stealthedUserIds, viewerIsDetoured } = collectRaceIllusions(
       effects,
       userId,
@@ -152,19 +160,24 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           })),
           maskedUserIds
         );
-    const presentationOrdered = [...ordered].sort((left, right) => {
-      const leftMasked = viewerIsDetoured || maskedUserIds.has(left.userId);
-      const rightMasked = viewerIsDetoured || maskedUserIds.has(right.userId);
-      if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
-      if (leftMasked) return String(left.userId).localeCompare(String(right.userId));
-      return ordered.indexOf(left) - ordered.indexOf(right);
-    });
+    const eligibleIds = new Set(eligible.map((participant) => participant.id));
+    const presentationOrdered = [...ordered]
+      .filter((participant) => eligibleIds.has(participant.id))
+      .sort((left, right) => {
+        const leftMasked = viewerIsDetoured || maskedUserIds.has(left.userId);
+        const rightMasked = viewerIsDetoured || maskedUserIds.has(right.userId);
+        if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
+        if (leftMasked) {
+          return String(left.userId).localeCompare(String(right.userId));
+        }
+        return ordered.indexOf(left) - ordered.indexOf(right);
+      });
     const slotRows = inventoryRows.filter(
       (row) => row.status === "HELD" || row.status === "MYSTERY_BOX"
     );
 
     return {
-      contract: "race-powerup-target-context-v1",
+      contract: "race-powerup-target-context-v2",
       ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
       participants: presentationOrdered.map((participant) => {
         const index = ordered.indexOf(participant);
@@ -184,9 +197,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           ...(powerupType === "BOUNTY"
             ? { totalSteps: masked ? null : participant.totalSteps ?? 0 }
             : {}),
-          placement: masked || (!privacySafeDisplayRanks && placementPrivacyActive)
-            ? null
-            : participant.placement ?? index + 1,
+          placement:
+            masked || (!privacySafeDisplayRanks && placementPrivacyActive)
+              ? null
+              : participant.placement ?? index + 1,
           ...(privacySafeDisplayRanks
             ? {
                 displayPlacement: masked
@@ -196,20 +210,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
             : {}),
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
-          // Keep the existing presentation/privacy guard for Detour while
-          // exposing offensive eligibility through a separate additive field.
           stealthed: masked,
           ...(viewerIsDetoured && !actuallyStealthed
             ? { targetable: true }
             : {}),
-          // Additive targeting metadata. Older clients ignore this field;
-          // newer clients can avoid presenting a target that the use endpoint
-          // would reject for an already-active Leg Cramp.
-          legCramped: effects.some(
-            (effect) =>
-              effect.targetParticipantId === participant.id &&
-              effect.type === "LEG_CRAMP"
-          ),
         };
       }),
       powerupData: {
@@ -222,10 +226,11 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         })),
         queuedBoxCount: inventoryRows.filter((row) => row.status === "QUEUED").length,
         myPlacement:
-          viewerIsDetoured || (!privacySafeDisplayRanks && placementPrivacyActive)
+          viewerIsDetoured ||
+          (!privacySafeDisplayRanks && placementPrivacyActive)
             ? null
             : myIndex >= 0
-              ? (mine.placement ?? myIndex + 1)
+              ? mine.placement ?? myIndex + 1
               : null,
         ...(privacySafeDisplayRanks
           ? {
