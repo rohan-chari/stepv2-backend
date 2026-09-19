@@ -28,6 +28,18 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
     raceId,
     powerupId,
   }) {
+    async function currentStashQuantity(powerupType) {
+      const row = await db.userPowerupItem.findUnique({
+        where: {
+          userId_powerupType: {
+            userId,
+            powerupType,
+          },
+        },
+        select: { quantity: true },
+      });
+      return Math.max(0, Number(row?.quantity) || 0);
+    }
     const powerup = await powerupModel.findById(powerupId);
     if (
       !powerup ||
@@ -55,6 +67,7 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
         returned: false,
         alreadyReturned: true,
         powerupType: powerup.type,
+        quantity: await currentStashQuantity(powerup.type),
       };
     }
     if (powerup.status !== "HELD") {
@@ -108,6 +121,7 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
           returned: false,
           alreadyReturned: true,
           powerupType: powerup.type,
+          quantity: await currentStashQuantity(powerup.type),
         };
       }
       throw new ReturnRedeemedPowerupError(
