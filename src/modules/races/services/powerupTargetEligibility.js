@@ -28,13 +28,12 @@ function eligiblePowerupTargets({
   viewerUserId,
   effects = [],
   stealableParticipantIds = new Set(),
+  isTeamRace = false,
   now = new Date(),
 }) {
   const me = (participants || []).find((p) => p.userId === viewerUserId);
   if (!me) return [];
-  const teamRace = me.team != null && (participants || []).some(
-    (p) => p.team != null && p.team !== me.team,
-  );
+  const teamRace = isTeamRace === true;
   const active = liveEffectsByParticipant(effects, now);
   const conflicts = ACTIVE_CONFLICTS[powerupType] || null;
   const viewerHasActiveHitchhike =
