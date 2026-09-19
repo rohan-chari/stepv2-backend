@@ -115,21 +115,46 @@ async function reconcileIntent({ row, prisma, raceJob, intentModel, now, effectM
     const sourceUserIds = [...new Set(
       hitchhikeEffects.map((effect) => effect.sourceUserId).filter(Boolean),
     )];
-    const sourceParticipants = await prisma.raceParticipant.findMany({
-      where: {
-        raceId: race.id,
-        userId: { in: sourceUserIds },
-        status: "ACCEPTED",
-      },
-    });
+    const [sourceParticipants, captureRows] = await Promise.all([
+      prisma.raceParticipant.findMany({
+        where: {
+          raceId: race.id,
+          userId: { in: sourceUserIds },
+          status: "ACCEPTED",
+        },
+      }),
+      prisma.hitchhikeAttributionCapture.findMany({
+        where: {
+          effectId: { in: hitchhikeEffects.map((effect) => effect.id) },
+        },
+      }),
+    ]);
     const sourceByUserId = new Map(
       sourceParticipants.map((source) => [source.userId, source]),
     );
+    const captureByEffectId = new Map(
+      captureRows.map((capture) => [capture.effectId, capture]),
+    );
+
+    // Every Hitchhike discovered by this intent has the same race + target.
+    // The canonical scorer asks for the same modifier families each time, so
+    // share that one authoritative DB read across sequential Hitchhike windows.
+    let modifierEffectsPromise = null;
+    const memoizedEffectModel = {
+      async findEffectsForRaceByTypes(raceId, targetParticipantId, types) {
+        modifierEffectsPromise ||= effectModel.findEffectsForRaceByTypes(
+          raceId,
+          targetParticipantId,
+          types,
+        );
+        return modifierEffectsPromise;
+      },
+    };
 
     for (const effect of hitchhikeEffects) {
       const sourceParticipant = sourceByUserId.get(effect.sourceUserId);
       if (!sourceParticipant) continue;
-      const frozenBefore = await HitchhikeAttributionCapture.findByEffect(effect.id);
+      const frozenBefore = captureByEffectId.get(effect.id);
       if (!frozenBefore?.frozenAt) continue;
       if (
         BigInt(frozenBefore.scoringInputGeneration ?? 0) >=
@@ -170,7 +195,7 @@ async function reconcileIntent({ row, prisma, raceJob, intentModel, now, effectM
           targetForfeitedAt: participant.forfeitedAt,
           targetParticipantId: participant.id,
           raceId: race.id,
-          raceActiveEffectModel: effectModel,
+          raceActiveEffectModel: memoizedEffectModel,
           raceTimezone: race.timezone || "UTC",
           attributionCaptureModel: dryCaptureModel,
         },
