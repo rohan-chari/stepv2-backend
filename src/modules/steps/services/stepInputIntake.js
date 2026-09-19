@@ -76,7 +76,13 @@ function buildStepInputDirtyEnvelope({
   };
 }
 
-async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
+async function upsertDailyStep(tx, {
+  userId,
+  date,
+  steps,
+  requestTimestamp,
+  requestOrder = null,
+}) {
   // The per-user scoring fence is already held by the caller, so the prior
   // row seen here is authoritative. Classify create/update and persist the
   // value in one statement instead of a read followed by a Prisma upsert.
@@ -89,16 +95,29 @@ async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
         WHERE user_id=$1 AND date=$2::date
      ), persisted AS (
        INSERT INTO steps (
-         id,user_id,date,steps,step_goal,created_at,sync_requested_at
+         id,user_id,date,steps,step_goal,created_at,sync_requested_at,sync_stream_id
        )
        VALUES (
-         gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP,$4::timestamptz
+         gen_random_uuid()::text,$1,$2::date,$3,NULL,CURRENT_TIMESTAMP,
+         $4::timestamptz,$5::text
        )
        ON CONFLICT (user_id,date) DO UPDATE
          SET steps=EXCLUDED.steps,
-             sync_requested_at=EXCLUDED.sync_requested_at
-       WHERE steps.sync_requested_at IS NULL
-          OR steps.sync_requested_at <= EXCLUDED.sync_requested_at
+             sync_requested_at=EXCLUDED.sync_requested_at,
+             sync_stream_id=EXCLUDED.sync_stream_id
+       WHERE CASE
+         WHEN EXCLUDED.sync_stream_id IS NOT NULL
+          AND steps.sync_stream_id IS NOT NULL
+         THEN ROW(
+           split_part(steps.sync_stream_id, '-', 1)::bigint,
+           split_part(steps.sync_stream_id, '-', 2)::bigint
+         ) < ROW(
+           split_part(EXCLUDED.sync_stream_id, '-', 1)::bigint,
+           split_part(EXCLUDED.sync_stream_id, '-', 2)::bigint
+         )
+         ELSE steps.sync_requested_at IS NULL
+           OR steps.sync_requested_at <= EXCLUDED.sync_requested_at
+       END
        RETURNING id,user_id AS "userId",steps,step_goal AS "stepGoal",
                  date,created_at AS "createdAt"
      )
@@ -118,6 +137,7 @@ async function upsertDailyStep(tx, { userId, date, steps, requestTimestamp }) {
     new Date(date),
     Number(steps),
     requestTimestamp,
+    requestOrder,
   );
   // The locked normal path returns even an unchanged row from this statement.
   // Keep READ COMMITTED's next-snapshot fallback for a legacy writer inserting
@@ -157,6 +177,7 @@ function buildStepInputIntake(dependencies = {}) {
     samples = null,
     timeZone = "UTC",
     requestTimestamp = now(),
+    requestOrder = null,
     burstCoalescing = true,
     queuedGenerationMerge = true,
     beforeSourceWrites = null,
@@ -179,7 +200,12 @@ function buildStepInputIntake(dependencies = {}) {
     if (daily) {
       const persistedDaily = await measureStepTelemetryPhase(
         "daily",
-        () => upsertDailyStep(tx, { userId, ...daily, requestTimestamp }),
+        () => upsertDailyStep(tx, {
+          userId,
+          ...daily,
+          requestTimestamp,
+          requestOrder,
+        }),
       );
       record = persistedDaily.record;
       dailyExisted = persistedDaily.existed;
