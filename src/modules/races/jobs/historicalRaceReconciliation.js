@@ -479,11 +479,11 @@ function buildHistoricalRaceReconciliationWorker({
           cursor: cursor.cursor_race_id ? { raceId: cursor.cursor_race_id, participantId: cursor.cursor_participant_id } : null,
           limit: 100,
         });
-        const eligible = page.rows.filter((row) =>
-          ["active", "completed"].includes(String(row.raceStatus).toLowerCase())
+        const completed = page.rows.filter(
+          (row) => String(row.raceStatus).toLowerCase() === "completed"
         );
-        if (eligible.length) await intentModel.admitMany({
-          rows: eligible,
+        if (completed.length) await intentModel.admitMany({
+          rows: completed,
           changedStart: cursor.changed_start,
           changedEnd: cursor.changed_end,
           sourceGeneration: cursor.requested_source_generation,
