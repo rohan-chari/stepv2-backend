@@ -1,29 +1,7 @@
 const { readFragment } = require("../../../shared/cache/cacheEfficiencyRead");
 const { RacePowerup } = require("../../powerups/models/racePowerup");
 
-const UNSTEALABLE_TYPES = new Set([
-  "SNEAKY_SWAP",
-  "MYSTERY_BOX",
-  "UPRISING",
-  "GHOST_PEPPER",
-  "COIN_FLIP",
-  "MYSTERY_POTION",
-  "DECOY",
-  "POWER_OUTAGE",
-  "UMBRELLA",
-  "RALLY_FLAG",
-  "DRILL_SERGEANT",
-  "PIGGY_BANK",
-  "BOUNTY",
-]);
-
-function isStealable(powerup) {
-  return Boolean(
-    powerup &&
-    powerup.status === "HELD" &&
-    !UNSTEALABLE_TYPES.has(powerup.type)
-  );
-}
+const { isStealablePowerup } = require("../../powerups/services/powerupStealability");
 
 function valid(value) {
   return Array.isArray(value) &&
@@ -47,7 +25,7 @@ function buildStealableTargetCache(dependencies = {}) {
         const rows = await powerupModel.findInventoryForParticipants(ids, ["HELD"]);
         const targetIds = new Set();
         for (const row of rows || []) {
-          if (isStealable(row) && row.participantId) targetIds.add(row.participantId);
+          if (isStealablePowerup(row) && row.participantId) targetIds.add(row.participantId);
         }
         return [...targetIds].sort();
       },
@@ -58,4 +36,4 @@ function buildStealableTargetCache(dependencies = {}) {
 
 const stealableParticipants = buildStealableTargetCache();
 
-module.exports = { UNSTEALABLE_TYPES, isStealable, buildStealableTargetCache, stealableParticipants };
+module.exports = { buildStealableTargetCache, stealableParticipants };
