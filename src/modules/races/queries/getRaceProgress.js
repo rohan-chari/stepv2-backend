@@ -1672,6 +1672,11 @@ function buildGetRaceProgress(deps = {}) {
       myPlacementHidden:
         viewerIsDetoured ||
         (placementPrivacyActive && !privacySafeDisplayRanks),
+      // Additive viewer summary for paged standings. The requester row already
+      // comes from the projection's requester bucket when the viewer is off-page,
+      // so this exposes rank/steps without loading the page that contains them.
+      currentUser:
+        leaderboard.find((participant) => participant.userId === userId) ?? null,
       tournamentId: snapRace.tournamentId,
       tournamentRound: snapRace.tournamentRound,
       tournamentRoundLabel: snapRace.tournamentRoundLabel,
@@ -1848,15 +1853,22 @@ function buildGetRaceProgress(deps = {}) {
     // make it easier for a future serializer change to leak the concealed
     // identity.
     if (hydratePresentation) {
-      const visibleIds = result.participants
-        .filter(
-          (participant) =>
-            participant.stealthed !== true && participant.displayName !== "???"
-        )
-        .map((participant) => participant.userId);
+      const visibleIds = [
+        ...result.participants
+          .filter(
+            (participant) =>
+              participant.stealthed !== true && participant.displayName !== "???"
+          )
+          .map((participant) => participant.userId),
+        ...(result.currentUser &&
+        result.currentUser.stealthed !== true &&
+        result.currentUser.displayName !== "???"
+          ? [result.currentUser.userId]
+          : []),
+      ];
       const presentations = await presentationBulkRead.getMany(
         raceId,
-        visibleIds,
+        [...new Set(visibleIds)],
         true,
       );
       result.participants = result.participants.map((participant) => {
@@ -1880,6 +1892,26 @@ function buildGetRaceProgress(deps = {}) {
           ),
         };
       });
+      if (
+        result.currentUser &&
+        result.currentUser.stealthed !== true &&
+        result.currentUser.displayName !== "???"
+      ) {
+        const presentation = presentations.get(result.currentUser.userId);
+        if (presentation) {
+          result.currentUser = {
+            ...result.currentUser,
+            displayName: presentation.displayName,
+            profilePhotoUrl: presentation.profilePhotoUrl,
+            ...characterPresentation(
+              presentation,
+              supportsCharacters,
+              releaseChannel,
+              supportsRemoteAssets
+            ),
+          };
+        }
+      }
     }
 
     if (projectionMetadata && pagingRequested) {
