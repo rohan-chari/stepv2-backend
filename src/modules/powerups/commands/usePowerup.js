@@ -89,6 +89,7 @@ const { acquireRaceWriteFence } = require("../../races/services/raceWriteFence")
 const {
   shouldSkipRedirectedDuplicate,
 } = require("../constants/powerupPolicy");
+const { UNSTEALABLE_TYPES } = require("../services/powerupStealability");
 
 async function applyImmediatePenalty(
   participantModel,
@@ -206,10 +207,6 @@ const POWERUPS5_TYPES = [
   "UPRISING", "GHOST_PEPPER", "COIN_FLIP", "MYSTERY_POTION", "DECOY",
   "POWER_OUTAGE", "UMBRELLA", "RALLY_FLAG", "DRILL_SERGEANT", "PIGGY_BANK", "BOUNTY",
 ];
-// Types Pickpocket can never steal: another Pickpocket (no steal chains),
-// unopened Mystery Boxes, and every wave-5 store purchase (owner decision D6 —
-// expensive buys can't be sniped). Mirrors the isStealable helper in routes/races.js.
-const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
 // AoE attacks resolve Decoy interception per victim. Rainstorm and Power
 // Outage use the same one-hop destination pool as targeted attacks; Quicksand
 // remains an explicitly selected-target operation and is unchanged here.
@@ -3104,7 +3101,7 @@ function buildUsePowerup(dependencies = {}) {
       // mutual-swap flow — both are deliberately ignored, so a legacy client
       // can never lose its own powerup here.
       const targetHeld = await powerupModel.findHeldByParticipant(targetParticipant.id);
-      const stealable = targetHeld.filter((p) => !UNSTEALABLE_TYPES.includes(p.type));
+      const stealable = targetHeld.filter((p) => !UNSTEALABLE_TYPES.has(p.type));
       if (stealable.length === 0) {
         throw new PowerupUseError("Target has no powerup to steal", 400);
       }
@@ -4701,7 +4698,7 @@ function buildUsePowerup(dependencies = {}) {
           fromParticipantId: targetParticipant.id,
           toParticipantId: myParticipant.id,
           toUserId: myParticipant.userId,
-          excludeTypes: UNSTEALABLE_TYPES,
+          excludeTypes: [...UNSTEALABLE_TYPES],
           random,
         });
         result.swapped = true; // legacy field — old clients key success off it
