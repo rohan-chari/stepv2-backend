@@ -2730,6 +2730,15 @@ function buildUsePowerup(dependencies = {}) {
         throw new PowerupUseError("You can't target a teammate", 400, "INVALID_TARGET");
       }
     }
+    // A teammate Hitchhike is cooperative, not an attack. It still obeys the
+    // normal Hitchhike caster/target occupancy limits, but target defenses must
+    // not hide, redirect, reflect, block, or be consumed by the friendly link.
+    const friendlyHitchhike =
+      type === "HITCHHIKE" &&
+      isTeamRace &&
+      targetParticipant != null &&
+      myParticipant.team != null &&
+      targetParticipant.team === myParticipant.team;
 
     // IMPOSTER: targeted but not offensive. Validate the chosen rival is a real
     // active participant (the display swap stores their userId in metadata).
@@ -2815,7 +2824,7 @@ function buildUsePowerup(dependencies = {}) {
     // inventory by the item-12 unwind if it was a redeemed one). Auto-targeted
     // RED_CARD / PINECONE_TOSS are NOT in TARGETED_TYPES, so a stealthed leader
     // can still be red-carded (powerups-stealth-redcard.test.js stays green).
-    if (TARGETED_TYPES.includes(type)) {
+    if (TARGETED_TYPES.includes(type) && !friendlyHitchhike) {
       const targetedParticipant =
         targetParticipant || imposterTargetParticipant || bountyTargetParticipant;
       if (targetedParticipant) {
@@ -3211,36 +3220,43 @@ function buildUsePowerup(dependencies = {}) {
     // item, feed, scoring state, and activation coins as one rejected action.
     // The race mutation lock keeps this snapshot stable until the later consume.
     if (type === "HITCHHIKE" && targetParticipant) {
-      const decoy = await effectModel.findActiveByTypeForParticipant(
-        targetParticipant.id,
-        "DECOY",
-        { expiresAfter: hitchhikeCheckTime },
-      );
-      if (decoy) {
-        const redirect = pickDecoyRedirectVictim({
-          acceptedParticipants,
-          isAliveTarget,
-          attackerUserId: userId,
-          holderParticipant: targetParticipant,
-          isTeamRace,
-          random,
-        });
-        hitchhikeDecoyResolution = {
-          decoy,
-          holder: targetParticipant,
-          redirect,
-        };
-        if (redirect) {
-          assertHitchhikeAvailableForFinalTarget({
-            liveLinks: liveHitchhikeLinks,
-            targetUserId: redirect.userId,
-          });
-        }
-      } else {
+      if (friendlyHitchhike) {
         assertHitchhikeAvailableForFinalTarget({
           liveLinks: liveHitchhikeLinks,
           targetUserId: resolvedTargetUserId,
         });
+      } else {
+        const decoy = await effectModel.findActiveByTypeForParticipant(
+          targetParticipant.id,
+          "DECOY",
+          { expiresAfter: hitchhikeCheckTime },
+        );
+        if (decoy) {
+          const redirect = pickDecoyRedirectVictim({
+            acceptedParticipants,
+            isAliveTarget,
+            attackerUserId: userId,
+            holderParticipant: targetParticipant,
+            isTeamRace,
+            random,
+          });
+          hitchhikeDecoyResolution = {
+            decoy,
+            holder: targetParticipant,
+            redirect,
+          };
+          if (redirect) {
+            assertHitchhikeAvailableForFinalTarget({
+              liveLinks: liveHitchhikeLinks,
+              targetUserId: redirect.userId,
+            });
+          }
+        } else {
+          assertHitchhikeAvailableForFinalTarget({
+            liveLinks: liveHitchhikeLinks,
+            targetUserId: resolvedTargetUserId,
+          });
+        }
       }
     }
 
@@ -3361,7 +3377,12 @@ function buildUsePowerup(dependencies = {}) {
     // (one redirect max — a second Decoy on the new victim does not chain): their
     // Socks is caught by the block below (targetParticipant now points at them),
     // and their Mirror is handled here.
-    if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+    if (
+      !friendlyHitchhike &&
+      !reflected &&
+      OFFENSIVE_TYPES.includes(type) &&
+      targetParticipant
+    ) {
       const decoy = type === "HITCHHIKE"
         ? hitchhikeDecoyResolution?.decoy || null
         : plannedDecoyResolution
@@ -3548,7 +3569,11 @@ function buildUsePowerup(dependencies = {}) {
     // so this same check is what lets an attacker's own active socks block
     // the bounced attack (Mirror consumed above, socks consumed here, effect
     // lands on no one).
-    if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+    if (
+      !friendlyHitchhike &&
+      OFFENSIVE_TYPES.includes(type) &&
+      targetParticipant
+    ) {
       const shield = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "COMPRESSION_SOCKS"
