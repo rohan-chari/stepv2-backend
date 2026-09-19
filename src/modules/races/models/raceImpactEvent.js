@@ -4,6 +4,11 @@ const { POWERUP_NAMES } = require("../../powerups/commands/rollPowerup");
 const CALCULATION_VERSION = 2;
 const VALUE_STATUS = "SYNCED_SNAPSHOT";
 const PRESENTATION_PREFIX = "impact:";
+const RECONCILABLE_TIMED_IMPACT_TYPES = new Set([
+  "RUNNERS_HIGH", "WRONG_TURN", "LEG_CRAMP", "QUICKSAND", "RAINSTORM",
+  "CAMPFIRE_REST", "UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER",
+  "HITCHHIKE",
+]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function presentationId(id) {
@@ -128,18 +133,14 @@ async function overlayReconciledImpactRows(rows, { raceId, userId }, client) {
   if (!Array.isArray(rows) || rows.length === 0) return rows || [];
   const effectIds = [...new Set(
     rows
-      .filter((row) => row?.sourceKind === "ACTIVE_EFFECT" && typeof row.sourceId === "string")
+      .filter((row) =>
+        row?.sourceKind === "ACTIVE_EFFECT" &&
+        RECONCILABLE_TIMED_IMPACT_TYPES.has(row.powerupType) &&
+        typeof row.sourceId === "string"
+      )
       .map((row) => row.sourceId),
   )];
-  if (effectIds.length === 0) {
-    return rows.map((row) => ({
-      ...row,
-      impactValueStatus: "PROVISIONAL",
-      wasReconciled: false,
-      reconciledAt: null,
-      displayDescription: impactDisplayDescription(row.powerupType, row.deltaSteps, false),
-    }));
-  }
+  if (effectIds.length === 0) return rows;
 
   const [projections, corrections] = await Promise.all([
     client.historicalEffectContribution.findMany({
@@ -168,9 +169,11 @@ async function overlayReconciledImpactRows(rows, { raceId, userId }, client) {
   }
 
   return rows.map((row) => {
-    const projection = row?.sourceKind === "ACTIVE_EFFECT"
-      ? projectionByEffectId.get(row.sourceId)
-      : null;
+    const reconcilable =
+      row?.sourceKind === "ACTIVE_EFFECT" &&
+      RECONCILABLE_TIMED_IMPACT_TYPES.has(row.powerupType);
+    if (!reconcilable) return row;
+    const projection = projectionByEffectId.get(row.sourceId);
     const reconciled = Boolean(projection);
     const deltaSteps = reconciled
       ? Number(projection.currentDeltaSteps) || 0
