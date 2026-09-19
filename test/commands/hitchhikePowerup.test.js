@@ -324,6 +324,39 @@ test("HITCHHIKE rejects a second link ON a target that already has one (409 HITC
   assert.equal(ctx.updatedPowerup, null, "powerup NOT consumed on rejection");
 });
 
+test("teammate HITCHHIKE ignores defenses and leaves them untouched", async () => {
+  const ctx = makeDeps({
+    isTeamRace: true,
+    user1: { team: "TEAM_A" },
+    user2: { team: "TEAM_A" },
+    user3: { team: "TEAM_B" },
+    existingEffects: {
+      "rp-2": [
+        { id: "stealth-1", type: "STEALTH_MODE" },
+        { id: "decoy-1", type: "DECOY", expiresAt: new Date(NOW.getTime() + 60_000) },
+        { id: "socks-1", type: "COMPRESSION_SOCKS" },
+        { id: "mirror-1", type: "MIRROR" },
+      ],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+    targetUserId: "user-2",
+  });
+
+  assert.equal(result.outcome, "APPLIED");
+  assert.notEqual(result.blocked, true);
+  assert.notEqual(result.redirected, true);
+  assert.notEqual(result.reflected, true);
+  assert.equal(ctx.effectsCreated.length, 1);
+  assert.equal(ctx.effectsCreated[0].targetUserId, "user-2");
+  assert.deepEqual(ctx.effectUpdates, [], "friendly Hitchhike must not consume defenses");
+});
+
 test("HITCHHIKE can target an eligible teammate in a team race", async () => {
   const ctx = makeDeps({
     isTeamRace: true,
