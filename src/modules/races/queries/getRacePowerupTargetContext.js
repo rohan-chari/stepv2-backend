@@ -288,7 +288,10 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       now().getTime()
     );
     const ordered = [...race.participants].sort(compareParticipantsForPlacement);
-    const myIndex = ordered.findIndex((row) => row.userId === userId);
+    const orderIndexByUserId = new Map(
+      ordered.map((participant, index) => [participant.userId, index]),
+    );
+    const myIndex = orderIndexByUserId.get(userId) ?? -1;
     const maskedUserIds = new Set(
       ordered
         .filter(
