@@ -7,16 +7,15 @@ const {
 } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
-// HITCHHIKE (§7) — store-only, TARGETED, 60-minute 1:1 raw-step COPY. Using it
+// HITCHHIKE (§7) — store-only, TARGETED, 60-minute 50% eligible-step COPY. Using it
 // parks a HITCHHIKE effect on the chosen rival (targetUserId = the walked-on
 // racer, sourceUserId = the hitchhiker). The copy itself is scored later from
 // the TARGET's in-window steps (src/modules/powerups/hitchhikeCopies.js) — not here.
 //
-// Socks/Mirror behavior is achieved by LIST MEMBERSHIP alone (§7.2):
-//   OFFENSIVE_TYPES  => Compression Socks blocks it
-//   SHOP_POWERUP_TYPES => a Mirror can NEVER reflect it
-//   TARGETED_TYPES   => the shared targeting validation applies
-// There is deliberately no hard-coded IMPOSTER-style branch.
+// Enemy-targeted Hitchhike keeps normal target defenses: Socks can block it,
+// Decoy can redirect it, and Mirror never reflects it. In a team race, a
+// teammate-targeted Hitchhike is cooperative and ignores all target defenses
+// without consuming them.
 // ---------------------------------------------------------------------------
 
 const NOW = new Date("2026-07-20T12:00:00Z");
