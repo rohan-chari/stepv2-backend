@@ -110,9 +110,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       powerupType === "SNEAKY_SWAP"
         ? stealableParticipants(
             raceId,
-            race.participants
-              .filter((participant) => participant.userId !== userId)
-              .map((participant) => participant.id)
+            race.participants.map((participant) => participant.id)
           )
         : Promise.resolve(new Set());
 
