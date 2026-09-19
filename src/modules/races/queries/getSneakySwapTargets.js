@@ -1,20 +1,11 @@
 const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
-const { RacePowerup } = require("../../powerups/models/racePowerup");
+const { RacePowerup } = require("../../powerups/models/racePowerup");\nconst { isStealablePowerup } = require("../../powerups/services/powerupStealability");
 
 function routeError(message, statusCode) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
-}
-
-function isStealable(powerup) {
-  return Boolean(
-    powerup &&
-      (!powerup.status || powerup.status === "HELD") &&
-      powerup.type !== "SNEAKY_SWAP" &&
-      powerup.type !== "MYSTERY_BOX"
-  );
 }
 
 function buildGetSneakySwapTargets(dependencies = {}) {
@@ -86,7 +77,7 @@ function buildGetSneakySwapTargets(dependencies = {}) {
     );
     const hasStealable = new Set();
     for (const powerup of heldInventory || []) {
-      if (isStealable(powerup)) {
+      if (isStealablePowerup(powerup)) {
         if (powerup.participantId) hasStealable.add(powerup.participantId);
       }
     }
