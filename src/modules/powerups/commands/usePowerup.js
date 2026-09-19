@@ -5180,7 +5180,6 @@ const usePowerup = buildUsePowerup();
 module.exports = {
   buildUsePowerup,
   usePowerup,
-  rebaseDecoyUsageCooldownsOnConsume,
   PowerupUseError,
   assertHitchhikeAvailableForFinalTarget,
   isLiveHitchhikeAt,
