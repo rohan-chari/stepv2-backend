@@ -238,7 +238,7 @@ async function computeHitchhikeCopiedSteps(
   );
   const exactCopiedSteps = hitchhikeExactContribution(effect,exactSteps,modifiers);
 
-  // A opted-in frozen V3 capture may advance only from newer exact source
+  // An opted-in frozen V3 capture may advance only from newer exact source
   // evidence. The window end/frozen boundary never moves. This handles delayed
   // Health samples without turning every later sync into a historical replay.
   if (frozenCapture) {
