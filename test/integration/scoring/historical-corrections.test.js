@@ -658,6 +658,23 @@ describe("historical late event-time effect reconciliation", () => {
       where: { effectId: hitchhike.id },
     });
     assert.equal(frozen.frozenAt.getTime(), expiresAt.getTime());
+    assert.equal(frozen.captureThrough.getTime(), expiresAt.getTime());
+    assert.equal(frozen.scoringInputGeneration, 2n);
+    assert.equal(frozen.rawSourceHighWater, 9_965);
+    assert.equal(frozen.effectiveContribution, 9_965);
+    assert.equal(await prisma.historicalEffectCorrection.count({
+      where: { effectId: hitchhike.id },
+    }), 1);
+
+    await enqueue(targetData, startsAt, expiresAt, 2);
+    const retry = await worker().runOnce();
+    assert.equal(retry.noop, 1);
+    assert.equal(
+      (await prisma.raceParticipant.findUniqueOrThrow({
+        where: { id: caster.participant.id },
+      })).totalSteps,
+      10_965,
+    );
     assert.equal(await prisma.historicalEffectCorrection.count({
       where: { effectId: hitchhike.id },
     }), 1);
