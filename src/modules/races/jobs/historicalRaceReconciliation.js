@@ -181,7 +181,7 @@ async function reconcileIntent({ row, prisma, raceJob, intentModel, now, effectM
         Number(dryReplacement?.rawSourceHighWater) || 0,
       );
       if (
-        rawSourceHighWater <=
+        rawSourceHighWater ===
         Math.max(0, Number(frozenBefore.rawSourceHighWater) || 0)
       ) {
         continue;
