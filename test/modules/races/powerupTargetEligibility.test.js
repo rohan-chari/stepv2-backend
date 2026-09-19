@@ -126,3 +126,27 @@ test("Quicksand hides rivals already frozen by Leg Cramp or Quicksand", () => {
   });
   assert.deepEqual(targets.map((p) => p.userId), ["free"]);
 });
+
+
+test("authoritative team-race flag controls enemy targeting and disables Bounty", () => {
+  const roster = [
+    { id: "me-p", userId: "me", status: "ACCEPTED", team: "TEAM_A", totalSteps: 100 },
+    { id: "mate-p", userId: "mate", status: "ACCEPTED", team: "TEAM_A", totalSteps: 200 },
+  ];
+
+  const shortcut = eligiblePowerupTargets({
+    powerupType: "SHORTCUT",
+    participants: roster,
+    viewerUserId: "me",
+    isTeamRace: true,
+  });
+  assert.deepEqual(shortcut, []);
+
+  const bounty = eligiblePowerupTargets({
+    powerupType: "BOUNTY",
+    participants: roster,
+    viewerUserId: "me",
+    isTeamRace: true,
+  });
+  assert.deepEqual(bounty, []);
+});
