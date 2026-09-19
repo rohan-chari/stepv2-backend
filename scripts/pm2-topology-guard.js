@@ -570,8 +570,11 @@ async function main() {
     const transitionedRoles = rolesArg
       ? rolesArg.split("=")[1].split(",").filter(Boolean)
       : [];
-    if (!baselineFile) throw new Error("--baseline-file is required for live pool validation");
-    const baseline = JSON.parse(fs.readFileSync(baselineFile, "utf8"));
+    let baseline = null;
+    if (poolMode === "transition") {
+      if (!baselineFile) throw new Error("--baseline-file is required for transition pool validation");
+      baseline = JSON.parse(fs.readFileSync(baselineFile, "utf8"));
+    }
     const result = validateLivePoolBudget(firstSnapshot.pm2, {
       mode: poolMode,
       transitionedRoles,
