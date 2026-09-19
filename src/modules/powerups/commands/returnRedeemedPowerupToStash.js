@@ -65,7 +65,7 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
       );
     }
 
-    const returned = await db.$transaction(async (tx) => {
+    const returnResult = await db.$transaction(async (tx) => {
       const claimed = await tx.racePowerup.updateMany({
         where: {
           id: powerupId,
@@ -78,9 +78,9 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
         },
         data: { status: "DISCARDED" },
       });
-      if (claimed.count !== 1) return false;
+      if (claimed.count !== 1) return null;
 
-      await tx.userPowerupItem.upsert({
+      const stashRow = await tx.userPowerupItem.upsert({
         where: {
           userId_powerupType: {
             userId,
@@ -96,10 +96,12 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
           quantity: { increment: 1 },
         },
       });
-      return true;
+      return {
+        quantity: Math.max(0, Number(stashRow.quantity) || 0),
+      };
     });
 
-    if (!returned) {
+    if (!returnResult) {
       const latest = await powerupModel.findById(powerupId);
       if (latest?.status === "DISCARDED") {
         return {
@@ -129,6 +131,7 @@ function buildReturnRedeemedPowerupToStash(deps = {}) {
       returned: true,
       alreadyReturned: false,
       powerupType: powerup.type,
+      quantity: returnResult.quantity,
     };
   };
 }
