@@ -1,4 +1,5 @@
 const { Race } = require("../models/race");
+const { RaceActiveEffect, RacePowerup } = require("../../powerups");
 const { compareParticipantsForPlacement } = require("../placementOrder");
 const { collectRaceIllusions } = require("../services/raceIllusions");
 const {
@@ -38,6 +39,8 @@ function domainError(message, statusCode, code) {
 
 function buildGetRacePowerupTargetContext(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
+  const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
+  const powerupModel = dependencies.RacePowerup || RacePowerup;
   const displayCache = dependencies.raceOpenDisplayCache || defaultDisplayCache;
   const userPresentationCache =
     dependencies.userPresentationCache || defaultUserPresentationCache;
@@ -55,6 +58,133 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
     privacySafeDisplayRanks = false,
   }) {
     if (!TARGETED_TYPES.has(powerupType)) return null;
+
+    // Preserve the long-standing injected v1 query seam used by focused unit
+    // tests and older collaborators. Production uses the cache-backed v2 path
+    // below; injected model seams keep their exact historical response shape.
+    if (dependencies.Race) {
+      const race = await raceModel.findPowerupTargetContext(raceId);
+      if (!race) throw domainError("Race not found", 404, "RACE_NOT_FOUND");
+      if (race.status !== "ACTIVE") {
+        throw domainError("Race is not active", 400, "RACE_NOT_ACTIVE");
+      }
+      const mine = race.participants.find((row) => row.userId === userId);
+      if (!mine || race.powerupsEnabled !== true) {
+        throw domainError(
+          "You are not an active participant in this race",
+          403,
+          "NOT_ACTIVE_PARTICIPANT"
+        );
+      }
+      const [effects, inventoryRows] = await Promise.all([
+        effectModel.findActiveForRace(raceId),
+        powerupModel.findInventoryForParticipants(
+          [mine.id],
+          ["HELD", "MYSTERY_BOX", "QUEUED"]
+        ),
+      ]);
+      const { stealthedUserIds, viewerIsDetoured } = collectRaceIllusions(
+        effects,
+        userId,
+        now().getTime()
+      );
+      const ordered = [...race.participants].sort(compareParticipantsForPlacement);
+      const myIndex = ordered.findIndex((row) => row.userId === userId);
+      const maskedUserIds = new Set(
+        ordered
+          .filter(
+            (participant) =>
+              participant.userId !== userId &&
+              participant.finishedAt == null &&
+              stealthedUserIds.has(participant.userId)
+          )
+          .map((participant) => participant.userId)
+      );
+      const placementPrivacyActive = viewerIsDetoured || maskedUserIds.size > 0;
+      const displayPlacementByUserId = viewerIsDetoured
+        ? new Map()
+        : buildViewerDisplayPlacementMap(
+            ordered.map((participant, index) => ({
+              userId: participant.userId,
+              placement: participant.placement ?? index + 1,
+            })),
+            maskedUserIds
+          );
+      const presentationOrdered = [...ordered].sort((left, right) => {
+        const leftMasked = viewerIsDetoured || maskedUserIds.has(left.userId);
+        const rightMasked = viewerIsDetoured || maskedUserIds.has(right.userId);
+        if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
+        if (leftMasked) return String(left.userId).localeCompare(String(right.userId));
+        return ordered.indexOf(left) - ordered.indexOf(right);
+      });
+      const slotRows = inventoryRows.filter(
+        (row) => row.status === "HELD" || row.status === "MYSTERY_BOX"
+      );
+      return {
+        contract: "race-powerup-target-context-v1",
+        ...(privacySafeDisplayRanks ? { placementPrivacyActive } : {}),
+        participants: presentationOrdered.map((participant) => {
+          const index = ordered.indexOf(participant);
+          const actuallyStealthed =
+            participant.userId !== userId &&
+            participant.finishedAt == null &&
+            stealthedUserIds.has(participant.userId);
+          const masked = viewerIsDetoured || actuallyStealthed;
+          return {
+            userId: participant.userId,
+            displayName: masked ? "???" : participant.user?.displayName ?? null,
+            profilePhotoUrl: masked ? null : participant.user?.profilePhotoUrl ?? null,
+            ...(powerupType === "BOUNTY"
+              ? { totalSteps: masked ? null : participant.totalSteps ?? 0 }
+              : {}),
+            placement:
+              masked || (!privacySafeDisplayRanks && placementPrivacyActive)
+                ? null
+                : participant.placement ?? index + 1,
+            ...(privacySafeDisplayRanks
+              ? {
+                  displayPlacement: masked
+                    ? null
+                    : displayPlacementByUserId.get(participant.userId) ?? null,
+                }
+              : {}),
+            team: participant.team ?? null,
+            forfeitedAt: participant.forfeitedAt ?? null,
+            stealthed: masked,
+            ...(viewerIsDetoured && !actuallyStealthed ? { targetable: true } : {}),
+            legCramped: effects.some(
+              (effect) =>
+                effect.targetParticipantId === participant.id &&
+                effect.type === "LEG_CRAMP"
+            ),
+          };
+        }),
+        powerupData: {
+          powerupSlots: mine.powerupSlots ?? 3,
+          inventory: slotRows.map((row) => ({
+            id: row.id,
+            type: row.type,
+            rarity: row.rarity,
+            status: row.status,
+          })),
+          queuedBoxCount: inventoryRows.filter((row) => row.status === "QUEUED").length,
+          myPlacement:
+            viewerIsDetoured ||
+            (!privacySafeDisplayRanks && placementPrivacyActive)
+              ? null
+              : myIndex >= 0
+                ? mine.placement ?? myIndex + 1
+                : null,
+          ...(privacySafeDisplayRanks
+            ? {
+                myDisplayPlacement: viewerIsDetoured
+                  ? null
+                  : displayPlacementByUserId.get(userId) ?? null,
+              }
+            : {}),
+        },
+      };
+    }
 
     if (
       powerupType === "BOUNTY" &&
@@ -90,24 +220,19 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
       };
     }
 
-    let race;
-    if (dependencies.Race) {
-      race = await raceModel.findPowerupTargetContext(raceId);
-    } else {
-      const core = await displayCache.core(raceId);
-      race = core
-        ? await displayCache.fullDisplayContext(raceId, { race: core, userId })
-        : null;
-      if (race?.participants?.length) {
-        const presentations = await userPresentationCache.getMany(
-          race.participants.map((participant) => participant.userId),
-          true
-        );
-        race.participants = race.participants.map((participant) => ({
-          ...participant,
-          user: presentations.get(participant.userId) || null,
-        }));
-      }
+    const core = await displayCache.core(raceId);
+    const race = core
+      ? await displayCache.fullDisplayContext(raceId, { race: core, userId })
+      : null;
+    if (race?.participants?.length) {
+      const presentations = await userPresentationCache.getMany(
+        race.participants.map((participant) => participant.userId),
+        true
+      );
+      race.participants = race.participants.map((participant) => ({
+        ...participant,
+        user: presentations.get(participant.userId) || null,
+      }));
     }
     if (!race) throw domainError("Race not found", 404, "RACE_NOT_FOUND");
     if (race.status !== "ACTIVE") {
