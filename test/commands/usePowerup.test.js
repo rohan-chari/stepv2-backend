@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildUsePowerup, PowerupUseError, rebaseDecoyUsageCooldownOnConsume } = require("../../src/modules/powerups/commands/usePowerup");
 
 function makeParticipant(userId, overrides = {}) {
   return {
@@ -426,4 +426,35 @@ test("usePowerup behavior is unchanged for an open-ended race (endsAt null)", as
 
   assert.equal(result.stolen, 1000);
   assert.equal(ctx.events.some((e) => e.event === "POWERUP_USED"), true);
+});
+
+
+test("Decoy pop rebases shop cooldown to one hour after actual consumption", async () => {
+  const writes = [];
+  const consumedAt = new Date("2026-09-19T14:00:00.000Z");
+
+  await rebaseDecoyUsageCooldownOnConsume({
+    usageStateModel: {
+      async upsertUsed(input) {
+        writes.push(input);
+      },
+    },
+    db: {},
+    raceId: "race-1",
+    ownerUserId: "user-2",
+    sourcePowerupId: "decoy-powerup-1",
+    consumedAt,
+  });
+
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].userId, "user-2");
+  assert.equal(writes[0].raceId, "race-1");
+  assert.equal(writes[0].powerupType, "DECOY");
+  assert.equal(writes[0].lastUsedAt.getTime(), consumedAt.getTime());
+  assert.equal(writes[0].activeUntil.getTime(), consumedAt.getTime());
+  assert.equal(
+    writes[0].nextUsableAt.getTime(),
+    consumedAt.getTime() + 60 * 60 * 1000,
+  );
+  assert.equal(writes[0].sourcePowerupId, "decoy-powerup-1");
 });
