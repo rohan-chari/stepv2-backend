@@ -302,7 +302,7 @@ function buildStepSyncStreamWorker(dependencies = {}) {
            ON race.id=effect.race_id
         WHERE effect.race_id = ANY($1::text[])
           AND effect.target_participant_id = ANY($2::text[])
-          AND effect.status IN ('active_effect','expired_effect')
+          AND effect.status = 'expired_effect'
           AND effect.type::text = ANY($3::text[])
           AND effect.starts_at < $5::timestamp
           AND effect.expires_at IS NOT NULL
