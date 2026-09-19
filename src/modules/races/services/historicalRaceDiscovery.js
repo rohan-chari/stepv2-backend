@@ -48,7 +48,7 @@ function buildHistoricalRaceDiscovery({ prisma, now = () => new Date() }) {
               FROM race_active_effects effect
              WHERE effect.race_id=race.id
                AND effect.target_participant_id=participant.id
-               AND effect.type = ANY($8::text[])
+               AND effect.type::text = ANY($8::text[])
                AND effect.starts_at < $3::timestamp
                AND effect.expires_at IS NOT NULL
                AND effect.expires_at > $2::timestamp
@@ -57,7 +57,7 @@ function buildHistoricalRaceDiscovery({ prisma, now = () => new Date() }) {
         ORDER BY race.id, participant.id
         LIMIT $7`,
       userId, start, end, through, cursor?.raceId || null, cursor?.participantId || null,
-      boundedLimit, RECONCILABLE_EFFECT_TYPES,
+      boundedLimit, RECONCILABLE_EFFECT_TYPES.map((type) => type.toLowerCase()),
     );
     const last = rows.length === boundedLimit ? rows[rows.length - 1] : null;
     return {
