@@ -366,4 +366,118 @@ describe("timed impact receipt reconciliation", () => {
     );
   });
 
+
+  it("does not admit reconciliation while the timed effect is still active", async () => {
+    const wallNow = new Date();
+    const raceStart = new Date(wallNow.getTime() - 2 * 60 * 60 * 1000);
+    const effectStart = new Date(wallNow.getTime() - 30 * 60 * 1000);
+    const effectEnd = new Date(wallNow.getTime() + 30 * 60 * 1000);
+    const account = await createTestUser({ displayName: "Active effect guard" });
+    const race = await prisma.race.create({
+      data: {
+        creatorId: account.user.id,
+        name: "Active effect guard",
+        targetSteps: 100000,
+        status: "ACTIVE",
+        startedAt: raceStart,
+        endsAt: new Date(wallNow.getTime() + 24 * 60 * 60 * 1000),
+        timezone: "UTC",
+        powerupsEnabled: true,
+        timeBased: true,
+        maxDurationDays: 2,
+      },
+    });
+    const participant = await prisma.raceParticipant.create({
+      data: {
+        raceId: race.id,
+        userId: account.user.id,
+        status: "ACCEPTED",
+        joinedAt: raceStart,
+        totalSteps: 0,
+        rawSteps: 0,
+      },
+    });
+    const powerup = await prisma.racePowerup.create({
+      data: {
+        raceId: race.id,
+        participantId: participant.id,
+        userId: account.user.id,
+        type: "RUNNERS_HIGH",
+        rarity: "RARE",
+        status: "USED",
+      },
+    });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId: race.id,
+        targetParticipantId: participant.id,
+        targetUserId: account.user.id,
+        sourceUserId: account.user.id,
+        powerupId: powerup.id,
+        type: "RUNNERS_HIGH",
+        status: "ACTIVE",
+        startsAt: effectStart,
+        expiresAt: effectEnd,
+        metadata: { multiplier: 2 },
+      },
+    });
+
+    const server = await getSharedServer();
+    const response = await request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token: account.token,
+      headers: {
+        "Idempotency-Key": randomUUID(),
+        "X-App-Version": "9.9.9",
+      },
+      body: {
+        date: wallNow.toISOString().slice(0, 10),
+        steps: 100,
+        samples: [{
+          periodStart: effectStart.toISOString(),
+          periodEnd: new Date(wallNow.getTime() - 5 * 60 * 1000).toISOString(),
+          steps: 100,
+        }],
+      },
+    });
+    assert.equal(response.status, 202, await response.text());
+    assert.equal(
+      await prisma.historicalRaceReconciliationIntent.count({
+        where: { raceId: race.id, userId: account.user.id },
+      }),
+      0,
+    );
+  });
+
+  it("keeps a reconciled zero-impact receipt visible in Activity", async () => {
+    const data = await fixture();
+    const projection = await prisma.historicalEffectContribution.create({
+      data: {
+        raceId: data.race.id,
+        userId: data.account.user.id,
+        effectId: data.effect.id,
+        powerupType: "RUNNERS_HIGH",
+        currentDeltaSteps: 0,
+        sourceGeneration: 3,
+        calculationVersion: 1,
+      },
+    });
+
+    const [row] = await RaceImpactEvent.listActivity({
+      raceId: data.race.id,
+      userId: data.account.user.id,
+      limit: 50,
+      reconciliationEnabled: true,
+    });
+    const activity = activityProjection(row);
+    assert.ok(activity);
+    assert.equal(activity.deltaSteps, 0);
+    assert.equal(activity.impactValueStatus, "RECONCILED");
+    assert.equal(activity.wasReconciled, true);
+    assert.equal(activity.reconciledAt.getTime(), projection.updatedAt.getTime());
+    assert.equal(
+      activity.displayDescription,
+      "Runner’s High 0 steps. Updated after step sync.",
+    );
+  });
+
 });
