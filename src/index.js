@@ -294,12 +294,6 @@ function startServer({
         retainStopHandle(scheduleStepStream());
         return;
       }
-      if (processRole === "race") {
-        retainStopHandle(schedulePowerupStream());
-        retainStopHandle(scheduleRaceDirtyStream());
-        retainStopHandle(scheduleRaceRecovery());
-        return;
-      }
       if (processRole === "event") {
         retainStopHandle(scheduleGlobalEventRedisScheduleHydratorJob());
         retainStopHandle(scheduleGlobalEventBoundaryStreamSchedulerJob());
