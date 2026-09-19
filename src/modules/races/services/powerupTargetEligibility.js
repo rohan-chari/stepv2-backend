@@ -48,6 +48,11 @@ function eligiblePowerupTargets({
     if (conflicts && [...conflicts].some((type) => targetEffects.has(type))) return false;
 
     if (powerupType === "SNEAKY_SWAP" && !stealableParticipantIds.has(participant.id)) return false;
+    if (powerupType === "BOUNTY") {
+      const mineSteps = Math.max(0, Number(me.totalSteps) || 0);
+      const targetSteps = Math.max(0, Number(participant.totalSteps) || 0);
+      if (targetSteps <= mineSteps) return false;
+    }
 
     return true;
   });
