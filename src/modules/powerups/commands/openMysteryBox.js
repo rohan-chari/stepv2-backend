@@ -11,7 +11,7 @@ const {
   pickTypeForRarity,
   canonicalRarityFor,
 } = require("../powerupOdds");
-const { rawPositionFor } = require("../rawPosition");
+const { leaderboardPositionFor } = require("../rawPosition");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
@@ -173,7 +173,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     const allParticipants = participantsFromRace
       ? participantsFromRace.filter((entry) => entry.status === "ACCEPTED")
       : await participantModel.findAcceptedByRace(raceId);
-    const { position, totalParticipants } = rawPositionFor({
+    const { position, totalParticipants } = leaderboardPositionFor({
       participants: allParticipants,
       race,
       userId,
